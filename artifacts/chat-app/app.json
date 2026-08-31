@@ -16,8 +16,8 @@
     "ios": {
       "supportsTablet": false,
       "infoPlist": {
-        "NSCameraUsageDescription": "DevStudio uses your camera for video calls.",
-        "NSMicrophoneUsageDescription": "DevStudio uses your microphone for voice and video calls."
+        "NSCameraUsageDescription": "RealtimeDevAlgoChatApp uses your camera for video calls.",
+        "NSMicrophoneUsageDescription": "RealtimeDevAlgoChatApp uses your microphone for voice and video calls."
       }
     },
     "android": {
