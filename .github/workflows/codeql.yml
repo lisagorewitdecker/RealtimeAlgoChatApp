@@ -44,8 +44,8 @@ jobs:
       matrix:
         include:
           - language: actions
-        # Use 'java-kotlin' to analyze code written in Java, Kotlin or both
-        # Use 'javascript-typescript' to analyze code written in JavaScript, TypeScript or both
+        # Keep this to `actions` only: the repo has workflow files but no JS/TS source files.
+        # Using `javascript-typescript` here fails with "no source code seen during build".
         # To learn more about changing the languages that are analyzed or customizing the build mode for your analysis,
         # see https://docs.github.com/en/code-security/code-scanning/creating-an-advanced-setup-for-code-scanning/customizing-your-advanced-setup-for-code-scanning.
         # If you are analyzing a compiled language, you can modify the 'build-mode' for that language to customize how
