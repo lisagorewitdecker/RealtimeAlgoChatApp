@@ -11,7 +11,7 @@ This is a pnpm monorepo. The product is split across three artifacts, each indep
 ```
 artifacts/
   api-server/       Express + Socket.IO backend (auth, rooms, moderation, AI assistant proxy)
-  chat-app/         Expo/React Native app (iOS, Android, Web) — the DevStudio client
+  chat-app/         Expo/React Native app (iOS, Android, Web) — the Realtime DevAlgoChatApp client
   mockup-sandbox/   Design/preview sandbox used while iterating on UI components
 ```
 
