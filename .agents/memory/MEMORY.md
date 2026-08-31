@@ -1,0 +1,15 @@
+- [Socket.IO room join ordering](socket-room-join-order.md) — attach room event listeners before emitting `join-room` so fast responses cannot be lost.
+- [Clerk Expo startup](clerk-expo-startup.md) — map the managed publishable key into Expo’s public environment and never block the root UI on font loading.
+- [Expo preview CORS](expo-preview-cors.md) — API browser allowlists must include the Expo preview origin, not only the main development domain.
+- [Sandbox release validation](sandbox-release-validation.md) — test the generated editor and the mobile WebView host independently at their delivery boundaries.
+- [Post-merge setup timing](post-merge-setup-timing.md) — dependency reconciliation can exceed the default setup timeout; keep the configured allowance realistic.
+- [Account access policy](account-access-policy.md) — Clerk-owned bans and verified email checks apply at every server entry point, including room capabilities.
+- [Admin moderation visibility](admin-moderation-visibility.md) — expose only the current user’s server-derived admin flag; never copy admin configuration to clients.
+- [Clerk account search](clerk-account-search.md) — clerkClient.users.getUserList's `query` param already fuzzy-searches email/name/userId; don't build custom search.
+- [Image parser vulnerability](image-parser-vulnerability.md) — image-size has no released fix for malformed-box loops; retain the pnpm guard patch until upstream publishes one.
+- [pnpm drizzle-orm/OpenTelemetry duplication](pnpm-drizzle-otel-duplication.md) — adding an @opentelemetry/api-dependent package beside drizzle-orm forks it into two incompatible type instances; fix by converging the shared db package onto the same peer.
+- [Sentry connector API-key quirk](sentry-connector-api-key-quirk.md) — its Management API can be unusable (bad host config); use the DSN directly for error capture + Cron Monitor uptime alerts instead.
+- [Drizzle schema completeness](drizzle-schema-completeness.md) — every live DB table needs a pgTable export or the post-merge `push --force` will silently drop it.
+- [Socket.IO Sentry alerting](socket-sentry-alerting.md) — rate/cooldown counters turn failure floods into one Sentry issue; async event handlers need their own try/catch, Sentry's Express integration won't see them.
+- [Clerk synthetic browser sessions](clerk-synthetic-browser-sessions.md) — backend-created test users may require a client-trust email code before browser sessions activate.
+- [React Native Web confirmations](react-native-web-confirmations.md) — Alert button callbacks are not reliable on web; use the browser confirm result for destructive actions.
