@@ -1,6 +1,6 @@
-# DevStudio
+# Realtime DevAlgoChatApp (React Native)
 
-DevStudio (DevAlgoChat) is a real-time collaboration platform for developers, built around three modes in a single room: **Build** (collaborative code sandbox with an AI assistant), **Call** (voice/video), and **Ship** (chat and room coordination).
+Realtime DevAlgoChatApp is a real-time collaboration platform for developers, built around three modes in a single room: **Build** (collaborative code sandbox with an AI assistant), **Call** (voice/video), and **Ship** (chat and room coordination).
 
 Every account is authenticated through Clerk. Any signed-in user with a verified email and an unbanned account gets full access to the product — there are no paid tiers or feature gates. Administrators (configured via an allowlist of Clerk user IDs) can search for accounts and ban or restore access.
 
@@ -11,7 +11,7 @@ This is a pnpm monorepo. The product is split across three artifacts, each indep
 ```
 artifacts/
   api-server/       Express + Socket.IO backend (auth, rooms, moderation, AI assistant proxy)
-  chat-app/         Expo/React Native app (iOS, Android, Web) — the DevStudio client
+  chat-app/         Expo/React Native app (iOS, Android, Web) — the Realtime DevAlgoChatApp client
   mockup-sandbox/   Design/preview sandbox used while iterating on UI components
 ```
 
