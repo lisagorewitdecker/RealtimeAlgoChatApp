@@ -1,4 +1,4 @@
-# DevStudio
+# RealtimeAlgoChatApp
 
 DevStudio (DevAlgoChat) is a real-time collaboration platform for developers, built around three modes in a single room: **Build** (collaborative code sandbox with an AI assistant), **Call** (voice/video), and **Ship** (chat and room coordination).
 
