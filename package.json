@@ -13,13 +13,5 @@
   "devDependencies": {
     "prettier": "^3.8.3",
     "typescript": "~7.0.2"
-  },
-  "pnpm": {
-    "patchedDependencies": {
-      "image-size@1.2.1": "patches/image-size@1.2.1.patch"
-    }
-  },
-  "dependencies": {
-    "image-size": "2.0.2"
   }
 }

@@ -77,12 +77,6 @@ peerDependencyRules:
     "@clerk/shared>react": 19.1.0
     "@clerk/shared>react-dom": 19.1.0
 
-onlyBuiltDependencies:
-  - '@swc/core'
-  - esbuild
-  - msw
-  - unrs-resolver
-
 overrides:
   # replit uses linux-x64 only, we can exclude all other platforms
   "esbuild>@esbuild/darwin-arm64": "-"
@@ -166,7 +160,7 @@ overrides:
   "@expo/ngrok-bin>@expo/ngrok-bin-win32-x64": "-"
   # drizzle-kit uses esbuild internally on an older version that's vulnerable, this overrides it
   "@esbuild-kit/esm-loader": "npm:tsx@^4.21.0"
-  esbuild: "0.27.3"
+  esbuild: "0.28.2"
   # Keep each brace-expansion major on its patched release line.
   "brace-expansion@1.1.15": "1.1.18"
   "brace-expansion@2.1.1": "2.1.4"
@@ -181,3 +175,9 @@ overrides:
   "postcss@8.5.14": "8.5.18"
   "socket.io-parser@4.2.6": "4.2.7"
   "nanoid@3.3.12": "3.3.18"
+
+allowBuilds:
+  "@swc/core": true
+  esbuild: true
+  msw: true
+  unrs-resolver: true
