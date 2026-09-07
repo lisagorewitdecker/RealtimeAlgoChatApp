@@ -142,7 +142,7 @@ overrides:
   '@expo/ngrok-bin>@expo/ngrok-bin-win32-ia32': '-'
   '@expo/ngrok-bin>@expo/ngrok-bin-win32-x64': '-'
   '@esbuild-kit/esm-loader': npm:tsx@^4.21.0
-  esbuild: 0.27.3
+  esbuild: 0.28.2
   brace-expansion@1.1.15: 1.1.18
   brace-expansion@2.1.1: 2.1.4
   brace-expansion@5.0.6: 5.0.9
@@ -160,10 +160,6 @@ overrides:
 importers:
 
   .:
-    dependencies:
-      image-size:
-        specifier: 2.0.2
-        version: 2.0.2
     devDependencies:
       prettier:
         specifier: ^3.8.3
@@ -266,7 +262,7 @@ importers:
         version: 0.0.6
       '@tailwindcss/vite':
         specifier: 'catalog:'
-        version: 4.3.3(vite@8.2.2(@types/node@26.4.1)(esbuild@0.27.3)(jiti@2.7.0)(tsx@4.23.13))
+        version: 4.3.3(vite@8.2.2(@types/node@26.4.1)(jiti@2.7.0)(tsx@4.23.13))
       '@types/node':
         specifier: 'catalog:'
         version: 26.4.1
@@ -278,7 +274,7 @@ importers:
         version: 19.2.7(@types/react@19.2.18)
       '@vitejs/plugin-react':
         specifier: 'catalog:'
-        version: 6.1.1(vite@8.2.2(@types/node@26.4.1)(esbuild@0.27.3)(jiti@2.7.0)(tsx@4.23.13))
+        version: 6.1.1(vite@8.2.2(@types/node@26.4.1)(jiti@2.7.0)(tsx@4.23.13))
       chokidar:
         specifier: ^4.0.3
         version: 4.0.3
@@ -292,8 +288,8 @@ importers:
         specifier: ^1.1.1
         version: 1.1.1(@types/react-dom@19.2.7(@types/react@19.2.18))(@types/react@19.2.18)(react-dom@19.1.0(react@19.1.0))(react@19.1.0)
       date-fns:
-        specifier: ^3.6.0
-        version: 3.6.0
+        specifier: ^4.4.0
+        version: 4.4.0
       embla-carousel-react:
         specifier: ^8.6.0
         version: 8.6.0(react@19.1.0)
@@ -350,7 +346,7 @@ importers:
         version: 1.1.2(@types/react-dom@19.2.7(@types/react@19.2.18))(@types/react@19.2.18)(react-dom@19.1.0(react@19.1.0))(react@19.1.0)
       vite:
         specifier: 'catalog:'
-        version: 8.2.2(@types/node@26.4.1)(esbuild@0.27.3)(jiti@2.7.0)(tsx@4.23.13)
+        version: 8.2.2(@types/node@26.4.1)(jiti@2.7.0)(tsx@4.23.13)
       zod:
         specifier: 'catalog:'
         version: 4.5.4
@@ -406,8 +402,8 @@ packages:
   '@date-fns/tz@1.5.0':
     resolution: {integrity: sha512-lwYN/vDPeNRULcepoE/LO2Pgx+7/RV+S9ARfbc9lr2DtGkOD7pAiruHvbR1RX3Qyf6ja47EWJDMsNK5vK08DJg==}
 
-  '@esbuild/linux-x64@0.27.3':
-    resolution: {integrity: sha512-Czi8yzXUWIQYAtL/2y6vogER8pvcsOsk5cpwL4Gk5nJqH5UZiVByIY8Eorm5R13gq+DQKYg0+JyQoytLQas4dA==}
+  '@esbuild/linux-x64@0.28.2':
+    resolution: {integrity: sha512-4xTZr1FUmSoQW4XIWmit3tzQrUTZM+N3P0XV8xROKYF50XfI7xeO90+1bZvNwxIufQ9hDQVRJH5YhgPVF8A/HQ==}
     engines: {node: '>=18'}
     cpu: [x64]
     os: [linux]
@@ -1481,9 +1477,6 @@ packages:
     resolution: {integrity: sha512-ndfJ/JxxMd3nw31uyKoY2naivF+r29V+Lc0svZxe1JvvIRmi8hUsrMvdOwgS1o6uBHmiz91geQ0ylPP0aj1VUA==}
     engines: {node: '>=12'}
 
-  date-fns@3.6.0:
-    resolution: {integrity: sha512-fRHTG8g/Gif+kSh50gaGEdToemgfj74aRX3swtiouboip5JDLAyDE9F11nHMIcvOaXeOC6D7SpNhi7uFyB7Uww==}
-
   date-fns@4.4.0:
     resolution: {integrity: sha512-+1UMbeh68lH1SegH83CGWwpb6OHHbpSgr3+s5Eww5M4CAgswBpoWS0AjTOfEJ33HiYKz1hdj/KTFprzXHmq/6w==}
 
@@ -1526,8 +1519,8 @@ packages:
   es-toolkit@1.52.0:
     resolution: {integrity: sha512-XTNEJQh1tY1ZJVcf6ayP/2n4ZPyaHlW2FWs7xvw5ddPuhUVjLD3olQVQS7kf58JbAB48iL0uL/jerTrjtV3lDA==}
 
-  esbuild@0.27.3:
-    resolution: {integrity: sha512-8VwMnyGCONIs6cWue2IdpHxHnAjzxnw2Zr7MkVxB2vjmQ2ivqGFb4LEG3SMnv0Gb2F/G/2yA8zUaiL1gywDCCg==}
+  esbuild@0.28.2:
+    resolution: {integrity: sha512-HKVLS8dvII+xoKW9kmqxbRKrnWEXfJJr/FZhhJmiqIB0e053QNYFqOBouTMO/k5sID4MvCiUCvv8b9M4h32wIA==}
     engines: {node: '>=18'}
     hasBin: true
 
@@ -1580,11 +1573,6 @@ packages:
 
   graceful-fs@4.2.11:
     resolution: {integrity: sha512-RbJ5/jmFcNNCcDV5o9eTnBLJ/HszWV0P73bc+Ff4nS/rJj+YaS6IGyiOL0VoBYX+l1Wrl3k63h/KrH+nhJ0XvQ==}
-
-  image-size@2.0.2:
-    resolution: {integrity: sha512-IRqXKlaXwgSMAMtpNzZa1ZAe8m+Sa1770Dhk8VkSsP9LS+iHD62Zd8FQKs8fbPiagBE7BzoFX23cxFnwshpV6w==}
-    engines: {node: '>=16.x'}
-    hasBin: true
 
   immer@11.1.18:
     resolution: {integrity: sha512-EQyQtLiYW029lyoczMl/Hh4Xu7cDecSc58JRYpHyL4tIAu3eqd1yJzQX04d2BZHDkzFFvm6qJEJWOtfDSWAXbQ==}
@@ -1918,7 +1906,7 @@ packages:
     peerDependencies:
       '@types/node': ^20.19.0 || >=22.12.0
       '@vitejs/devtools': ^0.4.0 || ^0.5.0
-      esbuild: 0.27.3
+      esbuild: 0.28.2
       jiti: '>=1.21.0'
       less: ^4.0.0
       sass: ^1.70.0
@@ -2008,7 +1996,7 @@ snapshots:
 
   '@date-fns/tz@1.5.0': {}
 
-  '@esbuild/linux-x64@0.27.3':
+  '@esbuild/linux-x64@0.28.2':
     optional: true
 
   '@floating-ui/core@1.8.0':
@@ -2829,12 +2817,12 @@ snapshots:
       '@tailwindcss/oxide-linux-x64-gnu': 4.3.3
       '@tailwindcss/oxide-wasm32-wasi': 4.3.3
 
-  '@tailwindcss/vite@4.3.3(vite@8.2.2(@types/node@26.4.1)(esbuild@0.27.3)(jiti@2.7.0)(tsx@4.23.13))':
+  '@tailwindcss/vite@4.3.3(vite@8.2.2(@types/node@26.4.1)(jiti@2.7.0)(tsx@4.23.13))':
     dependencies:
       '@tailwindcss/node': 4.3.3
       '@tailwindcss/oxide': 4.3.3
       tailwindcss: 4.3.3
-      vite: 8.2.2(@types/node@26.4.1)(esbuild@0.27.3)(jiti@2.7.0)(tsx@4.23.13)
+      vite: 8.2.2(@types/node@26.4.1)(jiti@2.7.0)(tsx@4.23.13)
 
   '@types/d3-array@3.2.2': {}
 
@@ -2934,10 +2922,10 @@ snapshots:
   '@typescript/typescript-win32-x64@7.0.2':
     optional: true
 
-  '@vitejs/plugin-react@6.1.1(vite@8.2.2(@types/node@26.4.1)(esbuild@0.27.3)(jiti@2.7.0)(tsx@4.23.13))':
+  '@vitejs/plugin-react@6.1.1(vite@8.2.2(@types/node@26.4.1)(jiti@2.7.0)(tsx@4.23.13))':
     dependencies:
       '@rolldown/pluginutils': 1.0.1
-      vite: 8.2.2(@types/node@26.4.1)(esbuild@0.27.3)(jiti@2.7.0)(tsx@4.23.13)
+      vite: 8.2.2(@types/node@26.4.1)(jiti@2.7.0)(tsx@4.23.13)
 
   aria-hidden@1.2.6:
     dependencies:
@@ -3009,8 +2997,6 @@ snapshots:
 
   d3-timer@3.0.1: {}
 
-  date-fns@3.6.0: {}
-
   date-fns@4.4.0: {}
 
   debug@4.4.3:
@@ -3042,9 +3028,9 @@ snapshots:
 
   es-toolkit@1.52.0: {}
 
-  esbuild@0.27.3:
+  esbuild@0.28.2:
     optionalDependencies:
-      '@esbuild/linux-x64': 0.27.3
+      '@esbuild/linux-x64': 0.28.2
 
   eventemitter3@5.0.4: {}
 
@@ -3087,8 +3073,6 @@ snapshots:
       is-glob: 4.0.3
 
   graceful-fs@4.2.11: {}
-
-  image-size@2.0.2: {}
 
   immer@11.1.18: {}
 
@@ -3331,7 +3315,7 @@ snapshots:
 
   tsx@4.23.13:
     dependencies:
-      esbuild: 0.27.3
+      esbuild: 0.28.2
     optionalDependencies:
       fsevents: 2.3.3
 
@@ -3407,7 +3391,7 @@ snapshots:
       d3-time: 3.1.0
       d3-timer: 3.0.1
 
-  vite@8.2.2(@types/node@26.4.1)(esbuild@0.27.3)(jiti@2.7.0)(tsx@4.23.13):
+  vite@8.2.2(@types/node@26.4.1)(jiti@2.7.0)(tsx@4.23.13):
     dependencies:
       lightningcss: 1.33.0
       picomatch: 4.0.7
@@ -3416,7 +3400,6 @@ snapshots:
       tinyglobby: 0.2.17
     optionalDependencies:
       '@types/node': 26.4.1
-      esbuild: 0.27.3
       fsevents: 2.3.3
       jiti: 2.7.0
       tsx: 4.23.13
