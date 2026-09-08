@@ -34,7 +34,3 @@
 - [E2EE key registration ordering](e2ee-key-registration-ordering.md) — do not join encrypted rooms until the current public key is confirmed by the server.
 - [Realtime resource budgets](socket-resource-budgets.md) — bound admission, shared event budgets, fanout, and persistence before accepting realtime work.
 - [Expo Sentry wizard fallback](expo-sentry-wizard.md) — non-TTY wizard runs can exit after the banner without changes; verify diffs and honor Expo's SDK-compatible package range.
-- [React Native heading semantics](rn-heading-semantics.md) — use `accessibilityRole="header"` and pair it with web `role="heading"` plus `aria-level`; avoid unsupported `accessibilityLevel` on RN 0.81 typings.
-- [Static-server SAST taint](static-server-sast-taint.md) — avoid request-derived filesystem paths in Expo static serving by allowing only startup-indexed asset-map key lookups.
-- [Publish metadata merge state](publish-metadata-merge-state.md) — after merges, ensure no unmerged index entries remain before trusting manifest/lockfile validation for publish readiness.
-- [Expo canvas iframe refresh](expo-canvas-iframe-refresh.md) — after Expo render-crash fixes, restart Expo and remount the mobile artifact frame before re-validating.
