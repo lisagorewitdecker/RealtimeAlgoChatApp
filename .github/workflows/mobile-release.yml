@@ -36,6 +36,7 @@ permissions:
 
 env:
   PNPM_VERSION: 10.26.1
+  EAS_CLI_VERSION: 23.2.0
 
 jobs:
   native-ios:
@@ -364,11 +365,11 @@ jobs:
           ANDROID_BUILD_ID: ${{ secrets.NATIVE_SMOKE_ANDROID_BUILD_ID }}
         run: |
           set -euo pipefail
-          pnpm dlx eas-cli@latest submit \
+          pnpm dlx eas-cli@${{ env.EAS_CLI_VERSION }} submit \
             --platform ios \
             --id "$IOS_BUILD_ID" \
             --non-interactive
-          pnpm dlx eas-cli@latest submit \
+          pnpm dlx eas-cli@${{ env.EAS_CLI_VERSION }} submit \
             --platform android \
             --id "$ANDROID_BUILD_ID" \
             --non-interactive
