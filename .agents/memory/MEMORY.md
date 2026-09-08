@@ -11,10 +11,13 @@
 - [pnpm drizzle-orm / OpenTelemetry peer duplication](pnpm-drizzle-otel-duplication.md) — adding @opentelemetry/api-dependent packages alongside drizzle-orm can fork incompatible type instances; converge peers and avoid externalizing otel interfaces.
 - [Drizzle schema completeness](drizzle-schema-completeness.md) — every live DB table needs a pgTable export or the post-merge `push --force` will silently drop it.
 - [Socket.IO Sentry alerting](socket-sentry-alerting.md) — rate/cooldown counters turn failure floods into one Sentry issue; async event handlers need their own try/catch, Sentry's Express integration won't see them.
+- [React Native heading semantics](rn-heading-semantics.md) — pair native header semantics with web role and aria-level because RN 0.81 omits accessibilityLevel from Text typings.
+- [Static-server SAST taint](static-server-sast-taint.md) — request-time filesystem reads remain flagged despite boundary checks; serve only startup-indexed assets.
+- [Publish metadata merge state](publish-metadata-merge-state.md) — valid manifests can still be uncommittable; verify the Git index and frozen lockfile before publishing.
+- [Expo canvas iframe refresh](expo-canvas-iframe-refresh.md) — after fixing a render crash, restart Expo and remount the canvas artifact frame to clear its retained error state.
 - [Clerk synthetic browser sessions](clerk-synthetic-browser-sessions.md) — backend-created test users may require a client-trust email code before browser sessions activate.
 - [React Native Web confirmations](react-native-web-confirmations.md) — Alert button callbacks are not reliable on web; use the browser confirm result for destructive actions.
 - [Socket.IO client delivery](socketio-client-delivery.md) — esbuild may not preserve Socket.IO’s bundled browser asset; serve an explicit vendor route instead.
-- [Socket.IO client delivery](socketio-client-delivery.md) — Esbuild may not preserve Socket.IO’s bundled browser asset; serve an explicit vendor route instead.
 - [Image-size remediation](image-size-remediation.md) — Metro’s image parser had unpatched high advisories, so it is locally replaced with a safe compatible subset.
 - [Clerk token effect stability](clerk-token-effect-stability.md) — keep Expo Clerk token callbacks out of stateful loading-effect dependencies to prevent request storms.
 - [Cryptocurrency boundary](cryptocurrency-boundary.md) — do not add cryptocurrency payments or wallet features; preserve cryptographic E2EE separately.
