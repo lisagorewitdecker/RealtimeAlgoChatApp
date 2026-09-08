@@ -7,8 +7,8 @@
 - [Admin moderation visibility](admin-moderation-visibility.md) — expose only the current user’s server-derived admin flag; never copy admin configuration to clients.
 - [Clerk account search](clerk-account-search.md) — clerkClient.users.getUserList's `query` param already fuzzy-searches email/name/userId; don't build custom search.
 - [Image parser vulnerability](image-parser-vulnerability.md) — image-size has no released fix for malformed-box loops; retain the pnpm guard patch until upstream publishes one.
-- [pnpm drizzle-orm/OpenTelemetry duplication](pnpm-drizzle-otel-duplication.md) — adding an @opentelemetry/api-dependent package beside drizzle-orm forks it into two incompatible type instances; fix by converging the shared db package onto the same peer.
 - [Sentry connector API-key quirk](sentry-connector-api-key-quirk.md) — its Management API can be unusable (bad host config); use the DSN directly for error capture + Cron Monitor uptime alerts instead.
+- [pnpm drizzle-orm / OpenTelemetry peer duplication](pnpm-drizzle-otel-duplication.md) — adding @opentelemetry/api-dependent packages alongside drizzle-orm can fork incompatible type instances; converge peers and avoid externalizing otel interfaces.
 - [Drizzle schema completeness](drizzle-schema-completeness.md) — every live DB table needs a pgTable export or the post-merge `push --force` will silently drop it.
 - [Socket.IO Sentry alerting](socket-sentry-alerting.md) — rate/cooldown counters turn failure floods into one Sentry issue; async event handlers need their own try/catch, Sentry's Express integration won't see them.
 - [React Native heading semantics](rn-heading-semantics.md) — pair native header semantics with web role and aria-level because RN 0.81 omits accessibilityLevel from Text typings.
@@ -17,6 +17,7 @@
 - [Expo canvas iframe refresh](expo-canvas-iframe-refresh.md) — after fixing a render crash, restart Expo and remount the canvas artifact frame to clear its retained error state.
 - [Clerk synthetic browser sessions](clerk-synthetic-browser-sessions.md) — backend-created test users may require a client-trust email code before browser sessions activate.
 - [React Native Web confirmations](react-native-web-confirmations.md) — Alert button callbacks are not reliable on web; use the browser confirm result for destructive actions.
+- [Socket.IO client delivery](socketio-client-delivery.md) — esbuild may not preserve Socket.IO’s bundled browser asset; serve an explicit vendor route instead.
 - [Socket.IO client delivery](socketio-client-delivery.md) — Esbuild may not preserve Socket.IO’s bundled browser asset; serve an explicit vendor route instead.
 - [Image-size remediation](image-size-remediation.md) — Metro’s image parser had unpatched high advisories, so it is locally replaced with a safe compatible subset.
 - [Clerk token effect stability](clerk-token-effect-stability.md) — keep Expo Clerk token callbacks out of stateful loading-effect dependencies to prevent request storms.
