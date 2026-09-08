@@ -8,5 +8,3 @@ When a React Native provider starts asynchronous work in an effect, render it no
 **Why:** The installed React Native Testing Library wraps render itself, while provider promises can resolve after that synchronous wrapper finishes.
 
 **How to apply:** Use this pattern for tests that mount asynchronous context providers and otherwise finish before their initial state update.
-
-Do not mark a container as one `accessible` element when it contains an interactive control. On iOS that grouping can hide descendants from the accessibility tree; announce status text separately and leave actions independently focusable.
