@@ -18,7 +18,6 @@
 - [Clerk synthetic browser sessions](clerk-synthetic-browser-sessions.md) — backend-created test users may require a client-trust email code before browser sessions activate.
 - [React Native Web confirmations](react-native-web-confirmations.md) — Alert button callbacks are not reliable on web; use the browser confirm result for destructive actions.
 - [Socket.IO client delivery](socketio-client-delivery.md) — esbuild may not preserve Socket.IO’s bundled browser asset; serve an explicit vendor route instead.
-- [Socket.IO client delivery](socketio-client-delivery.md) — Esbuild may not preserve Socket.IO’s bundled browser asset; serve an explicit vendor route instead.
 - [Image-size remediation](image-size-remediation.md) — Metro’s image parser had unpatched high advisories, so it is locally replaced with a safe compatible subset.
 - [Clerk token effect stability](clerk-token-effect-stability.md) — keep Expo Clerk token callbacks out of stateful loading-effect dependencies to prevent request storms.
 - [Cryptocurrency boundary](cryptocurrency-boundary.md) — do not add cryptocurrency payments or wallet features; preserve cryptographic E2EE separately.
