@@ -1,0 +1,519 @@
+import { createServer, type Server as HttpServer } from "node:http";
+import type { AddressInfo } from "node:net";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { io as createClient, type Socket as ClientSocket } from "socket.io-client";
+
+const mockVerifyToken = vi.hoisted(() => vi.fn());
+const mockGetAccountProfile = vi.hoisted(() => vi.fn());
+const mockGetAccountAccess = vi.hoisted(() => vi.fn());
+const mockIsConfiguredAdmin = vi.hoisted(() => vi.fn());
+const mockGetPublicKey = vi.hoisted(() => vi.fn());
+const mockGetRoomEnvelope = vi.hoisted(() => vi.fn());
+const mockLoadEncryptedMessages = vi.hoisted(() => vi.fn());
+const mockLoadEncryptedSandboxState = vi.hoisted(() => vi.fn());
+const mockSaveEncryptedMessage = vi.hoisted(() => vi.fn());
+const mockSaveEncryptedSandboxState = vi.hoisted(() => vi.fn());
+const mockSaveRoomEnvelope = vi.hoisted(() => vi.fn());
+
+vi.mock("@clerk/express", () => ({
+  verifyToken: mockVerifyToken,
+}));
+
+vi.mock("./lib/accountProfile", () => ({
+  getAccountProfile: mockGetAccountProfile,
+}));
+
+vi.mock("./lib/accountAccess", () => ({
+  getAccountAccess: mockGetAccountAccess,
+  isConfiguredAdmin: mockIsConfiguredAdmin,
+}));
+
+vi.mock("./lib/e2eePersistence", () => ({
+  getPublicKey: mockGetPublicKey,
+  getRoomEnvelope: mockGetRoomEnvelope,
+  loadEncryptedMessages: mockLoadEncryptedMessages,
+  loadEncryptedSandboxState: mockLoadEncryptedSandboxState,
+  saveEncryptedMessage: mockSaveEncryptedMessage,
+  saveEncryptedSandboxState: mockSaveEncryptedSandboxState,
+  savePublicKey: vi.fn(),
+  saveRoomEnvelope: mockSaveRoomEnvelope,
+}));
+
+import {
+  disconnectBannedUser,
+  getRooms,
+  kickRoomMember,
+  setupSocketIO,
+} from "./socket.js";
+
+let httpServer: HttpServer;
+let socketServer: ReturnType<typeof setupSocketIO>;
+let serverUrl: string;
+const clients: ClientSocket[] = [];
+
+beforeEach(async () => {
+  mockVerifyToken.mockReset().mockImplementation(async (token: string) => {
+    if (token === "token-ada") return { sub: "user-ada" };
+    if (token === "token-ben") return { sub: "user-ben" };
+    if (token === "token-cara") return { sub: "user-cara" };
+    if (token === "token-dana") return { sub: "user-dana" };
+    throw new Error("Invalid session");
+  });
+  mockGetAccountProfile.mockReset().mockImplementation(async (userId: string) => {
+    if (userId === "user-ada") return { username: "Ada", avatarEmoji: "👩‍💻" };
+    if (userId === "user-cara") return { username: "Cara", avatarEmoji: "🐱" };
+    if (userId === "user-dana") return { username: "Dana", avatarEmoji: "🐶" };
+    return { username: "Ben", avatarEmoji: "🦊" };
+  });
+  mockGetAccountAccess.mockReset().mockResolvedValue({ allowed: true });
+  mockIsConfiguredAdmin.mockReset().mockReturnValue(false);
+  mockGetPublicKey.mockReset().mockResolvedValue(null);
+  mockGetRoomEnvelope.mockReset().mockResolvedValue(null);
+  mockLoadEncryptedMessages.mockReset().mockResolvedValue([]);
+  mockLoadEncryptedSandboxState.mockReset().mockResolvedValue(null);
+  mockSaveEncryptedMessage.mockReset().mockResolvedValue(undefined);
+  mockSaveEncryptedSandboxState.mockReset().mockResolvedValue(undefined);
+  mockSaveRoomEnvelope.mockReset().mockResolvedValue(undefined);
+
+  httpServer = createServer();
+  socketServer = setupSocketIO(httpServer);
+  httpServer.listen(0, "127.0.0.1");
+  await new Promise<void>((resolve) => httpServer.once("listening", resolve));
+  const { port } = httpServer.address() as AddressInfo;
+  serverUrl = `http://127.0.0.1:${port}`;
+});
+
+afterEach(async () => {
+  clients.splice(0).forEach((client) => client.close());
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  await new Promise<void>((resolve) => socketServer.close(() => resolve()));
+  await new Promise<void>((resolve) => httpServer.close(() => resolve()));
+});
+
+function createRoomClient(token?: string, username = "Member") {
+  const client = createClient(serverUrl, {
+    auth: token
+      ? { token, username, avatarEmoji: "🧑‍💻" }
+      : { username, avatarEmoji: "🧑‍💻" },
+    path: "/api/socket.io",
+    reconnection: false,
+    transports: ["websocket"],
+  });
+  clients.push(client);
+  return client;
+}
+
+function waitForEvent<T>(socket: ClientSocket, event: string) {
+  return new Promise<T>((resolve) => {
+    socket.once(event, (payload: T) => resolve(payload));
+  });
+}
+
+async function waitFor(
+  assertion: () => void,
+  options: { attempts?: number; delayMs?: number } = {},
+) {
+  let lastError: unknown;
+  const attempts = options.attempts ?? 25;
+  const delayMs = options.delayMs ?? 20;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      assertion();
+      return;
+    } catch (error) {
+      lastError = error;
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+  }
+  throw lastError;
+}
+
+async function expectNoEvent(
+  socket: ClientSocket,
+  event: string,
+  action: () => void,
+) {
+  let received = false;
+  socket.once(event, () => {
+    received = true;
+  });
+  action();
+  await new Promise((resolve) => setTimeout(resolve, 75));
+  expect(received).toBe(false);
+}
+
+describe("room Socket.IO lifecycle", () => {
+  it("relays only encrypted chat and sandbox payloads and delivers key envelopes", async () => {
+    const roomId = `encrypted-room-${Date.now()}`;
+    mockGetPublicKey.mockImplementation(async (userId: string) =>
+      userId === "user-ada" ? "sender-key" : "recipient-key",
+    );
+    const ada = createRoomClient("token-ada");
+    const ben = createRoomClient("token-ben");
+    await Promise.all([waitForEvent(ada, "connect"), waitForEvent(ben, "connect")]);
+
+    const adaJoined = waitForEvent(ada, "room-joined");
+    ada.emit("join-room", { roomId });
+    await adaJoined;
+    const benJoined = waitForEvent<{
+      users: Array<{ userId: string; publicKey: string | null }>;
+    }>(ben, "room-joined");
+    ben.emit("join-room", { roomId, createIfMissing: false });
+    await expect(benJoined).resolves.toMatchObject({
+      users: [
+        { userId: "user-ada", publicKey: "sender-key" },
+        { userId: "user-ben", publicKey: "recipient-key" },
+      ],
+    });
+
+    await expectNoEvent(ben, "message", () => {
+      ada.emit("message", { roomId, content: "server-readable secret" });
+    });
+
+    const encryptedMessage = waitForEvent<{
+      ciphertext: string;
+      nonce: string;
+      content?: string;
+    }>(ben, "message");
+    ada.emit("message", {
+      roomId,
+      ciphertext: "Y2lwaGVydGV4dA==",
+      nonce: "bm9uY2U=",
+    });
+    await expect(encryptedMessage).resolves.toMatchObject({
+      ciphertext: "Y2lwaGVydGV4dA==",
+      nonce: "bm9uY2U=",
+    });
+    expect((await encryptedMessage).content).toBeUndefined();
+    await waitFor(() => expect(mockSaveEncryptedMessage).toHaveBeenCalled());
+
+    mockSaveRoomEnvelope.mockClear();
+    ada.emit("room-key-envelope", {
+      roomId,
+      targetUserId: "user-not-in-room",
+      senderPublicKey: "sender-key",
+      ciphertext: "ZW52ZWxvcGU=",
+      nonce: "ZW52ZWxvcGUtbm9uY2U=",
+    });
+    await new Promise((resolve) => setTimeout(resolve, 75));
+    expect(mockSaveRoomEnvelope).not.toHaveBeenCalled();
+
+    const deliveredEnvelope = waitForEvent<{
+      roomId: string;
+      targetUserId: string;
+      ciphertext: string;
+      nonce: string;
+    }>(ben, "room-key-envelope");
+    ada.emit("room-key-envelope", {
+      roomId,
+      targetUserId: "user-ben",
+      senderPublicKey: "sender-key",
+      ciphertext: "ZW52ZWxvcGU=",
+      nonce: "ZW52ZWxvcGUtbm9uY2U=",
+    });
+    await expect(deliveredEnvelope).resolves.toMatchObject({
+      roomId,
+      ciphertext: "ZW52ZWxvcGU=",
+      nonce: "ZW52ZWxvcGUtbm9uY2U=",
+    });
+    await waitFor(() => expect(mockSaveRoomEnvelope).toHaveBeenCalled());
+
+    mockSaveRoomEnvelope.mockClear();
+    await expectNoEvent(ada, "room-key-envelope", () => {
+      ben.emit("room-key-envelope", {
+        roomId,
+        targetUserId: "user-ada",
+        senderPublicKey: "recipient-key",
+        ciphertext: "YXR0YWNrLWVudmVsb3Bl",
+        nonce: "YXR0YWNrLW5vbmNl",
+      });
+    });
+    expect(mockSaveRoomEnvelope).not.toHaveBeenCalled();
+  });
+
+  it("restores only the joining account's stored room-key envelope", async () => {
+    const roomId = `envelope-restore-${Date.now()}`;
+    mockGetRoomEnvelope.mockImplementation(
+      async (requestedRoomId: string, userId: string) =>
+        requestedRoomId === roomId && userId === "user-ben"
+          ? {
+              ciphertext: "stored-envelope",
+              nonce: "stored-nonce",
+              senderPublicKey: "sender-key",
+            }
+          : null,
+    );
+    const ada = createRoomClient("token-ada");
+    const ben = createRoomClient("token-ben");
+    await Promise.all([waitForEvent(ada, "connect"), waitForEvent(ben, "connect")]);
+
+    const adaJoined = waitForEvent<{ keyEnvelope: unknown }>(ada, "room-joined");
+    ada.emit("join-room", { roomId });
+    await expect(adaJoined).resolves.toMatchObject({ keyEnvelope: null });
+
+    const benJoined = waitForEvent<{ keyEnvelope: unknown }>(ben, "room-joined");
+    ben.emit("join-room", { roomId, createIfMissing: false });
+    await expect(benJoined).resolves.toMatchObject({
+      keyEnvelope: {
+        ciphertext: "stored-envelope",
+        nonce: "stored-nonce",
+        senderPublicKey: "sender-key",
+      },
+    });
+    expect(mockGetRoomEnvelope).toHaveBeenCalledWith(roomId, "user-ben");
+  });
+
+  it("rejects an unauthenticated client before it can create or join a room", async () => {
+    const client = createRoomClient();
+    const error = await waitForEvent<Error>(client, "connect_error");
+
+    expect(error.message).toBe("Authentication required.");
+    expect(getRooms()).toEqual([]);
+  });
+
+  it("creates, lists, joins, and removes a room through authenticated clients", async () => {
+    const roomId = `kick-restart-${Date.now()}`;
+    const ada = createRoomClient("token-ada");
+    await waitForEvent(ada, "connect");
+
+    const adaJoined = waitForEvent(ada, "room-joined");
+    ada.emit("join-room", { roomId, roomName: "Lifecycle room" });
+
+    await expect(adaJoined).resolves.toMatchObject({
+      roomId,
+      roomName: "Lifecycle room",
+      users: [{ userId: "user-ada" }],
+      canModerate: true,
+    });
+    expect(getRooms()).toEqual([
+      expect.objectContaining({
+        id: roomId,
+        name: "Lifecycle room",
+        userCount: 1,
+      }),
+    ]);
+
+    const ben = createRoomClient("token-ben");
+    await waitForEvent(ben, "connect");
+    const benJoined = waitForEvent<{
+      canModerate: boolean;
+      users: Array<{ userId: string }>;
+    }>(ben, "room-joined");
+    ben.emit("join-room", { roomId, createIfMissing: false });
+
+    const benRoom = await benJoined;
+    expect(benRoom.canModerate).toBe(false);
+    expect(benRoom.users).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ userId: "user-ada" }),
+        expect.objectContaining({ userId: "user-ben" }),
+      ]),
+    );
+    expect(getRooms()).toEqual([
+      expect.objectContaining({ id: roomId, userCount: 2 }),
+    ]);
+
+    mockIsConfiguredAdmin.mockImplementation(
+      (userId: string) => userId === "user-ben",
+    );
+    await expect(
+      kickRoomMember(roomId, "user-ada", "user-ben"),
+    ).resolves.toBe("protected-target");
+    expect(getRooms()).toEqual([
+      expect.objectContaining({ id: roomId, userCount: 2 }),
+    ]);
+    mockIsConfiguredAdmin.mockReturnValue(false);
+
+    const adaSawBenLeave = waitForEvent<{ userId: string }>(ada, "user-left");
+    ben.emit("leave-room", { roomId });
+    await expect(adaSawBenLeave).resolves.toEqual(
+      expect.objectContaining({ userId: "user-ben" }),
+    );
+    expect(getRooms()).toEqual([
+      expect.objectContaining({ id: roomId, userCount: 1 }),
+    ]);
+
+    const benRejoined = waitForEvent(ben, "room-joined");
+    ben.emit("join-room", { roomId, createIfMissing: false });
+    await expect(benRejoined).resolves.toBeTruthy();
+    expect(getRooms()).toEqual([
+      expect.objectContaining({ id: roomId, userCount: 2 }),
+    ]);
+
+    ben.emit("leave-room", { roomId });
+    ada.emit("leave-room", { roomId });
+    await waitFor(() => expect(getRooms()).toEqual([]));
+  });
+
+  it("uses the account profile instead of a spoofed socket identity", async () => {
+    const roomId = `kick-restart-${Date.now()}`;
+    const client = createRoomClient("token-ada", "Spoofed name");
+    await waitForEvent(client, "connect");
+    const joined = waitForEvent<{
+      users: Array<{
+        userId: string;
+        username: string;
+        avatarEmoji: string;
+      }>;
+    }>(client, "room-joined");
+
+    client.emit("join-room", { roomId });
+
+    await expect(joined).resolves.toMatchObject({
+      users: [
+        {
+          userId: "user-ada",
+          username: "Ada",
+          avatarEmoji: "👩‍💻",
+        },
+      ],
+    });
+  });
+
+  it("rejects a banned user trying to reconnect with a valid Clerk token", async () => {
+    mockGetAccountAccess.mockResolvedValue({ allowed: false, reason: "banned" });
+    const client = createRoomClient("token-ben");
+
+    const error = await waitForEvent<Error>(client, "connect_error");
+
+    expect(error.message).toBe("Your RealtimeAlgoChatApp Studio account has been banned.");
+  });
+
+  it("disconnects an active banned user before they can keep using a room", async () => {
+    const ben = createRoomClient("token-ben");
+    await waitForEvent(ben, "connect");
+    const joined = waitForEvent(ben, "room-joined");
+    ben.emit("join-room", { roomId: "ban-active-room" });
+    await joined;
+
+    const revoked = waitForEvent<{ reason: string }>(ben, "access-revoked");
+    const disconnected = waitForEvent(ben, "disconnect");
+    disconnectBannedUser("user-ben");
+
+    await expect(revoked).resolves.toEqual({ reason: "banned" });
+    await expect(disconnected).resolves.toBeTruthy();
+  });
+
+  it("allows a configured admin to kick a non-admin from another creator's room", async () => {
+    const roomId = `kick-restart-${Date.now()}`;
+    const ben = createRoomClient("token-ben");
+    const ada = createRoomClient("token-ada");
+    await Promise.all([waitForEvent(ben, "connect"), waitForEvent(ada, "connect")]);
+
+    const benJoined = waitForEvent(ben, "room-joined");
+    ben.emit("join-room", { roomId });
+    await benJoined;
+
+    const adaJoined = waitForEvent(ada, "room-joined");
+    ada.emit("join-room", { roomId, createIfMissing: false });
+    await adaJoined;
+
+    mockIsConfiguredAdmin.mockImplementation(
+      (userId: string) => userId === "user-ada",
+    );
+    const kicked = waitForEvent<{ roomId: string; userId: string }>(ben, "kicked");
+
+    await expect(
+      kickRoomMember(roomId, "user-ada", "user-ben"),
+    ).resolves.toBe("ok");
+    await expect(kicked).resolves.toEqual({ roomId, userId: "user-ben" });
+    expect(getRooms()).toEqual([
+      expect.objectContaining({ id: roomId, userCount: 1 }),
+    ]);
+  });
+
+  it("keeps a kicked member on cooldown after the socket server restarts", async () => {
+    const roomId = `kick-restart-${Date.now()}`;
+    const ada = createRoomClient("token-ada");
+    const ben = createRoomClient("token-ben");
+    await Promise.all([waitForEvent(ada, "connect"), waitForEvent(ben, "connect")]);
+
+    const adaJoined = waitForEvent(ada, "room-joined");
+    ada.emit("join-room", { roomId });
+    await adaJoined;
+
+    const benJoined = waitForEvent(ben, "room-joined");
+    ben.emit("join-room", { roomId, createIfMissing: false });
+    await benJoined;
+
+    const kicked = waitForEvent<{ roomId: string; userId: string }>(ben, "kicked");
+    await expect(kickRoomMember(roomId, "user-ada", "user-ben")).resolves.toBe("ok");
+    await expect(kicked).resolves.toEqual({ roomId, userId: "user-ben" });
+
+    await new Promise<void>((resolve) => socketServer.close(() => resolve()));
+    await new Promise<void>((resolve) => httpServer.close(() => resolve()));
+    httpServer = createServer();
+    socketServer = setupSocketIO(httpServer);
+    httpServer.listen(0, "127.0.0.1");
+    await new Promise<void>((resolve) => httpServer.once("listening", resolve));
+    const { port } = httpServer.address() as AddressInfo;
+    serverUrl = `http://127.0.0.1:${port}`;
+
+    const benAfterRestart = createRoomClient("token-ben");
+    await waitForEvent(benAfterRestart, "connect");
+    const denied = waitForEvent<{ message: string }>(benAfterRestart, "error");
+    benAfterRestart.emit("join-room", { roomId, createIfMissing: false });
+    await expect(denied).resolves.toEqual({
+      message:
+        "You were recently removed from this room. Please wait a few minutes before rejoining.",
+    });
+  });
+
+  it("rejects messages before mutation or broadcast when persistence is saturated", async () => {
+    mockSaveEncryptedMessage.mockImplementation(
+      () => new Promise<void>(() => {}),
+    );
+    const roomId = `persistence-capacity-${Date.now()}`;
+    const ada = createRoomClient("token-ada");
+    const ben = createRoomClient("token-ben");
+    const cara = createRoomClient("token-cara");
+    const dana = createRoomClient("token-dana");
+    await Promise.all([
+      waitForEvent(ada, "connect"),
+      waitForEvent(ben, "connect"),
+      waitForEvent(cara, "connect"),
+      waitForEvent(dana, "connect"),
+    ]);
+    for (const client of [ada, ben, cara, dana]) {
+      const joined = waitForEvent(client, "room-joined");
+      client.emit("join-room", { roomId, createIfMissing: client === ada });
+      await joined;
+    }
+
+    const received = vi.fn();
+    ada.on("message", received);
+    const sendMessages = (client: ClientSocket, count: number) => {
+      for (let index = 0; index < count; index += 1) {
+        client.emit("message", {
+          roomId,
+          ciphertext: `message-${client.id}-${index}`,
+          nonce: "nonce",
+        });
+      }
+    };
+    sendMessages(ben, 85);
+    sendMessages(cara, 85);
+    sendMessages(dana, 86);
+    await waitFor(
+      () => {
+        expect(mockSaveEncryptedMessage).toHaveBeenCalledTimes(256);
+        expect(received).toHaveBeenCalledTimes(256);
+      },
+      { attempts: 100, delayMs: 20 },
+    );
+
+    const persistenceBusy = waitForEvent<{ code: string }>(dana, "error");
+    dana.emit("message", {
+      roomId,
+      ciphertext: "not-persisted",
+      nonce: "nonce",
+    });
+    await expect(persistenceBusy).resolves.toMatchObject({
+      code: "PERSISTENCE_BUSY",
+      message: "Realtime storage is busy. Please try again shortly.",
+    });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(mockSaveEncryptedMessage).toHaveBeenCalledTimes(256);
+    expect(received).toHaveBeenCalledTimes(256);
+  });
+});

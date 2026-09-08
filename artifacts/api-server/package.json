@@ -1,0 +1,47 @@
+{
+  "name": "@workspace/api-server",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "export NODE_ENV=development && pnpm run build && pnpm run start",
+    "build": "node ./build.mjs",
+    "start": "node --enable-source-maps --import ./dist/instrument.mjs ./dist/index.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run src --maxWorkers=1",
+    "test:e2e:banned-room": "playwright install chromium && playwright test --config e2e/playwright.config.ts",
+    "typecheck:e2e": "tsc -p e2e/tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@clerk/backend": "^3.16.13",
+    "@clerk/express": "^2.1.64",
+    "@clerk/shared": "^4.30.2",
+    "@sentry/node": "^10.71.0",
+    "@workspace/api-zod": "workspace:*",
+    "@workspace/db": "workspace:*",
+    "@workspace/integrations-anthropic-ai": "workspace:*",
+    "cookie-parser": "^1.4.7",
+    "cors": "^2.8.6",
+    "drizzle-orm": "catalog:",
+    "express": "^5.2.1",
+    "http-proxy-middleware": "^4.2.0",
+    "pino": "^9.14.0",
+    "pino-http": "^10.5.0",
+    "socket.io": "^4.8.3",
+    "socket.io-client": "^4.8.3",
+    "tweetnacl": "^1.0.3"
+  },
+  "devDependencies": {
+    "@clerk/testing": "2.2.31",
+    "@playwright/test": "1.62.1",
+    "@types/cookie-parser": "^1.4.10",
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.6",
+    "@types/node": "catalog:",
+    "esbuild": "0.28.2",
+    "esbuild-plugin-pino": "^2.3.3",
+    "pino-pretty": "^13.1.3",
+    "thread-stream": "3.1.0",
+    "vitest": "^4.1.11"
+  }
+}
