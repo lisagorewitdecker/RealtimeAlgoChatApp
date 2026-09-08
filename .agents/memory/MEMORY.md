@@ -7,9 +7,28 @@
 - [Admin moderation visibility](admin-moderation-visibility.md) — expose only the current user’s server-derived admin flag; never copy admin configuration to clients.
 - [Clerk account search](clerk-account-search.md) — clerkClient.users.getUserList's `query` param already fuzzy-searches email/name/userId; don't build custom search.
 - [Image parser vulnerability](image-parser-vulnerability.md) — image-size has no released fix for malformed-box loops; retain the pnpm guard patch until upstream publishes one.
-- [pnpm drizzle-orm/OpenTelemetry duplication](pnpm-drizzle-otel-duplication.md) — adding an @opentelemetry/api-dependent package beside drizzle-orm forks it into two incompatible type instances; fix by converging the shared db package onto the same peer.
 - [Sentry connector API-key quirk](sentry-connector-api-key-quirk.md) — its Management API can be unusable (bad host config); use the DSN directly for error capture + Cron Monitor uptime alerts instead.
 - [Drizzle schema completeness](drizzle-schema-completeness.md) — every live DB table needs a pgTable export or the post-merge `push --force` will silently drop it.
 - [Socket.IO Sentry alerting](socket-sentry-alerting.md) — rate/cooldown counters turn failure floods into one Sentry issue; async event handlers need their own try/catch, Sentry's Express integration won't see them.
+- [React Native heading semantics](rn-heading-semantics.md) — pair native header semantics with web role and aria-level because RN 0.81 omits accessibilityLevel from Text typings.
+- [Static-server SAST taint](static-server-sast-taint.md) — request-time filesystem reads remain flagged despite boundary checks; serve only startup-indexed assets.
+- [Publish metadata merge state](publish-metadata-merge-state.md) — valid manifests can still be uncommittable; verify the Git index and frozen lockfile before publishing.
+- [Expo canvas iframe refresh](expo-canvas-iframe-refresh.md) — after fixing a render crash, restart Expo and remount the canvas artifact frame to clear its retained error state.
 - [Clerk synthetic browser sessions](clerk-synthetic-browser-sessions.md) — backend-created test users may require a client-trust email code before browser sessions activate.
 - [React Native Web confirmations](react-native-web-confirmations.md) — Alert button callbacks are not reliable on web; use the browser confirm result for destructive actions.
+- [Socket.IO client delivery](socketio-client-delivery.md) — Esbuild may not preserve Socket.IO’s bundled browser asset; serve an explicit vendor route instead.
+- [Image-size remediation](image-size-remediation.md) — Metro’s image parser had unpatched high advisories, so it is locally replaced with a safe compatible subset.
+- [Clerk token effect stability](clerk-token-effect-stability.md) — keep Expo Clerk token callbacks out of stateful loading-effect dependencies to prevent request storms.
+- [Cryptocurrency boundary](cryptocurrency-boundary.md) — do not add cryptocurrency payments or wallet features; preserve cryptographic E2EE separately.
+- [Validation workflow concurrency](validation-workflow-concurrency.md) — run heavy API, Chat, and browser checks sequentially to avoid resource-starvation timeouts.
+- [Artifact cold-start readiness](artifact-startup-after-pnpm-pruning.md) — open the port before async asset preloading; bypassing the package manager alone is insufficient.
+- [Mobile release browser validation](mobile-release-browser-validation.md) — proxied E2E flows need a healthy, freshly served Expo frontend and API pair.
+- [Node preload worker inheritance](node-preload-worker-inheritance.md) — `--import` preloads also run in worker threads; guard process-wide initialization to the main thread.
+- [Node preload paths](node-preload-paths.md) — hosted monorepo artifact commands run from the workspace root; make entrypoint and `--import` paths root-relative.
+- [React Native async act](react-native-async-act.md) — flush provider effects with a separate async act after render; nesting render in async act can unmount RNTL trees.
+- [Orval API codegen normalization](orval-api-codegen-normalization.md) — discard Orval's wildcard Zod export after generation so explicit package exports stay stable.
+- [Bash required-variable messages](bash-required-variable-messages.md) — avoid apostrophes inside `${name:?message}`; Bash can parse them as unmatched quotes.
+- [E2EE assistant boundary](e2ee-assistant-boundary.md) — server-side assistants cannot inspect encrypted room content without breaking the room’s confidentiality promise.
+- [E2EE key registration ordering](e2ee-key-registration-ordering.md) — do not join encrypted rooms until the current public key is confirmed by the server.
+- [Realtime resource budgets](socket-resource-budgets.md) — bound admission, shared event budgets, fanout, and persistence before accepting realtime work.
+- [Expo Sentry wizard fallback](expo-sentry-wizard.md) — non-TTY wizard runs can exit after the banner without changes; verify diffs and honor Expo's SDK-compatible package range.
