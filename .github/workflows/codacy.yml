@@ -15,10 +15,10 @@ name: Codacy Security Scan
 
 on:
   push:
-    branches: [ "development" ]
+    branches: [ "main", "development" ]
   pull_request:
     # The branches below must be a subset of the branches above
-    branches: [ "development" ]
+    branches: [ "main", "development" ]
   schedule:
     - cron: '43 3 * * 2'
 
@@ -27,7 +27,7 @@ permissions:
 
 jobs:
   codacy-security-scan:
-    if: github.event.pull_request == null || github.event.pull_request.head.repo.fork == false
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false
     permissions:
       contents: read # for actions/checkout to fetch code
       security-events: write # for github/codeql-action/upload-sarif to upload SARIF results
