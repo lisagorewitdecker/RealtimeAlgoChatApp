@@ -32,6 +32,7 @@ on:
 
 permissions:
   contents: read
+  actions: write
 
 env:
   PNPM_VERSION: 10.26.1
