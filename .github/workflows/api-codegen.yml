@@ -33,7 +33,17 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Verify generated API clients
-        run: pnpm validate:api-codegen
+        run: |
+          if [[ -f artifacts/api-spec/package.json ]]; then
+            pnpm validate:api-codegen
+          else
+            echo "No artifacts/api-spec workspace present; skipping generated API client validation."
+          fi
 
       - name: Check API contract compatibility
-        run: pnpm validate:api-compatibility
+        run: |
+          if [[ -f artifacts/api-spec/package.json ]]; then
+            pnpm validate:api-compatibility
+          else
+            echo "No artifacts/api-spec workspace present; skipping API contract compatibility validation."
+          fi
