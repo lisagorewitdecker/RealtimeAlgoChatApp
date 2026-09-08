@@ -112,6 +112,8 @@
   --font-sans: 'Inter', sans-serif;
   --font-serif: georgia, serif;
   --font-mono: menlo, monospace;
+  --font-serif: Georgia, serif;
+  --font-mono: Menlo, monospace;
   --radius: 0.5rem;
   --spacing: 0.25rem;
 }
