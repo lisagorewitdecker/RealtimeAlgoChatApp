@@ -338,9 +338,7 @@ function runNativeValidation() {
     });
     mkdirSync(resultsDir, { recursive: true });
     writeFileSync(reportPath, report);
-    console.log(
-      `Native ${platform} branding matches: ${productName} (build ${buildId})`,
-    );
+    console.log(`Native ${platform} branding matches: ${productName}`);
   } catch (error) {
     report = nativeBrandingReport({
       platform,

@@ -88,6 +88,7 @@ run_case() {
     NATIVE_SMOKE_EMAIL=email-secret-sentinel \
     NATIVE_SMOKE_PASSWORD=password-secret-sentinel \
     NATIVE_SMOKE_RESULTS_DIR="$test_root/$name-results" \
+    GITHUB_STEP_SUMMARY="$test_root/$name-summary.md" \
     "$@" \
     "$BASH_BIN" "$GATE" ios 2>&1
   )"; then
@@ -119,12 +120,15 @@ missing_maestro_output="$(
   run_case missing-maestro 2 "$missing_maestro_path"
 )"
 assert_contains "$missing_maestro_output" "Required command not found: maestro"
+assert_contains "$(<"$test_root/missing-maestro-summary.md")" "Status: **BLOCKED**"
+assert_contains "$(<"$test_root/missing-maestro-summary.md")" "Required command not found: maestro"
 
 missing_xcrun_path="$(make_command_path missing-xcrun)"
 missing_xcrun_output="$(
   run_case missing-xcrun 2 "$missing_xcrun_path"
 )"
 assert_contains "$missing_xcrun_output" "xcrun is required for the iOS smoke test."
+assert_contains "$(<"$test_root/missing-xcrun-summary.md")" "Xcode simulator tooling: **BLOCKED**"
 
 unavailable_simulator_path="$(make_command_path unavailable-simulator)"
 make_xcrun_stub "$unavailable_simulator_path" ""
@@ -134,6 +138,9 @@ unavailable_simulator_output="$(
 assert_contains \
   "$unavailable_simulator_output" \
   "Boot the smallest supported iOS simulator (iPhone SE, 3rd generation) first."
+assert_contains \
+  "$(<"$test_root/unavailable-simulator-summary.md")" \
+  "No booted iPhone SE (3rd generation) simulator was found."
 
 supported_model_path="$(make_command_path supported-model)"
 make_xcrun_stub \
@@ -145,6 +152,7 @@ supported_model_output="$(
 assert_contains \
   "$supported_model_output" \
   "Expected at least 11 native screenshots, found 0."
+assert_contains "$(<"$test_root/supported-model-summary.md")" "Status: **READY**"
 
 wrong_model_path="$(make_command_path wrong-model)"
 make_xcrun_stub \
@@ -156,5 +164,18 @@ wrong_model_output="$(
 assert_contains \
   "$wrong_model_output" \
   "Expected a booted iPhone SE simulator, found: iPhone 14"
+assert_contains \
+  "$(<"$test_root/wrong-model-summary.md")" \
+  "Expected iPhone SE (3rd generation); found: iPhone 14"
+
+for summary in "$test_root"/*-summary.md; do
+  for sentinel in \
+    app-id-secret-sentinel \
+    build-id-secret-sentinel \
+    email-secret-sentinel \
+    password-secret-sentinel; do
+    assert_not_contains "$(<"$summary")" "$sentinel"
+  done
+done
 
 echo "iOS native large-text readiness regression tests passed."

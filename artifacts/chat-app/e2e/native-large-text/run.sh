@@ -7,36 +7,98 @@ if [[ "$PLATFORM" != "ios" && "$PLATFORM" != "android" ]]; then
   exit 2
 fi
 
-for command in maestro pnpm; do
-  if ! command -v "$command" >/dev/null 2>&1; then
-    echo "Required command not found: $command" >&2
-    exit 2
-  fi
-done
-
-: "${NATIVE_SMOKE_APP_ID:?Set NATIVE_SMOKE_APP_ID to the installed application ID.}"
-: "${NATIVE_SMOKE_BUILD_ID:?Set NATIVE_SMOKE_BUILD_ID to the installed release candidate build ID.}"
-: "${NATIVE_SMOKE_EMAIL:?Set NATIVE_SMOKE_EMAIL for the dedicated verified smoke-test account.}"
-: "${NATIVE_SMOKE_PASSWORD:?Set NATIVE_SMOKE_PASSWORD for the dedicated smoke-test account.}"
-: "${NATIVE_SMOKE_DISPLAY_NAME:=Large Text Release Check}"
-: "${NATIVE_SMOKE_SCHEME:=chat-app}"
-export NATIVE_SMOKE_APP_ID NATIVE_SMOKE_EMAIL NATIVE_SMOKE_PASSWORD
-
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
 CHAT_APP_DIR="$ROOT_DIR/artifacts/chat-app"
 RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)"
 RESULTS_DIR="${NATIVE_SMOKE_RESULTS_DIR:-$ROOT_DIR/test-results/native-large-text/$PLATFORM/$RUN_ID}"
+mkdir -p "$RESULTS_DIR"
+
+IOS_READINESS_BLOCKERS=()
+IOS_MAESTRO_STATUS="BLOCKED"
+IOS_PNPM_STATUS="BLOCKED"
+IOS_XCRUN_STATUS="BLOCKED"
+IOS_SIMULATOR_STATUS="BLOCKED"
+IOS_RELEASE_CONFIGURATION_STATUS="BLOCKED"
+
+record_ios_readiness_failure() {
+  IOS_READINESS_BLOCKERS+=("$1")
+}
+
+write_ios_readiness_summary() {
+  if [[ "$PLATFORM" != "ios" ]]; then
+    return
+  fi
+
+  local status="READY"
+  if ((${#IOS_READINESS_BLOCKERS[@]})); then
+    status="BLOCKED"
+  fi
+
+  {
+    echo "## iOS native large-text readiness"
+    echo
+    echo "- Status: **${status}**"
+    echo
+    echo "### Prerequisites"
+    echo "- Maestro: **${IOS_MAESTRO_STATUS}**"
+    echo "- pnpm: **${IOS_PNPM_STATUS}**"
+    echo "- Xcode simulator tooling: **${IOS_XCRUN_STATUS}**"
+    echo "- Booted iPhone SE (3rd generation): **${IOS_SIMULATOR_STATUS}**"
+    echo "- Release configuration: **${IOS_RELEASE_CONFIGURATION_STATUS}**"
+    if ((${#IOS_READINESS_BLOCKERS[@]})); then
+      echo
+      echo "### Blocking prerequisites"
+      printf -- '- %s\n' "${IOS_READINESS_BLOCKERS[@]}"
+    fi
+  } > "$RESULTS_DIR/ios-readiness.md"
+
+  if [[ -n "${GITHUB_STEP_SUMMARY:-}" && "${NATIVE_SMOKE_SUMMARY_DEFER:-0}" != "1" ]]; then
+    cat "$RESULTS_DIR/ios-readiness.md" >> "$GITHUB_STEP_SUMMARY"
+  fi
+}
+
+for command in maestro pnpm; do
+  if command -v "$command" >/dev/null 2>&1; then
+    if [[ "$command" == "maestro" ]]; then
+      IOS_MAESTRO_STATUS="READY"
+    else
+      IOS_PNPM_STATUS="READY"
+    fi
+  else
+    echo "Required command not found: $command" >&2
+    record_ios_readiness_failure "Required command not found: $command"
+  fi
+done
+
+missing_release_values=()
+for value in NATIVE_SMOKE_APP_ID NATIVE_SMOKE_BUILD_ID NATIVE_SMOKE_EMAIL NATIVE_SMOKE_PASSWORD; do
+  if [[ -z "${!value:-}" ]]; then
+    missing_release_values+=("$value")
+  fi
+done
+if ((${#missing_release_values[@]})); then
+  echo "Required release configuration is incomplete." >&2
+  record_ios_readiness_failure "Required release configuration is incomplete."
+else
+  IOS_RELEASE_CONFIGURATION_STATUS="READY"
+fi
+
+: "${NATIVE_SMOKE_DISPLAY_NAME:=Large Text Release Check}"
+: "${NATIVE_SMOKE_SCHEME:=chat-app}"
+export NATIVE_SMOKE_APP_ID NATIVE_SMOKE_EMAIL NATIVE_SMOKE_PASSWORD
 export NATIVE_SMOKE_DISPLAY_NAME NATIVE_SMOKE_SCHEME
 export NATIVE_SMOKE_SCREENSHOT_DIR="$RESULTS_DIR/screenshots"
 export NATIVE_SMOKE_CALL_SCREENSHOT_DIR="$RESULTS_DIR/call-surface"
 mkdir -p "$NATIVE_SMOKE_SCREENSHOT_DIR" "$NATIVE_SMOKE_CALL_SCREENSHOT_DIR"
-printf '%s\n' "$NATIVE_SMOKE_BUILD_ID" > "$RESULTS_DIR/candidate-build-id.txt"
+if [[ -n "${NATIVE_SMOKE_BUILD_ID:-}" ]]; then
+  printf '%s\n' "$NATIVE_SMOKE_BUILD_ID" > "$RESULTS_DIR/candidate-build-id.txt"
+fi
 
 RESULT_STATUS="FAIL"
 write_result_record() {
   cat > "$RESULTS_DIR/pass-fail-record.txt" <<EOF
 platform=$PLATFORM
-candidate_build_id=$NATIVE_SMOKE_BUILD_ID
+candidate_build_id=${NATIVE_SMOKE_BUILD_ID:-}
 status=$RESULT_STATUS
 native_screenshot_count=$(find "$NATIVE_SMOKE_SCREENSHOT_DIR" -type f -name '*.png' | wc -l | tr -d ' ')
 call_surface_screenshot_count=$(find "$NATIVE_SMOKE_CALL_SCREENSHOT_DIR" -type f -name '*.png' | wc -l | tr -d ' ')
@@ -45,25 +107,38 @@ EOF
 }
 trap write_result_record EXIT
 
+if ((${#IOS_READINESS_BLOCKERS[@]})); then
+  write_ios_readiness_summary
+  exit 2
+fi
+
 if [[ "$PLATFORM" == "ios" ]]; then
   if ! command -v xcrun >/dev/null 2>&1; then
     echo "xcrun is required for the iOS smoke test." >&2
+    record_ios_readiness_failure "xcrun is required for the iOS smoke test."
+  else
+    IOS_XCRUN_STATUS="READY"
+    BOOTED_DEVICE="$(xcrun simctl list devices booted | sed -n 's/^[[:space:]]*\(.*\) ([-A-F0-9]\{8,\}) (Booted)$/\1/p' | head -n 1)"
+    if [[ -z "$BOOTED_DEVICE" ]]; then
+      echo "Boot the smallest supported iOS simulator (iPhone SE, 3rd generation) first." >&2
+      record_ios_readiness_failure "No booted iPhone SE (3rd generation) simulator was found."
+    elif [[ "$BOOTED_DEVICE" != "iPhone SE (3rd generation)" && "${NATIVE_SMOKE_ALLOW_LARGER_DEVICE:-0}" != "1" ]]; then
+      echo "Expected a booted iPhone SE simulator, found: $BOOTED_DEVICE" >&2
+      echo "Set NATIVE_SMOKE_ALLOW_LARGER_DEVICE=1 only for a non-release diagnostic run." >&2
+      record_ios_readiness_failure "Expected iPhone SE (3rd generation); found: $BOOTED_DEVICE"
+    else
+      IOS_SIMULATOR_STATUS="READY"
+    fi
+  fi
+  if ((${#IOS_READINESS_BLOCKERS[@]})); then
+    write_ios_readiness_summary
     exit 2
   fi
-  BOOTED_DEVICE="$(xcrun simctl list devices booted | sed -n 's/^[[:space:]]*\(.*\) ([-A-F0-9]\{8,\}) (Booted)$/\1/p' | head -n 1)"
-  if [[ -z "$BOOTED_DEVICE" ]]; then
-    echo "Boot the smallest supported iOS simulator (iPhone SE, 3rd generation) first." >&2
-    exit 2
-  fi
-  if [[ "$BOOTED_DEVICE" != *"iPhone SE"* && "${NATIVE_SMOKE_ALLOW_LARGER_DEVICE:-0}" != "1" ]]; then
-    echo "Expected a booted iPhone SE simulator, found: $BOOTED_DEVICE" >&2
-    echo "Set NATIVE_SMOKE_ALLOW_LARGER_DEVICE=1 only for a non-release diagnostic run." >&2
-    exit 2
-  fi
+  write_ios_readiness_summary
   cat > "$RESULTS_DIR/runner-metadata.txt" <<EOF
 platform=ios
-candidate_build_id=$NATIVE_SMOKE_BUILD_ID
-app_id=$NATIVE_SMOKE_APP_ID
+candidate_build_id=${NATIVE_SMOKE_BUILD_ID:-}
+app_id=${NATIVE_SMOKE_APP_ID:-}
 device=$BOOTED_DEVICE
 recorded_at_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 EOF
@@ -79,7 +154,7 @@ else
     exit 2
   fi
   if ! adb shell pm path "$NATIVE_SMOKE_APP_ID" >/dev/null 2>&1; then
-    echo "The release candidate is not installed for application ID $NATIVE_SMOKE_APP_ID." >&2
+    echo "The release candidate is not installed on the connected Android device." >&2
     exit 2
   fi
   ANDROID_SIZE="$(adb shell wm size | tr -d '\r' | tail -n 1 | sed 's/^.*: //')"
