@@ -7,7 +7,8 @@
     "dev": "vite dev",
     "build": "vite build",
     "preview": "vite preview",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "typecheck:clean": "node ../../scripts/validate-mockup-clean.mjs"
   },
   "devDependencies": {
     "@hookform/resolvers": "^3.10.0",
@@ -57,11 +58,11 @@
     "lucide-react": "catalog:",
     "next-themes": "^0.4.6",
     "react": "catalog:",
-    "react-day-picker": "^10.0.1",
+    "react-day-picker": "^9.14.0",
     "react-dom": "catalog:",
     "react-hook-form": "^7.75.0",
     "react-resizable-panels": "^2.1.9",
-    "recharts": "^3.10.1",
+    "recharts": "^2.15.4",
     "sonner": "^2.0.7",
     "tailwind-merge": "catalog:",
     "tailwindcss": "catalog:",
