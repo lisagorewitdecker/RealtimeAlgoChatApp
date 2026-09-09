@@ -13,6 +13,18 @@ interface DiscoveredComponent {
   importPath: string;
 }
 
+const escapeCharMap: Record<string, string> = {
+  "<": "\\u003C",
+  ">": "\\u003E",
+  "/": "\\u002F",
+  "\u2028": "\\u2028",
+  "\u2029": "\\u2029",
+};
+
+function escapeUnsafeChars(str: string): string {
+  return str.replace(/[<>/\u2028\u2029]/g, (x) => escapeCharMap[x] ?? x);
+}
+
 export function mockupPreviewPlugin(): Plugin {
   let root = "";
   let currentSource = "";
@@ -55,7 +67,7 @@ export function mockupPreviewPlugin(): Plugin {
     const entries = components
       .map(
         (c) =>
-          `  ${JSON.stringify(c.globKey)}: () => import(${JSON.stringify(c.importPath)})`,
+          `  ${escapeUnsafeChars(JSON.stringify(c.globKey))}: () => import(${escapeUnsafeChars(JSON.stringify(c.importPath))})`,
       )
       .join(",\n");
 
