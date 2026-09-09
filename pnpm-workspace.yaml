@@ -32,6 +32,17 @@ minimumReleaseAgeExclude:
   # These are published by Replit and trusted — the supply-chain attack vector
   # this setting guards against does not apply to our own packages.
   - '@replit/*'
+  # User-authorized exceptions for the Expo SDK 57 upgrade. These stable
+  # package releases were published within the one-day maturity window.
+  - expo-router
+  - expo-glass-effect
+  - expo
+  - '@expo/ui'
+  - '@expo/cli'
+  - '@expo/metro-file-map'
+  - babel-preset-expo
+  - expo-modules-core
+  - expo-modules-jsi
   - stripe-replit-sync
   # Security fix for fast-uri was published within the release-age window.
   - fast-uri
@@ -57,10 +68,10 @@ catalog:
   drizzle-orm: ^0.45.2
   framer-motion: ^12.43.0
   lucide-react: ^0.545.0
-  # Must be this exact version because Expo SDK 54 requires it.
-  react: 19.1.0
-  # Must be this exact version because Expo SDK 54 requires it.
-  react-dom: 19.1.0
+  # Must be this exact version because Expo SDK 57 requires it.
+  react: 19.2.3
+  # Must be this exact version because Expo SDK 57 requires it.
+  react-dom: 19.2.3
   tailwind-merge: ^3.6.0
   tailwindcss: ^4.3.3
   tsx: ^4.23.12
@@ -71,13 +82,13 @@ catalog:
 autoInstallPeers: false
 
 # @clerk/expo supports React 19, while its web-only nested packages publish a
-# narrower patch-level peer range. Expo SDK 54 requires 19.1.0 at runtime.
+# narrower patch-level peer range. Expo SDK 57 requires 19.2.3 at runtime.
 peerDependencyRules:
   allowedVersions:
-    "@clerk/react>react": 19.1.0
-    "@clerk/react>react-dom": 19.1.0
-    "@clerk/shared>react": 19.1.0
-    "@clerk/shared>react-dom": 19.1.0
+    "@clerk/react>react": 19.2.3
+    "@clerk/react>react-dom": 19.2.3
+    "@clerk/shared>react": 19.2.3
+    "@clerk/shared>react-dom": 19.2.3
 
 onlyBuiltDependencies:
   - '@swc/core'

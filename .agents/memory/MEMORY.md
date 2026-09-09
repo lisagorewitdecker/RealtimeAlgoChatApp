@@ -1,5 +1,6 @@
 - [Socket.IO room join ordering](socket-room-join-order.md) — attach room event listeners before emitting `join-room` so fast responses cannot be lost.
 - [Clerk Expo startup](clerk-expo-startup.md) — map the managed publishable key into Expo’s public environment and never block the root UI on font loading.
+- [Expo SDK maturity exceptions](expo-sdk-maturity-exceptions.md) — keep the package-age policy enabled and allowlist only same-day official Expo dependency-chain packages.
 - [Expo preview CORS](expo-preview-cors.md) — API browser allowlists must include the Expo preview origin, not only the main development domain.
 - [Sandbox release validation](sandbox-release-validation.md) — test the generated editor and the mobile WebView host independently at their delivery boundaries.
 - [Post-merge setup timing](post-merge-setup-timing.md) — dependency reconciliation can exceed the default setup timeout; keep the configured allowance realistic.

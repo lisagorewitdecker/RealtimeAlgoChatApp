@@ -92,4 +92,5 @@ describe("encrypted sandbox assistant privacy boundary", () => {
     });
     expect(mockStreamSandboxAssistant).not.toHaveBeenCalled();
   });
+
 });

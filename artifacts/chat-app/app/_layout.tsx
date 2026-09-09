@@ -24,7 +24,6 @@ import { AppProvider, useApp } from "@/contexts/AppContext";
 import { CryptoProvider } from "@/contexts/CryptoContext";
 import { SocketProvider } from "@/contexts/SocketContext";
 import { clerkTokenCache } from "@/lib/clerkTokenCache";
-import { Sentry } from "@/lib/sentry";
 
 if (process.env["EXPO_PUBLIC_DOMAIN"]) {
   setBaseUrl(`https://${process.env["EXPO_PUBLIC_DOMAIN"]}`);
@@ -248,7 +247,7 @@ function AuthTokenBridge({ children }: { children: React.ReactNode }) {
   return <CryptoProvider>{children}</CryptoProvider>;
 }
 
-function RootLayout() {
+export default function RootLayout() {
   const publishableKey = process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY;
   const [fontsLoaded, fontError] = useFonts({
     Inter_400Regular,
@@ -293,5 +292,3 @@ function RootLayout() {
     </ClerkProvider>
   );
 }
-
-export default Sentry.wrap(RootLayout);

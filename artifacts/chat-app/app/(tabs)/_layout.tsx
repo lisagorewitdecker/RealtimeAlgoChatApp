@@ -1,7 +1,7 @@
 import { BlurView } from "expo-blur";
 import { isLiquidGlassAvailable } from "expo-glass-effect";
 import { Tabs } from "expo-router";
-import { Icon, Label, NativeTabs } from "expo-router/unstable-native-tabs";
+import { NativeTabs } from "expo-router/unstable-native-tabs";
 import { SymbolView } from "expo-symbols";
 import { Feather } from "@expo/vector-icons";
 import React from "react";
@@ -13,12 +13,16 @@ function NativeTabLayout() {
   return (
     <NativeTabs>
       <NativeTabs.Trigger name="index">
-        <Icon sf={{ default: "message.circle", selected: "message.circle.fill" }} />
-        <Label>Chats</Label>
+        <NativeTabs.Trigger.Icon
+          sf={{ default: "message.circle", selected: "message.circle.fill" }}
+        />
+        <NativeTabs.Trigger.Label>Chats</NativeTabs.Trigger.Label>
       </NativeTabs.Trigger>
       <NativeTabs.Trigger name="profile">
-        <Icon sf={{ default: "person.circle", selected: "person.circle.fill" }} />
-        <Label>Profile</Label>
+        <NativeTabs.Trigger.Icon
+          sf={{ default: "person.circle", selected: "person.circle.fill" }}
+        />
+        <NativeTabs.Trigger.Label>Profile</NativeTabs.Trigger.Label>
       </NativeTabs.Trigger>
     </NativeTabs>
   );

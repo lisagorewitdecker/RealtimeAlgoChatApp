@@ -177,5 +177,5 @@ packages = ["glib", "nss", "nspr", "atk", "at-spi2-atk", "dbus", "xorg.libX11", 
 [userenv]
 
 [userenv.shared]
-ADMIN_USER_IDS = "no"
-EXPO_PUBLIC_ADMIN_USER_IDS = "no"
+ADMIN_USER_IDS = ""
+EXPO_PUBLIC_ADMIN_USER_IDS = ""
