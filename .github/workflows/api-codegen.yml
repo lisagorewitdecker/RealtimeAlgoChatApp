@@ -34,4 +34,6 @@ jobs:
         run: pnpm validate:api-codegen
 
       - name: Check API contract compatibility
+        env:
+          API_BREAKING_CHANGE_PR_BODY: ${{ github.event.pull_request.body }}
         run: pnpm validate:api-compatibility
