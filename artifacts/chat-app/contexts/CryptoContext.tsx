@@ -5,6 +5,7 @@ import nacl from "tweetnacl";
 import { decodeBase64, decodeUTF8, encodeBase64 } from "tweetnacl-util";
 import React, { createContext, useCallback, useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Platform } from "react-native";
+import { toSecureStoreKey } from "@/lib/secureStorageKey";
 
 nacl.setPRNG((target: Uint8Array, length: number) => target.set(ExpoCrypto.getRandomBytes(length)));
 
@@ -18,8 +19,13 @@ function waitForRetry(delayMs: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, delayMs));
 }
 
+// Native secure storage rejects the ":" separators used in the logical keys
+// above, so they are encoded (see lib/secureStorageKey.ts). Web keeps the
+// logical key because browser storage already holds data under it.
 async function getStored(key: string) {
-  return Platform.OS === "web" ? globalThis.localStorage?.getItem(key) ?? null : SecureStore.getItemAsync(key);
+  return Platform.OS === "web"
+    ? globalThis.localStorage?.getItem(key) ?? null
+    : SecureStore.getItemAsync(toSecureStoreKey(key));
 }
 async function setStored(key: string, value: string) {
   if (Platform.OS === "web") {
@@ -27,7 +33,7 @@ async function setStored(key: string, value: string) {
     if (!storage) throw new Error("Browser storage is unavailable.");
     storage.setItem(key, value);
   } else {
-    await SecureStore.setItemAsync(key, value);
+    await SecureStore.setItemAsync(toSecureStoreKey(key), value);
   }
 }
 

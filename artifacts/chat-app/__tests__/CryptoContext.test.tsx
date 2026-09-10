@@ -10,6 +10,7 @@ import {
   type CryptoContextValue,
   useCrypto,
 } from "../contexts/CryptoContext";
+import { toSecureStoreKey } from "../lib/secureStorageKey";
 
 const mockSecureStore = new Map<string, string>();
 let mockRandomCounter = 0;
@@ -18,24 +19,48 @@ let mockRoomKeyWriteRelease: (() => void) | null = null;
 let mockAuthUserId: string | null = "crypto-test-user";
 let mockGetToken: (() => Promise<string | null>) | null = null;
 
-jest.mock("expo-secure-store", () => ({
-  getItemAsync: jest.fn(async (key: string) => mockSecureStore.get(key) ?? null),
-  setItemAsync: jest.fn(async (key: string, value: string) => {
-    if (key.startsWith("devstudio_roomkey:") && mockRoomKeyWriteRelease) {
-      await new Promise<void>((resolve) => {
-        const release = mockRoomKeyWriteRelease;
-        mockRoomKeyWriteRelease = () => {
-          release?.();
-          resolve();
-        };
-      });
+// Storage keys as the native keychain/keystore receives them.
+// Prefixed with "mock" so the hoisted jest.mock factory below may reference it.
+const mockRoomKeyStoragePrefix = toSecureStoreKey("devstudio_roomkey:");
+const roomKeyStorageKey = (userId: string, roomId: string) =>
+  toSecureStoreKey(`devstudio_roomkey:${userId}:${roomId}`);
+const deviceKeypairStorageKey = (userId: string) =>
+  toSecureStoreKey(`devstudio_device_keypair_v1:${userId}`);
+
+jest.mock("expo-secure-store", () => {
+  // Same validation as the real module on iOS and Android: the keychain and
+  // keystore reject any other key name, which is exactly what broke room key
+  // persistence on phones while web (localStorage) kept working.
+  const ensureValidKey = (key: string) => {
+    if (typeof key !== "string" || !/^[\w.-]+$/.test(key)) {
+      throw new Error(
+        'Invalid key provided to SecureStore. Keys must not be empty and contain only alphanumeric characters, ".", "-", and "_".',
+      );
     }
-    if (mockRoomKeyWriteFailure && key.startsWith("devstudio_roomkey:")) {
-      throw new Error("Secure storage unavailable");
-    }
-    mockSecureStore.set(key, value);
-  }),
-}));
+  };
+  return {
+    getItemAsync: jest.fn(async (key: string) => {
+      ensureValidKey(key);
+      return mockSecureStore.get(key) ?? null;
+    }),
+    setItemAsync: jest.fn(async (key: string, value: string) => {
+      ensureValidKey(key);
+      if (key.startsWith(mockRoomKeyStoragePrefix) && mockRoomKeyWriteRelease) {
+        await new Promise<void>((resolve) => {
+          const release = mockRoomKeyWriteRelease;
+          mockRoomKeyWriteRelease = () => {
+            release?.();
+            resolve();
+          };
+        });
+      }
+      if (mockRoomKeyWriteFailure && key.startsWith(mockRoomKeyStoragePrefix)) {
+        throw new Error("Secure storage unavailable");
+      }
+      mockSecureStore.set(key, value);
+    }),
+  };
+});
 
 jest.mock("expo-crypto", () => ({
   getRandomBytes: jest.fn((length: number) => {
@@ -183,6 +208,22 @@ describe("CryptoProvider", () => {
     fetchMock.mockRestore();
   });
 
+  it("persists the device identity keypair in native secure storage and reuses it after remount", async () => {
+    const firstView = await renderCryptoProvider();
+    const firstPublicKey = cryptoValue?.publicKeyB64;
+    expect(firstPublicKey).toBeTruthy();
+
+    const storedKeypair = mockSecureStore.get(deviceKeypairStorageKey("crypto-test-user"));
+    expect(storedKeypair).toBeTruthy();
+    expect(JSON.parse(storedKeypair as string)).toEqual({ secretKey: expect.any(String) });
+
+    firstView.unmount();
+    await renderCryptoProvider();
+
+    expect(cryptoValue?.publicKeyB64).toBe(firstPublicKey);
+    expect(mockSecureStore.size).toBe(1);
+  });
+
   it("generates a room key, persists it, and restores it after remount", async () => {
     const firstView = await renderCryptoProvider();
     let generatedKey: Uint8Array | undefined;
@@ -193,9 +234,7 @@ describe("CryptoProvider", () => {
 
     expect(generatedKey).toHaveLength(nacl.secretbox.keyLength);
     expect(cryptoValue?.getRoomKey("room-42")).toEqual(generatedKey);
-    expect(
-      mockSecureStore.get("devstudio_roomkey:crypto-test-user:room-42"),
-    ).toBe(
+    expect(mockSecureStore.get(roomKeyStorageKey("crypto-test-user", "room-42"))).toBe(
       encodeBase64(generatedKey as Uint8Array),
     );
 

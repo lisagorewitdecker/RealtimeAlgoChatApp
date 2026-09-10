@@ -14,7 +14,8 @@
     "test:build-preflight": "node --test scripts/build.test.js",
     "validate:branding": "node scripts/validate-branding.mjs",
     "validate:branding:native": "node scripts/validate-branding.mjs --native",
-    "test:native-large-text": "bash e2e/native-large-text/run.sh"
+    "test:native-large-text": "bash e2e/native-large-text/run.sh",
+    "test:native-sentry": "bash e2e/sentry-source-map/run.sh"
   },
   "jest": {
     "preset": "jest-expo",
@@ -23,7 +24,14 @@
     ],
     "moduleNameMapper": {
       "^@/(.*)$": "<rootDir>/$1"
-    }
+    },
+    "testPathIgnorePatterns": [
+      "/node_modules/",
+      "<rootDir>/scripts/"
+    ],
+    "setupFilesAfterEnv": [
+      "<rootDir>/jest.setup-after-env.js"
+    ]
   },
   "devDependencies": {
     "@babel/core": "^7.29.7",

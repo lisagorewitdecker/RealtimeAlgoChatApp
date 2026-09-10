@@ -69,11 +69,36 @@ function assertReleaseCrashReportingConfigured(env = process.env) {
   }
 }
 
+function assertNativeSentryUploadConfigured(env = process.env) {
+  const required = ["SENTRY_AUTH_TOKEN", "SENTRY_RELEASE", "SENTRY_DIST"];
+  const missing = required.filter((key) => !env[key]?.trim());
+  if (missing.length > 0) {
+    throw new Error(
+      "Native mobile release build requires Sentry source-map upload credentials and release identity. " +
+        "Configure SENTRY_AUTH_TOKEN, SENTRY_RELEASE, and SENTRY_DIST in the mobile-release build environment.",
+    );
+  }
+  if (!(env.EAS_BUILD_ID?.trim() || env.SENTRY_BUILD_ID?.trim())) {
+    throw new Error(
+      "Native mobile release build requires EAS_BUILD_ID (or SENTRY_BUILD_ID for an equivalent prepared runner) so verification is bound to the exact candidate.",
+    );
+  }
+  if (
+    env.SENTRY_DISABLE_AUTO_UPLOAD === "true" ||
+    env.SENTRY_ALLOW_FAILURE === "true"
+  ) {
+    throw new Error(
+      "Native mobile release builds must fail when Sentry source-map upload is disabled or fails.",
+    );
+  }
+}
+
 function prepareNativeReleaseBuild(
   env = process.env,
   outputRoot = env.MOBILE_RELEASE_PREFLIGHT_OUTPUT_ROOT || projectRoot,
 ) {
   assertReleaseCrashReportingConfigured(env);
+  assertNativeSentryUploadConfigured(env);
 
   const evidencePath = path.join(
     outputRoot,
@@ -81,9 +106,16 @@ function prepareNativeReleaseBuild(
     "releaseCrashReporting.ts",
   );
   fs.mkdirSync(path.dirname(evidencePath), { recursive: true });
+  const sentryBuildId = env.EAS_BUILD_ID?.trim() || env.SENTRY_BUILD_ID.trim();
   fs.writeFileSync(
     evidencePath,
-    `export const RELEASE_CRASH_REPORTING_BUILD_EVIDENCE = "${RELEASE_EVIDENCE_MARKER}";\n`,
+    [
+      `export const RELEASE_CRASH_REPORTING_BUILD_EVIDENCE = "${RELEASE_EVIDENCE_MARKER}";`,
+      `export const RELEASE_SENTRY_RELEASE = ${JSON.stringify(env.SENTRY_RELEASE.trim())};`,
+      `export const RELEASE_SENTRY_DIST = ${JSON.stringify(env.SENTRY_DIST.trim())};`,
+      `export const RELEASE_SENTRY_BUILD_ID = ${JSON.stringify(sentryBuildId)};`,
+      "",
+    ].join("\n"),
     { mode: 0o600 },
   );
 
@@ -689,7 +721,7 @@ async function run() {
   if (process.argv.includes(NATIVE_BUILD_PREFLIGHT_FLAG)) {
     prepareNativeReleaseBuild();
     console.log(
-      "Native mobile release crash reporting preflight passed: SENTRY_DSN or EXPO_PUBLIC_SENTRY_DSN is configured.",
+      "Native mobile release crash reporting preflight passed: runtime capture and source-map upload are configured.",
     );
     return;
   }
@@ -716,6 +748,7 @@ if (require.main === module) {
 
 module.exports = {
   assertReleaseCrashReportingConfigured,
+  assertNativeSentryUploadConfigured,
   getSentryDsn,
   prepareNativeReleaseBuild,
   RELEASE_EVIDENCE_MARKER,

@@ -32,6 +32,10 @@ function runNativeBuildPreflight(overrides = {}) {
       ...process.env,
       SENTRY_DSN: "",
       EXPO_PUBLIC_SENTRY_DSN: "",
+      SENTRY_AUTH_TOKEN: "test-auth-token",
+      SENTRY_RELEASE: "chat-app@1.0.0+test",
+      SENTRY_DIST: "100",
+      SENTRY_BUILD_ID: "build-test",
       MOBILE_RELEASE_PREFLIGHT_OUTPUT_ROOT: outputRoot,
       ...overrides,
     },
@@ -42,27 +46,39 @@ function runNativeBuildPreflight(overrides = {}) {
 
 test("native production build hook accepts and maps managed SENTRY_DSN", (t) => {
   const sentinel = "https://managed-sentry-dsn.example/secret";
+  const authSentinel = "auth-token-must-not-be-written";
   const { outputRoot, result } = runNativeBuildPreflight({
     EXPO_PUBLIC_SENTRY_DSN: " ",
     SENTRY_DSN: sentinel,
+    SENTRY_AUTH_TOKEN: authSentinel,
   });
   t.after(() => fs.rmSync(outputRoot, { recursive: true, force: true }));
 
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /crash reporting preflight passed/i);
   assert.equal((result.stdout + result.stderr).includes(sentinel), false);
+  assert.equal((result.stdout + result.stderr).includes(authSentinel), false);
   assert.match(
     fs.readFileSync(
       path.join(outputRoot, "constants", "releaseCrashReporting.ts"),
       "utf8",
     ),
-    /SENTRY_RELEASE_PREFLIGHT_PASSED_V1/,
+    /SENTRY_RELEASE_PREFLIGHT_PASSED_V1[\s\S]*chat-app@1\.0\.0\+test[\s\S]*100[\s\S]*build-test/,
   );
   assert.equal(
     fs
       .readFileSync(path.join(outputRoot, ".env.local"), "utf8")
       .includes(sentinel),
     true,
+  );
+  assert.equal(
+    fs
+      .readFileSync(
+        path.join(outputRoot, "constants", "releaseCrashReporting.ts"),
+        "utf8",
+      )
+      .includes(authSentinel),
+    false,
   );
 });
 
@@ -97,6 +113,46 @@ test("native production build hook blocks bundling without a Sentry DSN", (t) =>
     ),
     false,
   );
+});
+
+test("native production build hook blocks source-map upload without an auth token", (t) => {
+  const { outputRoot, result } = runNativeBuildPreflight({
+    SENTRY_DSN: "https://public-dsn.example/123",
+    SENTRY_AUTH_TOKEN: "",
+  });
+  t.after(() => fs.rmSync(outputRoot, { recursive: true, force: true }));
+
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /SENTRY_AUTH_TOKEN, SENTRY_RELEASE, and SENTRY_DIST/);
+  assert.equal(
+    fs.existsSync(
+      path.join(outputRoot, "constants", "releaseCrashReporting.ts"),
+    ),
+    false,
+  );
+});
+
+test("native production build hook refuses best-effort source-map uploads", (t) => {
+  const { outputRoot, result } = runNativeBuildPreflight({
+    SENTRY_DSN: "https://public-dsn.example/123",
+    SENTRY_ALLOW_FAILURE: "true",
+  });
+  t.after(() => fs.rmSync(outputRoot, { recursive: true, force: true }));
+
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /must fail when Sentry source-map upload/);
+});
+
+test("native production build hook requires candidate-bound build identity", (t) => {
+  const { outputRoot, result } = runNativeBuildPreflight({
+    SENTRY_DSN: "https://public-dsn.example/123",
+    SENTRY_BUILD_ID: "",
+    EAS_BUILD_ID: "",
+  });
+  t.after(() => fs.rmSync(outputRoot, { recursive: true, force: true }));
+
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /requires EAS_BUILD_ID/);
 });
 
 test("custom production bundler blocks before build work without a DSN", () => {

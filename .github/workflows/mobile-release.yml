@@ -15,6 +15,8 @@ on:
     secrets:
       EAS_TOKEN:
         required: true
+      SENTRY_AUTH_TOKEN:
+        required: true
       NATIVE_SMOKE_IOS_BUILD_ID:
         required: true
       NATIVE_SMOKE_ANDROID_BUILD_ID:
@@ -29,6 +31,14 @@ on:
         required: true
       NATIVE_SMOKE_DISPLAY_NAME:
         required: false
+      NATIVE_SMOKE_IOS_SENTRY_RELEASE:
+        required: true
+      NATIVE_SMOKE_IOS_SENTRY_DIST:
+        required: true
+      NATIVE_SMOKE_ANDROID_SENTRY_RELEASE:
+        required: true
+      NATIVE_SMOKE_ANDROID_SENTRY_DIST:
+        required: true
 
 permissions:
   contents: read
@@ -167,6 +177,26 @@ jobs:
           NATIVE_SMOKE_SUMMARY_DEFER: "1"
         run: pnpm --filter @workspace/chat-app test:native-large-text ios
 
+      - name: Send controlled iOS JavaScript error
+        id: ios-sentry-trigger
+        env:
+          NATIVE_SMOKE_APP_ID: ${{ secrets.NATIVE_SMOKE_IOS_APP_ID }}
+          NATIVE_SMOKE_BUILD_ID: ${{ secrets.NATIVE_SMOKE_IOS_BUILD_ID }}
+          NATIVE_SENTRY_MARKER: native-${{ github.run_id }}-${{ github.run_attempt }}-ios
+        run: pnpm --filter @workspace/chat-app test:native-sentry ios
+
+      - name: Verify readable iOS source maps in Sentry
+        id: ios-sentry-verification
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_EXPECTED_PLATFORM: ios
+          SENTRY_EXPECTED_BUILD_ID: ${{ secrets.NATIVE_SMOKE_IOS_BUILD_ID }}
+          SENTRY_EXPECTED_RELEASE: ${{ secrets.NATIVE_SMOKE_IOS_SENTRY_RELEASE }}
+          SENTRY_EXPECTED_DIST: ${{ secrets.NATIVE_SMOKE_IOS_SENTRY_DIST }}
+          SENTRY_PROBE_MARKER: native-${{ github.run_id }}-${{ github.run_attempt }}-ios
+          SENTRY_EVIDENCE_PATH: ${{ env.NATIVE_SMOKE_RESULTS_DIR }}/sentry-source-map-evidence.json
+        run: node scripts/verify-sentry-native-event.mjs
+
       - name: Summarize iOS readiness
         if: always()
         env:
@@ -179,6 +209,8 @@ jobs:
           IOS_NATIVE_BRANDING_RESULT: ${{ steps.ios-native-branding.outcome }}
           IOS_MAESTRO_RESULT: ${{ steps.ios-maestro.outcome }}
           IOS_NATIVE_EVIDENCE_RESULT: ${{ steps.ios-native-evidence.outcome }}
+          IOS_SENTRY_TRIGGER_RESULT: ${{ steps.ios-sentry-trigger.outcome }}
+          IOS_SENTRY_VERIFICATION_RESULT: ${{ steps.ios-sentry-verification.outcome }}
         shell: bash
         run: |
           set -euo pipefail
@@ -206,6 +238,8 @@ jobs:
           add_check "Installed native candidate" "$IOS_NATIVE_BRANDING_RESULT"
           add_check "Maestro" "$IOS_MAESTRO_RESULT"
           add_check "Native large-text evidence" "$IOS_NATIVE_EVIDENCE_RESULT"
+          add_check "Controlled Sentry error" "$IOS_SENTRY_TRIGGER_RESULT"
+          add_check "Readable Sentry source maps" "$IOS_SENTRY_VERIFICATION_RESULT"
 
           {
             echo "## iOS native large-text readiness"
@@ -424,6 +458,7 @@ jobs:
         run: maestro --version
 
       - name: Run Android native large-text release gate
+        id: android-native-evidence
         env:
           NATIVE_SMOKE_APP_ID: ${{ secrets.NATIVE_SMOKE_ANDROID_APP_ID }}
           NATIVE_SMOKE_EMAIL: ${{ secrets.NATIVE_SMOKE_EMAIL }}
@@ -431,6 +466,26 @@ jobs:
           NATIVE_SMOKE_DISPLAY_NAME: ${{ secrets.NATIVE_SMOKE_DISPLAY_NAME }}
           NATIVE_SMOKE_BUILD_ID: ${{ secrets.NATIVE_SMOKE_ANDROID_BUILD_ID }}
         run: pnpm --filter @workspace/chat-app test:native-large-text android
+
+      - name: Send controlled Android JavaScript error
+        id: android-sentry-trigger
+        env:
+          NATIVE_SMOKE_APP_ID: ${{ secrets.NATIVE_SMOKE_ANDROID_APP_ID }}
+          NATIVE_SMOKE_BUILD_ID: ${{ secrets.NATIVE_SMOKE_ANDROID_BUILD_ID }}
+          NATIVE_SENTRY_MARKER: native-${{ github.run_id }}-${{ github.run_attempt }}-android
+        run: pnpm --filter @workspace/chat-app test:native-sentry android
+
+      - name: Verify readable Android source maps in Sentry
+        id: android-sentry-verification
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_EXPECTED_PLATFORM: android
+          SENTRY_EXPECTED_BUILD_ID: ${{ secrets.NATIVE_SMOKE_ANDROID_BUILD_ID }}
+          SENTRY_EXPECTED_RELEASE: ${{ secrets.NATIVE_SMOKE_ANDROID_SENTRY_RELEASE }}
+          SENTRY_EXPECTED_DIST: ${{ secrets.NATIVE_SMOKE_ANDROID_SENTRY_DIST }}
+          SENTRY_PROBE_MARKER: native-${{ github.run_id }}-${{ github.run_attempt }}-android
+          SENTRY_EVIDENCE_PATH: ${{ env.NATIVE_SMOKE_RESULTS_DIR }}/sentry-source-map-evidence.json
+        run: node scripts/verify-sentry-native-event.mjs
 
       - name: Upload Android native smoke artifacts
         if: always()

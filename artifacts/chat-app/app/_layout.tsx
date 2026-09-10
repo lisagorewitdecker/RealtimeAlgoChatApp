@@ -24,6 +24,7 @@ import { AppProvider, useApp } from "@/contexts/AppContext";
 import { CryptoProvider } from "@/contexts/CryptoContext";
 import { SocketProvider } from "@/contexts/SocketContext";
 import { clerkTokenCache } from "@/lib/clerkTokenCache";
+import { Sentry, sentryEnabled } from "@/lib/sentry";
 
 if (process.env["EXPO_PUBLIC_DOMAIN"]) {
   setBaseUrl(`https://${process.env["EXPO_PUBLIC_DOMAIN"]}`);
@@ -41,7 +42,10 @@ function RootLayoutContent() {
   const router = useRouter();
   const segments = useSegments();
   const isSetupRoute = segments[0] === "setup";
+  const isSentrySmokeRoute =
+    (segments as readonly string[])[0] === "sentry-smoke";
   const isAuthRoute =
+    isSentrySmokeRoute ||
     (segments as readonly string[]).includes("(auth)") ||
     segments[0] === "sign-in" ||
     segments[0] === "sign-up";
@@ -68,6 +72,7 @@ function RootLayoutContent() {
       isReady &&
       accessStatus === "ready" &&
       username &&
+      !isSentrySmokeRoute &&
       (isSetupRoute || isAuthRoute)
     ) {
       router.replace("/(tabs)");
@@ -77,6 +82,7 @@ function RootLayoutContent() {
     isAuthRoute,
     isLoaded,
     isReady,
+    isSentrySmokeRoute,
     isSetupRoute,
     isSignedIn,
     router,
@@ -247,7 +253,7 @@ function AuthTokenBridge({ children }: { children: React.ReactNode }) {
   return <CryptoProvider>{children}</CryptoProvider>;
 }
 
-export default function RootLayout() {
+function RootLayout() {
   const publishableKey = process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY;
   const [fontsLoaded, fontError] = useFonts({
     Inter_400Regular,
@@ -292,3 +298,5 @@ export default function RootLayout() {
     </ClerkProvider>
   );
 }
+
+export default sentryEnabled ? Sentry.wrap(RootLayout) : RootLayout;

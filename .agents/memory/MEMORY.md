@@ -21,7 +21,7 @@
 - [Image-size remediation](image-size-remediation.md) — Metro’s image parser had unpatched high advisories, so it is locally replaced with a safe compatible subset.
 - [Clerk token effect stability](clerk-token-effect-stability.md) — keep Expo Clerk token callbacks out of stateful loading-effect dependencies to prevent request storms.
 - [Cryptocurrency boundary](cryptocurrency-boundary.md) — do not add cryptocurrency payments or wallet features; preserve cryptographic E2EE separately.
-- [Validation workflow concurrency](validation-workflow-concurrency.md) — run heavy API, Chat, and browser checks sequentially to avoid resource-starvation timeouts.
+- [Validation workflow concurrency](validation-workflow-concurrency.md) — completion validation launches every check at once; heavy commands stay behind the shared flock prefix.
 - [Artifact cold-start readiness](artifact-startup-after-pnpm-pruning.md) — open the port before async asset preloading; bypassing the package manager alone is insufficient.
 - [Mobile release browser validation](mobile-release-browser-validation.md) — proxied E2E flows need a healthy, freshly served Expo frontend and API pair.
 - [Node preload worker inheritance](node-preload-worker-inheritance.md) — `--import` preloads also run in worker threads; guard process-wide initialization to the main thread.
@@ -34,3 +34,5 @@
 - [Realtime resource budgets](socket-resource-budgets.md) — bound admission, shared event budgets, fanout, and persistence before accepting realtime work.
 - [Expo Sentry wizard fallback](expo-sentry-wizard.md) — non-TTY wizard runs can exit after the banner without changes; verify diffs and honor Expo's SDK-compatible package range.
 - [Candidate-bound release evidence](candidate-bound-release-evidence.md) — checks for prebuilt mobile candidates must verify evidence inside each binary, not current release-time secrets.
+- [Expo Go native modules & preview 502s](expo-go-native-modules.md) — gate native SDK init outside Expo Go; orphan `expo start` blocks the port prompt; Go home screen = dropped launch.
+- [Expo Go secure-store keys](expo-go-native-modules.md) — expo-secure-store rejects `:` in key names on phones only; encode keys and keep the Jest mock enforcing the real pattern.
