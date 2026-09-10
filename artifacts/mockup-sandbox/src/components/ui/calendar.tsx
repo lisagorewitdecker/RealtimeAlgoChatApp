@@ -128,13 +128,13 @@ function Calendar({
         Root: ({ className, rootRef, ...props }) => {
           const setRootRef: React.RefCallback<HTMLDivElement> = (node) => {
             if (typeof rootRef === "function") {
-              return rootRef(node) as unknown as ReturnType<
-                React.RefCallback<HTMLDivElement>
-              >
+              rootRef(node)
+              return
             }
 
-            if (rootRef) {
-              rootRef.current = node
+            if (rootRef && typeof rootRef === "object") {
+              ;(rootRef as React.MutableRefObject<HTMLDivElement | null>).current =
+                node
             }
           }
 
