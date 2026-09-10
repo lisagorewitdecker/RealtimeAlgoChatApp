@@ -2,18 +2,19 @@
 
 ## Supported Versions
 
-This repository is currently pre-release (`0.0.0`). Security updates are
-provided for the latest code on the `main` branch.
+This project does not publish versioned releases at this time. Security fixes are applied to the latest commit on the `main` branch only.
 
-| Version | Supported          |
-| ------- | ------------------ |
-| main    | :white_check_mark: |
-| all tags/releases | :x:       |
+| Branch | Supported          |
+| ------ | ------------------ |
+| main   | :white_check_mark: |
 
 ## Reporting a Vulnerability
 
-Please report vulnerabilities using
-[GitHub Security Advisories](../../security/advisories/new).
+To report a security vulnerability, please use [GitHub Security Advisories](../../security/advisories/new) to disclose it privately.
 
-After you submit a report, maintainers will acknowledge it within 5 business
-days and provide status updates as the investigation progresses.
+Please include the following in your report:
+- A description of the vulnerability and its potential impact
+- Steps to reproduce the issue
+- Any relevant code snippets or screenshots
+
+You can expect an initial response within 7 days. If the vulnerability is confirmed, a fix will be prioritized and you will be notified when it is resolved. If the report is declined, you will receive an explanation. Please do not disclose the vulnerability publicly until it has been addressed.

@@ -1,7 +1,7 @@
 # SEO Strategy
 
 ## Product summary
-DevStudio (DevAlgoChat) is a real-time collaboration platform for developers
+RealtimeAlgoChatApp Studio is a real-time collaboration platform for developers
 (Build/Call/Ship: collaborative code sandbox + AI assistant, voice/video calls,
 and chat). Every feature requires a Clerk-authenticated, verified-email
 account — there are no free/public content areas, no paid marketing tiers,
