@@ -28,6 +28,7 @@
 - [Node preload paths](node-preload-paths.md) — hosted monorepo artifact commands run from the workspace root; make entrypoint and `--import` paths root-relative.
 - [React Native async act](react-native-async-act.md) — flush provider effects with a separate async act after render; nesting render in async act can unmount RNTL trees.
 - [Orval API codegen normalization](orval-api-codegen-normalization.md) — discard Orval's wildcard Zod export after generation so explicit package exports stay stable.
+- [Generated drift diff rendering](generated-drift-diff.md) — the drift check renders its own bounded unified diff (no git/diff binaries); keep the caps and block-replacement fallback.
 - [Bash required-variable messages](bash-required-variable-messages.md) — avoid apostrophes inside `${name:?message}`; Bash can parse them as unmatched quotes.
 - [E2EE assistant boundary](e2ee-assistant-boundary.md) — server-side assistants cannot inspect encrypted room content without breaking the room’s confidentiality promise.
 - [E2EE key registration ordering](e2ee-key-registration-ordering.md) — do not join encrypted rooms until the current public key is confirmed by the server.
