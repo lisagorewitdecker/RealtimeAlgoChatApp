@@ -209,3 +209,8 @@ overrides:
   # The upstream image-size package has no published fix for its parser loops.
   # Metro only requires standard mobile asset formats, which the local replacement handles.
   image-size: "link:./vendor/image-size-secure"
+allowBuilds:
+  '@sentry/cli': set this to true or false
+  browser-tabs-lock: set this to true or false
+  core-js: set this to true or false
+  esbuild: set this to true or false
