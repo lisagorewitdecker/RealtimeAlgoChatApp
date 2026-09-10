@@ -39,7 +39,10 @@ preferred install method. If they do not have a preference, use npm:
 npm install -g clerk
 ```
 
-Equivalent install commands are `pnpm install -g clerk`, `yarn global add clerk`, `bun add -g clerk`, or `brew install clerk/stable/clerk`. If the user explicitly opts in, `curl -fsSL https://clerk.com/install | bash` is also available (it runs a remote script).
+Equivalent install commands are `pnpm install -g clerk`,
+`yarn global add clerk`, `bun add -g clerk`, or
+`brew install clerk/stable/clerk`. If the user explicitly opts in,
+`curl -fsSL https://clerk.com/install | bash` is also available (it runs a remote script).
 
 ## Step 2: Sign in to Clerk
 
@@ -61,15 +64,14 @@ If the user is already signed in, continue to initialization.
 Inspect the current directory to determine whether this is an existing
 project or an empty directory.
 
-This setup must be linked to a Clerk application.
-
-- If you already have an app ID, pass `--app <app_id>` to `clerk init`.
-- Otherwise, omit `--app` and follow the CLI prompts (or create an app in the Clerk Dashboard), then re-run with the chosen app.
+This setup is linked to the Clerk application `app_3IJqIeaOmnFVLXI3Qrwtd7gZOQM`. Always
+pass `--app app_3IJqIeaOmnFVLXI3Qrwtd7gZOQM` to `clerk init` so the project links to
+the right Clerk app.
 
 If this is an existing project, run:
 
 ```bash
-clerk init --app <app_id>
+clerk init --app app_3IJqIeaOmnFVLXI3Qrwtd7gZOQM
 ```
 
 `clerk init` detects the framework and package manager for existing
@@ -80,7 +82,7 @@ existing projects unless the user explicitly wants to override detection or
 the CLI asks for those values.
 
 If the directory is empty, ask the user which framework and package manager
-they want to use. If they have no preference, use Expo and pnpm. Then
+they want to use. If they have no preference, use Next.js and npm. Then
 scaffold with explicit framework and package manager options:
 
 ```bash
@@ -210,7 +212,7 @@ Add to global CSS:
 - Next.js proxy matchers include `'/__clerk/:path*'` after
   `'/(api|trpc)(.*)'`
 - Never expose `CLERK_SECRET_KEY` in client code
-- Use the framework-appropriate Clerk SDK (this repo: `@clerk/expo` for the Expo client), not `@clerk/clerk-react` unless you're building a plain React web app.
+- Use `@clerk/nextjs`, not `@clerk/clerk-react`
 - Do not read or print existing environment variable files; ask the user
   for any missing non-sensitive configuration
 

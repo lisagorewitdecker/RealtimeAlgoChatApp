@@ -1,0 +1,152 @@
+Uncaught Error
+useAccessibility must be inside AccessibilityProvider
+Source
+ 
+ 152 |
+var
+ warn 
+=
+ (msg) 
+=>
+ console 
+&&
+ 
+typeof
+ console
+.
+warn 
+===
+ 
+"function"
+ 
+&&
+ console
+.
+warn(msg)
+;
+ 
+ 153 |
+var
+ getTagsFromPropsList 
+=
+ (tagName
+,
+ primaryAttributes
+,
+ propsList) 
+=>
+ {
+>
+ 154 |
+  
+const
+ approvedSeenTags 
+=
+ {}
+;
+ 
+     |
+                             
+^
+ 
+ 155 |
+  
+return
+ propsList
+.
+filter((props) 
+=>
+ {
+ 
+ 156 |
+    
+if
+ (
+Array
+.
+isArray(props[tagName])) {
+ 
+ 157 |
+      
+return
+ 
+true
+;
+Call Stack
+SignInScreen
+app/(auth)/sign-in.tsx:234:33
+See 12 more frames
+Component Stack
+getTagsFromPropsList
+node_modules/.pnpm/expo-router@6.0.24_@types+react-dom@19.1.11_@types+react@19.1.17__@types+react@19.1.17__a8963d9f475924884ad807606c930713/node_modules/expo-router/vendor/react-helmet-async/lib/index.js:154:30
+div
+unknown:0:0
+React.forwardRef$argument_0
+node_modules/.pnpm/react-native-web@0.21.2_react-dom@19.1.0_react@19.1.0__react@19.1.0/node_modules/react-native-web/dist/exports/View/index.js:42:22
+React.useMemo$argument_0
+node_modules/.pnpm/react-native-safe-area-context@5.6.2_react-native@0.81.5_@babel+core@7.29.7_@types+reac_a403bed5a2c0c91bdb8678b4a740f507/node_modules/react-native-safe-area-context/lib/module/SafeAreaView.web.js:42:13
+onEnd
+node_modules/.pnpm/react-native-safe-area-context@5.6.2_react-native@0.81.5_@babel+core@7.29.7_@types+reac_a403bed5a2c0c91bdb8678b4a740f507/node_modules/react-native-safe-area-context/lib/module/NativeSafeAreaProvider.web.js:46:13
+QueryObserver#createResult
+node_modules/.pnpm/@tanstack+query-core@5.100.9/node_modules/@tanstack/query-core/build/modern/queryObserver.js:320:11
+Suspense
+unknown:0:0
+<global>
+node_modules/.pnpm/expo-router@6.0.24_@types+react-dom@19.1.11_@types+react@19.1.17__@types+react@19.1.17__a8963d9f475924884ad807606c930713/node_modules/expo-router/build/native-tabs/NativeBottomTabs/NativeTabTrigger.js:3:32
+<global>
+node_modules/.pnpm/expo-router@6.0.24_@types+react-dom@19.1.11_@types+react@19.1.17__@types+react@19.1.17__a8963d9f475924884ad807606c930713/node_modules/expo-router/build/views/Toast.js:6:8
+StaticContainer
+https://9ef9cc57-ae03-4505-bda2-eb1e49ac0af4-00-ag9lllazkfvs.expo.worf.replit.dev/node_modules/.pnpm/expo-router@6.0.24_@types+react-dom@19.1.11_@types+react@19.1.17__@types+react@19.1.17__a8963d9f475924884ad807606c930713/node_modules/expo-router/entry.bundle
+ReactElement
+node_modules/.pnpm/react@19.1.0/node_modules/react/cjs/react-jsx-runtime.development.js:188:16
+SceneView
+https://9ef9cc57-ae03-4505-bda2-eb1e49ac0af4-00-ag9lllazkfvs.expo.worf.replit.dev/node_modules/.pnpm/expo-router@6.0.24_@types+react-dom@19.1.11_@types+react@19.1.17__@types+react@19.1.17__a8963d9f475924884ad807606c930713/node_modules/expo-router/entry.bundle
+<global>
+node_modules/.pnpm/@react-navigation+core@7.21.1_react@19.1.0/node_modules/@react-navigation/core/lib/module/CurrentRenderContext.js:1:14
+<global>
+node_modules/.pnpm/@react-navigation+core@7.21.1_react@19.1.0/node_modules/@react-navigation/core/lib/module/useFocusEffect.js:9
+<global>
+node_modules/.pnpm/@react-navigation+core@7.21.1_react@19.1.0/node_modules/@react-navigation/core/lib/module/useOnAction.js:1:14
+render
+node_modules/.pnpm/@react-navigation+core@7.21.1_react@19.1.0/node_modules/@react-navigation/core/lib/module/useDescriptors.js:92:11
+render
+node_modules/.pnpm/@react-navigation+core@7.21.1_react@19.1.0/node_modules/@react-navigation/core/lib/module/useDescriptors.js:109:17
+<anonymous>
+node_modules/.pnpm/expo-router@6.0.24_@types+react-dom@19.1.11_@types+react@19.1.17__@types+react@19.1.17__a8963d9f475924884ad807606c930713/node_modules/expo-router/build/fork/NavigationContainer.js:59:20
+div
+unknown:0:0
+React.forwardRef$argument_0
+node_modules/.pnpm/react-native-web@0.21.2_react-dom@19.1.0_react@19.1.0__react@19.1.0/node_modules/react-native-web/dist/exports/View/index.js:42:22
+React.useMemo$argument_0
+node_modules/.pnpm/react-native-safe-area-context@5.6.2_react-native@0.81.5_@babel+core@7.29.7_@types+reac_a403bed5a2c0c91bdb8678b4a740f507/node_modules/react-native-safe-area-context/lib/module/SafeAreaView.web.js:42:13
+onEnd
+node_modules/.pnpm/react-native-safe-area-context@5.6.2_react-native@0.81.5_@babel+core@7.29.7_@types+reac_a403bed5a2c0c91bdb8678b4a740f507/node_modules/react-native-safe-area-context/lib/module/NativeSafeAreaProvider.web.js:46:13
+options.tabBarButton
+node_modules/.pnpm/expo-router@6.0.24_@types+react-dom@19.1.11_@types+react@19.1.17__@types+react@19.1.17__a8963d9f475924884ad807606c930713/node_modules/expo-router/build/layouts/TabsClient.js:34:68
+<unknown>
+https://9ef9cc57-ae03-4505-bda2-eb1e49ac0af4-00-ag9lllazkfvs.expo.worf.replit.dev/node_modules/.pnpm/expo-router@6.0.24_@types+react-dom@19.1.11_@types+react@19.1.17__@types+react@19.1.17__a8963d9f475924884ad807606c930713/node_modules/expo-router/entry.bundle
+<anonymous>
+node_modules/.pnpm/@react-navigation+core@7.21.1_react@19.1.0/node_modules/@react-navigation/core/lib/module/useEventEmitter.js:32:9
+ReactElement
+node_modules/.pnpm/react@19.1.0/node_modules/react/cjs/react-jsx-runtime.development.js:188:16
+BaseNavigationContainer
+node_modules/.pnpm/@react-navigation+core@7.21.1_react@19.1.0/node_modules/@react-navigation/core/lib/module/BaseNavigationContainer.js:177:9
+<anonymous>
+node_modules/.pnpm/expo-router@6.0.24_@types+react-dom@19.1.11_@types+react@19.1.17__@types+react@19.1.17__a8963d9f475924884ad807606c930713/node_modules/expo-router/build/fork/useThenable.js:7:5
+ContextNavigator
+https://9ef9cc57-ae03-4505-bda2-eb1e49ac0af4-00-ag9lllazkfvs.expo.worf.replit.dev/node_modules/.pnpm/expo-router@6.0.24_@types+react-dom@19.1.11_@types+react@19.1.17__@types+react@19.1.17__a8963d9f475924884ad807606c930713/node_modules/expo-router/entry.bundle
+onUnhandledAction
+node_modules/.pnpm/expo-router@6.0.24_@types+react-dom@19.1.11_@types+react@19.1.17__@types+react@19.1.17__a8963d9f475924884ad807606c930713/node_modules/expo-router/build/ExpoRoot.js:193:17
+_HelmetProvider
+https://9ef9cc57-ae03-4505-bda2-eb1e49ac0af4-00-ag9lllazkfvs.expo.worf.replit.dev/node_modules/.pnpm/expo-router@6.0.24_@types+react-dom@19.1.11_@types+react@19.1.17__@types+react@19.1.17__a8963d9f475924884ad807606c930713/node_modules/expo-router/entry.bundle
+App
+unknown:0:0
+LogBoxStateSubscription#constructor
+node_modules/.pnpm/@expo+metro-runtime@6.1.2_expo@54.0.37_react-dom@19.1.0_react@19.1.0__react-native@0.81_959e457d873c78d5adb0053372fe8d63/node_modules/@expo/metro-runtime/src/error-overlay/Data/LogBoxData.tsx:365:12
+ErrorOverlay
+unknown:0:0
+withDevTools(ErrorOverlay)
+unknown:0:0
+<global>
+node_modules/.pnpm/react-native-web@0.21.2_react-dom@19.1.0_react@19.1.0__react@19.1.0/node_modules/react-native-web/dist/exports/LayoutAnimation/index.js:12
+Collapse all 36 frames
