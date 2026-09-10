@@ -37,13 +37,7 @@
           "origin": "https://replit.com/"
         }
       ],
-      [
-        "@sentry/react-native/expo",
-        {
-          "organization": "lisagorewitdecker-06",
-          "project": "react-native"
-        }
-      ],
+      "@sentry/react-native/expo",
       "expo-font",
       "expo-web-browser"
     ],
