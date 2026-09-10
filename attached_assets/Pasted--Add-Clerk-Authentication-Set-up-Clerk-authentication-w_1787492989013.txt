@@ -64,9 +64,10 @@ If the user is already signed in, continue to initialization.
 Inspect the current directory to determine whether this is an existing
 project or an empty directory.
 
-This setup is linked to the Clerk application `app_3IJqIeaOmnFVLXI3Qrwtd7gZOQM`. Always
-pass `--app app_3IJqIeaOmnFVLXI3Qrwtd7gZOQM` to `clerk init` so the project links to
-the right Clerk app.
+This setup must be linked to a Clerk application.
+
+- If you already have an app ID, pass `--app <app_id>` to `clerk init`.
+- Otherwise, omit `--app` and follow the CLI prompts (or create an app in the Clerk Dashboard), then re-run with the chosen app.
 
 If this is an existing project, run:
 
