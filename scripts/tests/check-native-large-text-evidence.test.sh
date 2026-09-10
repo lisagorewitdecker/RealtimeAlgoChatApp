@@ -46,6 +46,7 @@ EOF
   fi
   cat > "$run_dir/pass-fail-record.txt" <<EOF
 platform=$platform
+run_mode=release-gate
 status=PASS
 EOF
   printf '{}\n' > "$run_dir/native-info.json"
@@ -82,6 +83,27 @@ if incomplete_output="$(bash "$CHECKER" "$incomplete_root" 2>&1)"; then
 fi
 assert_contains "$incomplete_output" "[android] Missing runner metadata and device details"
 assert_contains "$incomplete_output" "[ios] Found 1 empty call-surface screenshot file(s)"
+
+diagnostic_root="$TEST_ROOT/diagnostic"
+write_valid_run "$diagnostic_root" ios
+write_valid_run "$diagnostic_root" android
+cat > "$diagnostic_root/ios/20260909T120000Z/pass-fail-record.txt" <<EOF
+platform=ios
+run_mode=diagnostic-only
+status=PASS
+EOF
+cat > "$diagnostic_root/android/20260909T120000Z/pass-fail-record.txt" <<EOF
+platform=android
+status=PASS
+EOF
+if diagnostic_output="$(bash "$CHECKER" "$diagnostic_root" 2>&1)"; then
+  echo "diagnostic-only evidence case unexpectedly passed" >&2
+  exit 1
+fi
+assert_contains "$diagnostic_output" "[ios] The pass/fail record at"
+assert_contains "$diagnostic_output" "is from a diagnostic-only run (NATIVE_SMOKE_ALLOW_LARGER_DEVICE=1), not release evidence"
+assert_contains "$diagnostic_output" "[android] The pass/fail record at"
+assert_contains "$diagnostic_output" "does not declare run_mode=release-gate"
 
 valid_root="$TEST_ROOT/valid"
 write_valid_run "$valid_root" ios

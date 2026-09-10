@@ -35,6 +35,32 @@ pnpm --filter @workspace/chat-app test:native-large-text android
 The runner refuses a non-SE iOS simulator or an Android emulator larger than
 320×568 dp for release runs. It does not mutate simulator settings.
 
+### Diagnostic-only runs on a larger iOS simulator
+
+`NATIVE_SMOKE_ALLOW_LARGER_DEVICE=1` is a local troubleshooting override for the
+iOS runner only. It never produces release evidence:
+
+- Setting it marks the whole run as diagnostic-only, even when an iPhone SE
+  (3rd generation) happens to be booted. The readiness report is titled
+  `iOS native large-text readiness (DIAGNOSTIC-ONLY)`, states
+  `Run mode: **DIAGNOSTIC-ONLY** (not release evidence)`, and shows the
+  simulator prerequisite as `OVERRIDDEN` with the accepted device name when a
+  larger simulator was used. `runner-metadata.txt` and `pass-fail-record.txt`
+  record `run_mode=diagnostic-only`, and console output is prefixed with
+  `DIAGNOSTIC-ONLY RUN`.
+- Diagnostic-only results default to
+  `test-results/native-large-text-diagnostic/ios/<UTC timestamp>/`, outside the
+  evidence directory, and the evidence completeness check rejects any pass
+  record whose `run_mode` is not `release-gate`.
+- Release workflow runs refuse the override. When `GITHUB_ACTIONS=true`, a
+  runner with `NATIVE_SMOKE_ALLOW_LARGER_DEVICE=1` in its environment fails the
+  readiness check with a blocking prerequisite instead of running on a larger
+  device, whatever simulator is booted.
+
+To produce release evidence, unset the variable and re-run on a booted
+iPhone SE (3rd generation). Release-gate runs state
+`Run mode: **RELEASE GATE**` and record `run_mode=release-gate`.
+
 ## Mobile release pipeline
 
 `.github/workflows/mobile-release.yml` runs the same commands as a release gate.
@@ -128,6 +154,9 @@ Results are written to a unique run directory:
 
 `test-results/native-large-text/<platform>/<UTC timestamp>/`
 
+Diagnostic-only iOS runs write to `test-results/native-large-text-diagnostic/`
+instead, so they never sit next to release evidence.
+
 The folder contains runner metadata, the candidate build ID, a pass/fail record,
 the compiled native metadata and `native-branding-check.md`, JUnit output,
 eleven native screenshots, and two independent call-surface screenshots. The
@@ -160,8 +189,9 @@ The check validates both `test-results/native-large-text/ios/` and
 one timestamped run directory with non-empty candidate-build, runner/device
 metadata, pass/fail, compiled native metadata, branding, and JUnit artifacts.
 It also requires at least eleven native screenshots and exactly two independent
-call-surface screenshots. A failed or blocked pass record, a non-PASS branding
-report, or an empty artifact blocks release review.
+call-surface screenshots. A failed or blocked pass record, a pass record that
+does not declare `run_mode=release-gate` (including diagnostic-only iOS runs), a
+non-PASS branding report, or an empty artifact blocks release review.
 
 `runner-check.txt` is host diagnostic evidence only. If it is the only file
 available for a platform, the check reports that the platform is blocked rather

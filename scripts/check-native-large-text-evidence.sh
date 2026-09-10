@@ -71,6 +71,16 @@ validate_platform() {
     issue "$platform" "The pass/fail record at ${run_dir}/pass-fail-record.txt is not PASS. Failed or blocked runner output is not reviewed device evidence; complete the run before release review."
   fi
 
+  if [[ -s "$run_dir/pass-fail-record.txt" ]]; then
+    local run_mode
+    run_mode="$(metadata_value "$run_dir/pass-fail-record.txt" run_mode)"
+    if [[ "$run_mode" == "diagnostic-only" ]]; then
+      issue "$platform" "The pass/fail record at ${run_dir}/pass-fail-record.txt is from a diagnostic-only run (NATIVE_SMOKE_ALLOW_LARGER_DEVICE=1), not release evidence. Re-run the release gate on the smallest supported device without the override."
+    elif [[ "$run_mode" != "release-gate" ]]; then
+      issue "$platform" "The pass/fail record at ${run_dir}/pass-fail-record.txt does not declare run_mode=release-gate. Only release-gate runs on the smallest supported device are release evidence; re-run the current native large-text gate."
+    fi
+  fi
+
   if [[ -s "$run_dir/native-branding-check.md" ]] &&
     ! grep -Fq -- "- Status: **PASS**" "$run_dir/native-branding-check.md"; then
     issue "$platform" "The native branding report at ${run_dir}/native-branding-check.md is not PASS. Resolve the native metadata failure and rerun the release gate."

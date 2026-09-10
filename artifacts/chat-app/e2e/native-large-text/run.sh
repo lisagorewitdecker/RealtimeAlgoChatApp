@@ -10,15 +10,49 @@ fi
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
 CHAT_APP_DIR="$ROOT_DIR/artifacts/chat-app"
 RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)"
-RESULTS_DIR="${NATIVE_SMOKE_RESULTS_DIR:-$ROOT_DIR/test-results/native-large-text/$PLATFORM/$RUN_ID}"
+SMALLEST_IOS_DEVICE="iPhone SE (3rd generation)"
+
+# NATIVE_SMOKE_ALLOW_LARGER_DEVICE=1 is a local iOS troubleshooting override.
+# Setting it marks the whole run as diagnostic-only, even when the smallest
+# supported simulator happens to be booted, so its output can never be mistaken
+# for release evidence. Release workflow runs (GitHub Actions) refuse it.
+LARGER_DEVICE_OVERRIDE=0
+if [[ "$PLATFORM" == "ios" && "${NATIVE_SMOKE_ALLOW_LARGER_DEVICE:-0}" == "1" ]]; then
+  LARGER_DEVICE_OVERRIDE=1
+fi
+RELEASE_WORKFLOW_RUN=0
+if [[ "${GITHUB_ACTIONS:-}" == "true" ]]; then
+  RELEASE_WORKFLOW_RUN=1
+fi
+RUN_MODE="release-gate"
+if [[ "$LARGER_DEVICE_OVERRIDE" == "1" && "$RELEASE_WORKFLOW_RUN" == "0" ]]; then
+  RUN_MODE="diagnostic-only"
+fi
+
+# Diagnostic-only output defaults to its own tree so the release evidence
+# directory validated by scripts/check-native-large-text-evidence.sh never
+# receives it by accident.
+if [[ -n "${NATIVE_SMOKE_RESULTS_DIR:-}" ]]; then
+  RESULTS_DIR="$NATIVE_SMOKE_RESULTS_DIR"
+elif [[ "$RUN_MODE" == "diagnostic-only" ]]; then
+  RESULTS_DIR="$ROOT_DIR/test-results/native-large-text-diagnostic/$PLATFORM/$RUN_ID"
+else
+  RESULTS_DIR="$ROOT_DIR/test-results/native-large-text/$PLATFORM/$RUN_ID"
+fi
 mkdir -p "$RESULTS_DIR"
+
+if [[ "$RUN_MODE" == "diagnostic-only" ]]; then
+  echo "DIAGNOSTIC-ONLY RUN: NATIVE_SMOKE_ALLOW_LARGER_DEVICE=1 is set. This output is not release evidence." >&2
+fi
 
 IOS_READINESS_BLOCKERS=()
 IOS_MAESTRO_STATUS="BLOCKED"
 IOS_PNPM_STATUS="BLOCKED"
 IOS_XCRUN_STATUS="BLOCKED"
 IOS_SIMULATOR_STATUS="BLOCKED"
+IOS_SIMULATOR_DETAIL=""
 IOS_RELEASE_CONFIGURATION_STATUS="BLOCKED"
+BOOTED_DEVICE=""
 
 record_ios_readiness_failure() {
   IOS_READINESS_BLOCKERS+=("$1")
@@ -35,16 +69,34 @@ write_ios_readiness_summary() {
   fi
 
   {
-    echo "## iOS native large-text readiness"
+    if [[ "$RUN_MODE" == "diagnostic-only" ]]; then
+      echo "## iOS native large-text readiness (DIAGNOSTIC-ONLY)"
+    else
+      echo "## iOS native large-text readiness"
+    fi
     echo
     echo "- Status: **${status}**"
+    if [[ "$RUN_MODE" == "diagnostic-only" ]]; then
+      echo "- Run mode: **DIAGNOSTIC-ONLY** (not release evidence)"
+    else
+      echo "- Run mode: **RELEASE GATE**"
+    fi
     echo
     echo "### Prerequisites"
     echo "- Maestro: **${IOS_MAESTRO_STATUS}**"
     echo "- pnpm: **${IOS_PNPM_STATUS}**"
     echo "- Xcode simulator tooling: **${IOS_XCRUN_STATUS}**"
-    echo "- Booted iPhone SE (3rd generation): **${IOS_SIMULATOR_STATUS}**"
+    echo "- Booted ${SMALLEST_IOS_DEVICE}: **${IOS_SIMULATOR_STATUS}**${IOS_SIMULATOR_DETAIL}"
     echo "- Release configuration: **${IOS_RELEASE_CONFIGURATION_STATUS}**"
+    if [[ "$RUN_MODE" == "diagnostic-only" ]]; then
+      echo
+      echo "### Diagnostic-only run"
+      echo "- NATIVE_SMOKE_ALLOW_LARGER_DEVICE=1 is set, so this run is local troubleshooting output and must not be used as release evidence."
+      if [[ -n "$BOOTED_DEVICE" && "$BOOTED_DEVICE" != "$SMALLEST_IOS_DEVICE" ]]; then
+        echo "- The override accepted a larger simulator: ${BOOTED_DEVICE}."
+      fi
+      echo "- Unset NATIVE_SMOKE_ALLOW_LARGER_DEVICE and re-run on a booted ${SMALLEST_IOS_DEVICE} to produce release evidence."
+    fi
     if ((${#IOS_READINESS_BLOCKERS[@]})); then
       echo
       echo "### Blocking prerequisites"
@@ -69,6 +121,12 @@ for command in maestro pnpm; do
     record_ios_readiness_failure "Required command not found: $command"
   fi
 done
+
+if [[ "$LARGER_DEVICE_OVERRIDE" == "1" && "$RELEASE_WORKFLOW_RUN" == "1" ]]; then
+  echo "NATIVE_SMOKE_ALLOW_LARGER_DEVICE=1 is not permitted in release workflow runs; it is a local diagnostic-only override." >&2
+  echo "Unset it on the runner and re-run on a booted ${SMALLEST_IOS_DEVICE}." >&2
+  record_ios_readiness_failure "NATIVE_SMOKE_ALLOW_LARGER_DEVICE=1 is not permitted in release workflow runs. Unset it on the runner; release evidence requires a booted ${SMALLEST_IOS_DEVICE} without the override."
+fi
 
 missing_release_values=()
 for value in NATIVE_SMOKE_APP_ID NATIVE_SMOKE_BUILD_ID NATIVE_SMOKE_EMAIL NATIVE_SMOKE_PASSWORD; do
@@ -98,6 +156,7 @@ RESULT_STATUS="FAIL"
 write_result_record() {
   cat > "$RESULTS_DIR/pass-fail-record.txt" <<EOF
 platform=$PLATFORM
+run_mode=$RUN_MODE
 candidate_build_id=${NATIVE_SMOKE_BUILD_ID:-}
 status=$RESULT_STATUS
 native_screenshot_count=$(find "$NATIVE_SMOKE_SCREENSHOT_DIR" -type f -name '*.png' | wc -l | tr -d ' ')
@@ -121,13 +180,17 @@ if [[ "$PLATFORM" == "ios" ]]; then
     BOOTED_DEVICE="$(xcrun simctl list devices booted | sed -n 's/^[[:space:]]*\(.*\) ([-A-F0-9]\{8,\}) (Booted)$/\1/p' | head -n 1)"
     if [[ -z "$BOOTED_DEVICE" ]]; then
       echo "Boot the smallest supported iOS simulator (iPhone SE, 3rd generation) first." >&2
-      record_ios_readiness_failure "No booted iPhone SE (3rd generation) simulator was found."
-    elif [[ "$BOOTED_DEVICE" != "iPhone SE (3rd generation)" && "${NATIVE_SMOKE_ALLOW_LARGER_DEVICE:-0}" != "1" ]]; then
-      echo "Expected a booted iPhone SE simulator, found: $BOOTED_DEVICE" >&2
-      echo "Set NATIVE_SMOKE_ALLOW_LARGER_DEVICE=1 only for a non-release diagnostic run." >&2
-      record_ios_readiness_failure "Expected iPhone SE (3rd generation); found: $BOOTED_DEVICE"
-    else
+      record_ios_readiness_failure "No booted ${SMALLEST_IOS_DEVICE} simulator was found."
+    elif [[ "$BOOTED_DEVICE" == "$SMALLEST_IOS_DEVICE" ]]; then
       IOS_SIMULATOR_STATUS="READY"
+    elif [[ "$RUN_MODE" == "diagnostic-only" ]]; then
+      IOS_SIMULATOR_STATUS="OVERRIDDEN"
+      IOS_SIMULATOR_DETAIL=" (diagnostic-only override accepted ${BOOTED_DEVICE})"
+      echo "DIAGNOSTIC-ONLY RUN: the override accepted a larger simulator (${BOOTED_DEVICE}); release evidence requires a booted ${SMALLEST_IOS_DEVICE}." >&2
+    else
+      echo "Expected a booted iPhone SE simulator, found: $BOOTED_DEVICE" >&2
+      echo "Set NATIVE_SMOKE_ALLOW_LARGER_DEVICE=1 only for a local, non-release diagnostic run." >&2
+      record_ios_readiness_failure "Expected ${SMALLEST_IOS_DEVICE}; found: $BOOTED_DEVICE"
     fi
   fi
   if ((${#IOS_READINESS_BLOCKERS[@]})); then
@@ -137,6 +200,7 @@ if [[ "$PLATFORM" == "ios" ]]; then
   write_ios_readiness_summary
   cat > "$RESULTS_DIR/runner-metadata.txt" <<EOF
 platform=ios
+run_mode=$RUN_MODE
 candidate_build_id=${NATIVE_SMOKE_BUILD_ID:-}
 app_id=${NATIVE_SMOKE_APP_ID:-}
 device=$BOOTED_DEVICE
@@ -180,6 +244,7 @@ else
   }
   cat > "$RESULTS_DIR/runner-metadata.txt" <<EOF
 platform=android
+run_mode=$RUN_MODE
 candidate_build_id=$NATIVE_SMOKE_BUILD_ID
 app_id=$NATIVE_SMOKE_APP_ID
 device_serial=$ANDROID_SERIAL
@@ -194,7 +259,11 @@ recorded_at_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 EOF
 fi
 
-echo "Running $PLATFORM native large-text smoke test; artifacts: $RESULTS_DIR"
+if [[ "$RUN_MODE" == "diagnostic-only" ]]; then
+  echo "Running $PLATFORM native large-text DIAGNOSTIC-ONLY smoke test (not release evidence); artifacts: $RESULTS_DIR"
+else
+  echo "Running $PLATFORM native large-text smoke test; artifacts: $RESULTS_DIR"
+fi
 cd "$CHAT_APP_DIR"
 maestro test \
   --format JUNIT \
@@ -219,4 +288,8 @@ if [[ "$CALL_SCREENSHOT_COUNT" -ne 2 ]]; then
 fi
 
 RESULT_STATUS="PASS"
-echo "Native large-text smoke test passed for $PLATFORM."
+if [[ "$RUN_MODE" == "diagnostic-only" ]]; then
+  echo "Native large-text smoke test passed for $PLATFORM (DIAGNOSTIC-ONLY; not release evidence)."
+else
+  echo "Native large-text smoke test passed for $PLATFORM."
+fi
