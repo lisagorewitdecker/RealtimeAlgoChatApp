@@ -69,7 +69,7 @@ This setup must be linked to a Clerk application.
 If this is an existing project, run:
 
 ```bash
-clerk init --app app_3IJqIeaOmnFVLXI3Qrwtd7gZOQM
+clerk init --app <app_id>
 ```
 
 `clerk init` detects the framework and package manager for existing
