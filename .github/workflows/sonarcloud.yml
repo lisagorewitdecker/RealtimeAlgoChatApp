@@ -42,6 +42,10 @@ permissions:
 jobs:
   Analysis:
     runs-on: ubuntu-latest
+    env:
+      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+      SONAR_PROJECT_KEY: ${{ vars.SONAR_PROJECT_KEY }}
+      SONAR_ORGANIZATION_KEY: ${{ vars.SONAR_ORGANIZATION_KEY }}
 
     steps:
       - name: Check out repository
@@ -49,18 +53,22 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Skip when SonarCloud is not configured
+        if: ${{ env.SONAR_TOKEN == '' || env.SONAR_PROJECT_KEY == '' || env.SONAR_ORGANIZATION_KEY == '' }}
+        run: |
+          echo "::notice title=SonarCloud skipped::Set SONAR_TOKEN, SONAR_PROJECT_KEY, and SONAR_ORGANIZATION_KEY to enable analysis."
+
       - name: Analyze with SonarCloud
+        if: ${{ env.SONAR_TOKEN != '' && env.SONAR_PROJECT_KEY != '' && env.SONAR_ORGANIZATION_KEY != '' }}
 
         # You can pin the exact commit or the version.
         # uses: SonarSource/sonarcloud-github-action@v2.2.0
         uses: SonarSource/sonarcloud-github-action@4006f663ecaf1f8093e8e4abb9227f6041f52216
-        env:
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}   # Generate a token on Sonarcloud.io, add it to the secrets of this repo with the name SONAR_TOKEN (Settings > Secrets > Actions > add new repository secret)
         with:
           # Additional arguments for the SonarScanner CLI
           args: >
-            -Dsonar.projectKey=${{ vars.SONAR_PROJECT_KEY }}
-            -Dsonar.organization=${{ vars.SONAR_ORGANIZATION_KEY }}
+            -Dsonar.projectKey=${{ env.SONAR_PROJECT_KEY }}
+            -Dsonar.organization=${{ env.SONAR_ORGANIZATION_KEY }}
             #-Dsonar.sources= # optional, default is project base directory
             # Comma-separated paths to directories containing test source files.
             #-Dsonar.tests= # optional. For more info about Code Coverage, please refer to https://docs.sonarcloud.io/enriching/test-coverage/overview/
