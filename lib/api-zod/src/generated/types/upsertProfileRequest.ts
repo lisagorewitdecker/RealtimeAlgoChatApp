@@ -17,4 +17,9 @@ export interface UpsertProfileRequest {
      * @maxLength 64
      */
   publicKey?: string | null;
+  /**
+     * Compare-and-set guard for publicKey: the key currently registered for the account (null when none). Omitted, publicKey only registers a first key or re-sends the current one; replacing a different key without naming it is rejected with 409.
+     * @maxLength 64
+     */
+  previousPublicKey?: string | null;
 }

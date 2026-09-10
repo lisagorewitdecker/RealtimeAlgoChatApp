@@ -39,12 +39,15 @@ export const upsertProfileBodyUsernameMax = 64;
 
 export const upsertProfileBodyPublicKeyMax = 64;
 
+export const upsertProfileBodyPreviousPublicKeyMax = 64;
+
 
 
 export const UpsertProfileBody = zod.object({
   "username": zod.string().max(upsertProfileBodyUsernameMax).optional(),
   "avatar": zod.enum(['🧑‍💻', '🚀', '🦊', '🐼', '🐸', '🐙', '🦄', '🌻', '🍕', '🎮', '🔥', '💎']).nullish(),
-  "publicKey": zod.string().max(upsertProfileBodyPublicKeyMax).nullish().describe('Base64-encoded X25519 public key')
+  "publicKey": zod.string().max(upsertProfileBodyPublicKeyMax).nullish().describe('Base64-encoded X25519 public key'),
+  "previousPublicKey": zod.string().max(upsertProfileBodyPreviousPublicKeyMax).nullish().describe('Compare-and-set guard for publicKey: the key currently registered for the account (null when none). Omitted, publicKey only registers a first key or re-sends the current one; replacing a different key without naming it is rejected with 409.')
 })
 
 export const UpsertProfileResponse = zod.object({

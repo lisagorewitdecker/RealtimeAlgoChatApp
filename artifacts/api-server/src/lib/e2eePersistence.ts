@@ -5,7 +5,7 @@ import {
   sandboxStatesTable,
   userProfilesTable,
 } from "@workspace/db";
-import { and, desc, eq, isNull } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 
 export interface EncryptedPayload {
   ciphertext: string;
@@ -21,17 +21,90 @@ export async function getPublicKey(userId: string): Promise<string | null> {
   return profile?.publicKey ?? null;
 }
 
-export async function savePublicKey(
+/**
+ * The account's registered device key together with the key the most recent
+ * replacement displaced. The previous key is what still lets a signed-in
+ * session that kept using it hand its room keys to the new registration.
+ */
+export interface PublicKeyRecord {
+  publicKey: string | null;
+  previousPublicKey: string | null;
+}
+
+export async function getPublicKeyRecord(userId: string): Promise<PublicKeyRecord> {
+  const [profile] = await db
+    .select({
+      publicKey: userProfilesTable.publicKey,
+      previousPublicKey: userProfilesTable.previousPublicKey,
+    })
+    .from(userProfilesTable)
+    .where(eq(userProfilesTable.userId, userId))
+    .limit(1);
+  return {
+    publicKey: profile?.publicKey ?? null,
+    previousPublicKey: profile?.previousPublicKey ?? null,
+  };
+}
+
+export type PublicKeyRegistration =
+  | { outcome: "registered"; publicKey: string }
+  | { outcome: "conflict"; registeredPublicKey: string | null };
+
+/**
+ * Registers a device public key with compare-and-set semantics so that key
+ * writes are never last-write-wins across an account's devices and sessions.
+ *
+ * The write applies only when the key the account holds right now equals
+ * `previousPublicKey` (`null` meaning no key yet) or already equals
+ * `publicKey` (an idempotent retry). Anything else is a conflict that leaves
+ * the stored key untouched and reports what the server holds, so a delayed
+ * registration from an older device or session cannot undo a newer reset.
+ * Each branch is a single guarded statement, so concurrent writers serialize
+ * on the row and exactly one of two competing takeovers wins.
+ *
+ * A replacement also records the key it displaced as `previousPublicKey`
+ * (an idempotent retry keeps the earlier record), so the server can later
+ * authenticate a room-key handover from a session still holding that key.
+ */
+export async function registerPublicKey(
   userId: string,
   publicKey: string,
-): Promise<void> {
-  await db
-    .insert(userProfilesTable)
-    .values({ userId, username: userId, publicKey })
-    .onConflictDoUpdate({
-      target: userProfilesTable.userId,
-      set: { publicKey, updatedAt: new Date() },
-    });
+  previousPublicKey: string | null,
+): Promise<PublicKeyRegistration> {
+  const updatedAt = new Date();
+  const applied =
+    previousPublicKey === null
+      ? await db
+          .insert(userProfilesTable)
+          .values({ userId, username: userId, publicKey, updatedAt })
+          .onConflictDoUpdate({
+            target: userProfilesTable.userId,
+            set: { publicKey, updatedAt },
+            setWhere: or(
+              isNull(userProfilesTable.publicKey),
+              eq(userProfilesTable.publicKey, publicKey),
+            ),
+          })
+          .returning({ publicKey: userProfilesTable.publicKey })
+      : await db
+          .update(userProfilesTable)
+          .set({
+            publicKey,
+            updatedAt,
+            // SET expressions read the row's old values: a real replacement
+            // records the displaced key, an idempotent retry keeps the record.
+            previousPublicKey: sql`CASE WHEN ${userProfilesTable.publicKey} = ${publicKey} THEN ${userProfilesTable.previousPublicKey} ELSE ${userProfilesTable.publicKey} END`,
+          })
+          .where(
+            and(
+              eq(userProfilesTable.userId, userId),
+              inArray(userProfilesTable.publicKey, [previousPublicKey, publicKey]),
+            ),
+          )
+          .returning({ publicKey: userProfilesTable.publicKey });
+
+  if (applied.length > 0) return { outcome: "registered", publicKey };
+  return { outcome: "conflict", registeredPublicKey: await getPublicKey(userId) };
 }
 
 export async function getRoomEnvelope(roomId: string, userId: string) {

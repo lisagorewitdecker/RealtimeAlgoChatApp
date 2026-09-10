@@ -30,6 +30,13 @@ const mockRoomKeyPersistenceFailures = new Map<
   string,
   { roomId: string; message: string; kind?: "save" | "load" }
 >();
+const mockMarkDeviceKeySuperseded = jest.fn();
+// Mutable so tests can simulate device-key (re)registration between renders.
+const mockCryptoState: {
+  isReady: boolean;
+  publicKeyB64: string;
+  deviceKeyStatus: "registering" | "registered" | "superseded";
+} = { isReady: true, publicKeyB64: "public-key", deviceKeyStatus: "registered" };
 
 jest.mock("@expo/vector-icons", () => ({
   Feather: () => null,
@@ -89,8 +96,10 @@ jest.mock("@/contexts/SocketContext", () => ({
 
 jest.mock("@/contexts/CryptoContext", () => ({
   useCrypto: () => ({
-    isReady: true,
-    publicKeyB64: "public-key",
+    isReady: mockCryptoState.isReady,
+    publicKeyB64: mockCryptoState.publicKeyB64,
+    deviceKeyStatus: mockCryptoState.deviceKeyStatus,
+    markDeviceKeySuperseded: mockMarkDeviceKeySuperseded,
     getRoomKey: mockGetRoomKey,
     loadRoomKey: mockLoadRoomKey,
     generateRoomKey: jest.fn(),
@@ -122,29 +131,41 @@ jest.mock("@/hooks/useColors", () => ({
   }),
 }));
 
+function resetRoomMocks() {
+  mockHandlers.clear();
+  Object.values(mockRouter).forEach((mock) => mock.mockReset());
+  mockSocket.on.mockClear();
+  mockSocket.off.mockClear();
+  mockSocket.emit.mockClear();
+  mockGetToken.mockReset().mockResolvedValue("clerk-token");
+  mockRetryRoomKeyPersistence.mockReset().mockResolvedValue(true);
+  mockGetRoomKey.mockReset().mockReturnValue(defaultRoomKey);
+  mockLoadRoomKey.mockReset().mockResolvedValue(undefined);
+  mockDecryptMessage.mockReset();
+  mockDecryptRoomKeyEnvelope.mockReset();
+  mockEncryptMessage.mockReset();
+  mockEncryptRoomKey.mockReset();
+  mockSetRoomKey.mockReset();
+  mockRoomKeyPersistenceFailures.clear();
+  mockMarkDeviceKeySuperseded.mockReset();
+  mockCryptoState.isReady = true;
+  mockCryptoState.publicKeyB64 = "public-key";
+  mockCryptoState.deviceKeyStatus = "registered";
+  globalThis.fetch = jest.fn().mockResolvedValue({
+    ok: true,
+    json: jest.fn().mockResolvedValue({ ok: true }),
+  }) as jest.Mock;
+}
+
+function socketEmits(event: string) {
+  return mockSocket.emit.mock.calls.filter(([name]) => name === event);
+}
+
 describe("room ban handling", () => {
   let alertSpy: jest.SpyInstance;
 
   beforeEach(() => {
-    mockHandlers.clear();
-    Object.values(mockRouter).forEach((mock) => mock.mockReset());
-    mockSocket.on.mockClear();
-    mockSocket.off.mockClear();
-    mockSocket.emit.mockClear();
-    mockGetToken.mockReset().mockResolvedValue("clerk-token");
-    mockRetryRoomKeyPersistence.mockReset().mockResolvedValue(true);
-    mockGetRoomKey.mockReset().mockReturnValue(defaultRoomKey);
-    mockLoadRoomKey.mockReset().mockResolvedValue(undefined);
-    mockDecryptMessage.mockReset();
-    mockDecryptRoomKeyEnvelope.mockReset();
-    mockEncryptMessage.mockReset();
-    mockEncryptRoomKey.mockReset();
-    mockSetRoomKey.mockReset();
-    mockRoomKeyPersistenceFailures.clear();
-    globalThis.fetch = jest.fn().mockResolvedValue({
-      ok: true,
-      json: jest.fn().mockResolvedValue({ ok: true }),
-    }) as jest.Mock;
+    resetRoomMocks();
     alertSpy = jest.spyOn(Alert, "alert").mockImplementation(() => undefined);
   });
 
@@ -454,5 +475,411 @@ describe("room ban handling", () => {
     expect(mockSocket.emit).toHaveBeenCalledWith("leave-room", {
       roomId: "room-42",
     });
+  });
+});
+
+describe("room device-key registration ordering", () => {
+  beforeEach(() => {
+    resetRoomMocks();
+  });
+
+  it("does not join an encrypted room until the device key is registered", () => {
+    mockCryptoState.isReady = false;
+    const view = render(<RoomScreen />);
+
+    expect(socketEmits("join-room")).toHaveLength(0);
+    expect(view.getByTestId("room-loading")).toBeTruthy();
+
+    mockCryptoState.isReady = true;
+    view.rerender(<RoomScreen />);
+
+    expect(socketEmits("join-room")).toHaveLength(1);
+  });
+
+  it("leaves during a device-key reset and re-joins only once the replacement key is confirmed", () => {
+    mockEncryptRoomKey.mockReturnValue({ ciphertextB64: "cipher", nonceB64: "nonce" });
+    const view = render(<RoomScreen />);
+    act(() => {
+      mockHandlers.get("room-joined")?.({ messages: [], users: [], canModerate: true });
+    });
+    expect(view.queryByTestId("room-loading")).toBeNull();
+    expect(socketEmits("join-room")).toHaveLength(1);
+
+    // The reset swaps the key locally; the server has not confirmed it yet.
+    mockCryptoState.isReady = false;
+    mockCryptoState.publicKeyB64 = "rotated-key";
+    view.rerender(<RoomScreen />);
+
+    expect(socketEmits("leave-room")).toEqual([["leave-room", { roomId: "room-42" }]]);
+    expect(socketEmits("join-room")).toHaveLength(1);
+    expect(view.getByTestId("room-loading")).toBeTruthy();
+
+    // Registration confirmed: the room is re-joined under the new key and, as
+    // creator, this device re-sends envelopes signed with that key.
+    mockCryptoState.isReady = true;
+    view.rerender(<RoomScreen />);
+    expect(socketEmits("join-room")).toHaveLength(2);
+
+    act(() => {
+      mockHandlers.get("room-joined")?.({
+        messages: [],
+        users: [{ userId: "user-ada", username: "Ada", publicKey: "ada-key" }],
+        canModerate: true,
+      });
+    });
+    expect(view.queryByTestId("room-loading")).toBeNull();
+    expect(mockEncryptRoomKey).toHaveBeenCalledWith(defaultRoomKey, "ada-key");
+    expect(socketEmits("room-key-envelope")).toEqual([
+      [
+        "room-key-envelope",
+        {
+          roomId: "room-42",
+          targetUserId: "user-ada",
+          senderPublicKey: "rotated-key",
+          ciphertext: "cipher",
+          nonce: "nonce",
+        },
+      ],
+    ]);
+  });
+
+  it("sends a fresh envelope when a member re-joins with a new device key", () => {
+    mockEncryptRoomKey.mockReturnValue({ ciphertextB64: "cipher-2", nonceB64: "nonce-2" });
+    render(<RoomScreen />);
+    act(() => {
+      mockHandlers.get("room-joined")?.({ messages: [], users: [], canModerate: true });
+    });
+
+    act(() => {
+      mockHandlers.get("user-joined")?.({
+        userId: "user-ada",
+        username: "Ada",
+        publicKey: "ada-new-key",
+        message: {
+          id: "system-join",
+          userId: "system",
+          username: "System",
+          type: "system",
+          content: "Ada joined",
+          timestamp: 1,
+        },
+      });
+    });
+
+    expect(mockEncryptRoomKey).toHaveBeenCalledWith(defaultRoomKey, "ada-new-key");
+    expect(socketEmits("room-key-envelope")).toEqual([
+      [
+        "room-key-envelope",
+        expect.objectContaining({
+          targetUserId: "user-ada",
+          senderPublicKey: "public-key",
+          ciphertext: "cipher-2",
+          nonce: "nonce-2",
+        }),
+      ],
+    ]);
+  });
+
+  it("sends a fresh envelope when a member's device key changes while another of their sessions stays joined", () => {
+    mockEncryptRoomKey.mockReturnValue({ ciphertextB64: "cipher-3", nonceB64: "nonce-3" });
+    render(<RoomScreen />);
+    act(() => {
+      mockHandlers.get("room-joined")?.({
+        messages: [],
+        users: [{ userId: "user-ada", username: "Ada", publicKey: "ada-key" }],
+        canModerate: true,
+      });
+    });
+    mockSocket.emit.mockClear();
+    mockEncryptRoomKey.mockClear();
+    const onUserKeyChanged = mockHandlers.get("user-key-changed");
+    expect(onUserKeyChanged).toBeDefined();
+
+    // Notices for other rooms are ignored; a notice about this device's own
+    // account means another session took over the key, never an envelope.
+    act(() => {
+      onUserKeyChanged?.({ roomId: "room-99", userId: "user-ada", publicKey: "ada-new-key" });
+      onUserKeyChanged?.({ roomId: "room-42", userId: "user-ben", publicKey: "public-key" });
+    });
+    expect(socketEmits("room-key-envelope")).toHaveLength(0);
+    expect(mockMarkDeviceKeySuperseded).not.toHaveBeenCalled();
+
+    act(() => {
+      onUserKeyChanged?.({
+        roomId: "room-42",
+        userId: "user-ada",
+        username: "Ada",
+        publicKey: "ada-new-key",
+      });
+    });
+    expect(mockEncryptRoomKey).toHaveBeenCalledTimes(1);
+    expect(mockEncryptRoomKey).toHaveBeenCalledWith(defaultRoomKey, "ada-new-key");
+    expect(socketEmits("room-key-envelope")).toEqual([
+      [
+        "room-key-envelope",
+        {
+          roomId: "room-42",
+          targetUserId: "user-ada",
+          senderPublicKey: "public-key",
+          ciphertext: "cipher-3",
+          nonce: "nonce-3",
+        },
+      ],
+    ]);
+  });
+
+  it("closes the room when the join roster shows another device's key registered for this account", () => {
+    mockEncryptRoomKey.mockReturnValue({ ciphertextB64: "handover-cipher", nonceB64: "handover-nonce" });
+    const view = render(<RoomScreen />);
+    act(() => {
+      mockHandlers.get("room-joined")?.({
+        messages: [],
+        users: [
+          { userId: "user-ada", username: "Ada", publicKey: "ada-key" },
+          { userId: "user-ben", username: "Ben", publicKey: "laptop-key" },
+        ],
+        canModerate: true,
+      });
+    });
+
+    // The server's key for this account is authoritative: rooms never open
+    // under a key the server no longer advertises. As the creator holding the
+    // room key, this session first hands the key to the account's new key.
+    expect(mockEncryptRoomKey).toHaveBeenCalledWith(defaultRoomKey, "laptop-key");
+    expect(socketEmits("room-key-envelope")).toEqual([
+      [
+        "room-key-envelope",
+        {
+          roomId: "room-42",
+          targetUserId: "user-ben",
+          senderPublicKey: "public-key",
+          ciphertext: "handover-cipher",
+          nonce: "handover-nonce",
+        },
+      ],
+    ]);
+    expect(mockMarkDeviceKeySuperseded).toHaveBeenCalledWith("laptop-key");
+    expect(mockSocket.emit.mock.calls.findIndex(([name]) => name === "room-key-envelope")).toBeLessThan(
+      mockMarkDeviceKeySuperseded.mock.invocationCallOrder[0] ?? Infinity,
+    );
+    expect(view.getByTestId("room-loading")).toBeTruthy();
+
+    // The context reports the conflict; the screen explains and links to Profile.
+    mockCryptoState.isReady = false;
+    mockCryptoState.deviceKeyStatus = "superseded";
+    view.rerender(<RoomScreen />);
+    expect(socketEmits("leave-room")).toEqual([["leave-room", { roomId: "room-42" }]]);
+    expect(view.getByTestId("room-key-superseded")).toBeTruthy();
+    expect(view.getByText("Encryption key replaced")).toBeTruthy();
+    expect(view.queryByTestId("room-loading")).toBeNull();
+    fireEvent.press(view.getByTestId("room-key-superseded-profile"));
+    expect(mockRouter.replace).toHaveBeenCalledWith("/(tabs)/profile");
+  });
+
+  it("opens the room normally when the roster shows this device's own key or none", () => {
+    const view = render(<RoomScreen />);
+    act(() => {
+      mockHandlers.get("room-joined")?.({
+        messages: [],
+        users: [
+          { userId: "user-ben", username: "Ben", publicKey: "public-key" },
+          { userId: "user-ada", username: "Ada" },
+        ],
+        canModerate: false,
+      });
+    });
+    expect(mockMarkDeviceKeySuperseded).not.toHaveBeenCalled();
+    expect(view.queryByTestId("room-loading")).toBeNull();
+  });
+
+  it("hands the room key to the account's new key before closing when another session registers it mid-conversation", () => {
+    mockEncryptRoomKey.mockReturnValue({ ciphertextB64: "handover-cipher", nonceB64: "handover-nonce" });
+    const view = render(<RoomScreen />);
+    act(() => {
+      mockHandlers.get("room-joined")?.({ messages: [], users: [], canModerate: true });
+    });
+    expect(view.queryByTestId("room-loading")).toBeNull();
+    mockSocket.emit.mockClear();
+
+    act(() => {
+      mockHandlers.get("user-key-changed")?.({
+        roomId: "room-42",
+        userId: "user-ben",
+        username: "Ben",
+        publicKey: "laptop-key",
+      });
+    });
+    expect(mockEncryptRoomKey).toHaveBeenCalledWith(defaultRoomKey, "laptop-key");
+    expect(socketEmits("room-key-envelope")).toEqual([
+      [
+        "room-key-envelope",
+        {
+          roomId: "room-42",
+          targetUserId: "user-ben",
+          senderPublicKey: "public-key",
+          ciphertext: "handover-cipher",
+          nonce: "handover-nonce",
+        },
+      ],
+    ]);
+    expect(mockMarkDeviceKeySuperseded).toHaveBeenCalledWith("laptop-key");
+  });
+
+  it("does not hand over room keys it is not the creator of when its key is superseded", () => {
+    mockEncryptRoomKey.mockReturnValue({ ciphertextB64: "handover-cipher", nonceB64: "handover-nonce" });
+    const view = render(<RoomScreen />);
+    act(() => {
+      mockHandlers.get("room-joined")?.({ messages: [], users: [], canModerate: false });
+    });
+    expect(view.queryByTestId("room-loading")).toBeNull();
+
+    act(() => {
+      mockHandlers.get("user-key-changed")?.({
+        roomId: "room-42",
+        userId: "user-ben",
+        username: "Ben",
+        publicKey: "laptop-key",
+      });
+    });
+    expect(mockEncryptRoomKey).not.toHaveBeenCalled();
+    expect(socketEmits("room-key-envelope")).toHaveLength(0);
+    expect(mockMarkDeviceKeySuperseded).toHaveBeenCalledWith("laptop-key");
+
+    // The same holds when the mismatch shows up in a join roster.
+    mockMarkDeviceKeySuperseded.mockClear();
+    act(() => {
+      mockHandlers.get("room-joined")?.({
+        messages: [],
+        users: [{ userId: "user-ben", username: "Ben", publicKey: "laptop-key" }],
+        canModerate: false,
+      });
+    });
+    expect(socketEmits("room-key-envelope")).toHaveLength(0);
+    expect(mockMarkDeviceKeySuperseded).toHaveBeenCalledWith("laptop-key");
+  });
+
+  it("waits for the saved room key to hydrate before handing it over on a mismatched join", async () => {
+    let resolveLoad!: () => void;
+    mockGetRoomKey.mockReturnValue(null);
+    mockLoadRoomKey.mockReturnValueOnce(
+      new Promise<void>((resolve) => {
+        resolveLoad = () => {
+          mockGetRoomKey.mockReturnValue(defaultRoomKey);
+          resolve();
+        };
+      }),
+    );
+    mockEncryptRoomKey.mockReturnValue({ ciphertextB64: "handover-cipher", nonceB64: "handover-nonce" });
+    render(<RoomScreen />);
+
+    act(() => {
+      mockHandlers.get("room-joined")?.({
+        messages: [],
+        users: [{ userId: "user-ben", username: "Ben", publicKey: "laptop-key" }],
+        canModerate: true,
+      });
+    });
+    expect(socketEmits("room-key-envelope")).toHaveLength(0);
+    expect(mockMarkDeviceKeySuperseded).not.toHaveBeenCalled();
+
+    await act(async () => {
+      resolveLoad();
+      await Promise.resolve();
+    });
+    expect(mockEncryptRoomKey).toHaveBeenCalledWith(defaultRoomKey, "laptop-key");
+    expect(socketEmits("room-key-envelope")).toHaveLength(1);
+    expect(socketEmits("leave-room")).toHaveLength(0);
+    expect(mockMarkDeviceKeySuperseded).toHaveBeenCalledWith("laptop-key");
+  });
+
+  it("recovers a room it created from an envelope handed over by its own account's previous key", async () => {
+    const handedOverKey = new Uint8Array(32).fill(5);
+    mockGetRoomKey.mockReturnValue(null);
+    mockSetRoomKey.mockImplementation(async (_roomId: string, key: Uint8Array) => {
+      mockGetRoomKey.mockReturnValue(key);
+    });
+    mockDecryptRoomKeyEnvelope.mockImplementation((_ciphertext: string, _nonce: string, sender: string) =>
+      sender === "old-phone-key" ? handedOverKey : null,
+    );
+    const view = render(<RoomScreen />);
+
+    // The fresh device took over the registration; the roster already shows
+    // its key, and no stored envelope exists for the creator account.
+    await act(async () => {
+      mockHandlers.get("room-joined")?.({
+        messages: [],
+        users: [{ userId: "user-ben", username: "Ben", publicKey: "public-key" }],
+        canModerate: true,
+        keyEnvelope: null,
+      });
+    });
+    expect(mockMarkDeviceKeySuperseded).not.toHaveBeenCalled();
+    expect(view.getByTestId("room-key-waiting")).toBeTruthy();
+    expect(
+      view.getByText(/only another signed-in device or session of yours that still holds the key/),
+    ).toBeTruthy();
+    expect(view.getByTestId("room-composer-input").props.editable).toBe(false);
+
+    await act(async () => {
+      mockHandlers.get("room-key-envelope")?.({
+        roomId: "room-42",
+        senderPublicKey: "old-phone-key",
+        ciphertext: "handover-cipher",
+        nonce: "handover-nonce",
+      });
+    });
+    expect(mockDecryptRoomKeyEnvelope).toHaveBeenCalledWith(
+      "handover-cipher",
+      "handover-nonce",
+      "old-phone-key",
+    );
+    expect(mockSetRoomKey).toHaveBeenCalledWith("room-42", handedOverKey);
+    expect(view.queryByTestId("room-key-waiting")).toBeNull();
+    expect(view.getByTestId("room-composer-input").props.editable).toBe(true);
+  });
+
+  it("explains that the room key is pending until an envelope for the new device key arrives", async () => {
+    const freshKey = new Uint8Array(32).fill(9);
+    mockGetRoomKey.mockReturnValue(null);
+    mockSetRoomKey.mockImplementation(async (_roomId: string, key: Uint8Array) => {
+      mockGetRoomKey.mockReturnValue(key);
+    });
+    // The stored envelope was encrypted to the previous device key and cannot
+    // be opened; only the creator's fresh envelope yields the room key.
+    mockDecryptRoomKeyEnvelope.mockImplementation((ciphertext: string) =>
+      ciphertext === "fresh-cipher" ? freshKey : null,
+    );
+    const view = render(<RoomScreen />);
+
+    await act(async () => {
+      mockHandlers.get("room-joined")?.({
+        messages: [],
+        users: [],
+        keyEnvelope: {
+          senderPublicKey: "creator-key",
+          ciphertext: "stale-cipher",
+          nonce: "stale-nonce",
+        },
+      });
+    });
+
+    expect(view.queryByTestId("room-loading")).toBeNull();
+    expect(view.getByTestId("room-key-waiting")).toBeTruthy();
+    expect(view.getByText("Waiting for this room's encryption key")).toBeTruthy();
+    expect(view.getByTestId("room-composer-input").props.editable).toBe(false);
+    expect(mockSetRoomKey).not.toHaveBeenCalled();
+
+    await act(async () => {
+      mockHandlers.get("room-key-envelope")?.({
+        roomId: "room-42",
+        senderPublicKey: "creator-key",
+        ciphertext: "fresh-cipher",
+        nonce: "fresh-nonce",
+      });
+    });
+
+    expect(mockSetRoomKey).toHaveBeenCalledWith("room-42", freshKey);
+    expect(view.queryByTestId("room-key-waiting")).toBeNull();
+    expect(view.getByTestId("room-composer-input").props.editable).toBe(true);
   });
 });

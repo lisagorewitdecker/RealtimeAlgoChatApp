@@ -7,7 +7,7 @@ import {
 } from "../lib/accountProfile";
 import { isConfiguredAdmin } from "../lib/accountAccess";
 import { requireAuthorizedUser } from "../lib/requireAccountAccess";
-import { getPublicKey, savePublicKey } from "../lib/e2eePersistence";
+import { getPublicKey, registerPublicKey } from "../lib/e2eePersistence";
 
 const router = Router();
 
@@ -50,7 +50,15 @@ router.put("/", async (req, res, next) => {
   const username = body?.["username"];
   const avatarEmoji = body?.["avatarEmoji"];
   const publicKey = body?.["publicKey"];
+  // Which key this write replaces (`null`: none registered yet). Omitting it
+  // only ever registers a first key or re-sends the current one; replacing a
+  // different key requires naming it so stale devices cannot overwrite a reset.
+  const previousPublicKey = body?.["previousPublicKey"];
   if (
+    (previousPublicKey !== undefined &&
+      previousPublicKey !== null &&
+      !isValidPublicKey(previousPublicKey)) ||
+    (previousPublicKey !== undefined && publicKey === undefined) ||
     (username !== undefined &&
       (typeof username !== "string" ||
         username.trim().replace(/\s+/g, " ").length < 2 ||
@@ -66,14 +74,25 @@ router.put("/", async (req, res, next) => {
   }
 
   try {
-    if (
-      typeof publicKey === "string" &&
-      username === undefined &&
-      avatarEmoji === undefined
-    ) {
-      await savePublicKey(userId, publicKey);
-      res.json({ publicKey });
-      return;
+    if (typeof publicKey === "string") {
+      const registration = await registerPublicKey(
+        userId,
+        publicKey,
+        typeof previousPublicKey === "string" ? previousPublicKey : null,
+      );
+      if (registration.outcome === "conflict") {
+        res.status(409).json({
+          error:
+            "A different encryption key is registered for this account. Reset the device key to replace it.",
+          code: "PUBLIC_KEY_CONFLICT",
+          publicKey: registration.registeredPublicKey,
+        });
+        return;
+      }
+      if (username === undefined && avatarEmoji === undefined) {
+        res.json({ publicKey });
+        return;
+      }
     }
     const current = await getAccountProfile(userId);
     const profile = await updateAccountProfile(userId, {
@@ -86,9 +105,6 @@ router.put("/", async (req, res, next) => {
           ? current.avatarEmoji
           : normalizeProfileAvatar(avatarEmoji),
     });
-    if (typeof publicKey === "string") {
-      await savePublicKey(userId, publicKey);
-    }
     res.json({
       profile,
       ...(typeof publicKey === "string" ? { publicKey } : {}),

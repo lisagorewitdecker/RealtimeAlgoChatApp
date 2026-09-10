@@ -2,12 +2,14 @@ import { createServer, type Server as HttpServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { io as createClient, type Socket as ClientSocket } from "socket.io-client";
+import nacl from "tweetnacl";
 
 const mockVerifyToken = vi.hoisted(() => vi.fn());
 const mockGetAccountProfile = vi.hoisted(() => vi.fn());
 const mockGetAccountAccess = vi.hoisted(() => vi.fn());
 const mockIsConfiguredAdmin = vi.hoisted(() => vi.fn());
 const mockGetPublicKey = vi.hoisted(() => vi.fn());
+const mockGetPublicKeyRecord = vi.hoisted(() => vi.fn());
 const mockGetRoomEnvelope = vi.hoisted(() => vi.fn());
 const mockLoadEncryptedMessages = vi.hoisted(() => vi.fn());
 const mockLoadEncryptedSandboxState = vi.hoisted(() => vi.fn());
@@ -30,12 +32,13 @@ vi.mock("./lib/accountAccess", () => ({
 
 vi.mock("./lib/e2eePersistence", () => ({
   getPublicKey: mockGetPublicKey,
+  getPublicKeyRecord: mockGetPublicKeyRecord,
   getRoomEnvelope: mockGetRoomEnvelope,
   loadEncryptedMessages: mockLoadEncryptedMessages,
   loadEncryptedSandboxState: mockLoadEncryptedSandboxState,
   saveEncryptedMessage: mockSaveEncryptedMessage,
   saveEncryptedSandboxState: mockSaveEncryptedSandboxState,
-  savePublicKey: vi.fn(),
+  registerPublicKey: vi.fn(),
   saveRoomEnvelope: mockSaveRoomEnvelope,
 }));
 
@@ -68,6 +71,11 @@ beforeEach(async () => {
   mockGetAccountAccess.mockReset().mockResolvedValue({ allowed: true });
   mockIsConfiguredAdmin.mockReset().mockReturnValue(false);
   mockGetPublicKey.mockReset().mockResolvedValue(null);
+  // Unless a test records a displaced key, the record mirrors the current key.
+  mockGetPublicKeyRecord.mockReset().mockImplementation(async (userId: string) => ({
+    publicKey: await mockGetPublicKey(userId),
+    previousPublicKey: null,
+  }));
   mockGetRoomEnvelope.mockReset().mockResolvedValue(null);
   mockLoadEncryptedMessages.mockReset().mockResolvedValue([]);
   mockLoadEncryptedSandboxState.mockReset().mockResolvedValue(null);
@@ -102,6 +110,9 @@ function createRoomClient(token?: string, username = "Member") {
   clients.push(client);
   return client;
 }
+
+const encodeBase64 = (bytes: Uint8Array) => Buffer.from(bytes).toString("base64");
+const decodeBase64 = (text: string) => new Uint8Array(Buffer.from(text, "base64"));
 
 function waitForEvent<T>(socket: ClientSocket, event: string) {
   return new Promise<T>((resolve) => {
@@ -226,6 +237,330 @@ describe("room Socket.IO lifecycle", () => {
         senderPublicKey: "recipient-key",
         ciphertext: "YXR0YWNrLWVudmVsb3Bl",
         nonce: "YXR0YWNrLW5vbmNl",
+      });
+    });
+    expect(mockSaveRoomEnvelope).not.toHaveBeenCalled();
+  });
+
+  it("lets the creator deliver and persist a fresh envelope after a member resets their device key", async () => {
+    const roomId = `device-reset-${Date.now()}`;
+    let benKey = "ben-old-key";
+    mockGetPublicKey.mockImplementation(async (userId: string) =>
+      userId === "user-ada" ? "ada-key" : benKey,
+    );
+    const ada = createRoomClient("token-ada");
+    const ben = createRoomClient("token-ben");
+    await Promise.all([waitForEvent(ada, "connect"), waitForEvent(ben, "connect")]);
+
+    const adaJoined = waitForEvent(ada, "room-joined");
+    ada.emit("join-room", { roomId });
+    await adaJoined;
+    const benJoined = waitForEvent(ben, "room-joined");
+    ben.emit("join-room", { roomId, createIfMissing: false });
+    await benJoined;
+
+    // Ben resets his device key: the client leaves, registers the new key,
+    // and re-joins only afterwards.
+    const benLeft = waitForEvent<{ userId: string }>(ada, "user-left");
+    ben.emit("leave-room", { roomId });
+    await expect(benLeft).resolves.toMatchObject({ userId: "user-ben" });
+    benKey = "ben-new-key";
+
+    const benRejoinedForAda = waitForEvent<{ userId: string; publicKey: string | null }>(
+      ada,
+      "user-joined",
+    );
+    const benRejoined = waitForEvent<{
+      users: Array<{ userId: string; publicKey: string | null }>;
+    }>(ben, "room-joined");
+    ben.emit("join-room", { roomId, createIfMissing: false });
+    await expect(benRejoinedForAda).resolves.toMatchObject({
+      userId: "user-ben",
+      publicKey: "ben-new-key",
+    });
+    await expect(benRejoined).resolves.toMatchObject({
+      users: expect.arrayContaining([
+        expect.objectContaining({ userId: "user-ben", publicKey: "ben-new-key" }),
+      ]),
+    });
+
+    mockSaveRoomEnvelope.mockClear();
+    const freshEnvelope = waitForEvent<{
+      roomId: string;
+      ciphertext: string;
+      nonce: string;
+      senderPublicKey: string;
+    }>(ben, "room-key-envelope");
+    ada.emit("room-key-envelope", {
+      roomId,
+      targetUserId: "user-ben",
+      senderPublicKey: "ada-key",
+      ciphertext: "ZnJlc2gtZW52ZWxvcGU=",
+      nonce: "ZnJlc2gtbm9uY2U=",
+    });
+    await expect(freshEnvelope).resolves.toEqual({
+      roomId,
+      ciphertext: "ZnJlc2gtZW52ZWxvcGU=",
+      nonce: "ZnJlc2gtbm9uY2U=",
+      senderPublicKey: "ada-key",
+    });
+    await waitFor(() =>
+      expect(mockSaveRoomEnvelope).toHaveBeenCalledWith({
+        roomId,
+        userId: "user-ben",
+        ciphertext: "ZnJlc2gtZW52ZWxvcGU=",
+        nonce: "ZnJlc2gtbm9uY2U=",
+        senderPublicKey: "ada-key",
+      }),
+    );
+  });
+
+  it("tells the creator about a member's new device key while another session of theirs stays in the room", async () => {
+    const roomId = `device-reset-multi-${Date.now()}`;
+    let benKey = "ben-old-key";
+    mockGetPublicKey.mockImplementation(async (userId: string) =>
+      userId === "user-ada" ? "ada-key" : benKey,
+    );
+    const ada = createRoomClient("token-ada");
+    const benPhone = createRoomClient("token-ben");
+    const benLaptop = createRoomClient("token-ben");
+    await Promise.all([
+      waitForEvent(ada, "connect"),
+      waitForEvent(benPhone, "connect"),
+      waitForEvent(benLaptop, "connect"),
+    ]);
+
+    const adaJoined = waitForEvent(ada, "room-joined");
+    ada.emit("join-room", { roomId });
+    await adaJoined;
+    const benPhoneJoined = waitForEvent(benPhone, "room-joined");
+    const benJoinedForAda = waitForEvent<{ userId: string; publicKey: string | null }>(
+      ada,
+      "user-joined",
+    );
+    benPhone.emit("join-room", { roomId, createIfMissing: false });
+    await benPhoneJoined;
+    await expect(benJoinedForAda).resolves.toMatchObject({
+      userId: "user-ben",
+      publicKey: "ben-old-key",
+    });
+
+    // A second session of the same account joins with the same key: the
+    // account is already present, so peers hear nothing.
+    const benLaptopJoined = waitForEvent(benLaptop, "room-joined");
+    await expectNoEvent(ada, "user-joined", () => {
+      benLaptop.emit("join-room", { roomId, createIfMissing: false });
+    });
+    await benLaptopJoined;
+
+    // The phone resets its device key and re-joins. The laptop keeps the
+    // account's presence alive, so no user-left / user-joined pair fires.
+    benKey = "ben-new-key";
+    await expectNoEvent(ada, "user-left", () => {
+      benPhone.emit("leave-room", { roomId });
+    });
+    const keyChangedForAda = waitForEvent<{
+      roomId: string;
+      userId: string;
+      username: string;
+      publicKey: string;
+    }>(ada, "user-key-changed");
+    const benPhoneRejoined = waitForEvent<{
+      users: Array<{ userId: string; publicKey: string | null }>;
+    }>(benPhone, "room-joined");
+    await expectNoEvent(ada, "user-joined", () => {
+      benPhone.emit("join-room", { roomId, createIfMissing: false });
+    });
+    await expect(keyChangedForAda).resolves.toEqual({
+      roomId,
+      userId: "user-ben",
+      username: "Ben",
+      publicKey: "ben-new-key",
+    });
+    await expect(benPhoneRejoined).resolves.toMatchObject({
+      users: expect.arrayContaining([
+        expect.objectContaining({ userId: "user-ben", publicKey: "ben-new-key" }),
+      ]),
+    });
+
+    // The creator answers with an envelope for the new key; it is persisted
+    // and reaches every session of the account.
+    mockSaveRoomEnvelope.mockClear();
+    const phoneEnvelope = waitForEvent<{ senderPublicKey: string }>(
+      benPhone,
+      "room-key-envelope",
+    );
+    const laptopEnvelope = waitForEvent<{ senderPublicKey: string }>(
+      benLaptop,
+      "room-key-envelope",
+    );
+    ada.emit("room-key-envelope", {
+      roomId,
+      targetUserId: "user-ben",
+      senderPublicKey: "ada-key",
+      ciphertext: "ZnJlc2gtZW52ZWxvcGU=",
+      nonce: "ZnJlc2gtbm9uY2U=",
+    });
+    await expect(phoneEnvelope).resolves.toMatchObject({ senderPublicKey: "ada-key" });
+    await expect(laptopEnvelope).resolves.toMatchObject({ senderPublicKey: "ada-key" });
+    await waitFor(() =>
+      expect(mockSaveRoomEnvelope).toHaveBeenCalledWith({
+        roomId,
+        userId: "user-ben",
+        ciphertext: "ZnJlc2gtZW52ZWxvcGU=",
+        nonce: "ZnJlc2gtbm9uY2U=",
+        senderPublicKey: "ada-key",
+      }),
+    );
+
+    // A re-join with an unchanged key stays silent.
+    const benLaptopRejoined = waitForEvent(benLaptop, "room-joined");
+    await expectNoEvent(ada, "user-key-changed", () => {
+      benLaptop.emit("join-room", { roomId, createIfMissing: false });
+    });
+    await benLaptopRejoined;
+  });
+
+  it("lets a superseded creator session hand its room key to the account's new device key", async () => {
+    // Ada created the room on her old phone, which holds the room key. She
+    // takes over the registration from a fresh phone that has no room key.
+    const roomId = `creator-handover-${Date.now()}`;
+    const oldPhoneKeys = nacl.box.keyPair();
+    const newPhoneKeys = nacl.box.keyPair();
+    const oldKey = encodeBase64(oldPhoneKeys.publicKey);
+    const newKey = encodeBase64(newPhoneKeys.publicKey);
+    const roomKey = nacl.randomBytes(nacl.secretbox.keyLength);
+    let adaRecord = { publicKey: oldKey, previousPublicKey: null as string | null };
+    mockGetPublicKey.mockImplementation(async (userId: string) =>
+      userId === "user-ada" ? adaRecord.publicKey : "ben-key",
+    );
+    mockGetPublicKeyRecord.mockImplementation(async (userId: string) =>
+      userId === "user-ada" ? adaRecord : { publicKey: "ben-key", previousPublicKey: null },
+    );
+
+    const oldPhone = createRoomClient("token-ada");
+    const newPhone = createRoomClient("token-ada");
+    const ben = createRoomClient("token-ben");
+    await Promise.all([
+      waitForEvent(oldPhone, "connect"),
+      waitForEvent(newPhone, "connect"),
+      waitForEvent(ben, "connect"),
+    ]);
+    const oldPhoneJoined = waitForEvent(oldPhone, "room-joined");
+    oldPhone.emit("join-room", { roomId });
+    await oldPhoneJoined;
+    const benJoined = waitForEvent(ben, "room-joined");
+    ben.emit("join-room", { roomId, createIfMissing: false });
+    await benJoined;
+
+    // The fresh phone registers (compare-and-set records the displaced key)
+    // and joins; the old phone learns about the account's new key.
+    adaRecord = { publicKey: newKey, previousPublicKey: oldKey };
+    const keyChangedForOldPhone = waitForEvent<{ userId: string; publicKey: string }>(
+      oldPhone,
+      "user-key-changed",
+    );
+    const newPhoneJoined = waitForEvent<{ keyEnvelope: unknown }>(newPhone, "room-joined");
+    newPhone.emit("join-room", { roomId, createIfMissing: false });
+    await expect(newPhoneJoined).resolves.toMatchObject({ keyEnvelope: null });
+    await expect(keyChangedForOldPhone).resolves.toEqual(
+      expect.objectContaining({ userId: "user-ada", publicKey: newKey }),
+    );
+
+    // The old phone is no longer the account's key authority for others: an
+    // envelope for Ben signed with the displaced key is dropped.
+    const nonceForBen = nacl.randomBytes(nacl.box.nonceLength);
+    await expectNoEvent(ben, "room-key-envelope", () => {
+      oldPhone.emit("room-key-envelope", {
+        roomId,
+        targetUserId: "user-ben",
+        senderPublicKey: oldKey,
+        ciphertext: encodeBase64(
+          nacl.box(roomKey, nonceForBen, nacl.box.keyPair().publicKey, oldPhoneKeys.secretKey),
+        ),
+        nonce: encodeBase64(nonceForBen),
+      });
+    });
+    expect(mockSaveRoomEnvelope).not.toHaveBeenCalled();
+
+    // A self-targeted handover under the displaced key is persisted and
+    // reaches the account's other session, never back to the sender.
+    const nonce = nacl.randomBytes(nacl.box.nonceLength);
+    const ciphertext = encodeBase64(
+      nacl.box(roomKey, nonce, newPhoneKeys.publicKey, oldPhoneKeys.secretKey),
+    );
+    const envelopeForNewPhone = waitForEvent<{
+      roomId: string;
+      ciphertext: string;
+      nonce: string;
+      senderPublicKey: string;
+    }>(newPhone, "room-key-envelope");
+    await expectNoEvent(oldPhone, "room-key-envelope", () => {
+      oldPhone.emit("room-key-envelope", {
+        roomId,
+        targetUserId: "user-ada",
+        senderPublicKey: oldKey,
+        ciphertext,
+        nonce: encodeBase64(nonce),
+      });
+    });
+    const envelope = await envelopeForNewPhone;
+    expect(envelope).toEqual({ roomId, ciphertext, nonce: encodeBase64(nonce), senderPublicKey: oldKey });
+    const recovered = nacl.box.open(
+      decodeBase64(envelope.ciphertext),
+      decodeBase64(envelope.nonce),
+      decodeBase64(envelope.senderPublicKey),
+      newPhoneKeys.secretKey,
+    );
+    expect(recovered).toEqual(roomKey);
+    await waitFor(() =>
+      expect(mockSaveRoomEnvelope).toHaveBeenCalledWith({
+        roomId,
+        userId: "user-ada",
+        ciphertext,
+        nonce: encodeBase64(nonce),
+        senderPublicKey: oldKey,
+      }),
+    );
+
+    // Only the key the registry recorded as displaced may hand over: a key
+    // the account never held, or one displaced by an even later reset, is
+    // dropped. So is a non-creator's self-handover.
+    mockSaveRoomEnvelope.mockClear();
+    await expectNoEvent(newPhone, "room-key-envelope", () => {
+      oldPhone.emit("room-key-envelope", {
+        roomId,
+        targetUserId: "user-ada",
+        senderPublicKey: encodeBase64(nacl.box.keyPair().publicKey),
+        ciphertext,
+        nonce: encodeBase64(nonce),
+      });
+    });
+    adaRecord = { publicKey: encodeBase64(nacl.box.keyPair().publicKey), previousPublicKey: newKey };
+    await expectNoEvent(newPhone, "room-key-envelope", () => {
+      oldPhone.emit("room-key-envelope", {
+        roomId,
+        targetUserId: "user-ada",
+        senderPublicKey: oldKey,
+        ciphertext,
+        nonce: encodeBase64(nonce),
+      });
+    });
+    const benLaptop = createRoomClient("token-ben");
+    await waitForEvent(benLaptop, "connect");
+    const benLaptopJoined = waitForEvent(benLaptop, "room-joined");
+    benLaptop.emit("join-room", { roomId, createIfMissing: false });
+    await benLaptopJoined;
+    mockGetPublicKeyRecord.mockImplementation(async (userId: string) =>
+      userId === "user-ada" ? adaRecord : { publicKey: "ben-new-key", previousPublicKey: "ben-key" },
+    );
+    await expectNoEvent(benLaptop, "room-key-envelope", () => {
+      ben.emit("room-key-envelope", {
+        roomId,
+        targetUserId: "user-ben",
+        senderPublicKey: "ben-key",
+        ciphertext,
+        nonce: encodeBase64(nonce),
       });
     });
     expect(mockSaveRoomEnvelope).not.toHaveBeenCalled();

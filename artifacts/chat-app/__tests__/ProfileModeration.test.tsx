@@ -24,6 +24,14 @@ jest.mock("@/contexts/SocketContext", () => ({
   useSocket: () => ({ isConnected: true, connectionError: null }),
 }));
 
+jest.mock("@/contexts/CryptoContext", () => ({
+  useCrypto: () => ({
+    deviceKeyStatus: "registered",
+    publicKeyB64: "",
+    resetDeviceIdentity: jest.fn(),
+  }),
+}));
+
 jest.mock("@/hooks/useColors", () => ({
   useColors: () => ({
     background: "#10131a",

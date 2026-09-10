@@ -17,6 +17,7 @@ import { PRODUCT_NAME } from "@/constants/branding";
 import { useApp } from "@/contexts/AppContext";
 import { useAccessibility } from "@/contexts/AccessibilityContext";
 import { useSocket } from "@/contexts/SocketContext";
+import { DeviceEncryptionCard } from "@/components/DeviceEncryptionCard";
 import { ScaledText as Text } from "@/components/ScaledText";
 import { ScaledTextInput as TextInput } from "@/components/ScaledTextInput";
 import { useColors } from "@/hooks/useColors";
@@ -519,6 +520,8 @@ export default function ProfileScreen() {
             {userId}
           </Text>
         </View>
+
+        <DeviceEncryptionCard />
 
         <View
           testID="accessibility-settings"

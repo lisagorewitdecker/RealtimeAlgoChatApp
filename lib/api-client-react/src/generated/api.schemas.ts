@@ -76,6 +76,25 @@ export interface UpsertProfileRequest {
      * @maxLength 64
      */
   publicKey?: string | null;
+  /**
+     * Compare-and-set guard for publicKey: the key currently registered for the account (null when none). Omitted, publicKey only registers a first key or re-sends the current one; replacing a different key without naming it is rejected with 409.
+     * @maxLength 64
+     */
+  previousPublicKey?: string | null;
+}
+
+export type PublicKeyConflictResponseCode = typeof PublicKeyConflictResponseCode[keyof typeof PublicKeyConflictResponseCode];
+
+
+export const PublicKeyConflictResponseCode = {
+  PUBLIC_KEY_CONFLICT: 'PUBLIC_KEY_CONFLICT',
+} as const;
+
+export interface PublicKeyConflictResponse {
+  error: string;
+  code: PublicKeyConflictResponseCode;
+  /** The public key the account currently holds */
+  publicKey?: string | null;
 }
 
 export interface Room {

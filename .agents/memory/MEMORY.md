@@ -31,10 +31,10 @@
 - [Generated drift diff rendering](generated-drift-diff.md) — the drift check renders its own bounded unified diff (no git/diff binaries); keep the caps and block-replacement fallback.
 - [Bash required-variable messages](bash-required-variable-messages.md) — avoid apostrophes inside `${name:?message}`; Bash can parse them as unmatched quotes.
 - [E2EE assistant boundary](e2ee-assistant-boundary.md) — server-side assistants cannot inspect encrypted room content without breaking the room’s confidentiality promise.
-- [E2EE key registration ordering](e2ee-key-registration-ordering.md) — do not join encrypted rooms until the current public key is confirmed by the server.
+- [E2EE key registration ordering](e2ee-key-registration-ordering.md) — join only after the server confirms the key; key writes are compare-and-set; resets take over explicitly.
 - [Realtime resource budgets](socket-resource-budgets.md) — bound admission, shared event budgets, fanout, and persistence before accepting realtime work.
 - [Expo Sentry wizard fallback](expo-sentry-wizard.md) — non-TTY wizard runs can exit after the banner without changes; verify diffs and honor Expo's SDK-compatible package range.
-- [Generated-client check backup safety](generated-check-backup-safety.md) — keep the backup when restoration is incomplete; simulate disk failures via a read-only file-in-directory (skipped as root).
+- [Generated-client check backup safety](generated-check-backup-safety.md) — keep the backup when restoration is incomplete; simulate disk failures via read-only paths (skipped as root).
 - [Native gate diagnostic runs](native-gate-diagnostic-runs.md) — any device override marks the whole run diagnostic-only; CI refuses it loudly; evidence requires run_mode=release-gate.
 - [Volatile tracked test results](volatile-tracked-test-results.md) — a committed Playwright run marker under artifacts/api-server can change during unrelated work; restore it before completing.
 - [Native evidence review record](native-evidence-review-record.md) — a missing human review is reported, not fatal (the CI gate runs before anyone can review); rejected or mismatched records fail.
@@ -42,7 +42,7 @@
 - [Expo Go native modules & preview 502s](expo-go-native-modules.md) — gate native SDK init outside Expo Go; orphan `expo start` blocks the port prompt; Go home screen = dropped launch.
 - [Expo Go secure-store keys](expo-go-native-modules.md) — expo-secure-store rejects `:` in key names on phones only; encode keys and keep the Jest mock enforcing the real pattern.
 - [Physical-device evidence tasks](physical-device-evidence.md) — no phones are reachable here; probe once, file a BLOCKED record per the docs procedure, then ask the user for device access.
-- [Stale node_modules after merge](physical-device-evidence.md) — Chat App Jest "Cannot find module '@babel/generator'" means node_modules lags the lockfile; run `pnpm install --frozen-lockfile --offline`.
+- [Stale node_modules after merge](physical-device-evidence.md) — Jest "Cannot find module '@babel/generator'" means node_modules lags the lockfile; reinstall frozen and offline.
 - [Preview device debugging](preview-device-debugging.md) — in-container probes bypass the public edge; use the opt-in Metro request log and check the live manifest date first.
 - [Room key hydration](room-key-hydration.md) — key-load promises must always settle; storage read failures become retryable load failures, never a hang or key replacement.
 - [Job summary untrusted text](job-summary-untrusted-text.md) — render PR-body text and contract findings in backtick-safe code spans in GitHub job summaries; never as raw Markdown.
