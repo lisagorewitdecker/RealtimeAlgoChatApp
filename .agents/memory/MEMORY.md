@@ -33,3 +33,4 @@
 - [E2EE key registration ordering](e2ee-key-registration-ordering.md) — do not join encrypted rooms until the current public key is confirmed by the server.
 - [Realtime resource budgets](socket-resource-budgets.md) — bound admission, shared event budgets, fanout, and persistence before accepting realtime work.
 - [Expo Sentry wizard fallback](expo-sentry-wizard.md) — non-TTY wizard runs can exit after the banner without changes; verify diffs and honor Expo's SDK-compatible package range.
+- [Generated-client check backup safety](generated-check-backup-safety.md) — keep the backup whenever restoration is incomplete; simulate disk failures with read-only file-in-directory, skipped as root.
