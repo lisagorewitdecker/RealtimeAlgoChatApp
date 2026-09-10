@@ -37,7 +37,6 @@
           "origin": "https://replit.com/"
         }
       ],
-      "@sentry/react-native/expo",
       "expo-font",
       "expo-web-browser"
     ],
