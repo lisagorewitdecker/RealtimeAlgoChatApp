@@ -89,7 +89,11 @@ function validateNativeIosMetadata({
   productName,
   expectedPermissionDescriptions,
 }) {
-  const displayName = requireNativeValue(metadata, "CFBundleDisplayName", "iOS");
+  const displayName = requireNativeValue(
+    metadata,
+    "CFBundleDisplayName",
+    "iOS",
+  );
   const bundleName = requireNativeValue(metadata, "CFBundleName", "iOS");
 
   if (displayName !== productName) {
@@ -324,9 +328,14 @@ function nativePermissionSummary({
   };
 }
 
+/**
+ * Renders the fragment the release workflow copies into its GitHub step
+ * summary. The candidate build ID is private release data, so it stays in the
+ * detailed report inside the uploaded evidence artifact and never appears
+ * here; the summary contract test rejects any fragment that carries it.
+ */
 export function formatNativeBrandingSummary({
   platform,
-  buildId,
   productName,
   status,
   metadata = {},
@@ -344,7 +353,7 @@ export function formatNativeBrandingSummary({
     `## ${platform === "ios" ? "iOS" : "Android"} native branding`,
     "",
     `- Status: **${status}**`,
-    `- Candidate build ID: \`${buildId}\``,
+    "- Candidate build ID: recorded in the uploaded evidence artifact (kept out of this summary)",
     `- Native label: \`${nativeLabelForPlatform(platform, metadata)}\``,
     `- ${permissionSummary.label}: **${permissionSummary.status}** (${permissionSummary.detail})`,
   ];
@@ -411,8 +420,7 @@ function runNativeValidation() {
   const summaryPath = path.join(resultsDir, "native-branding-summary.md");
   const expectedPermissionDescriptions = {
     camera: appMetadata?.expo?.ios?.infoPlist?.NSCameraUsageDescription,
-    microphone:
-      appMetadata?.expo?.ios?.infoPlist?.NSMicrophoneUsageDescription,
+    microphone: appMetadata?.expo?.ios?.infoPlist?.NSMicrophoneUsageDescription,
   };
   const expectedPermissions = appMetadata?.expo?.android?.permissions;
   let report;
@@ -440,7 +448,6 @@ function runNativeValidation() {
       summaryPath,
       formatNativeBrandingSummary({
         platform,
-        buildId,
         productName,
         status: "PASS",
         metadata,
@@ -470,7 +477,6 @@ function runNativeValidation() {
       summaryPath,
       formatNativeBrandingSummary({
         platform,
-        buildId,
         productName,
         status: "FAIL",
         metadata,

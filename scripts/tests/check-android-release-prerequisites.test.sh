@@ -249,8 +249,9 @@ missing_app_output="$(
 )"
 assert_contains \
   "$missing_app_output" \
-  "The release-candidate application is not installed for application ID com.example."
+  "The release-candidate application (NATIVE_SMOKE_APP_ID) is not installed on the connected Android device."
 assert_not_contains "$missing_app_output" "secret-value-must-not-print"
+assert_not_contains "$missing_app_output" "com.example"
 
 missing_output="$(
   missing_utilities="$test_root/missing"

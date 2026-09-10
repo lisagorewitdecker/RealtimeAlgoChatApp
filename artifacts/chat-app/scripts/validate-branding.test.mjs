@@ -191,7 +191,6 @@ test("rejects missing Android permission declarations", () => {
 test("formats an iOS native branding summary with permission-copy status", () => {
   const summary = formatNativeBrandingSummary({
     platform: "ios",
-    buildId: "ios-build",
     productName: "RealtimeAlgoChatApp Studio",
     status: "PASS",
     metadata: {
@@ -209,15 +208,37 @@ test("formats an iOS native branding summary with permission-copy status", () =>
   });
 
   assert.match(summary, /Status: \*\*PASS\*\*/);
-  assert.match(summary, /Candidate build ID: `ios-build`/);
+  assert.match(
+    summary,
+    /Candidate build ID: recorded in the uploaded evidence artifact \(kept out of this summary\)/,
+  );
   assert.match(summary, /Native label: `RealtimeAlgoChatApp Studio`/);
   assert.match(summary, /Permission copy: \*\*PASS\*\*/);
+});
+
+test("keeps the candidate build ID out of the step-summary fragment", () => {
+  const summary = formatNativeBrandingSummary({
+    platform: "ios",
+    productName: "RealtimeAlgoChatApp Studio",
+    status: "FAIL",
+    metadata: { CFBundleDisplayName: "Old App" },
+    expectedPermissionDescriptions: {},
+    error: new Error("Native iOS label mismatch."),
+    // Callers used to pass the build ID; the fragment must ignore it even if
+    // a future caller reintroduces the property.
+    buildId: "ios-secret-build-id",
+  });
+
+  assert.doesNotMatch(summary, /ios-secret-build-id/);
+  assert.match(
+    summary,
+    /Candidate build ID: recorded in the uploaded evidence artifact/,
+  );
 });
 
 test("formats a failed Android summary with the mismatched declaration", () => {
   const summary = formatNativeBrandingSummary({
     platform: "android",
-    buildId: "android-build",
     productName: "RealtimeAlgoChatApp Studio",
     status: "FAIL",
     metadata: {
@@ -235,6 +256,9 @@ test("formats a failed Android summary with the mismatched declaration", () => {
 
   assert.match(summary, /Status: \*\*FAIL\*\*/);
   assert.match(summary, /Permission declarations: \*\*FAIL\*\*/);
-  assert.match(summary, /mismatched field|missing: android\.permission\.RECORD_AUDIO/);
+  assert.match(
+    summary,
+    /mismatched field|missing: android\.permission\.RECORD_AUDIO/,
+  );
   assert.match(summary, /native-branding-check\.md/);
 });

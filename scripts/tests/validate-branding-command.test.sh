@@ -15,6 +15,16 @@ assert_contains() {
   fi
 }
 
+assert_not_contains() {
+  local file="$1"
+  local unexpected="$2"
+  if grep -Fq -- "$unexpected" "$file"; then
+    printf 'Expected %s not to contain: %s\n' "$file" "$unexpected" >&2
+    cat "$file" >&2
+    exit 1
+  fi
+}
+
 cd "$ROOT_DIR"
 
 pnpm --filter @workspace/chat-app run validate:branding
@@ -35,7 +45,12 @@ pnpm --filter @workspace/chat-app run validate:branding:native -- \
   --results-dir "$TEST_ROOT/ios-results"
 
 assert_contains "$TEST_ROOT/ios-results/native-branding-check.md" "- Status: **PASS**"
-assert_contains "$TEST_ROOT/ios-results/native-branding-summary.md" "Candidate build ID: \`ios-command-test\`"
+assert_contains "$TEST_ROOT/ios-results/native-branding-check.md" "Candidate build ID: \`ios-command-test\`"
+# The summary fragment is copied into the GitHub step summary, so the private
+# candidate build ID must stay in the detailed report only.
+assert_contains "$TEST_ROOT/ios-results/native-branding-summary.md" "- Status: **PASS**"
+assert_contains "$TEST_ROOT/ios-results/native-branding-summary.md" "Candidate build ID: recorded in the uploaded evidence artifact"
+assert_not_contains "$TEST_ROOT/ios-results/native-branding-summary.md" "ios-command-test"
 
 cat > "$TEST_ROOT/android-native-info.json" <<'JSON'
 {
@@ -54,7 +69,9 @@ if pnpm --filter @workspace/chat-app run validate:branding:native -- \
 fi
 
 assert_contains "$TEST_ROOT/android-results/native-branding-check.md" "- Status: **FAIL**"
-assert_contains "$TEST_ROOT/android-results/native-branding-summary.md" "Candidate build ID: \`android-command-test\`"
+assert_contains "$TEST_ROOT/android-results/native-branding-check.md" "Candidate build ID: \`android-command-test\`"
+assert_contains "$TEST_ROOT/android-results/native-branding-summary.md" "- Status: **FAIL**"
 assert_contains "$TEST_ROOT/android-results/native-branding-summary.md" "Mismatch:"
+assert_not_contains "$TEST_ROOT/android-results/native-branding-summary.md" "android-command-test"
 
 echo "Native branding command regression tests passed."
