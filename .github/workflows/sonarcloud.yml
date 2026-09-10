@@ -36,8 +36,9 @@ on:
   workflow_dispatch:
 
 permissions:
-  pull-requests: read # allows SonarCloud to decorate PRs with analysis results
-
+  contents: read
+  pull-requests: write # allows SonarCloud to decorate PRs with analysis results
+  security-events: write # allows uploading Code Scanning results
 jobs:
   Analysis:
     runs-on: ubuntu-latest
