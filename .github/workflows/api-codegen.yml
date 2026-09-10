@@ -33,6 +33,11 @@ jobs:
       - name: Verify generated API clients
         run: pnpm validate:api-codegen
 
+      # Breaking contract changes fail this step unless the pull request
+      # description declares both pieces of review evidence, each on its own line:
+      #   API_BREAKING_CHANGE_JUSTIFICATION: <why the existing contract must break>
+      #   API_BREAKING_CHANGE_MIGRATION_PLAN: <how existing consumers move to the new contract>
+      # An override that omits either line is rejected.
       - name: Check API contract compatibility
         env:
           API_BREAKING_CHANGE_PR_BODY: ${{ github.event.pull_request.body }}

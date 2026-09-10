@@ -8,6 +8,7 @@ _Replace the heading above with the project's name, and this line with one sente
 - `pnpm run typecheck` — full typecheck across all packages
 - `pnpm run build` — typecheck + build all packages
 - `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from the OpenAPI spec
+- `pnpm validate:api-compatibility` — fail on breaking OpenAPI changes vs. the target branch; an intentional break needs both `API_BREAKING_CHANGE_JUSTIFICATION: <reason>` and `API_BREAKING_CHANGE_MIGRATION_PLAN: <consumer migration>` lines in the PR description (CI rejects an override missing either)
 - `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
 - Required env: `DATABASE_URL` — Postgres connection string
 - Optional env: `SENTRY_DSN` — enables production error tracking and the `/api/healthz` uptime monitor in `artifacts/api-server` (see Gotchas)
