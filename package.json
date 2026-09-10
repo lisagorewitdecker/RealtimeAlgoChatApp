@@ -7,11 +7,19 @@
     "build": "pnpm run typecheck && pnpm -r --if-present run build",
     "typecheck:libs": "tsc --build",
     "typecheck": "pnpm run typecheck:libs && pnpm -r --filter \"./artifacts/**\" --filter \"./scripts\" --if-present run typecheck",
-    "test:unit": "node --test"
+    "validate:api-codegen": "bash -c 'if [ -f artifacts/api-spec/package.json ]; then pnpm --filter @workspace/api-spec run check-generated; else echo \"No artifacts/api-spec workspace present; skipping generated API client validation.\"; fi'",
+    "validate:api-compatibility": "bash -c 'if [ -f artifacts/api-spec/package.json ]; then node lib/api-spec/scripts/check-contract-compatibility.mjs; else echo \"No artifacts/api-spec workspace present; skipping API contract compatibility validation.\"; fi'",
+    "validate:native-large-text-evidence": "bash -c 'if [ -f scripts/check-native-large-text-evidence.sh ]; then bash scripts/check-native-large-text-evidence.sh; else echo \"No native large text evidence script present; skipping.\"; fi'",
+    "validate:mockup-clean": "pnpm --filter @workspace/mockup-sandbox run typecheck",
+    "test:unit": "pnpm -r --if-present run test"
   },
   "private": true,
   "devDependencies": {
-    "prettier": "^3.8.3",
-    "typescript": "~7.0.2"
+    "prettier": "^3.9.6",
+    "typescript": "~5.9.3"
+  },
+  "dependencies": {
+    "image-size": "link:vendor/image-size-secure",
+    "yaml": "^2.9.0"
   }
 }

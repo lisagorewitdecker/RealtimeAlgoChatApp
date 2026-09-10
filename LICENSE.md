@@ -1,6 +1,6 @@
 # MIT License
 
-Copyright (c) 2026 DevStudio contributors
+Copyright (c) 2026 RealtimeAlgoChatApp Studio contributors
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
