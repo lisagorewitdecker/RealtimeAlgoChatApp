@@ -147,6 +147,27 @@ The call page is checked twice:
   375×667 with 140% text, forced high contrast, and reduced motion. This keeps a
   React Native host regression from masking a call-surface regression.
 
+## Evidence completeness check
+
+Before reviewing or publishing a candidate, run:
+
+```sh
+pnpm run validate:native-large-text-evidence
+```
+
+The check validates both `test-results/native-large-text/ios/` and
+`test-results/native-large-text/android/`. Each platform must contain exactly
+one timestamped run directory with non-empty candidate-build, runner/device
+metadata, pass/fail, compiled native metadata, branding, and JUnit artifacts.
+It also requires at least eleven native screenshots and exactly two independent
+call-surface screenshots. A failed or blocked pass record, a non-PASS branding
+report, or an empty artifact blocks release review.
+
+`runner-check.txt` is host diagnostic evidence only. If it is the only file
+available for a platform, the check reports that the platform is blocked rather
+than treating the diagnostic as reviewed device evidence. Complete the run on
+the prepared platform runner and upload its timestamped result directory.
+
 ## Manual physical-device supplement
 
 The automated gate inspects the installed iOS `Info.plist` and compiled Android

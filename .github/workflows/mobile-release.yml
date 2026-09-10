@@ -407,14 +407,41 @@ jobs:
       - native-android
     runs-on: ubuntu-latest
     steps:
+      - name: Check out release candidate
+        uses: actions/checkout@v4
+
+      - name: Download iOS native smoke artifacts
+        if: ${{ always() }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: native-large-text-ios
+          path: test-results/native-large-text/ios
+
+      - name: Download Android native smoke artifacts
+        if: ${{ always() }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: native-large-text-android
+          path: test-results/native-large-text/android
+
+      - name: Validate native evidence completeness
+        id: evidence-completeness
+        if: ${{ always() }}
+        continue-on-error: true
+        run: bash scripts/check-native-large-text-evidence.sh
+
       - name: Block release unless both native checks pass
+        if: ${{ always() }}
         env:
           IOS_RESULT: ${{ needs.native-ios.result }}
           ANDROID_RESULT: ${{ needs.native-android.result }}
+          EVIDENCE_RESULT: ${{ steps.evidence-completeness.outcome }}
         run: |
           set -euo pipefail
-          if [[ "$IOS_RESULT" != "success" || "$ANDROID_RESULT" != "success" ]]; then
-            echo "Mobile release blocked: iOS=$IOS_RESULT Android=$ANDROID_RESULT." >&2
+          if [[ "$EVIDENCE_RESULT" != "success" || "$IOS_RESULT" != "success" || "$ANDROID_RESULT" != "success" ]]; then
+            echo "Mobile release blocked: evidence=$EVIDENCE_RESULT iOS=$IOS_RESULT Android=$ANDROID_RESULT." >&2
             exit 1
           fi
           echo "Mobile release accessibility gate passed on iOS and Android."
