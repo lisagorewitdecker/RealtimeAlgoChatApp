@@ -83,7 +83,7 @@ existing projects unless the user explicitly wants to override detection or
 the CLI asks for those values.
 
 If the directory is empty, ask the user which framework and package manager
-they want to use. If they have no preference, use Next.js and npm. Then
+they want to use. If they have no preference, use Expo and pnpm. Then
 scaffold with explicit framework and package manager options:
 
 ```bash
