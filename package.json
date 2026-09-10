@@ -6,12 +6,20 @@
     "preinstall": "sh -c 'rm -f package-lock.json yarn.lock; case \"$npm_config_user_agent\" in pnpm/*) ;; *) echo \"Use pnpm instead\" >&2; exit 1 ;; esac'",
     "build": "pnpm run typecheck && pnpm -r --if-present run build",
     "typecheck:libs": "tsc --build",
-    "typecheck": "pnpm run typecheck:libs && pnpm -r --filter \"./artifacts/**\" --filter \"./scripts\" --if-present run typecheck",
-    "test:unit": "node --test"
+    "typecheck": "pnpm run typecheck:libs && pnpm -r --filter \"./artifacts/**\" --filter \"./scripts\" --if-present run typecheck && pnpm --filter @workspace/api-server run typecheck:e2e",
+    "validate:api-codegen": "pnpm --filter @workspace/api-spec run check-generated",
+    "validate:api-compatibility": "node lib/api-spec/scripts/check-contract-compatibility.mjs",
+    "validate:native-large-text-evidence": "bash scripts/check-native-large-text-evidence.sh",
+    "validate:mockup-clean": "pnpm --filter @workspace/mockup-sandbox run typecheck:clean",
+    "test:unit": "node --test artifacts/api-server/tests/profileIdentity.test.ts && pnpm --filter @workspace/scripts run test:android-preflight && bash scripts/tests/check-ios-native-large-text-readiness.test.sh && bash scripts/tests/check-native-large-text-evidence.test.sh && bash scripts/tests/validate-branding-command.test.sh"
   },
   "private": true,
   "devDependencies": {
-    "prettier": "^3.8.3",
-    "typescript": "~7.0.2"
+    "prettier": "^3.9.6",
+    "typescript": "~5.9.3"
+  },
+  "dependencies": {
+    "image-size": "link:vendor/image-size-secure",
+    "yaml": "^2.9.0"
   }
 }
