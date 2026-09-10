@@ -120,6 +120,10 @@ The candidate build IDs are recorded in each smoke result directory so the
 tested candidate can be audited by the publish job:
 
 - `EAS_TOKEN` — EAS authentication token used only by the publish job
+- `SENTRY_AUTH_TOKEN` — a masked Sentry token with release-upload and
+  event-read access for organization `lisagorewitdecker-06`, project
+  `react-native`; store the same token in the EAS release build environment and
+  never use an `EXPO_PUBLIC_` name for it
 - `NATIVE_SMOKE_IOS_BUILD_ID` — EAS build ID of the iOS candidate installed on
   the prepared iPhone SE simulator
 - `NATIVE_SMOKE_ANDROID_BUILD_ID` — EAS build ID of the Android candidate
@@ -129,6 +133,20 @@ tested candidate can be audited by the publish job:
 - `NATIVE_SMOKE_EMAIL`
 - `NATIVE_SMOKE_PASSWORD`
 - `NATIVE_SMOKE_DISPLAY_NAME` (optional)
+- `NATIVE_SMOKE_IOS_SENTRY_RELEASE`
+- `NATIVE_SMOKE_IOS_SENTRY_DIST`
+- `NATIVE_SMOKE_ANDROID_SENTRY_RELEASE`
+- `NATIVE_SMOKE_ANDROID_SENTRY_DIST`
+
+Build each candidate with `SENTRY_DSN`, `SENTRY_AUTH_TOKEN`, `SENTRY_RELEASE`,
+and `SENTRY_DIST` in its EAS release environment. EAS supplies `EAS_BUILD_ID`;
+an equivalent prepared runner must supply `SENTRY_BUILD_ID`. The native build
+preflight fails before bundling when the upload credential, release identity,
+or candidate build identity is absent, automatic upload is disabled, or upload
+failures are configured as non-blocking. `SENTRY_RELEASE`, `SENTRY_DIST`, and
+the build ID are stamped into the JavaScript bundle, while the native Sentry
+upload scripts use the release and distribution. Copy those non-secret values
+into the matching GitHub environment entries above.
 
 The `Mobile release gate` job always evaluates both platform jobs and fails if
 either one fails. Configure that job as a required check for the mobile release
@@ -150,6 +168,17 @@ screen therefore runs with text size at **140%**, **High contrast** on, and
 **Reduced motion** on. Assertions require primary controls to be visible while
 keyboards are open.
 
+After the layout checks, the runner opens a route that is not linked from the
+normal application UI and submits one uniquely tagged, controlled JavaScript
+exception. The route does not crash the app and is blocked unless it is running
+inside a native candidate that passed the release preflight and the runner's
+build ID matches the ID stamped into that candidate. GitHub then uses the
+step-scoped `SENTRY_AUTH_TOKEN` to poll Sentry and requires the event to match
+the candidate build ID, platform, release, and distribution. The named
+controlled-probe function must appear as an in-app TypeScript or JavaScript
+frame with a line and column; another mapped frame or a minified bundle-only
+stack blocks release.
+
 Results are written to a unique run directory:
 
 `test-results/native-large-text/<platform>/<UTC timestamp>/`
@@ -158,12 +187,21 @@ Diagnostic-only iOS runs write to `test-results/native-large-text-diagnostic/`
 instead, so they never sit next to release evidence.
 
 The folder contains runner metadata, the candidate build ID, a pass/fail record,
-the compiled native metadata and `native-branding-check.md`, JUnit output,
-eleven native screenshots, and two independent call-surface screenshots. The
-branding report records the exact candidate build ID that supplied the
-inspected metadata. Treat a missing screenshot, failed visibility
-assertion, clipped-control geometry assertion, or keyboard-obscured primary
-action as a release blocker.
+the compiled native metadata, `native-branding-check.md`, and the concise
+`native-branding-summary.md` used in the GitHub job summary, both JUnit outputs,
+the controlled-error trigger record, sanitized
+`sentry-source-map-evidence.json`, eleven native screenshots, and two
+independent call-surface screenshots. The branding and Sentry reports record
+the exact candidate build ID that supplied the inspected evidence. Treat a
+missing artifact, failed visibility assertion, clipped-control geometry
+assertion, keyboard-obscured primary action, release mismatch, or unreadable
+stack as a release blocker.
+
+The iOS and Android jobs append the branding summary after uploading their
+artifact. It shows the check status, candidate build ID, native label, and
+permission-copy or permission-declaration result. If branding fails, the
+summary includes the mismatched field and links to the uploaded
+`native-branding-check.md` report; the report remains the detailed audit record.
 
 Review `runner-metadata.txt`, `pass-fail-record.txt`, `maestro-results.xml`,
 `native-branding-check.md`, and all screenshots as described in
@@ -189,11 +227,12 @@ pnpm run validate:native-large-text-evidence
 The check validates both `test-results/native-large-text/ios/` and
 `test-results/native-large-text/android/`. Each platform must contain exactly
 one timestamped run directory with non-empty candidate-build, runner/device
-metadata, pass/fail, compiled native metadata, branding, and JUnit artifacts.
-It also requires at least eleven native screenshots and exactly two independent
-call-surface screenshots. A failed or blocked pass record, a pass record that
-does not declare `run_mode=release-gate` (including diagnostic-only iOS runs), a
-non-PASS branding report, or an empty artifact blocks release review.
+metadata, pass/fail, compiled native metadata, branding, both JUnit artifacts,
+and candidate-bound Sentry source-map evidence. It also requires at least
+eleven native screenshots and exactly two independent call-surface screenshots.
+A failed or blocked pass record, a pass record that does not declare
+`run_mode=release-gate` (including diagnostic-only iOS runs), a non-PASS
+branding or Sentry report, or an empty artifact blocks release review.
 
 `runner-check.txt` is host diagnostic evidence only. If it is the only file
 available for a platform, the check reports that the platform is blocked rather
