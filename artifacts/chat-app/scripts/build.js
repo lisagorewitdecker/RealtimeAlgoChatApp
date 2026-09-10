@@ -29,6 +29,9 @@ function findWorkspaceRoot(startDir) {
 const workspaceRoot = findWorkspaceRoot(projectRoot);
 const basePath = (process.env.BASE_PATH || "/").replace(/\/+$/, "");
 const metroPort = Number(process.env.METRO_PORT || "8082");
+const PREFLIGHT_ONLY_FLAG = "--preflight-only";
+const NATIVE_BUILD_PREFLIGHT_FLAG = "--native-build-preflight";
+const RELEASE_EVIDENCE_MARKER = "SENTRY_RELEASE_PREFLIGHT_PASSED_V1";
 
 if (!Number.isInteger(metroPort) || metroPort <= 0) {
   throw new Error(`Invalid METRO_PORT value: "${process.env.METRO_PORT}"`);
@@ -44,6 +47,54 @@ function exitWithError(message) {
     metroProcess.kill();
   }
   process.exit(1);
+}
+
+function getSentryDsn(env = process.env) {
+  for (const key of ["EXPO_PUBLIC_SENTRY_DSN", "SENTRY_DSN"]) {
+    const value = env[key];
+    if (typeof value === "string" && value.trim()) {
+      return value;
+    }
+  }
+
+  return undefined;
+}
+
+function assertReleaseCrashReportingConfigured(env = process.env) {
+  if (!getSentryDsn(env)) {
+    throw new Error(
+      "Mobile release build requires SENTRY_DSN or EXPO_PUBLIC_SENTRY_DSN. " +
+        "Configure one in the mobile-release environment before bundling.",
+    );
+  }
+}
+
+function prepareNativeReleaseBuild(
+  env = process.env,
+  outputRoot = env.MOBILE_RELEASE_PREFLIGHT_OUTPUT_ROOT || projectRoot,
+) {
+  assertReleaseCrashReportingConfigured(env);
+
+  const evidencePath = path.join(
+    outputRoot,
+    "constants",
+    "releaseCrashReporting.ts",
+  );
+  fs.mkdirSync(path.dirname(evidencePath), { recursive: true });
+  fs.writeFileSync(
+    evidencePath,
+    `export const RELEASE_CRASH_REPORTING_BUILD_EVIDENCE = "${RELEASE_EVIDENCE_MARKER}";\n`,
+    { mode: 0o600 },
+  );
+
+  if (!env.EXPO_PUBLIC_SENTRY_DSN?.trim()) {
+    const envPath = path.join(outputRoot, ".env.local");
+    fs.writeFileSync(
+      envPath,
+      `EXPO_PUBLIC_SENTRY_DSN=${JSON.stringify(getSentryDsn(env))}\n`,
+      { mode: 0o600 },
+    );
+  }
 }
 
 function setupSignalHandlers() {
@@ -189,8 +240,7 @@ async function startMetro(expoPublicDomain, expoPublicReplId) {
   const clerkPublishableKey =
     process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY ||
     process.env.VITE_CLERK_PUBLISHABLE_KEY;
-  const sentryDsn =
-    process.env.EXPO_PUBLIC_SENTRY_DSN || process.env.SENTRY_DSN;
+  const sentryDsn = getSentryDsn();
   const env = {
     ...process.env,
     ...(clerkPublishableKey
@@ -633,10 +683,40 @@ async function main() {
   process.exit(0);
 }
 
-main().catch((error) => {
-  console.error("Build failed:", error.message);
-  if (metroProcess) {
-    metroProcess.kill();
+async function run() {
+  assertReleaseCrashReportingConfigured();
+
+  if (process.argv.includes(NATIVE_BUILD_PREFLIGHT_FLAG)) {
+    prepareNativeReleaseBuild();
+    console.log(
+      "Native mobile release crash reporting preflight passed: SENTRY_DSN or EXPO_PUBLIC_SENTRY_DSN is configured.",
+    );
+    return;
   }
-  process.exit(1);
-});
+
+  if (process.argv.includes(PREFLIGHT_ONLY_FLAG)) {
+    console.log(
+      "Mobile release crash reporting preflight passed: SENTRY_DSN or EXPO_PUBLIC_SENTRY_DSN is configured.",
+    );
+    return;
+  }
+
+  await main();
+}
+
+if (require.main === module) {
+  run().catch((error) => {
+    console.error("Build failed:", error.message);
+    if (metroProcess) {
+      metroProcess.kill();
+    }
+    process.exit(1);
+  });
+}
+
+module.exports = {
+  assertReleaseCrashReportingConfigured,
+  getSentryDsn,
+  prepareNativeReleaseBuild,
+  RELEASE_EVIDENCE_MARKER,
+};

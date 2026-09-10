@@ -139,6 +139,11 @@ jobs:
             echo "The release candidate is not installed on the prepared iOS simulator." >&2
             exit 2
           fi
+          if ! LC_ALL=C grep -aR -Fq "SENTRY_RELEASE_PREFLIGHT_PASSED_V1" "$app_container"; then
+            echo "The installed iOS candidate does not contain crash-reporting preflight evidence. Rebuild it with SENTRY_DSN or EXPO_PUBLIC_SENTRY_DSN configured." >&2
+            exit 2
+          fi
+          echo "Verified crash-reporting preflight evidence in the installed iOS candidate."
           metadata_path="$NATIVE_SMOKE_RESULTS_DIR/native-info.json"
           plutil -convert json -o "$metadata_path" "$app_container/Info.plist"
           pnpm --filter @workspace/chat-app run validate:branding:native -- \
@@ -381,6 +386,14 @@ jobs:
           fi
           apk_path="$RUNNER_TEMP/realtime-algo-chat-app.apk"
           adb pull "$apk_source" "$apk_path"
+          apk_extract_dir="$RUNNER_TEMP/realtime-algo-chat-app-extracted"
+          rm -rf "$apk_extract_dir"
+          unzip -q "$apk_path" -d "$apk_extract_dir"
+          if ! LC_ALL=C grep -aR -Fq "SENTRY_RELEASE_PREFLIGHT_PASSED_V1" "$apk_extract_dir"; then
+            echo "The installed Android candidate does not contain crash-reporting preflight evidence. Rebuild it with SENTRY_DSN or EXPO_PUBLIC_SENTRY_DSN configured." >&2
+            exit 2
+          fi
+          echo "Verified crash-reporting preflight evidence in the installed Android candidate."
           badging_path="$NATIVE_SMOKE_RESULTS_DIR/android-badging.txt"
           "$aapt2_path" dump badging "$apk_path" > "$badging_path"
           metadata_path="$NATIVE_SMOKE_RESULTS_DIR/native-info.json"
