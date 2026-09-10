@@ -10,7 +10,7 @@ This project does not publish versioned releases at this time. Security fixes ar
 
 ## Reporting a Vulnerability
 
-To report a security vulnerability, please use [GitHub Security Advisories](https://github.com/lisagorewitdecker/Realtime-algochat/security/advisories/new) to disclose it privately.
+To report a security vulnerability, please use [GitHub Security Advisories](../../security/advisories/new) to disclose it privately.
 
 Please include the following in your report:
 - A description of the vulnerability and its potential impact
