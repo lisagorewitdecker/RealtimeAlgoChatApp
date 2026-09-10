@@ -1,12 +1,16 @@
 import * as Sentry from "@sentry/node";
 import { isMainThread } from "node:worker_threads";
-import { logger } from "./lib/logger";
 
-const dsn = process.env["SENTRY_DSN"];
-
-// Node workers inherit --import through execArgv. Initialize once in the
-// server's main thread rather than once per pino transport worker.
+// Node workers inherit --import through execArgv, so this module is evaluated
+// again inside every pino transport worker. Nothing may run off the main
+// thread: a static logger import here would build another transport-backed
+// logger in each worker, which spawns another transport worker, which
+// evaluates this module again — an unbounded chain of threads that grows until
+// the process is killed. The logger is therefore loaded only after the check.
 if (isMainThread) {
+  const { logger } = await import("./lib/logger");
+  const dsn = process.env["SENTRY_DSN"];
+
   if (dsn) {
     Sentry.init({
       dsn,
