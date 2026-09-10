@@ -8,6 +8,7 @@ import {
   validatePermissionDescriptions,
   validateBrandingValues,
   validateNativeArtifactMetadata,
+  formatNativeBrandingSummary,
 } from "./validate-branding.mjs";
 
 const brandingPath = new URL("../constants/branding.ts", import.meta.url);
@@ -185,4 +186,55 @@ test("rejects missing Android permission declarations", () => {
       }),
     /compiled APK is missing android\.permission\.RECORD_AUDIO/,
   );
+});
+
+test("formats an iOS native branding summary with permission-copy status", () => {
+  const summary = formatNativeBrandingSummary({
+    platform: "ios",
+    buildId: "ios-build",
+    productName: "RealtimeAlgoChatApp Studio",
+    status: "PASS",
+    metadata: {
+      CFBundleDisplayName: "RealtimeAlgoChatApp Studio",
+      NSCameraUsageDescription:
+        "RealtimeAlgoChatApp Studio uses your camera for video calls.",
+      NSMicrophoneUsageDescription:
+        "RealtimeAlgoChatApp Studio uses your microphone for voice and video calls.",
+    },
+    expectedPermissionDescriptions: {
+      camera: "RealtimeAlgoChatApp Studio uses your camera for video calls.",
+      microphone:
+        "RealtimeAlgoChatApp Studio uses your microphone for voice and video calls.",
+    },
+  });
+
+  assert.match(summary, /Status: \*\*PASS\*\*/);
+  assert.match(summary, /Candidate build ID: `ios-build`/);
+  assert.match(summary, /Native label: `RealtimeAlgoChatApp Studio`/);
+  assert.match(summary, /Permission copy: \*\*PASS\*\*/);
+});
+
+test("formats a failed Android summary with the mismatched declaration", () => {
+  const summary = formatNativeBrandingSummary({
+    platform: "android",
+    buildId: "android-build",
+    productName: "RealtimeAlgoChatApp Studio",
+    status: "FAIL",
+    metadata: {
+      applicationLabel: "Old App",
+      permissions: ["android.permission.CAMERA"],
+    },
+    expectedPermissions: [
+      "android.permission.CAMERA",
+      "android.permission.RECORD_AUDIO",
+    ],
+    error: new Error(
+      'Native Android label mismatch: expected applicationLabel to be "RealtimeAlgoChatApp Studio", received "Old App".',
+    ),
+  });
+
+  assert.match(summary, /Status: \*\*FAIL\*\*/);
+  assert.match(summary, /Permission declarations: \*\*FAIL\*\*/);
+  assert.match(summary, /mismatched field|missing: android\.permission\.RECORD_AUDIO/);
+  assert.match(summary, /native-branding-check\.md/);
 });

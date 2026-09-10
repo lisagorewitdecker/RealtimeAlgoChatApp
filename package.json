@@ -9,8 +9,9 @@
     "typecheck": "pnpm run typecheck:libs && pnpm -r --filter \"./artifacts/**\" --filter \"./scripts\" --if-present run typecheck && pnpm --filter @workspace/api-server run typecheck:e2e",
     "validate:api-codegen": "pnpm --filter @workspace/api-spec run check-generated",
     "validate:api-compatibility": "node lib/api-spec/scripts/check-contract-compatibility.mjs",
+    "validate:native-large-text-evidence": "bash scripts/check-native-large-text-evidence.sh",
     "validate:mockup-clean": "pnpm --filter @workspace/mockup-sandbox run typecheck:clean",
-    "test:unit": "node --test artifacts/api-server/tests/profileIdentity.test.ts && pnpm --filter @workspace/scripts run test:android-preflight && bash scripts/tests/check-ios-native-large-text-readiness.test.sh"
+    "test:unit": "node --test artifacts/api-server/tests/profileIdentity.test.ts && pnpm --filter @workspace/scripts run test:android-preflight && bash scripts/tests/check-ios-native-large-text-readiness.test.sh && bash scripts/tests/check-native-large-text-evidence.test.sh && bash scripts/tests/validate-branding-command.test.sh"
   },
   "private": true,
   "devDependencies": {

@@ -9,6 +9,8 @@
     "serve": "node server/serve.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "jest --passWithNoTests --runInBand",
+    "validate:branding": "node scripts/validate-branding.mjs",
+    "validate:branding:native": "node scripts/validate-branding.mjs --native",
     "test:native-large-text": "bash e2e/native-large-text/run.sh"
   },
   "jest": {

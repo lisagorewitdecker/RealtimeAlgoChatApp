@@ -265,6 +265,101 @@ function nativeBrandingReport({
   return `${lines.join("\n")}\n`;
 }
 
+function nativeLabelForPlatform(platform, metadata) {
+  const label =
+    platform === "ios"
+      ? metadata?.CFBundleDisplayName
+      : metadata?.applicationLabel;
+  return typeof label === "string" && label.length > 0 ? label : "Unavailable";
+}
+
+function nativePermissionSummary({
+  platform,
+  metadata,
+  expectedPermissionDescriptions,
+  expectedPermissions,
+}) {
+  if (platform === "ios") {
+    const fields = [
+      [
+        "NSCameraUsageDescription",
+        metadata?.NSCameraUsageDescription,
+        expectedPermissionDescriptions?.camera,
+      ],
+      [
+        "NSMicrophoneUsageDescription",
+        metadata?.NSMicrophoneUsageDescription,
+        expectedPermissionDescriptions?.microphone,
+      ],
+    ];
+    const mismatches = fields
+      .filter(([, actual, expected]) => actual !== expected)
+      .map(([field]) => field);
+    return {
+      label: "Permission copy",
+      status: mismatches.length === 0 ? "PASS" : "FAIL",
+      detail:
+        mismatches.length === 0
+          ? "camera and microphone"
+          : `mismatched field: ${mismatches.join(", ")}`,
+    };
+  }
+
+  const actualPermissions = Array.isArray(metadata?.permissions)
+    ? metadata.permissions
+    : [];
+  const requiredPermissions = Array.isArray(expectedPermissions)
+    ? expectedPermissions
+    : [];
+  const missingPermissions = requiredPermissions.filter(
+    (permission) => !actualPermissions.includes(permission),
+  );
+  return {
+    label: "Permission declarations",
+    status: missingPermissions.length === 0 ? "PASS" : "FAIL",
+    detail:
+      missingPermissions.length === 0
+        ? requiredPermissions.join(", ")
+        : `missing: ${missingPermissions.join(", ")}`,
+  };
+}
+
+export function formatNativeBrandingSummary({
+  platform,
+  buildId,
+  productName,
+  status,
+  metadata = {},
+  expectedPermissionDescriptions,
+  expectedPermissions,
+  error,
+}) {
+  const permissionSummary = nativePermissionSummary({
+    platform,
+    metadata,
+    expectedPermissionDescriptions,
+    expectedPermissions,
+  });
+  const lines = [
+    `## ${platform === "ios" ? "iOS" : "Android"} native branding`,
+    "",
+    `- Status: **${status}**`,
+    `- Candidate build ID: \`${buildId}\``,
+    `- Native label: \`${nativeLabelForPlatform(platform, metadata)}\``,
+    `- ${permissionSummary.label}: **${permissionSummary.status}** (${permissionSummary.detail})`,
+  ];
+
+  if (error) {
+    lines.push(`- Mismatch: \`${error.message}\``);
+  }
+
+  lines.push(
+    "- Detailed report: [native-branding-check.md](__NATIVE_BRANDING_REPORT_URL__)",
+    "",
+  );
+  return `${lines.join("\n")}\n`;
+}
+
 function parseNativeArguments(argv) {
   const argumentsByName = new Map();
   for (let index = 0; index < argv.length; index += 1) {
@@ -313,6 +408,13 @@ function runNativeValidation() {
     appMetadataSource,
   });
   const reportPath = path.join(resultsDir, "native-branding-check.md");
+  const summaryPath = path.join(resultsDir, "native-branding-summary.md");
+  const expectedPermissionDescriptions = {
+    camera: appMetadata?.expo?.ios?.infoPlist?.NSCameraUsageDescription,
+    microphone:
+      appMetadata?.expo?.ios?.infoPlist?.NSMicrophoneUsageDescription,
+  };
+  const expectedPermissions = appMetadata?.expo?.android?.permissions;
   let report;
 
   try {
@@ -321,12 +423,8 @@ function runNativeValidation() {
       platform,
       metadata,
       productName,
-      expectedPermissionDescriptions: {
-        camera: appMetadata?.expo?.ios?.infoPlist?.NSCameraUsageDescription,
-        microphone:
-          appMetadata?.expo?.ios?.infoPlist?.NSMicrophoneUsageDescription,
-      },
-      expectedPermissions: appMetadata?.expo?.android?.permissions,
+      expectedPermissionDescriptions,
+      expectedPermissions,
     });
     report = nativeBrandingReport({
       platform,
@@ -338,10 +436,26 @@ function runNativeValidation() {
     });
     mkdirSync(resultsDir, { recursive: true });
     writeFileSync(reportPath, report);
-    console.log(
-      `Native ${platform} branding matches: ${productName} (build ${buildId})`,
+    writeFileSync(
+      summaryPath,
+      formatNativeBrandingSummary({
+        platform,
+        buildId,
+        productName,
+        status: "PASS",
+        metadata,
+        expectedPermissionDescriptions,
+        expectedPermissions,
+      }),
     );
+    console.log(`Native ${platform} branding matches: ${productName}`);
   } catch (error) {
+    let metadata = {};
+    try {
+      metadata = JSON.parse(readFileSync(metadataPath, "utf8"));
+    } catch {
+      // The detailed report contains the metadata parsing failure.
+    }
     report = nativeBrandingReport({
       platform,
       buildId,
@@ -352,6 +466,19 @@ function runNativeValidation() {
     });
     mkdirSync(resultsDir, { recursive: true });
     writeFileSync(reportPath, report);
+    writeFileSync(
+      summaryPath,
+      formatNativeBrandingSummary({
+        platform,
+        buildId,
+        productName,
+        status: "FAIL",
+        metadata,
+        expectedPermissionDescriptions,
+        expectedPermissions,
+        error,
+      }),
+    );
     throw error;
   }
 }

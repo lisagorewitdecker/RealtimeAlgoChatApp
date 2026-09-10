@@ -129,12 +129,19 @@ Results are written to a unique run directory:
 `test-results/native-large-text/<platform>/<UTC timestamp>/`
 
 The folder contains runner metadata, the candidate build ID, a pass/fail record,
-the compiled native metadata and `native-branding-check.md`, JUnit output,
+the compiled native metadata, `native-branding-check.md`, and the concise
+`native-branding-summary.md` used in the GitHub job summary, JUnit output,
 eleven native screenshots, and two independent call-surface screenshots. The
 branding report records the exact candidate build ID that supplied the
 inspected metadata. Treat a missing screenshot, failed visibility
 assertion, clipped-control geometry assertion, or keyboard-obscured primary
 action as a release blocker.
+
+The iOS and Android jobs append the branding summary after uploading their
+artifact. It shows the check status, candidate build ID, native label, and
+permission-copy or permission-declaration result. If branding fails, the
+summary includes the mismatched field and links to the uploaded
+`native-branding-check.md` report; the report remains the detailed audit record.
 
 Review `runner-metadata.txt`, `pass-fail-record.txt`, `maestro-results.xml`, and
 `native-branding-check.md`, and all screenshots before changing the Android section of
@@ -146,6 +153,27 @@ The call page is checked twice:
 - A Playwright layout contract renders the call HTML by itself at 320×568 and
   375×667 with 140% text, forced high contrast, and reduced motion. This keeps a
   React Native host regression from masking a call-surface regression.
+
+## Evidence completeness check
+
+Before reviewing or publishing a candidate, run:
+
+```sh
+pnpm run validate:native-large-text-evidence
+```
+
+The check validates both `test-results/native-large-text/ios/` and
+`test-results/native-large-text/android/`. Each platform must contain exactly
+one timestamped run directory with non-empty candidate-build, runner/device
+metadata, pass/fail, compiled native metadata, branding, and JUnit artifacts.
+It also requires at least eleven native screenshots and exactly two independent
+call-surface screenshots. A failed or blocked pass record, a non-PASS branding
+report, or an empty artifact blocks release review.
+
+`runner-check.txt` is host diagnostic evidence only. If it is the only file
+available for a platform, the check reports that the platform is blocked rather
+than treating the diagnostic as reviewed device evidence. Complete the run on
+the prepared platform runner and upload its timestamped result directory.
 
 ## Manual physical-device supplement
 
