@@ -213,7 +213,7 @@ Add to global CSS:
 - Next.js proxy matchers include `'/__clerk/:path*'` after
   `'/(api|trpc)(.*)'`
 - Never expose `CLERK_SECRET_KEY` in client code
-- Use `@clerk/nextjs`, not `@clerk/clerk-react`
+- Use the framework-appropriate Clerk SDK (this repo: `@clerk/expo` for the Expo client), not `@clerk/clerk-react` unless you're building a plain React web app.
 - Do not read or print existing environment variable files; ask the user
   for any missing non-sensitive configuration
 
