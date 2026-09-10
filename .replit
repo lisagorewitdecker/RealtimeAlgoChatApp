@@ -69,7 +69,7 @@ BASE_PATH = "/__mockup"
 
 [[workflows.workflow]]
 name = "Project"
-mode = "sequential"
+mode = "parallel"
 author = "agent"
 
 [[workflows.workflow.tasks]]
@@ -100,12 +100,12 @@ args = "mockup-clean-typecheck"
 name = "typecheck"
 author = "agent"
 
-[[workflows.workflow.tasks]]
-task = "shell.exec"
-args = "pnpm run typecheck"
-
 [workflows.workflow.metadata]
 isValidation = true
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "flock -w 900 /tmp/replit-heavy-validation.lock pnpm run typecheck"
 
 [[workflows.workflow]]
 name = "unit-tests"
@@ -122,45 +122,45 @@ isValidation = true
 name = "api-server-test"
 author = "agent"
 
-[[workflows.workflow.tasks]]
-task = "shell.exec"
-args = "pnpm --filter @workspace/api-server run test"
-
 [workflows.workflow.metadata]
 isValidation = true
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "flock -w 900 /tmp/replit-heavy-validation.lock pnpm --filter @workspace/api-server run test"
 
 [[workflows.workflow]]
 name = "chat-app-test"
 author = "agent"
 
-[[workflows.workflow.tasks]]
-task = "shell.exec"
-args = "pnpm --filter @workspace/chat-app run test"
-
 [workflows.workflow.metadata]
 isValidation = true
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "flock -w 900 /tmp/replit-heavy-validation.lock pnpm --filter @workspace/chat-app run test"
 
 [[workflows.workflow]]
 name = "banned-room-e2e"
 author = "agent"
 
-[[workflows.workflow.tasks]]
-task = "shell.exec"
-args = "E2E_CHAT_URL=https://$REPLIT_EXPO_DEV_DOMAIN E2E_API_URL=https://$REPLIT_DEV_DOMAIN pnpm --filter @workspace/api-server run test:e2e:banned-room"
-
 [workflows.workflow.metadata]
 isValidation = true
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "E2E_CHAT_URL=https://$REPLIT_EXPO_DEV_DOMAIN E2E_API_URL=https://$REPLIT_DEV_DOMAIN flock -w 900 /tmp/replit-heavy-validation.lock pnpm --filter @workspace/api-server run test:e2e:banned-room"
 
 [[workflows.workflow]]
 name = "mockup-clean-typecheck"
 author = "agent"
 
-[[workflows.workflow.tasks]]
-task = "shell.exec"
-args = "pnpm run validate:mockup-clean"
-
 [workflows.workflow.metadata]
 isValidation = true
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "flock -w 900 /tmp/replit-heavy-validation.lock pnpm run validate:mockup-clean"
 
 [agent]
 stack = "PNPM_WORKSPACE"
@@ -179,3 +179,5 @@ packages = ["glib", "nss", "nspr", "atk", "at-spi2-atk", "dbus", "xorg.libX11", 
 [userenv.shared]
 ADMIN_USER_IDS = ""
 EXPO_PUBLIC_ADMIN_USER_IDS = ""
+
+[userenv.development]

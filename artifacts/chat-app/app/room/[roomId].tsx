@@ -143,7 +143,14 @@ export default function RoomScreen() {
 
   useEffect(() => {
     let cancelled = false;
-    const loading = loadRoomKey(roomId);
+    // The join below waits on this promise, so it must always settle: a
+    // rejected hydration would otherwise leave the room on "Opening room…".
+    const loading = loadRoomKey(roomId).catch((error: unknown) => {
+      console.warn(
+        "Room key hydration failed",
+        error instanceof Error ? error.message : error,
+      );
+    });
     roomKeyLoadRef.current = loading;
     void loading.then(() => {
       if (!cancelled) setHasRoomKey(!!getRoomKey(roomId));
@@ -479,6 +486,7 @@ export default function RoomScreen() {
   }
 
   if (roomKeyPersistenceFailure) {
+    const isLoadFailure = roomKeyPersistenceFailure.kind === "load";
     return (
       <View
         testID="room-key-storage-warning"
@@ -497,7 +505,9 @@ export default function RoomScreen() {
           accessibilityRole="header"
           style={[styles.blockedTitle, { color: colors.foreground }]}
         >
-          Encryption key not saved
+          {isLoadFailure
+            ? "Saved encryption key could not be read"
+            : "Encryption key not saved"}
         </Text>
         <Text style={[styles.blockedDescription, { color: colors.mutedForeground }]}>
           {roomKeyPersistenceFailure.message}
@@ -505,13 +515,21 @@ export default function RoomScreen() {
         <TouchableOpacity
           testID="retry-room-key-save-button"
           accessibilityRole="button"
-          accessibilityLabel="Retry saving room encryption key"
+          accessibilityLabel={
+            isLoadFailure
+              ? "Retry reading room encryption key"
+              : "Retry saving room encryption key"
+          }
           disabled={retryingRoomKey}
           onPress={() => void retrySavingRoomKey()}
           style={[styles.keyWarningButton, { borderColor: colors.destructive }]}
         >
           <Text style={[styles.keyWarningButtonText, { color: colors.destructive }]}>
-            {retryingRoomKey ? "Retrying…" : "Retry saving key"}
+            {retryingRoomKey
+              ? "Retrying…"
+              : isLoadFailure
+                ? "Retry reading key"
+                : "Retry saving key"}
           </Text>
         </TouchableOpacity>
       </View>

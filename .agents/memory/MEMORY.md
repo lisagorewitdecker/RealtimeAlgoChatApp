@@ -21,7 +21,7 @@
 - [Image-size remediation](image-size-remediation.md) — Metro’s image parser had unpatched high advisories, so it is locally replaced with a safe compatible subset.
 - [Clerk token effect stability](clerk-token-effect-stability.md) — keep Expo Clerk token callbacks out of stateful loading-effect dependencies to prevent request storms.
 - [Cryptocurrency boundary](cryptocurrency-boundary.md) — do not add cryptocurrency payments or wallet features; preserve cryptographic E2EE separately.
-- [Validation workflow concurrency](validation-workflow-concurrency.md) — run heavy API, Chat, and browser checks sequentially to avoid resource-starvation timeouts.
+- [Validation workflow concurrency](validation-workflow-concurrency.md) — completion validation launches every check at once; heavy commands stay behind the shared flock prefix.
 - [Artifact cold-start readiness](artifact-startup-after-pnpm-pruning.md) — open the port before async asset preloading; bypassing the package manager alone is insufficient.
 - [Mobile release browser validation](mobile-release-browser-validation.md) — proxied E2E flows need a healthy, freshly served Expo frontend and API pair.
 - [Node preload worker inheritance](node-preload-worker-inheritance.md) — `--import` preloads also run in worker threads; guard process-wide initialization to the main thread.
@@ -37,3 +37,10 @@
 - [Native gate diagnostic runs](native-gate-diagnostic-runs.md) — any device override marks the whole run diagnostic-only; CI refuses it loudly; evidence requires run_mode=release-gate.
 - [Volatile tracked test results](volatile-tracked-test-results.md) — a committed Playwright run marker under artifacts/api-server can change during unrelated work; restore it before completing.
 - [Native evidence review record](native-evidence-review-record.md) — a missing human review is reported, not fatal, because the CI gate runs before anyone can review; rejected or mismatched records fail.
+- [Candidate-bound release evidence](candidate-bound-release-evidence.md) — checks for prebuilt mobile candidates must verify evidence inside each binary, not current release-time secrets.
+- [Expo Go native modules & preview 502s](expo-go-native-modules.md) — gate native SDK init outside Expo Go; orphan `expo start` blocks the port prompt; Go home screen = dropped launch.
+- [Expo Go secure-store keys](expo-go-native-modules.md) — expo-secure-store rejects `:` in key names on phones only; encode keys and keep the Jest mock enforcing the real pattern.
+- [Physical-device evidence tasks](physical-device-evidence.md) — no phones are reachable here; probe once, file a BLOCKED record per the docs procedure, then ask the user for device access instead of re-probing.
+- [Stale node_modules after merge](physical-device-evidence.md) — Chat App Jest "Cannot find module '@babel/generator'" means node_modules lags the lockfile; `pnpm install --frozen-lockfile --offline` fixes it.
+- [Preview device debugging](preview-device-debugging.md) — in-container probes bypass the public edge; use the opt-in Metro request log and check the live manifest date first.
+- [Room key hydration](room-key-hydration.md) — key-load promises must always settle; storage read failures become retryable load failures, never a hang or key replacement.

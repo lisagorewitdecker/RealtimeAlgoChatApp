@@ -1,0 +1,24 @@
+Probe recorded (UTC): 20260910T165152Z
+Workspace: Linux x86_64 (Replit Linux container)
+Source revision: dddebef13472c705888d52d5dac68cb0f01ec68b
+
+Device/runner tooling:
+  adb: missing
+  sdkmanager: missing
+  avdmanager: missing
+  emulator: missing
+  java: missing
+  maestro: missing
+  xcrun: missing
+  xcodebuild: missing
+  ios-deploy: missing
+  idevice_id: missing
+  ideviceinstaller: missing
+  eas: missing
+
+Android SDK environment: ANDROID_HOME=unset ANDROID_SDK_ROOT=unset
+USB bus (/dev/bus/usb): absent
+Expo Go devices that reached this dev server (artifacts/chat-app/.expo/devices.json): 0
+EAS project configuration (artifacts/chat-app/eas.json): absent
+Release candidate identifiers (NATIVE_SMOKE_IOS_BUILD_ID / NATIVE_SMOKE_ANDROID_BUILD_ID / NATIVE_SMOKE_*_APP_ID): not set in this workspace
+Dedicated smoke/test account values (NATIVE_SMOKE_EMAIL / NATIVE_SMOKE_PASSWORD): not set in this workspace

@@ -86,6 +86,9 @@ validate_platform() {
   check_required_file "$platform" "$run_dir" "native-info.json" "compiled native metadata"
   check_required_file "$platform" "$run_dir" "native-branding-check.md" "native branding report"
   check_required_file "$platform" "$run_dir" "maestro-results.xml" "JUnit result"
+  check_required_file "$platform" "$run_dir" "sentry-maestro-results.xml" "controlled Sentry probe JUnit result"
+  check_required_file "$platform" "$run_dir" "sentry-trigger.txt" "controlled Sentry probe metadata"
+  check_required_file "$platform" "$run_dir" "sentry-source-map-evidence.json" "Sentry source-map evidence"
 
   if [[ -s "$run_dir/pass-fail-record.txt" ]] &&
     ! grep -Eq '^status=PASS[[:space:]]*$' "$run_dir/pass-fail-record.txt"; then
@@ -112,6 +115,11 @@ validate_platform() {
     issue "$platform" "The JUnit result at ${run_dir}/maestro-results.xml is not a recognizable testsuite report. Upload the complete Maestro JUnit output."
   fi
 
+  if [[ -s "$run_dir/sentry-maestro-results.xml" ]] &&
+    ! grep -Eq '<testsuite([[:space:]>])' "$run_dir/sentry-maestro-results.xml"; then
+    issue "$platform" "The controlled Sentry probe JUnit result at ${run_dir}/sentry-maestro-results.xml is not a recognizable testsuite report."
+  fi
+
   if [[ -s "$run_dir/runner-metadata.txt" ]]; then
     local actual_platform
     local required_key
@@ -135,6 +143,72 @@ validate_platform() {
         issue "$platform" "Runner metadata is missing ${required_key}=... in ${run_dir}/runner-metadata.txt. Record the tested device details before review."
       fi
     done
+  fi
+
+  if [[ -s "$run_dir/sentry-source-map-evidence.json" ]]; then
+    local candidate_build_id
+    local sentry_validation_output
+    candidate_build_id="$(tr -d '\r\n' < "$run_dir/candidate-build-id.txt")"
+    if ! sentry_validation_output="$(
+      node --input-type=module - \
+        "$run_dir/sentry-source-map-evidence.json" \
+        "$run_dir/sentry-trigger.txt" \
+        "$platform" \
+        "$candidate_build_id" <<'NODE'
+import { readFileSync } from "node:fs";
+
+const [, , evidencePath, triggerPath, platform, candidateBuildId] = process.argv;
+const rawEvidence = readFileSync(evidencePath, "utf8");
+if (/(?:auth(?:orization)?[_-]?token|sentry_auth_token|bearer\s+[A-Za-z0-9._-]+)/i.test(rawEvidence)) {
+  throw new Error("evidence contains credential-like content");
+}
+const evidence = JSON.parse(rawEvidence);
+const trigger = Object.fromEntries(
+  readFileSync(triggerPath, "utf8")
+    .trim()
+    .split(/\r?\n/)
+    .map((line) => {
+      const index = line.indexOf("=");
+      return [line.slice(0, index), line.slice(index + 1)];
+    }),
+);
+const requiredStrings = [
+  "eventId",
+  "marker",
+  "release",
+  "dist",
+];
+if (evidence.status !== "PASS") throw new Error("status is not PASS");
+if (evidence.platform !== platform) throw new Error("platform does not match");
+if (evidence.candidateBuildId !== candidateBuildId) {
+  throw new Error("candidate build ID does not match");
+}
+if (trigger.platform !== platform) throw new Error("trigger platform does not match");
+if (trigger.candidate_build_id !== candidateBuildId) {
+  throw new Error("trigger candidate build ID does not match");
+}
+if (trigger.marker !== evidence.marker) throw new Error("trigger marker does not match");
+for (const key of requiredStrings) {
+  if (typeof evidence[key] !== "string" || evidence[key].trim() === "") {
+    throw new Error(`${key} is missing`);
+  }
+}
+const frame = evidence.readableFrame;
+if (
+  !frame ||
+  typeof frame.filename !== "string" ||
+  !/\.[cm]?[jt]sx?$/i.test(frame.filename) ||
+  typeof frame.function !== "string" ||
+  !frame.function.includes("createNativeSourceMapProbeError") ||
+  !Number.isInteger(frame.line) ||
+  !Number.isInteger(frame.column)
+) {
+  throw new Error("readable source-mapped frame is missing");
+}
+NODE
+    )"; then
+      issue "$platform" "Invalid Sentry source-map evidence at ${run_dir}/sentry-source-map-evidence.json: ${sentry_validation_output:-validation failed}."
+    fi
   fi
 
   local native_screenshot_dir="$run_dir/screenshots"

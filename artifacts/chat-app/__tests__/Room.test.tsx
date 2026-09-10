@@ -28,7 +28,7 @@ const mockEncryptRoomKey = jest.fn();
 const mockSetRoomKey = jest.fn();
 const mockRoomKeyPersistenceFailures = new Map<
   string,
-  { roomId: string; message: string }
+  { roomId: string; message: string; kind?: "save" | "load" }
 >();
 
 jest.mock("@expo/vector-icons", () => ({
@@ -365,6 +365,61 @@ describe("room ban handling", () => {
     expect(getByText("Encryption key not saved")).toBeTruthy();
     expect(queryByPlaceholderText("Message…")).toBeNull();
     expect(mockHandlers.has("room-joined")).toBe(false);
+    expect(mockSocket.emit).not.toHaveBeenCalledWith(
+      "join-room",
+      expect.anything(),
+    );
+
+    await act(async () => {
+      fireEvent.press(getByTestId("retry-room-key-save-button"));
+    });
+
+    expect(mockRetryRoomKeyPersistence).toHaveBeenCalledWith("room-42");
+  });
+
+  it("still opens the room when saved-key hydration rejects instead of waiting forever", async () => {
+    // Reproduces the published-build hang seen on a phone: the secure-store
+    // read threw, the join waited on that promise, and "Opening room…" never
+    // went away.
+    mockGetRoomKey.mockReturnValue(null);
+    mockLoadRoomKey.mockRejectedValueOnce(
+      new Error("Invalid key provided to SecureStore."),
+    );
+    const warnMock = jest.spyOn(console, "warn").mockImplementation();
+    const view = render(<RoomScreen />);
+
+    await act(async () => {
+      mockHandlers.get("room-joined")?.({
+        messages: [],
+        users: [{ userId: "user-ben", username: "Ben" }],
+      });
+    });
+
+    expect(view.queryByTestId("room-loading")).toBeNull();
+    expect(view.getByTestId("room-back-button")).toBeTruthy();
+    expect(warnMock).toHaveBeenCalledWith(
+      "Room key hydration failed",
+      "Invalid key provided to SecureStore.",
+    );
+    warnMock.mockRestore();
+  });
+
+  it("explains an unreadable saved key and offers a read retry", async () => {
+    mockGetRoomKey.mockReturnValue(null);
+    mockRoomKeyPersistenceFailures.set("room-42", {
+      roomId: "room-42",
+      kind: "load",
+      message: "This device could not read its saved encryption keys.",
+    });
+    const { getByTestId, getByText, queryByTestId } = render(<RoomScreen />);
+
+    expect(getByTestId("room-key-storage-warning")).toBeTruthy();
+    expect(getByText("Saved encryption key could not be read")).toBeTruthy();
+    expect(
+      getByText("This device could not read its saved encryption keys."),
+    ).toBeTruthy();
+    expect(getByText("Retry reading key")).toBeTruthy();
+    expect(queryByTestId("room-loading")).toBeNull();
     expect(mockSocket.emit).not.toHaveBeenCalledWith(
       "join-room",
       expect.anything(),

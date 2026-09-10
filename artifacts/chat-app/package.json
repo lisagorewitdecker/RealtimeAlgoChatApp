@@ -6,10 +6,16 @@
   "scripts": {
     "dev": "EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY=$VITE_CLERK_PUBLISHABLE_KEY EXPO_PACKAGER_PROXY_URL=https://$REPLIT_EXPO_DEV_DOMAIN EXPO_PUBLIC_DOMAIN=$REPLIT_DEV_DOMAIN EXPO_PUBLIC_REPL_ID=$REPL_ID REACT_NATIVE_PACKAGER_HOSTNAME=$REPLIT_DEV_DOMAIN pnpm exec expo start --localhost --port $PORT",
     "build": "node scripts/build.js",
+    "eas-build-pre-install": "node scripts/build.js --native-build-preflight",
+    "preflight:release": "node scripts/build.js --preflight-only",
     "serve": "node server/serve.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "jest --passWithNoTests --runInBand",
-    "test:native-large-text": "bash e2e/native-large-text/run.sh"
+    "test": "jest --passWithNoTests --runInBand && pnpm run test:build-preflight",
+    "test:build-preflight": "node --test scripts/build.test.js",
+    "validate:branding": "node scripts/validate-branding.mjs",
+    "validate:branding:native": "node scripts/validate-branding.mjs --native",
+    "test:native-large-text": "bash e2e/native-large-text/run.sh",
+    "test:native-sentry": "bash e2e/sentry-source-map/run.sh"
   },
   "jest": {
     "preset": "jest-expo",
@@ -18,7 +24,14 @@
     ],
     "moduleNameMapper": {
       "^@/(.*)$": "<rootDir>/$1"
-    }
+    },
+    "testPathIgnorePatterns": [
+      "/node_modules/",
+      "<rootDir>/scripts/"
+    ],
+    "setupFilesAfterEnv": [
+      "<rootDir>/jest.setup-after-env.js"
+    ]
   },
   "devDependencies": {
     "@babel/core": "^7.29.7",

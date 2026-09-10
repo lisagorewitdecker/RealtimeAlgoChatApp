@@ -5,6 +5,7 @@ import nacl from "tweetnacl";
 import { decodeBase64, decodeUTF8, encodeBase64 } from "tweetnacl-util";
 import React, { createContext, useCallback, useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Platform } from "react-native";
+import { toSecureStoreKey } from "@/lib/secureStorageKey";
 
 nacl.setPRNG((target: Uint8Array, length: number) => target.set(ExpoCrypto.getRandomBytes(length)));
 
@@ -13,13 +14,29 @@ const deviceKeypairStorageKey = (userId: string) =>
 const roomStorageKey = (userId: string, roomId: string) =>
   `devstudio_roomkey:${userId}:${roomId}`;
 const PUBLIC_KEY_SYNC_RETRY_DELAYS_MS = [250, 750, 2_000, 5_000] as const;
+const ROOM_KEY_SAVE_FAILURE_MESSAGE =
+  "Keep this room open, make secure storage available, and retry before continuing.";
+const ROOM_KEY_LOAD_FAILURE_MESSAGE =
+  "This device could not read its saved encryption keys. Make secure storage available, then retry.";
 
 function waitForRetry(delayMs: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, delayMs));
 }
 
+// Only a secretbox-sized key may ever be installed, saved, or enveloped: any
+// other length would make every later encryption throw ("bad key size") and
+// could spread an unusable key to other members.
+function isRoomKey(candidate: Uint8Array): boolean {
+  return candidate.length === nacl.secretbox.keyLength;
+}
+
+// Native secure storage rejects the ":" separators used in the logical keys
+// above, so they are encoded (see lib/secureStorageKey.ts). Web keeps the
+// logical key because browser storage already holds data under it.
 async function getStored(key: string) {
-  return Platform.OS === "web" ? globalThis.localStorage?.getItem(key) ?? null : SecureStore.getItemAsync(key);
+  return Platform.OS === "web"
+    ? globalThis.localStorage?.getItem(key) ?? null
+    : SecureStore.getItemAsync(toSecureStoreKey(key));
 }
 async function setStored(key: string, value: string) {
   if (Platform.OS === "web") {
@@ -27,7 +44,7 @@ async function setStored(key: string, value: string) {
     if (!storage) throw new Error("Browser storage is unavailable.");
     storage.setItem(key, value);
   } else {
-    await SecureStore.setItemAsync(key, value);
+    await SecureStore.setItemAsync(toSecureStoreKey(key), value);
   }
 }
 
@@ -52,6 +69,12 @@ export interface CryptoContextValue {
 export interface RoomKeyPersistenceFailure {
   roomId: string;
   message: string;
+  /**
+   * "save": an in-memory room key could not be written to secure storage.
+   * "load": secure storage could not be read, so a previously saved key may be
+   * unavailable. Absent means "save" for callers created before this field.
+   */
+  kind?: "save" | "load";
 }
 
 export class RoomKeyPersistenceError extends Error {
@@ -290,8 +313,8 @@ export function CryptoProvider({ children }: { children: React.ReactNode }) {
           const next = new Map(current);
           next.set(roomId, {
             roomId,
-            message:
-              "Keep this room open, make secure storage available, and retry before continuing.",
+            kind: "save",
+            message: ROOM_KEY_SAVE_FAILURE_MESSAGE,
           });
           return next;
         });
@@ -299,6 +322,76 @@ export function CryptoProvider({ children }: { children: React.ReactNode }) {
       return "storage_unavailable";
     }
   }, [userId]);
+  // Reads a saved room key into memory. Never rejects: a secure-storage read
+  // failure is reported through roomKeyPersistenceFailures so screens can show
+  // a retry instead of waiting forever on a promise that will not settle.
+  const readSavedRoomKey = useCallback(async (
+    roomId: string,
+  ): Promise<"loaded" | "missing" | "storage_unavailable" | "skipped"> => {
+    if (
+      !userId ||
+      roomKeyOwnerRef.current !== userId ||
+      identityRef.current.userId !== userId
+    ) return "skipped";
+    if (roomKeys.has(roomId)) return "loaded";
+    const generation = identityRef.current.generation;
+    const identityUnchanged = () =>
+      identityRef.current.userId === userId &&
+      identityRef.current.generation === generation &&
+      roomKeyOwnerRef.current === userId;
+    const clearLoadFailure = () => {
+      setRoomKeyPersistenceFailures((current) => {
+        if (current.get(roomId)?.kind !== "load") return current;
+        const next = new Map(current);
+        next.delete(roomId);
+        return next;
+      });
+    };
+    let saved: string | null;
+    try {
+      saved = await getStored(roomStorageKey(userId, roomId));
+    } catch (error) {
+      console.warn(
+        "Saved room key could not be read from secure storage",
+        error instanceof Error ? error.message : error,
+      );
+      if (identityUnchanged()) {
+        setRoomKeyPersistenceFailures((current) => {
+          const next = new Map(current);
+          next.set(roomId, {
+            roomId,
+            kind: "load",
+            message: ROOM_KEY_LOAD_FAILURE_MESSAGE,
+          });
+          return next;
+        });
+      }
+      return "storage_unavailable";
+    }
+    if (!identityUnchanged()) return "skipped";
+    if (!saved) {
+      clearLoadFailure();
+      return "missing";
+    }
+    let key: Uint8Array | null;
+    try {
+      key = decodeBase64(saved);
+    } catch {
+      key = null;
+    }
+    if (!key || !isRoomKey(key)) {
+      // A corrupted entry (undecodable or not a secretbox-sized key) is treated
+      // as absent so the room can still receive the key again from another
+      // member; retrying the read cannot fix it, and installing it would make
+      // every later encryption fail.
+      console.warn("Saved room key is unreadable and will be ignored.");
+      clearLoadFailure();
+      return "missing";
+    }
+    roomKeys.set(roomId, key);
+    clearLoadFailure();
+    return "loaded";
+  }, [roomKeys, userId]);
   const setRoomKey = useCallback(async (roomId: string, key: Uint8Array) => {
     if (
       !userId ||
@@ -306,6 +399,11 @@ export function CryptoProvider({ children }: { children: React.ReactNode }) {
       identityRef.current.userId !== userId
     ) {
       throw new Error("An authenticated account is required to store room keys.");
+    }
+    if (!isRoomKey(key)) {
+      throw new Error(
+        `Room keys must be exactly ${nacl.secretbox.keyLength} bytes.`,
+      );
     }
     roomKeys.set(roomId, key);
     const persistenceResult = await persistRoomKey(roomId, key);
@@ -322,8 +420,12 @@ export function CryptoProvider({ children }: { children: React.ReactNode }) {
       return false;
     }
     const key = roomKeys.get(roomId);
-    return key ? (await persistRoomKey(roomId, key)) === "saved" : false;
-  }, [persistRoomKey, roomKeys, userId]);
+    if (key) return (await persistRoomKey(roomId, key)) === "saved";
+    // Nothing is in memory, so the outstanding failure is a read failure:
+    // retry the read instead of reporting an impossible save.
+    const result = await readSavedRoomKey(roomId);
+    return result === "loaded" || result === "missing";
+  }, [persistRoomKey, readSavedRoomKey, roomKeys, userId]);
   const getRoomKey = useCallback(
     (roomId: string) =>
       userId && roomKeyOwnerRef.current === userId
@@ -332,23 +434,8 @@ export function CryptoProvider({ children }: { children: React.ReactNode }) {
     [roomKeys, userId],
   );
   const loadRoomKey = useCallback(async (roomId: string) => {
-    if (
-      !userId ||
-      roomKeyOwnerRef.current !== userId ||
-      identityRef.current.userId !== userId
-    ) return;
-    if (roomKeys.has(roomId)) return;
-    const generation = identityRef.current.generation;
-    const saved = await getStored(roomStorageKey(userId, roomId));
-    if (
-      saved &&
-      identityRef.current.userId === userId &&
-      identityRef.current.generation === generation &&
-      roomKeyOwnerRef.current === userId
-    ) {
-      roomKeys.set(roomId, decodeBase64(saved));
-    }
-  }, [roomKeys, userId]);
+    await readSavedRoomKey(roomId);
+  }, [readSavedRoomKey]);
   const generateRoomKey = useCallback(async (roomId: string) => {
     const key = nacl.randomBytes(nacl.secretbox.keyLength);
     await setRoomKey(roomId, key);
@@ -369,12 +456,17 @@ export function CryptoProvider({ children }: { children: React.ReactNode }) {
     return result ? new TextDecoder().decode(result) : null;
   }, [decryptBytes]);
   const encryptRoomKey = useCallback((roomKey: Uint8Array, recipient: string) => {
-    if (!keypair || keypair.userId !== userId) return null;
+    if (!keypair || keypair.userId !== userId || !isRoomKey(roomKey)) return null;
     try { const nonce = nacl.randomBytes(nacl.box.nonceLength); return { ciphertextB64: encodeBase64(nacl.box(roomKey, nonce, decodeBase64(recipient), keypair.secretKey)), nonceB64: encodeBase64(nonce) }; } catch { return null; }
   }, [keypair, userId]);
   const decryptRoomKeyEnvelope = useCallback((ciphertext: string, nonce: string, sender: string) => {
     if (!keypair || keypair.userId !== userId) return null;
-    try { return nacl.box.open(decodeBase64(ciphertext), decodeBase64(nonce), decodeBase64(sender), keypair.secretKey) ?? null; } catch { return null; }
+    try {
+      const opened = nacl.box.open(decodeBase64(ciphertext), decodeBase64(nonce), decodeBase64(sender), keypair.secretKey);
+      // An authentic envelope that does not carry a secretbox-sized key is
+      // still unusable; refuse it rather than install a key that cannot encrypt.
+      return opened && isRoomKey(opened) ? opened : null;
+    } catch { return null; }
   }, [keypair, userId]);
 
   const activeKeypair = keypair?.userId === userId ? keypair : null;
