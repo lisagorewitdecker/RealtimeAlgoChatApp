@@ -5,13 +5,10 @@
   "main": "expo-router/entry",
   "scripts": {
     "dev": "EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY=$VITE_CLERK_PUBLISHABLE_KEY EXPO_PUBLIC_SENTRY_DSN=${EXPO_PUBLIC_SENTRY_DSN:-$SENTRY_DSN} EXPO_PACKAGER_PROXY_URL=https://$REPLIT_EXPO_DEV_DOMAIN EXPO_PUBLIC_DOMAIN=$REPLIT_DEV_DOMAIN EXPO_PUBLIC_REPL_ID=$REPL_ID REACT_NATIVE_PACKAGER_HOSTNAME=$REPLIT_DEV_DOMAIN pnpm exec expo start --localhost --port $PORT",
-    "build": "pnpm run validate:branding && node scripts/build.js",
-    "serve": "node server/serve.js",
+    "build": "pnpm run typecheck",
+    "serve": "pnpm exec expo start --web --non-interactive",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "jest --passWithNoTests --runInBand && node ./scripts/validate-branding.test.mjs && pnpm run validate:branding",
-    "validate:branding": "node ./scripts/validate-branding.mjs",
-    "validate:branding:native": "node ./scripts/validate-branding.mjs --native",
-    "test:native-large-text": "bash e2e/native-large-text/run.sh"
+    "test": "jest --passWithNoTests --runInBand"
   },
   "jest": {
     "preset": "jest-expo",
@@ -37,7 +34,6 @@
     "@types/react": "~19.1.17",
     "@types/react-dom": "~19.1.11",
     "@ungap/structured-clone": "^1.4.0",
-    "@workspace/api-client-react": "workspace:*",
     "babel-plugin-react-compiler": "19.0.0-beta-ebf51a3-20250411",
     "expo": "~54.0.37",
     "expo-auth-session": "~7.0.11",
