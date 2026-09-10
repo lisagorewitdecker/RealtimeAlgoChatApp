@@ -4,6 +4,10 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 RESULTS_ROOT="${1:-$ROOT_DIR/test-results/native-large-text}"
 FAILURE_COUNT=0
+REVIEW_PENDING_PLATFORMS=()
+REVIEW_DECISIONS=()
+UTC_TIMESTAMP_PATTERN='^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$'
+TEMPLATE_PLACEHOLDER_PATTERN='^<.*>$'
 
 issue() {
   local platform="$1"
@@ -12,10 +16,27 @@ issue() {
   FAILURE_COUNT=$((FAILURE_COUNT + 1))
 }
 
+notice() {
+  local platform="$1"
+  shift
+  printf '[%s] %s\n' "$platform" "$*" >&2
+}
+
 metadata_value() {
   local metadata_path="$1"
   local key="$2"
   sed -n "s/^${key}=//p" "$metadata_path" | head -n 1
+}
+
+# Hand-written review records may carry Windows line endings or stray spaces.
+trimmed_value() {
+  local metadata_path="$1"
+  local key="$2"
+  metadata_value "$metadata_path" "$key" | tr -d '\r' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//'
+}
+
+first_line_trimmed() {
+  head -n 1 "$1" | tr -d '\r' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//'
 }
 
 check_required_file() {
@@ -46,7 +67,7 @@ validate_platform() {
   mapfile -t run_dirs < <(find "$platform_dir" -mindepth 1 -maxdepth 1 -type d -print | sort)
   if ((${#run_dirs[@]} == 0)); then
     if [[ -s "$platform_dir/runner-check.txt" ]]; then
-      issue "$platform" "Only runner-check.txt is present in ${platform_dir}. It is blocked runner diagnostics, not reviewed device evidence; run on a prepared ${platform} runner and upload the timestamped result directory."
+      issue "$platform" "Only runner-check.txt is present in ${platform_dir}. It is blocked runner diagnostics, not reviewed device evidence; do not record a review decision for it. Run on a prepared ${platform} runner and upload the timestamped result directory."
     else
       issue "$platform" "No timestamped evidence run directory exists in ${platform_dir}. Run the ${platform} native large-text gate and upload its complete result directory."
     fi
@@ -143,6 +164,101 @@ validate_platform() {
   if ((call_empty_count > 0)); then
     issue "$platform" "Found ${call_empty_count} empty call-surface screenshot file(s) in ${call_screenshot_dir}. Replace them with captures from the reviewed device run."
   fi
+
+  validate_review_record "$platform" "$run_dir"
+}
+
+# The automated artifacts prove that the expected files were uploaded. The
+# review record proves that a person looked at the screenshots and the
+# platform-specific findings, and preserves that release decision next to the
+# evidence it covers.
+validate_review_record() {
+  local platform="$1"
+  local run_dir="$2"
+  local record_path="$run_dir/review-record.txt"
+  local required_key
+  local value
+  local record_valid=1
+
+  if [[ ! -e "$record_path" ]]; then
+    REVIEW_PENDING_PLATFORMS+=("$platform")
+    notice "$platform" "Review record missing: ${record_path} does not exist. No person has recorded a review of this run's native screenshots, call-surface screenshots, and platform-specific findings, so it is not yet reviewed device evidence. After reviewing the run, add review-record.txt with reviewer=, reviewed_at_utc=, candidate_build_id=, and decision=APPROVED or REJECTED."
+    return
+  fi
+  if [[ ! -s "$record_path" ]]; then
+    issue "$platform" "Empty review record: ${record_path}. Record reviewer=, reviewed_at_utc=, candidate_build_id=, and decision=APPROVED or REJECTED, or remove the file until the review is done."
+    return
+  fi
+
+  local reviewer reviewed_at decision record_build_id record_platform notes
+  reviewer="$(trimmed_value "$record_path" reviewer)"
+  reviewed_at="$(trimmed_value "$record_path" reviewed_at_utc)"
+  decision="$(trimmed_value "$record_path" decision)"
+  record_build_id="$(trimmed_value "$record_path" candidate_build_id)"
+  record_platform="$(trimmed_value "$record_path" platform)"
+  notes="$(trimmed_value "$record_path" notes)"
+
+  for required_key in reviewer reviewed_at_utc candidate_build_id decision; do
+    value="$(trimmed_value "$record_path" "$required_key")"
+    if [[ -z "$value" ]]; then
+      issue "$platform" "Review record is missing ${required_key}=... in ${record_path}. Record who reviewed the evidence, when, which candidate build, and the decision."
+      record_valid=0
+    elif [[ "$value" =~ $TEMPLATE_PLACEHOLDER_PATTERN ]]; then
+      issue "$platform" "Review record still contains the template placeholder for ${required_key} in ${record_path}. Replace it with the real value."
+      record_valid=0
+    fi
+  done
+
+  if [[ -n "$record_platform" && "$record_platform" != "$platform" ]]; then
+    issue "$platform" "Review record identifies platform '${record_platform}', not '${platform}', in ${record_path}. Each platform run needs its own review record."
+    record_valid=0
+  fi
+
+  if [[ -n "$reviewed_at" && ! "$reviewed_at" =~ $UTC_TIMESTAMP_PATTERN ]]; then
+    issue "$platform" "Review record reviewed_at_utc '${reviewed_at}' in ${record_path} is not a UTC timestamp such as 2026-09-10T14:05:00Z. Record the review time with: date -u +%Y-%m-%dT%H:%M:%SZ"
+    record_valid=0
+  fi
+
+  local tested_build_id=""
+  if [[ -s "$run_dir/candidate-build-id.txt" ]]; then
+    tested_build_id="$(first_line_trimmed "$run_dir/candidate-build-id.txt")"
+  fi
+  if [[ -n "$record_build_id" && -n "$tested_build_id" && "$record_build_id" != "$tested_build_id" ]]; then
+    issue "$platform" "Review record candidate_build_id '${record_build_id}' does not match the tested candidate '${tested_build_id}' in ${run_dir}/candidate-build-id.txt. A review covers one evidence set; do not reuse a review record from another build."
+    record_valid=0
+  fi
+
+  # The pass/fail record is written when the run finishes, so it is the latest
+  # time the evidence could have been produced. Fall back to the runner metadata
+  # for runs that never wrote a completion time.
+  local evidence_recorded_at=""
+  if [[ -s "$run_dir/pass-fail-record.txt" ]]; then
+    evidence_recorded_at="$(trimmed_value "$run_dir/pass-fail-record.txt" recorded_at_utc)"
+  fi
+  if [[ -z "$evidence_recorded_at" && -s "$run_dir/runner-metadata.txt" ]]; then
+    evidence_recorded_at="$(trimmed_value "$run_dir/runner-metadata.txt" recorded_at_utc)"
+  fi
+  if [[ "$reviewed_at" =~ $UTC_TIMESTAMP_PATTERN && "$evidence_recorded_at" =~ $UTC_TIMESTAMP_PATTERN && "$reviewed_at" < "$evidence_recorded_at" ]]; then
+    issue "$platform" "Review record reviewed_at_utc ${reviewed_at} predates the evidence recorded at ${evidence_recorded_at} in ${run_dir}. A review must happen after the run it covers; review this run and record a new decision."
+    record_valid=0
+  fi
+
+  case "$decision" in
+    APPROVED | "")
+      ;;
+    REJECTED)
+      issue "$platform" "The review record at ${record_path} records decision=REJECTED by ${reviewer:-an unnamed reviewer} at ${reviewed_at:-an unrecorded time}${notes:+ (notes: ${notes})}. A rejected review blocks release; resolve the recorded findings, rerun the native large-text gate, and record a new review."
+      record_valid=0
+      ;;
+    *)
+      issue "$platform" "Review record decision '${decision}' in ${record_path} is not APPROVED or REJECTED. Record an explicit decision."
+      record_valid=0
+      ;;
+  esac
+
+  if ((record_valid)); then
+    REVIEW_DECISIONS+=("[${platform}] Review record: APPROVED by ${reviewer} at ${reviewed_at} for candidate ${record_build_id}.")
+  fi
 }
 
 echo "Checking native large-text evidence under ${RESULTS_ROOT}"
@@ -156,3 +272,9 @@ if ((FAILURE_COUNT > 0)); then
 fi
 
 echo "Native large-text evidence completeness check passed for iOS and Android."
+if ((${#REVIEW_DECISIONS[@]} > 0)); then
+  printf '%s\n' "${REVIEW_DECISIONS[@]}"
+fi
+if ((${#REVIEW_PENDING_PLATFORMS[@]} > 0)); then
+  echo "Review pending for: ${REVIEW_PENDING_PLATFORMS[*]}. The automated evidence is complete, but no person has recorded a release decision for it; add review-record.txt to each run directory before treating it as reviewed device evidence." >&2
+fi

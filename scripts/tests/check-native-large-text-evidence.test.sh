@@ -15,6 +15,32 @@ assert_contains() {
   fi
 }
 
+assert_not_contains() {
+  local output="$1"
+  local unexpected="$2"
+  if grep -Fq -- "$unexpected" <<<"$output"; then
+    printf 'Expected output not to contain: %s\n%s\n' "$unexpected" "$output" >&2
+    exit 1
+  fi
+}
+
+write_review_record() {
+  local root="$1"
+  local platform="$2"
+  local decision="$3"
+  local reviewed_at="${4:-2026-09-09T13:00:00Z}"
+  local build_id="${5:-build-$platform}"
+  local reviewer="${6:-Ada Reviewer}"
+  cat > "$root/$platform/20260909T120000Z/review-record.txt" <<EOF
+platform=$platform
+reviewer=$reviewer
+reviewed_at_utc=$reviewed_at
+candidate_build_id=$build_id
+decision=$decision
+notes=Checked all eleven native screenshots and both call-surface captures.
+EOF
+}
+
 write_valid_run() {
   local root="$1"
   local platform="$2"
@@ -48,6 +74,7 @@ EOF
 platform=$platform
 run_mode=release-gate
 status=PASS
+recorded_at_utc=2026-09-09T12:30:00Z
 EOF
   printf '{}\n' > "$run_dir/native-info.json"
   printf '# Native branding validation\n\n- Status: **PASS**\n' > "$run_dir/native-branding-check.md"
@@ -70,7 +97,7 @@ if blocked_output="$(bash "$CHECKER" "$blocked_root" 2>&1)"; then
 fi
 assert_contains "$blocked_output" "[ios] Only runner-check.txt is present"
 assert_contains "$blocked_output" "[android] Only runner-check.txt is present"
-assert_contains "$blocked_output" "blocked runner diagnostics, not reviewed device evidence"
+assert_contains "$blocked_output" "blocked runner diagnostics, not reviewed device evidence; do not record a review decision for it"
 
 incomplete_root="$TEST_ROOT/incomplete"
 write_valid_run "$incomplete_root" ios
@@ -110,5 +137,76 @@ write_valid_run "$valid_root" ios
 write_valid_run "$valid_root" android
 valid_output="$(bash "$CHECKER" "$valid_root" 2>&1)"
 assert_contains "$valid_output" "passed for iOS and Android"
+assert_contains "$valid_output" "[ios] Review record missing: $valid_root/ios/20260909T120000Z/review-record.txt does not exist"
+assert_contains "$valid_output" "[android] Review record missing: $valid_root/android/20260909T120000Z/review-record.txt does not exist"
+assert_contains "$valid_output" "Review pending for: ios android"
+assert_not_contains "$valid_output" "Review record: APPROVED"
+
+reviewed_root="$TEST_ROOT/reviewed"
+write_valid_run "$reviewed_root" ios
+write_valid_run "$reviewed_root" android
+write_review_record "$reviewed_root" ios APPROVED
+write_review_record "$reviewed_root" android APPROVED "2026-09-09T14:45:00Z" build-android "Grace Reviewer"
+reviewed_output="$(bash "$CHECKER" "$reviewed_root" 2>&1)"
+assert_contains "$reviewed_output" "passed for iOS and Android"
+assert_contains "$reviewed_output" "[ios] Review record: APPROVED by Ada Reviewer at 2026-09-09T13:00:00Z for candidate build-ios."
+assert_contains "$reviewed_output" "[android] Review record: APPROVED by Grace Reviewer at 2026-09-09T14:45:00Z for candidate build-android."
+assert_not_contains "$reviewed_output" "Review record missing"
+assert_not_contains "$reviewed_output" "Review pending"
+
+rejected_root="$TEST_ROOT/rejected"
+write_valid_run "$rejected_root" ios
+write_valid_run "$rejected_root" android
+write_review_record "$rejected_root" ios APPROVED
+write_review_record "$rejected_root" android REJECTED
+if rejected_output="$(bash "$CHECKER" "$rejected_root" 2>&1)"; then
+  echo "rejected review case unexpectedly passed" >&2
+  exit 1
+fi
+assert_contains "$rejected_output" "[android] The review record at $rejected_root/android/20260909T120000Z/review-record.txt records decision=REJECTED by Ada Reviewer at 2026-09-09T13:00:00Z (notes: Checked all eleven native screenshots and both call-surface captures.)."
+assert_contains "$rejected_output" "A rejected review blocks release"
+assert_contains "$rejected_output" "completeness check FAILED with 1 issue(s)"
+assert_not_contains "$rejected_output" "[ios] Review record missing"
+
+mismatched_root="$TEST_ROOT/mismatched"
+write_valid_run "$mismatched_root" ios
+write_valid_run "$mismatched_root" android
+write_review_record "$mismatched_root" ios APPROVED "2026-09-09T13:00:00Z" build-previous-candidate
+write_review_record "$mismatched_root" android APPROVED "2026-09-09T12:10:00Z"
+if mismatched_output="$(bash "$CHECKER" "$mismatched_root" 2>&1)"; then
+  echo "mismatched review case unexpectedly passed" >&2
+  exit 1
+fi
+assert_contains "$mismatched_output" "[ios] Review record candidate_build_id 'build-previous-candidate' does not match the tested candidate 'build-ios'"
+assert_contains "$mismatched_output" "[android] Review record reviewed_at_utc 2026-09-09T12:10:00Z predates the evidence recorded at 2026-09-09T12:30:00Z"
+assert_contains "$mismatched_output" "completeness check FAILED with 2 issue(s)"
+
+malformed_root="$TEST_ROOT/malformed"
+write_valid_run "$malformed_root" ios
+write_valid_run "$malformed_root" android
+write_review_record "$malformed_root" ios MAYBE "September 9" build-ios "<full name or handle>"
+: > "$malformed_root/android/20260909T120000Z/review-record.txt"
+if malformed_output="$(bash "$CHECKER" "$malformed_root" 2>&1)"; then
+  echo "malformed review case unexpectedly passed" >&2
+  exit 1
+fi
+assert_contains "$malformed_output" "[ios] Review record still contains the template placeholder for reviewer"
+assert_contains "$malformed_output" "[ios] Review record reviewed_at_utc 'September 9'"
+assert_contains "$malformed_output" "[ios] Review record decision 'MAYBE'"
+assert_contains "$malformed_output" "[android] Empty review record: $malformed_root/android/20260909T120000Z/review-record.txt"
+assert_contains "$malformed_output" "completeness check FAILED with 4 issue(s)"
+
+wrong_platform_root="$TEST_ROOT/wrong-platform"
+write_valid_run "$wrong_platform_root" ios
+write_valid_run "$wrong_platform_root" android
+write_review_record "$wrong_platform_root" ios APPROVED
+write_review_record "$wrong_platform_root" android APPROVED
+printf 'platform=ios\nreviewer=Ada Reviewer\nreviewed_at_utc=2026-09-09T13:00:00Z\ncandidate_build_id=build-android\ndecision=APPROVED\n' \
+  > "$wrong_platform_root/android/20260909T120000Z/review-record.txt"
+if wrong_platform_output="$(bash "$CHECKER" "$wrong_platform_root" 2>&1)"; then
+  echo "wrong-platform review case unexpectedly passed" >&2
+  exit 1
+fi
+assert_contains "$wrong_platform_output" "[android] Review record identifies platform 'ios', not 'android'"
 
 echo "Native large-text evidence completeness regression tests passed."

@@ -36,3 +36,4 @@
 - [Generated-client check backup safety](generated-check-backup-safety.md) — keep the backup whenever restoration is incomplete; simulate disk failures with read-only file-in-directory, skipped as root.
 - [Native gate diagnostic runs](native-gate-diagnostic-runs.md) — any device override marks the whole run diagnostic-only; CI refuses it loudly; evidence requires run_mode=release-gate.
 - [Volatile tracked test results](volatile-tracked-test-results.md) — a committed Playwright run marker under artifacts/api-server can change during unrelated work; restore it before completing.
+- [Native evidence review record](native-evidence-review-record.md) — a missing human review is reported, not fatal, because the CI gate runs before anyone can review; rejected or mismatched records fail.
