@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "RealtimeDevAlgoChatApp",
+    "name": "RealtimeAlgoChatApp Studio",
     "slug": "chat-app",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -11,13 +11,13 @@
     "splash": {
       "image": "./assets/images/icon.png",
       "resizeMode": "contain",
-        "backgroundColor": "#0E1118"
+      "backgroundColor": "#0D0D1A"
     },
     "ios": {
       "supportsTablet": false,
       "infoPlist": {
-        "NSCameraUsageDescription": "RealtimeDevAlgoChatApp uses your camera for video calls.",
-        "NSMicrophoneUsageDescription": "RealtimeDevAlgoChatApp uses your microphone for voice and video calls."
+        "NSCameraUsageDescription": "RealtimeAlgoChatApp Studio uses your camera for video calls.",
+        "NSMicrophoneUsageDescription": "RealtimeAlgoChatApp Studio uses your microphone for voice and video calls."
       }
     },
     "android": {
