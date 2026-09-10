@@ -37,7 +37,9 @@ jobs:
       # description declares both pieces of review evidence, each on its own line:
       #   API_BREAKING_CHANGE_JUSTIFICATION: <why the existing contract must break>
       #   API_BREAKING_CHANGE_MIGRATION_PLAN: <how existing consumers move to the new contract>
-      # An override that omits either line is rejected.
+      # An override that omits either line is rejected. The decision (compatible,
+      # blocked, or approved override with its review evidence) is also published
+      # to the job summary through GITHUB_STEP_SUMMARY.
       - name: Check API contract compatibility
         env:
           API_BREAKING_CHANGE_PR_BODY: ${{ github.event.pull_request.body }}
