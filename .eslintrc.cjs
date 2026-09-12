@@ -13,7 +13,17 @@ module.exports = {
   ],
   overrides: [
     {
-      files: ["**/*.{js,jsx,mjs,cjs}"],
+      files: ["**/*.cjs"],
+      parserOptions: {
+        ecmaVersion: "latest",
+        sourceType: "script",
+        ecmaFeatures: {
+          jsx: true,
+        },
+      },
+    },
+    {
+      files: ["**/*.{js,jsx,mjs}"],
       parserOptions: {
         ecmaVersion: "latest",
         sourceType: "module",
