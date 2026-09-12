@@ -7,7 +7,7 @@
 # Test info
 
 - Name: idle-profile-registration.spec.ts >> an idle signed-in client registers its public key only once across token refresh
-- Location: e2e/idle-profile-registration.spec.ts:37:1
+- Location: e2e/idle-profile-registration.spec.ts:41:1
 
 # Error details
 

@@ -3,6 +3,10 @@ import { setupClerkTestingToken } from "@clerk/testing/playwright";
 import { expect, test, type BrowserContext } from "@playwright/test";
 import { db, pool, userProfilesTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
+import {
+  throwTestAndCleanupFailures,
+  withClerkRetry,
+} from "./clerk-retry.js";
 
 const chatUrl = process.env["E2E_CHAT_URL"];
 const apiUrl = process.env["E2E_API_URL"];
@@ -52,14 +56,16 @@ test("an idle signed-in client registers its public key only once across token r
   let testFailure: unknown;
 
   try {
-    const user = await clerkClient.users.createUser({
-      emailAddress: [email],
-      password,
-      firstName: "Idle",
-      lastName: "Profile",
-      skipLegalChecks: true,
-      privateMetadata: { purpose: "idle-profile-registration-e2e" },
-    });
+    const user = await withClerkRetry("create idle profile user", () =>
+      clerkClient.users.createUser({
+        emailAddress: [email],
+        password,
+        firstName: "Idle",
+        lastName: "Profile",
+        skipLegalChecks: true,
+        privateMetadata: { purpose: "idle-profile-registration-e2e" },
+      }),
+    );
     userId = user.id;
 
     context = await browser.newContext();
@@ -126,17 +132,17 @@ test("an idle signed-in client registers its public key only once across token r
         .delete(userProfilesTable)
         .where(eq(userProfilesTable.userId, userId))
         .catch((error) => cleanupErrors.push(error));
-      await clerkClient.users
-        .deleteUser(userId)
+      await withClerkRetry("delete idle profile user", () =>
+        clerkClient.users.deleteUser(userId),
+      )
         .catch((error) => cleanupErrors.push(error));
     }
     await pool.end().catch((error) => cleanupErrors.push(error));
-    if (testFailure) throw testFailure;
-    if (cleanupErrors.length > 0) {
-      throw new AggregateError(
-        cleanupErrors,
-        "Idle profile E2E cleanup failed",
-      );
-    }
+    throwTestAndCleanupFailures(
+      testFailure,
+      cleanupErrors,
+      "Idle profile E2E cleanup failed",
+      "Idle profile verification and cleanup both failed",
+    );
   }
 });
