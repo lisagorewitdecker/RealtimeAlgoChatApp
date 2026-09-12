@@ -49,7 +49,6 @@ jobs:
               artifacts \
               scripts \
               vendor \
-              .eslintrc.cjs \
               --config .eslintrc.cjs \
               --ext .js,.jsx,.mjs,.cjs,.ts,.tsx \
               --format "$tmp_dir/node_modules/@microsoft/eslint-formatter-sarif" \
