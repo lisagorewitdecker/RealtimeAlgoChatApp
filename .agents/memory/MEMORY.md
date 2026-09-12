@@ -50,3 +50,4 @@
 - [Preload worker transport chain](preload-worker-transport-chain.md) — a logger import in the `--import` preload spawned pino workers without bound; keep side effects behind `isMainThread`.
 - [Pinned packageExtensions after upgrades](pinned-package-extensions-after-upgrades.md) — exact-version extension keys silently stop applying after upgrades and broke the Chat App publish build.
 - [Release summary secret contract](release-summary-secret-contract.md) — secret masking is per-job and exact-match only; every workflow summary writer needs an inventoried sentinel contract.
+- [Node sleeping fixtures](node-sleeping-fixtures.md) — an unresolved top-level promise does not keep Node alive; use an active handle for signal-waiting fixtures.
