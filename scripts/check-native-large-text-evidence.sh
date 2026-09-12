@@ -256,7 +256,7 @@ validate_review_record() {
 
   if [[ ! -e "$record_path" ]]; then
     REVIEW_PENDING_PLATFORMS+=("$platform")
-    notice "$platform" "Review record missing: ${record_path} does not exist. No person has recorded a review of this run's native screenshots, call-surface screenshots, and platform-specific findings, so it is not yet reviewed device evidence. After reviewing the run, add review-record.txt with reviewer=, reviewed_at_utc=, candidate_build_id=, and decision=APPROVED or REJECTED."
+    notice "$platform" "Review record missing: ${record_path} does not exist. No person has recorded a review of this run's native screenshots, call-surface screenshots, and platform-specific findings, so it is not yet reviewed device evidence. After reviewing the run, complete review-record.template.txt and rename it to review-record.txt."
     return
   fi
   if [[ ! -s "$record_path" ]]; then
@@ -350,5 +350,5 @@ if ((${#REVIEW_DECISIONS[@]} > 0)); then
   printf '%s\n' "${REVIEW_DECISIONS[@]}"
 fi
 if ((${#REVIEW_PENDING_PLATFORMS[@]} > 0)); then
-  echo "Review pending for: ${REVIEW_PENDING_PLATFORMS[*]}. The automated evidence is complete, but no person has recorded a release decision for it; add review-record.txt to each run directory before treating it as reviewed device evidence." >&2
+  echo "Review pending for: ${REVIEW_PENDING_PLATFORMS[*]}. The automated evidence is complete, but no person has recorded a release decision for it; complete review-record.template.txt and rename it to review-record.txt in each run directory before treating it as reviewed device evidence." >&2
 fi

@@ -187,12 +187,12 @@ Diagnostic-only iOS runs write to `test-results/native-large-text-diagnostic/`
 instead, so they never sit next to release evidence.
 
 The folder contains runner metadata, the candidate build ID, a pass/fail record,
-the compiled native metadata, `native-branding-check.md`, and the concise
-`native-branding-summary.md` used in the GitHub job summary, both JUnit outputs,
-the controlled-error trigger record, sanitized
-`sentry-source-map-evidence.json`, eleven native screenshots, and two
-independent call-surface screenshots. The branding and Sentry reports record
-the exact candidate build ID that supplied the inspected evidence. Treat a
+a prefilled `review-record.template.txt`, the compiled native metadata,
+`native-branding-check.md`, and the concise `native-branding-summary.md` used in
+the GitHub job summary, both JUnit outputs, the controlled-error trigger record,
+sanitized `sentry-source-map-evidence.json`, eleven native screenshots, and two
+independent call-surface screenshots. The branding and Sentry reports record the
+exact candidate build ID that supplied the inspected evidence. Treat a
 missing artifact, failed visibility assertion, clipped-control geometry
 assertion, keyboard-obscured primary action, release mismatch, or unreadable
 stack as a release blocker.
@@ -245,7 +245,8 @@ The check also reads each run's `review-record.txt` (see
 - A missing record is reported as `Review record missing` for that platform and
   the final summary lists the platforms as `Review pending`. The automated
   artifacts still pass, but the run is not reviewed device evidence until a
-  person records a decision.
+  person completes `review-record.template.txt` and renames it to
+  `review-record.txt`. The template itself never counts as a completed review.
 - `decision=REJECTED` fails the check and prints the reviewer, review time, and
   notes so the blocking findings stay visible.
 - A record whose `candidate_build_id` does not match `candidate-build-id.txt`,
@@ -354,15 +355,17 @@ by hand and must be rejected.
 
 ### Recording the review decision
 
-After reviewing a platform's run, create `review-record.txt` inside that run
-directory (next to `pass-fail-record.txt`) with one `key=value` pair per line:
+After reviewing a platform's run, open the prefilled
+`review-record.template.txt` next to `pass-fail-record.txt`. The runner has
+already filled in `platform` and `candidate_build_id`. Replace every remaining
+placeholder, then rename the completed file to `review-record.txt`:
 
 ```text
 platform=ios
 reviewer=<full name or handle>
 reviewed_at_utc=<output of: date -u +%Y-%m-%dT%H:%M:%SZ>
-candidate_build_id=<the value in candidate-build-id.txt>
-decision=APPROVED
+candidate_build_id=<prefilled by the runner>
+decision=<APPROVED or REJECTED>
 notes=<optional one-line summary of platform-specific findings>
 ```
 
@@ -372,7 +375,8 @@ notes=<optional one-line summary of platform-specific findings>
   run's `recorded_at_utc`; a review cannot predate the evidence it covers.
 - `candidate_build_id` ties the decision to the tested candidate. If the
   candidate is rebuilt or the gate is rerun, review the new evidence and write
-  a new record; do not copy the old one.
+  a new record from that run's prefilled template; do not copy the old one or
+  retype the build ID.
 - `decision` is `APPROVED` or `REJECTED`. Use `REJECTED` for any blocking
   finding and describe it in `notes` so the release check prints it.
 

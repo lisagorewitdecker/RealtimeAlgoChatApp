@@ -192,11 +192,23 @@ assert_contains "$wrong_function_output" "readable source-mapped frame is missin
 valid_root="$TEST_ROOT/valid"
 write_valid_run "$valid_root" ios
 write_valid_run "$valid_root" android
+for platform in ios android; do
+  cat > "$valid_root/$platform/20260909T120000Z/review-record.template.txt" <<EOF
+# After reviewing this run, replace every placeholder and rename this file to review-record.txt.
+platform=$platform
+reviewer=<full name or handle>
+reviewed_at_utc=<output of: date -u +%Y-%m-%dT%H:%M:%SZ>
+candidate_build_id=build-$platform
+decision=<APPROVED or REJECTED>
+notes=<optional one-line summary of platform-specific findings>
+EOF
+done
 valid_output="$(bash "$CHECKER" "$valid_root" 2>&1)"
 assert_contains "$valid_output" "passed for iOS and Android"
 assert_contains "$valid_output" "[ios] Review record missing: $valid_root/ios/20260909T120000Z/review-record.txt does not exist"
 assert_contains "$valid_output" "[android] Review record missing: $valid_root/android/20260909T120000Z/review-record.txt does not exist"
 assert_contains "$valid_output" "Review pending for: ios android"
+assert_contains "$valid_output" "complete review-record.template.txt and rename it to review-record.txt"
 assert_not_contains "$valid_output" "Review record: APPROVED"
 
 reviewed_root="$TEST_ROOT/reviewed"

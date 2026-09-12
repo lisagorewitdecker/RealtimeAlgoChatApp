@@ -150,6 +150,15 @@ export NATIVE_SMOKE_CALL_SCREENSHOT_DIR="$RESULTS_DIR/call-surface"
 mkdir -p "$NATIVE_SMOKE_SCREENSHOT_DIR" "$NATIVE_SMOKE_CALL_SCREENSHOT_DIR"
 if [[ -n "${NATIVE_SMOKE_BUILD_ID:-}" ]]; then
   printf '%s\n' "$NATIVE_SMOKE_BUILD_ID" > "$RESULTS_DIR/candidate-build-id.txt"
+  cat > "$RESULTS_DIR/review-record.template.txt" <<EOF
+# After reviewing this run, replace every placeholder and rename this file to review-record.txt.
+platform=$PLATFORM
+reviewer=<full name or handle>
+reviewed_at_utc=<output of: date -u +%Y-%m-%dT%H:%M:%SZ>
+candidate_build_id=$NATIVE_SMOKE_BUILD_ID
+decision=<APPROVED or REJECTED>
+notes=<optional one-line summary of platform-specific findings>
+EOF
 fi
 
 RESULT_STATUS="FAIL"
