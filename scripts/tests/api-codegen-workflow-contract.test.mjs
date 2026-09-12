@@ -82,6 +82,31 @@ test("generated-client drift evidence remains visible in the CI job log", () => 
   );
 });
 
+test("generated-client validation remains required for the workflow", () => {
+  assert.ok(
+    generatedClientStep,
+    "expected the API codegen workflow to contain the generated-client validation step",
+  );
+
+  assert.ok(
+    generatedClientStep["continue-on-error"] === undefined ||
+      generatedClientStep["continue-on-error"] === false,
+    "the generated-client validation step must fail the job when its checker exits nonzero; do not enable continue-on-error",
+  );
+  assert.equal(
+    generatedClientStep.if,
+    undefined,
+    "the generated-client validation step must not be conditionally skipped",
+  );
+
+  const job = workflow.jobs?.["check-generated"];
+  assert.ok(job, "expected the API codegen workflow to contain the check-generated job");
+  assert.ok(
+    job["continue-on-error"] === undefined || job["continue-on-error"] === false,
+    "the generated-client job must fail the workflow when its checker exits nonzero; do not enable continue-on-error",
+  );
+});
+
 test("API compatibility still runs after generated-client failures", () => {
   assert.ok(
     compatibilityStep,
