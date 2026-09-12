@@ -1,5 +1,5 @@
 import React from "react";
-import { render } from "@testing-library/react-native";
+import { act, render } from "@testing-library/react-native";
 import ChatsScreen from "../app/(tabs)/index";
 
 jest.mock("@expo/vector-icons", () => ({
@@ -48,8 +48,17 @@ jest.mock("@/hooks/useColors", () => ({
 jest.mock("@/components/RoomCard", () => () => null);
 
 describe("home screen", () => {
-  it("shows the accessible greeting", () => {
+  afterEach(async () => {
+    await act(async () => {
+      await Promise.resolve();
+    });
+  });
+
+  it("shows the accessible greeting", async () => {
     const { getByText } = render(<ChatsScreen />);
+    await act(async () => {
+      await Promise.resolve();
+    });
     const greeting = getByText("welcome back");
 
     expect(greeting.props.accessibilityRole).toBe("header");
@@ -58,8 +67,11 @@ describe("home screen", () => {
     expect(getByText("Hi, Ada")).toBeTruthy();
   });
 
-  it("applies the selected scale to the home headings", () => {
+  it("applies the selected scale to the home headings", async () => {
     const { getByText } = render(<ChatsScreen />);
+    await act(async () => {
+      await Promise.resolve();
+    });
 
     expect(getByText("RealtimeAlgoChatApp Studio").props.style.fontSize).toBeCloseTo(39.2);
     expect(getByText("welcome back").props.style.fontSize).toBeCloseTo(28);

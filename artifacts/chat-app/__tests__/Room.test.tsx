@@ -20,7 +20,14 @@ const mockGetToken = jest.fn();
 const mockRetryRoomKeyPersistence = jest.fn();
 const defaultRoomKey = new Uint8Array(32).fill(7);
 const mockGetRoomKey = jest.fn<Uint8Array | null, []>(() => defaultRoomKey);
-const mockLoadRoomKey = jest.fn<Promise<void>, []>(async () => undefined);
+const loadedRoomKey = {
+  catch: () => loadedRoomKey,
+  then: (onFulfilled: () => void) => {
+    onFulfilled();
+    return loadedRoomKey;
+  },
+} as unknown as Promise<void>;
+const mockLoadRoomKey = jest.fn<Promise<void>, []>(() => loadedRoomKey);
 const mockDecryptMessage = jest.fn();
 const mockDecryptRoomKeyEnvelope = jest.fn();
 const mockEncryptMessage = jest.fn();
@@ -147,7 +154,7 @@ function resetRoomMocks() {
   mockGetToken.mockReset().mockResolvedValue("clerk-token");
   mockRetryRoomKeyPersistence.mockReset().mockResolvedValue(true);
   mockGetRoomKey.mockReset().mockReturnValue(defaultRoomKey);
-  mockLoadRoomKey.mockReset().mockResolvedValue(undefined);
+  mockLoadRoomKey.mockReset().mockReturnValue(loadedRoomKey);
   mockDecryptMessage.mockReset();
   mockDecryptRoomKeyEnvelope.mockReset();
   mockEncryptMessage.mockReset();
@@ -177,7 +184,10 @@ describe("room ban handling", () => {
     alertSpy = jest.spyOn(Alert, "alert").mockImplementation(() => undefined);
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    await act(async () => {
+      await Promise.resolve();
+    });
     alertSpy.mockRestore();
   });
 
@@ -505,6 +515,12 @@ describe("room ban handling", () => {
 describe("room device-key registration ordering", () => {
   beforeEach(() => {
     resetRoomMocks();
+  });
+
+  afterEach(async () => {
+    await act(async () => {
+      await Promise.resolve();
+    });
   });
 
   it("does not join an encrypted room until the device key is registered", () => {
