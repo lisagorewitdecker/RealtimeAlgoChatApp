@@ -12,6 +12,11 @@ encryption key from Profile, verifies their fingerprint and persisted room-key
 envelope both change, rejoins the live room, and confirms they can decrypt a new
 message from the creator.
 
+The idle-profile scenario signs in one client, observes its successful
+public-key registration at the API boundary, then leaves the client untouched
+for 75 seconds. It fails if another public-key `PUT /api/profile` succeeds after
+Clerk's token refresh interval.
+
 ## Prerequisites
 
 - The API Server and Chat App Expo workflows are running.
@@ -35,6 +40,14 @@ For key-reset recovery, run:
 E2E_CHAT_URL="https://${REPLIT_EXPO_DEV_DOMAIN}" \
 E2E_API_URL="https://${REPLIT_DEV_DOMAIN}" \
 pnpm --filter @workspace/api-server run test:e2e:key-reset-recovery
+```
+
+For idle profile registration, run:
+
+```sh
+E2E_CHAT_URL="https://${REPLIT_EXPO_DEV_DOMAIN}" \
+E2E_API_URL="https://${REPLIT_DEV_DOMAIN}" \
+pnpm --filter @workspace/api-server run test:e2e:idle-profile-registration
 ```
 
 The test script installs the Chromium revision pinned by `@playwright/test`
