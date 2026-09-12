@@ -6,6 +6,7 @@ const tsParser = process.env.ESLINT_PACKAGE_ROOT
 
 module.exports = {
   root: true,
+  extends: ["eslint:recommended"],
   ignorePatterns: [
     "**/node_modules/**",
     "artifacts/chat-app/static-build/**",
@@ -35,6 +36,8 @@ module.exports = {
     {
       files: ["**/*.{ts,tsx}"],
       parser: tsParser,
+      plugins: ["@typescript-eslint"],
+      extends: ["plugin:@typescript-eslint/recommended"],
       parserOptions: {
         ecmaVersion: "latest",
         sourceType: "module",
