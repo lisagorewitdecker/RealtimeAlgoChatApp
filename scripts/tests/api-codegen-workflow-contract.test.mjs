@@ -19,14 +19,26 @@ const workflow = YAML.parse(
 const rootPackage = JSON.parse(
   readFileSync(path.join(workspaceRoot, "package.json"), "utf8"),
 );
+const apiSpecPackage = JSON.parse(
+  readFileSync(path.join(workspaceRoot, "lib/api-spec/package.json"), "utf8"),
+);
+const generatedCheckerSource = readFileSync(
+  path.join(workspaceRoot, "lib/api-spec/scripts/check-generated.mjs"),
+  "utf8",
+);
 
 const steps = workflow.jobs?.["check-generated"]?.steps ?? [];
+const generatedClientStep = steps.find(
+  (step) => step.name === "Verify generated API clients",
+);
 const compatibilityStep = steps.find(
   (step) => step.name === "Check API contract compatibility",
 );
 
 function resolveRootPackageScript(command) {
-  const match = String(command).trim().match(/^pnpm(?:\s+run)?\s+([^\s]+)$/);
+  const match = String(command)
+    .trim()
+    .match(/^pnpm(?:\s+run)?\s+([^\s]+)$/);
   assert.ok(
     match,
     `expected a single root pnpm package script command, received: ${command}`,
@@ -41,6 +53,34 @@ function resolveRootPackageScript(command) {
   );
   return resolvedCommand;
 }
+
+test("generated-client drift evidence remains visible in the CI job log", () => {
+  assert.ok(
+    generatedClientStep,
+    "expected the API codegen workflow to contain the generated-client validation step",
+  );
+
+  assert.equal(
+    resolveRootPackageScript(generatedClientStep.run),
+    "pnpm --filter @workspace/api-spec run check-generated",
+    "the generated-client workflow must invoke the maintained checker through the root validation script so checker stderr remains in the job log",
+  );
+  assert.equal(
+    apiSpecPackage.scripts?.["check-generated"],
+    "pnpm run test && node ./scripts/check-generated.mjs",
+    "the generated-client validation script must run its contract tests before the checker",
+  );
+  assert.match(
+    generatedCheckerSource,
+    /console\.error\("Generated API drift detected after regeneration:"\)/,
+    "the job log must retain the primary generated-client drift failure signal",
+  );
+  assert.match(
+    generatedCheckerSource,
+    /console\.error\(\s*"Run `pnpm --filter @workspace\/api-spec run codegen` and commit the generated output\."\s*,?\s*\)/,
+    "the job log must retain the generated-client regeneration command when summary publishing is unavailable",
+  );
+});
 
 test("API compatibility still runs after generated-client failures", () => {
   assert.ok(
@@ -69,9 +109,7 @@ test("API compatibility still runs after generated-client failures", () => {
   for (const stepId of requiredPrerequisites) {
     assert.match(
       condition,
-      new RegExp(
-        `\\bsteps\\.${stepId}\\.outcome\\s*==\\s*['"]success['"]`,
-      ),
+      new RegExp(`\\bsteps\\.${stepId}\\.outcome\\s*==\\s*['"]success['"]`),
       `compatibility must require the ${stepId} step to succeed`,
     );
   }
