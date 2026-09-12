@@ -453,6 +453,53 @@ test("release workflow passes secrets to steps only through their environment", 
   );
 });
 
+test("idle-profile registration check blocks release and reports its result", () => {
+  const idleJob = workflow.jobs["idle-profile-registration"];
+  assert.ok(idleJob, "release workflow must define the idle-profile job");
+
+  const runStep = idleJob.steps.find(
+    (step) => step.name === "Run idle-profile registration release check",
+  );
+  assert.ok(runStep, "idle-profile job must run the browser check");
+  assert.match(
+    runStep.run,
+    /test:e2e:idle-profile-registration/,
+    "idle-profile job must invoke the dedicated Playwright command",
+  );
+  assert.notEqual(
+    runStep["continue-on-error"],
+    true,
+    "a repeated profile registration must fail the idle-profile job",
+  );
+
+  const summaryStep = idleJob.steps.find(
+    (step) => step.name === "Summarize idle-profile registration check",
+  );
+  assert.ok(summaryStep, "idle-profile job must write a release summary");
+  assert.equal(summaryStep.if, "${{ always() }}");
+  assert.match(summaryStep.run, /## Idle profile registration/);
+  assert.match(summaryStep.run, /Status: \*\*PASS\*\*/);
+  assert.match(summaryStep.run, /Status: \*\*FAIL\*\*/);
+
+  const gate = workflow.jobs["mobile-release-gate"];
+  assert.ok(
+    gate.needs.includes("idle-profile-registration"),
+    "the final release gate must require the idle-profile job",
+  );
+  const blockingStep = gate.steps.find(
+    (step) => step.name === "Block release unless both native checks pass",
+  );
+  assert.equal(
+    blockingStep.env.IDLE_PROFILE_RESULT,
+    "${{ needs.idle-profile-registration.result }}",
+  );
+  assert.match(
+    blockingStep.run,
+    /\$IDLE_PROFILE_RESULT" != "success"/,
+    "the final gate must reject a failed idle-profile job",
+  );
+});
+
 test("publish requires candidate-bound approvals from the current run attempt", () => {
   const attemptSuffix = "${{ github.run_id }}-${{ github.run_attempt }}";
   for (const [jobId, platform] of [
