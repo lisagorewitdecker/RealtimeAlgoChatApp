@@ -188,6 +188,9 @@ importers:
         specifier: ^2.9.0
         version: 2.9.0
     devDependencies:
+      markdown-it:
+        specifier: 14.3.0
+        version: 14.3.0
       prettier:
         specifier: ^3.9.6
         version: 3.9.6
