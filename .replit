@@ -96,6 +96,10 @@ args = "banned-room-e2e"
 task = "workflow.run"
 args = "mockup-clean-typecheck"
 
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "key-reset-recovery-e2e"
+
 [[workflows.workflow]]
 name = "typecheck"
 author = "agent"
@@ -161,6 +165,17 @@ isValidation = true
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "flock -w 900 /tmp/replit-heavy-validation.lock pnpm run validate:mockup-clean"
+
+[[workflows.workflow]]
+name = "key-reset-recovery-e2e"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "E2E_CHAT_URL=https://$REPLIT_EXPO_DEV_DOMAIN E2E_API_URL=https://$REPLIT_DEV_DOMAIN flock -w 900 /tmp/replit-heavy-validation.lock pnpm --filter @workspace/api-server run test:e2e:key-reset-recovery"
+
+[workflows.workflow.metadata]
+isValidation = true
 
 [agent]
 stack = "PNPM_WORKSPACE"
