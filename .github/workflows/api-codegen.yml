@@ -38,12 +38,18 @@ jobs:
       - name: Verify generated API clients
         run: pnpm validate:api-codegen
 
-      # Pull request runs fail for breaking contract changes unless the description
-      # declares both pieces of review evidence. Values may be inline:
+      # For an intentional versioned break, add both declarations to the pull request description.
+      # Inline example:
       #   API_BREAKING_CHANGE_JUSTIFICATION: <why the existing contract must break>
       #   API_BREAKING_CHANGE_MIGRATION_PLAN: <how existing consumers move to the new contract>
-      # or an indented/bulleted block directly below either marker, ending at the
-      # next blank line or marker. An override that omits either value is rejected.
+      #
+      # Multi-step migration plan example:
+      #   API_BREAKING_CHANGE_MIGRATION_PLAN:
+      #     - Release the updated client first.
+      #     - Keep the old API available during migration.
+      #     - Remove the old API after adoption is confirmed.
+      #   (End the block with a blank line or the next API_BREAKING_CHANGE_* marker.)
+      # Pull request runs reject breaking changes when either declaration is absent.
       # Push runs skip compatibility enforcement because the change was enforced
       # on its pull request before merge, and print that reason in the log and job
       # summary. Every decision is published through GITHUB_STEP_SUMMARY.
