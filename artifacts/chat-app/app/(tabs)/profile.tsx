@@ -21,6 +21,7 @@ import { DeviceEncryptionCard } from "@/components/DeviceEncryptionCard";
 import { ScaledText as Text } from "@/components/ScaledText";
 import { ScaledTextInput as TextInput } from "@/components/ScaledTextInput";
 import { useColors } from "@/hooks/useColors";
+import { getBuildIdentity } from "@/lib/buildIdentity";
 import { trackEvent } from "@/utils/analytics";
 
 type ModerationFeedback = {
@@ -53,6 +54,7 @@ function apiBaseUrl(): string {
 }
 
 export default function ProfileScreen() {
+  const buildIdentity = getBuildIdentity();
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const { username, avatarEmoji, userId, isAdmin, setUsername, setAvatarEmoji } = useApp();
@@ -519,6 +521,28 @@ export default function ProfileScreen() {
           <Text style={[styles.uid, { color: colors.mutedForeground }]} numberOfLines={1}>
             {userId}
           </Text>
+        </View>
+
+        <View
+          testID="build-identity"
+          accessible
+          accessibilityLabel={`Build information. App version ${buildIdentity.appVersion}. Build ID ${buildIdentity.buildId}. Update created ${buildIdentity.createdAt}. Runtime ${buildIdentity.runtimeVersion}. Client ${buildIdentity.clientType}.`}
+          style={[
+            styles.card,
+            { backgroundColor: colors.card, borderColor: colors.border, borderRadius: colors.radius },
+          ]}
+        >
+          <View style={styles.buildIdentityHeading}>
+            <Feather name="info" size={16} color={colors.primary} />
+            <Text style={[styles.sectionLabel, { color: colors.primary }]}>BUILD INFORMATION</Text>
+          </View>
+          <View style={styles.buildIdentityRows}>
+            <BuildIdentityRow label="App version" value={buildIdentity.appVersion} />
+            <BuildIdentityRow label="Build ID" value={buildIdentity.buildId} />
+            <BuildIdentityRow label="Update created" value={buildIdentity.createdAt} />
+            <BuildIdentityRow label="Runtime" value={buildIdentity.runtimeVersion} />
+            <BuildIdentityRow label="Client" value={buildIdentity.clientType} />
+          </View>
         </View>
 
         <DeviceEncryptionCard />
@@ -1081,6 +1105,20 @@ export default function ProfileScreen() {
       </ScrollView>
     </KeyboardAvoidingView>
   );
+
+  function BuildIdentityRow({ label, value }: { label: string; value: string }) {
+    return (
+      <View style={styles.buildIdentityRow}>
+        <Text style={[styles.buildIdentityLabel, { color: colors.mutedForeground }]}>{label}</Text>
+        <Text
+          selectable
+          style={[styles.buildIdentityValue, { color: colors.foreground }]}
+        >
+          {value}
+        </Text>
+      </View>
+    );
+  }
 }
 
 const styles = StyleSheet.create({
@@ -1119,6 +1157,16 @@ const styles = StyleSheet.create({
   saveBtn: { width: 44, height: 44, alignItems: "center", justifyContent: "center" },
   saved: { fontSize: 13, fontWeight: "600" as const },
   uid: { fontSize: 12, fontFamily: Platform.OS === "ios" ? "Courier" : "monospace" },
+  buildIdentityHeading: { flexDirection: "row", alignItems: "center", gap: 8 },
+  buildIdentityRows: { gap: 7 },
+  buildIdentityRow: { flexDirection: "row", alignItems: "flex-start", gap: 12 },
+  buildIdentityLabel: { width: 104, fontSize: 12, lineHeight: 18 },
+  buildIdentityValue: {
+    flex: 1,
+    fontSize: 12,
+    lineHeight: 18,
+    fontFamily: Platform.OS === "ios" ? "Courier" : "monospace",
+  },
   moderationCard: { borderWidth: 1, gap: 12 },
   moderationHeading: { flexDirection: "row", alignItems: "center", gap: 8 },
   moderationHint: { fontSize: 12, lineHeight: 18 },

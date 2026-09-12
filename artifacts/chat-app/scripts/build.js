@@ -107,6 +107,7 @@ function prepareNativeReleaseBuild(
   );
   fs.mkdirSync(path.dirname(evidencePath), { recursive: true });
   const sentryBuildId = env.EAS_BUILD_ID?.trim() || env.SENTRY_BUILD_ID.trim();
+  const buildCreatedAt = new Date().toISOString();
   fs.writeFileSync(
     evidencePath,
     [
@@ -114,6 +115,7 @@ function prepareNativeReleaseBuild(
       `export const RELEASE_SENTRY_RELEASE = ${JSON.stringify(env.SENTRY_RELEASE.trim())};`,
       `export const RELEASE_SENTRY_DIST = ${JSON.stringify(env.SENTRY_DIST.trim())};`,
       `export const RELEASE_SENTRY_BUILD_ID = ${JSON.stringify(sentryBuildId)};`,
+      `export const RELEASE_BUILD_CREATED_AT = ${JSON.stringify(buildCreatedAt)};`,
       "",
     ].join("\n"),
     { mode: 0o600 },

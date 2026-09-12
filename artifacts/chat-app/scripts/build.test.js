@@ -63,7 +63,7 @@ test("native production build hook accepts and maps managed SENTRY_DSN", (t) => 
       path.join(outputRoot, "constants", "releaseCrashReporting.ts"),
       "utf8",
     ),
-    /SENTRY_RELEASE_PREFLIGHT_PASSED_V1[\s\S]*chat-app@1\.0\.0\+test[\s\S]*100[\s\S]*build-test/,
+    /SENTRY_RELEASE_PREFLIGHT_PASSED_V1[\s\S]*chat-app@1\.0\.0\+test[\s\S]*100[\s\S]*build-test[\s\S]*RELEASE_BUILD_CREATED_AT = "20\d\d-/,
   );
   assert.equal(
     fs

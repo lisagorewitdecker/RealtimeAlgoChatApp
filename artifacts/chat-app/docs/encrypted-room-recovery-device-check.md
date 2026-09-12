@@ -25,9 +25,12 @@ single-phone smoke test.
    opening any existing room; if you see it, stop and check the candidate's
    build date (see `test-results/encrypted-room-recovery/ios/20260910T180851Z/`).
 2. The **same build** installed on two representative iPhones and two
-   representative Android phones. Record the EAS build ID (or app version plus
-   build number), phone model, and OS version. Expo Go is not a release
-   candidate.
+   representative Android phones. On each phone, open **Profile → Build
+   information** and copy the non-sensitive build ID, app version, update
+   creation time, runtime, and client type into the record's build column.
+   Confirm the displayed build ID matches the candidate's EAS build ID, then
+   record the phone model and OS version. The client type must read **Published
+   build**; Expo Go and development previews are not release candidates.
 3. A reachable API and database environment that holds no production data.
    Record its label (for example "development API"), never its credentials.
 4. Three dedicated, verified test accounts: **A** (room creator), **B** (second
@@ -58,7 +61,9 @@ single-phone smoke test.
 
 ## Procedure (repeat per platform with that platform's phones A and B)
 
-1. **Metadata.** Fill in the record's metadata table before testing.
+1. **Metadata.** Fill in the record's metadata table before testing. Use
+   **Profile → Build information** on each device as the source for its build
+   column; do not substitute a manifest URL or other environment details.
 2. **Fresh state.** Fresh-install the candidate on both phones. Sign in as A on
    phone A and B on phone B. Wait until each phone shows rooms as available
    (public key registered).

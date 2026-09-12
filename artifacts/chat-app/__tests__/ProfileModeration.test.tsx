@@ -107,6 +107,18 @@ describe("profile moderation controls", () => {
     expect(accessibilityValue.setHighContrast).toHaveBeenCalledWith(true);
   });
 
+  it("keeps non-sensitive build information available on the profile screen", () => {
+    const { getByTestId, getByText } = render(<ProfileScreen />);
+
+    expect(getByTestId("build-identity")).toBeTruthy();
+    expect(getByText("BUILD INFORMATION")).toBeTruthy();
+    expect(getByText("App version")).toBeTruthy();
+    expect(getByText("Build ID")).toBeTruthy();
+    expect(getByText("Update created")).toBeTruthy();
+    expect(getByText("Runtime")).toBeTruthy();
+    expect(getByText("Client")).toBeTruthy();
+  });
+
   it("lets users choose a text size from accessibility settings", () => {
     const { getByTestId } = render(<ProfileScreen />);
 
