@@ -118,8 +118,21 @@ For a physical-device supplement, use the same host-tool check but connect the
 representative phone over adb; the small-emulator size restriction applies to
 the automated gate, not to the separate physical-device review.
 
-Store the following values as secrets in the GitHub Actions `mobile-release`
-environment. Authentication values are injected only into the process that
+Store the candidate build IDs as repository-level GitHub Actions
+**variables**:
+
+- `NATIVE_SMOKE_IOS_BUILD_ID` — EAS build ID of the iOS candidate installed on
+  the prepared iPhone SE simulator
+- `NATIVE_SMOKE_ANDROID_BUILD_ID` — EAS build ID of the Android candidate
+  installed on the prepared emulator
+
+These IDs are non-secret release configuration and appear literally alongside
+their SHA-256 fingerprints in the release summary. Reusable-workflow callers
+instead pass the required `native_smoke_ios_build_id` and
+`native_smoke_android_build_id` inputs.
+
+Store the following values as **secrets** in the GitHub Actions
+`mobile-release` environment. Authentication values are injected only into the process that
 needs them and are never written to the repository or printed by the workflow.
 The candidate build IDs are recorded in each smoke result directory so the
 tested candidate can be audited by the publish job:
@@ -129,10 +142,6 @@ tested candidate can be audited by the publish job:
   event-read access for organization `lisagorewitdecker-06`, project
   `react-native`; store the same token in the EAS release build environment and
   never use an `EXPO_PUBLIC_` name for it
-- `NATIVE_SMOKE_IOS_BUILD_ID` — EAS build ID of the iOS candidate installed on
-  the prepared iPhone SE simulator
-- `NATIVE_SMOKE_ANDROID_BUILD_ID` — EAS build ID of the Android candidate
-  installed on the prepared emulator
 - `NATIVE_SMOKE_IOS_APP_ID`
 - `NATIVE_SMOKE_ANDROID_APP_ID`
 - `NATIVE_SMOKE_EMAIL`
@@ -286,8 +295,9 @@ The publish job always runs this strict check before either `eas submit`.
 ### Supplying approvals to the publish job
 
 Configure the GitHub `mobile-store-submission` environment with required
-reviewers and place the publish-only `EAS_TOKEN` and candidate build-ID secrets
-there. Do not permit self-review. This protected environment is the trusted
+reviewers and place the publish-only `EAS_TOKEN` secret there. Candidate build
+IDs continue to come from the non-secret repository variables. Do not
+permit self-review. This protected environment is the trusted
 human approval boundary; the general `mobile-release` environment used by the
 automated evidence jobs is not sufficient.
 

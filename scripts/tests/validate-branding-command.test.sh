@@ -46,11 +46,11 @@ pnpm --filter @workspace/chat-app run validate:branding:native -- \
 
 assert_contains "$TEST_ROOT/ios-results/native-branding-check.md" "- Status: **PASS**"
 assert_contains "$TEST_ROOT/ios-results/native-branding-check.md" "Candidate build ID: \`ios-command-test\`"
-# The summary fragment is copied into the GitHub step summary, so the private
-# candidate build ID must stay in the detailed report only.
+# Candidate build IDs are non-secret release configuration and remain visible
+# beside the fingerprint in the GitHub summary.
 assert_contains "$TEST_ROOT/ios-results/native-branding-summary.md" "- Status: **PASS**"
-assert_contains "$TEST_ROOT/ios-results/native-branding-summary.md" "Candidate build ID: recorded in the uploaded evidence artifact"
-assert_not_contains "$TEST_ROOT/ios-results/native-branding-summary.md" "ios-command-test"
+assert_contains "$TEST_ROOT/ios-results/native-branding-summary.md" "Candidate build ID: \`ios-command-test\`"
+assert_contains "$TEST_ROOT/ios-results/native-branding-summary.md" "Candidate build fingerprint (SHA-256):"
 
 cat > "$TEST_ROOT/android-native-info.json" <<'JSON'
 {
@@ -71,7 +71,8 @@ fi
 assert_contains "$TEST_ROOT/android-results/native-branding-check.md" "- Status: **FAIL**"
 assert_contains "$TEST_ROOT/android-results/native-branding-check.md" "Candidate build ID: \`android-command-test\`"
 assert_contains "$TEST_ROOT/android-results/native-branding-summary.md" "- Status: **FAIL**"
+assert_contains "$TEST_ROOT/android-results/native-branding-summary.md" "Candidate build ID: \`android-command-test\`"
+assert_contains "$TEST_ROOT/android-results/native-branding-summary.md" "Candidate build fingerprint (SHA-256):"
 assert_contains "$TEST_ROOT/android-results/native-branding-summary.md" "Mismatch:"
-assert_not_contains "$TEST_ROOT/android-results/native-branding-summary.md" "android-command-test"
 
 echo "Native branding command regression tests passed."

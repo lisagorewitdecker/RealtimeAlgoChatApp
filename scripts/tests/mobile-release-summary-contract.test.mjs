@@ -3,8 +3,9 @@
  *
  * GitHub masks a secret in logs and step summaries only when the exact value
  * was registered in the same job. Values that reach a summary through evidence
- * artifacts, another job, or a transformation render as-is, so release IDs and
- * smoke-account values are kept out of every summary surface by construction.
+ * artifacts, another job, or a transformation render as-is. Candidate build
+ * IDs are intentionally non-secret; private app IDs and smoke-account values
+ * are kept out of every summary surface by construction.
  * This test locks in four guarantees:
  *
  *   1. The release workflow hands secrets to steps only through `env`, and the
@@ -16,9 +17,8 @@
  *   3. Each inventoried script's diagnostics are fixed text, credentials are
  *      only ever exported by name, and its summary never carries private
  *      values.
- *   4. Audited candidate identifiers (build and app IDs) stay inside uploaded
- *      evidence artifacts and never reach logs, readiness reports, or the
- *      summary.
+ *   4. Private app IDs stay inside uploaded evidence artifacts. Non-secret
+ *      candidate build IDs may appear in the branding summary.
  *
  * The static rules catch code paths no scenario exercises; the behavioral runs
  * inject sentinel values for every secret-backed variable and prove the real
@@ -457,6 +457,37 @@ test("release workflow passes secrets to steps only through their environment", 
   );
 });
 
+test("candidate build IDs use non-secret variables or reusable-workflow inputs", () => {
+  assert.equal(
+    workflow.on.workflow_call.inputs.native_smoke_ios_build_id.required,
+    true,
+  );
+  assert.equal(
+    workflow.on.workflow_call.inputs.native_smoke_android_build_id.required,
+    true,
+  );
+  assert.equal(
+    workflow.on.workflow_call.secrets.NATIVE_SMOKE_IOS_BUILD_ID,
+    undefined,
+  );
+  assert.equal(
+    workflow.on.workflow_call.secrets.NATIVE_SMOKE_ANDROID_BUILD_ID,
+    undefined,
+  );
+  assert.equal(
+    workflow.env.NATIVE_SMOKE_IOS_BUILD_ID,
+    "${{ inputs.native_smoke_ios_build_id || vars.NATIVE_SMOKE_IOS_BUILD_ID }}",
+  );
+  assert.equal(
+    workflow.env.NATIVE_SMOKE_ANDROID_BUILD_ID,
+    "${{ inputs.native_smoke_android_build_id || vars.NATIVE_SMOKE_ANDROID_BUILD_ID }}",
+  );
+  assert.doesNotMatch(
+    JSON.stringify(workflow),
+    /secrets\.NATIVE_SMOKE_(?:IOS|ANDROID)_BUILD_ID/,
+  );
+});
+
 test("idle-profile registration check blocks release and reports its result", () => {
   const idleJob = workflow.jobs["idle-profile-registration"];
   assert.ok(idleJob, "release workflow must define the idle-profile job");
@@ -660,11 +691,11 @@ test("publish requires candidate-bound approvals from the current run attempt", 
   );
   assert.equal(
     publishSteps[approvalIndex].env.IOS_SUBMIT_BUILD_ID,
-    "${{ secrets.NATIVE_SMOKE_IOS_BUILD_ID }}",
+    "${{ env.NATIVE_SMOKE_IOS_BUILD_ID }}",
   );
   assert.equal(
     publishSteps[approvalIndex].env.ANDROID_SUBMIT_BUILD_ID,
-    "${{ secrets.NATIVE_SMOKE_ANDROID_BUILD_ID }}",
+    "${{ env.NATIVE_SMOKE_ANDROID_BUILD_ID }}",
   );
   assert.equal(
     workflow.permissions.actions,
@@ -710,7 +741,8 @@ function summaryEnvExpressionProblem(expression, { jobId, job }) {
     /^steps\.[\w-]+\.(outcome|conclusion)$/.test(trimmed) ||
     /^needs\.[\w-]+\.result$/.test(trimmed) ||
     trimmed === "job.status" ||
-    /^(?:github\.(?!token\b)[\w.-]+|runner\.\w+|inputs\.[\w-]+)$/.test(trimmed)
+    /^(?:github\.(?!token\b)[\w.-]+|runner\.\w+|inputs\.[\w-]+)$/.test(trimmed) ||
+    /^inputs\.[\w-]+\s*\|\|\s*vars\.[\w-]+$/.test(trimmed)
   ) {
     return null;
   }
@@ -1074,15 +1106,19 @@ function sentinelFor(name) {
   return `${name.toLowerCase().replaceAll("_", "-")}-secret-sentinel`;
 }
 
-/** Sentinel values for every secret-backed variable the workflow defines. */
+/** Sentinel values for every secret-backed variable and non-secret build ID. */
 const sentinelEnvironment = Object.fromEntries(
-  [...secretBearingEnv.keys()].map((name) => [name, sentinelFor(name)]),
+  [...secretBearingEnv.keys(), "NATIVE_SMOKE_BUILD_ID"].map((name) => [
+    name,
+    sentinelFor(name),
+  ]),
 );
 const identifierNames = new Set(
   [...privateNamesFor(iosGateScript)]
     .filter(([, kind]) => kind === "identifier")
     .map(([name]) => name),
 );
+identifierNames.add("NATIVE_SMOKE_BUILD_ID");
 
 function assertNoSentinels(text, description, allowedNames = new Set()) {
   for (const [name, sentinel] of Object.entries(sentinelEnvironment)) {
@@ -1193,8 +1229,8 @@ function approvedNativeMetadata(platform) {
  * The workflow's branding step inspects the installed candidate and runs the
  * real branding validator against the same results directory before the
  * summary steps run. The inspected metadata and the detailed report
- * legitimately carry candidate identifiers and stay in the uploaded artifact;
- * the summary fragment is copied into the step summary, so it must not.
+ * legitimately carry candidate identifiers. Candidate build IDs are
+ * non-secret and are copied into the step summary with a fingerprint.
  */
 function addBrandingEvidenceFixtures(resultsDir, platform) {
   mkdirSync(resultsDir, { recursive: true });
@@ -1236,9 +1272,9 @@ function addBrandingEvidenceFixtures(resultsDir, platform) {
     path.join(resultsDir, brandingFragmentFile),
     "utf8",
   );
-  assertNoSentinels(
-    fragment,
-    `${platform}: ${brandingFragmentFile} is copied into the step summary and`,
+  assert.ok(
+    fragment.includes(sentinelEnvironment.NATIVE_SMOKE_BUILD_ID),
+    `${platform}: ${brandingFragmentFile} should show the candidate build ID`,
   );
 }
 
@@ -1290,7 +1326,7 @@ function getGateRuns() {
 test("iOS gate keeps private values out of logs and the readiness report while recording candidate IDs in evidence", () => {
   assert.ok(
     identifierNames.has("NATIVE_SMOKE_BUILD_ID"),
-    "expected NATIVE_SMOKE_BUILD_ID to be classified as an audited identifier",
+    "expected NATIVE_SMOKE_BUILD_ID to be classified as an audited candidate identifier",
   );
 
   const expectations = {
@@ -1523,6 +1559,18 @@ function renderSummaryStepEnv(summaryStep, { resultsDir, outcome }) {
         ) {
           return outcome;
         }
+        if (
+          expression ===
+          "inputs.native_smoke_ios_build_id || vars.NATIVE_SMOKE_IOS_BUILD_ID"
+        ) {
+          return "ios-candidate-build-id";
+        }
+        if (
+          expression ===
+          "inputs.native_smoke_android_build_id || vars.NATIVE_SMOKE_ANDROID_BUILD_ID"
+        ) {
+          return "android-candidate-build-id";
+        }
         const envReference = expression.match(/^env\.(\w+)$/);
         if (envReference) {
           assert.ok(
@@ -1620,7 +1668,7 @@ function scenarioResultsDirs(scenario) {
   return { "native-ios": iosResultsDir, "native-android": androidResultsDir };
 }
 
-test("workflow summary steps render sanitized readiness and branding without secret values", () => {
+test("workflow summaries show candidate build IDs without exposing private values", () => {
   const runs = getGateRuns();
   const nativeJobs = ["native-ios", "native-android"];
   const nativeSummarySteps = summarySteps.filter(({ jobId }) =>
@@ -1676,6 +1724,7 @@ test("workflow summary steps render sanitized readiness and branding without sec
       assertNoSentinels(
         summary,
         `${summaryStep.label} (${scenario.name}): step summary`,
+        new Set(["NATIVE_SMOKE_BUILD_ID"]),
       );
       assert.ok(
         !summary.includes("__NATIVE_BRANDING_REPORT_URL__"),

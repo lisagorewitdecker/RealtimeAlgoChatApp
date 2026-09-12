@@ -1,4 +1,5 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
@@ -277,6 +278,10 @@ function nativeLabelForPlatform(platform, metadata) {
   return typeof label === "string" && label.length > 0 ? label : "Unavailable";
 }
 
+export function candidateBuildFingerprint(buildId) {
+  return createHash("sha256").update(buildId, "utf8").digest("hex");
+}
+
 function nativePermissionSummary({
   platform,
   metadata,
@@ -328,14 +333,9 @@ function nativePermissionSummary({
   };
 }
 
-/**
- * Renders the fragment the release workflow copies into its GitHub step
- * summary. The candidate build ID is private release data, so it stays in the
- * detailed report inside the uploaded evidence artifact and never appears
- * here; the summary contract test rejects any fragment that carries it.
- */
 export function formatNativeBrandingSummary({
   platform,
+  buildId,
   productName,
   status,
   metadata = {},
@@ -353,7 +353,8 @@ export function formatNativeBrandingSummary({
     `## ${platform === "ios" ? "iOS" : "Android"} native branding`,
     "",
     `- Status: **${status}**`,
-    "- Candidate build ID: recorded in the uploaded evidence artifact (kept out of this summary)",
+    `- Candidate build ID: \`${buildId}\``,
+    `- Candidate build fingerprint (SHA-256): \`${candidateBuildFingerprint(buildId)}\``,
     `- Native label: \`${nativeLabelForPlatform(platform, metadata)}\``,
     `- ${permissionSummary.label}: **${permissionSummary.status}** (${permissionSummary.detail})`,
   ];
@@ -448,6 +449,7 @@ function runNativeValidation() {
       summaryPath,
       formatNativeBrandingSummary({
         platform,
+        buildId,
         productName,
         status: "PASS",
         metadata,
@@ -477,6 +479,7 @@ function runNativeValidation() {
       summaryPath,
       formatNativeBrandingSummary({
         platform,
+        buildId,
         productName,
         status: "FAIL",
         metadata,
