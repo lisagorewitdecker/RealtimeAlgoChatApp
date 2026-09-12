@@ -9,6 +9,7 @@ fi
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
 CHAT_APP_DIR="$ROOT_DIR/artifacts/chat-app"
+WRITE_REVIEW_RECORD_TEMPLATE="$CHAT_APP_DIR/e2e/native-large-text/write-review-record-template.sh"
 RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)"
 SMALLEST_IOS_DEVICE="iPhone SE (3rd generation)"
 
@@ -151,15 +152,10 @@ export NATIVE_SMOKE_CALL_SCREENSHOT_DIR="$RESULTS_DIR/call-surface"
 mkdir -p "$NATIVE_SMOKE_SCREENSHOT_DIR" "$NATIVE_SMOKE_CALL_SCREENSHOT_DIR"
 if [[ -n "${NATIVE_SMOKE_BUILD_ID:-}" ]]; then
   printf '%s\n' "$NATIVE_SMOKE_BUILD_ID" > "$RESULTS_DIR/candidate-build-id.txt"
-  cat > "$RESULTS_DIR/review-record.template.txt" <<EOF
-# After reviewing this run, replace every placeholder and rename this file to review-record.txt.
-platform=$PLATFORM
-reviewer=<full name or handle>
-reviewed_at_utc=<output of: date -u +%Y-%m-%dT%H:%M:%SZ>
-candidate_build_id=$NATIVE_SMOKE_BUILD_ID
-decision=<APPROVED or REJECTED>
-notes=<optional one-line summary of platform-specific findings>
-EOF
+  source "$WRITE_REVIEW_RECORD_TEMPLATE" \
+    "$RESULTS_DIR/review-record.template.txt" \
+    "$PLATFORM" \
+    "$NATIVE_SMOKE_BUILD_ID"
 fi
 
 RESULT_STATUS="FAIL"
