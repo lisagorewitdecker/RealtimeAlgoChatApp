@@ -303,7 +303,10 @@ export default function RoomScreen() {
       };
       const finishAfterEnvelope = () => {
         if (data.keyEnvelope && !getRoomKey(roomId)) {
-          void acceptRoomKeyEnvelope(data.keyEnvelope).then(finishJoin);
+          void acceptRoomKeyEnvelope(data.keyEnvelope).then(
+            finishJoin,
+            () => undefined,
+          );
         } else {
           finishJoin();
         }
@@ -388,7 +391,11 @@ export default function RoomScreen() {
     }
     function onRoomKeyEnvelope(data: RoomKeyEnvelope & { roomId?: string }) {
       if (data.roomId === roomId) {
-        void acceptRoomKeyEnvelope(data);
+        // Persistence failures are exposed by CryptoContext through
+        // roomKeyPersistenceFailures. This listener is intentionally
+        // fire-and-forget, so consume the matching rejection here while the
+        // screen switches to its existing retry warning.
+        void acceptRoomKeyEnvelope(data).catch(() => undefined);
       }
     }
 
@@ -526,11 +533,14 @@ export default function RoomScreen() {
   const retrySavingRoomKey = useCallback(async () => {
     setRetryingRoomKey(true);
     try {
-      await retryRoomKeyPersistence(roomId);
+      const persisted = await retryRoomKeyPersistence(roomId);
+      if (persisted) {
+        setHasRoomKey(!!getRoomKey(roomId));
+      }
     } finally {
       setRetryingRoomKey(false);
     }
-  }, [retryRoomKeyPersistence, roomId]);
+  }, [getRoomKey, retryRoomKeyPersistence, roomId]);
 
   const openCall = useCallback(() => {
     if (roomKeyPersistenceFailure) return;
