@@ -220,7 +220,10 @@ describe("CryptoProvider", () => {
 
     const storedKeypair = mockSecureStore.get(deviceKeypairStorageKey("crypto-test-user"));
     expect(storedKeypair).toBeTruthy();
-    expect(JSON.parse(storedKeypair as string)).toEqual({ secretKey: expect.any(String) });
+    expect(JSON.parse(storedKeypair as string)).toEqual({
+      secretKey: expect.any(String),
+      registrationVersion: expect.any(Number),
+    });
 
     firstView.unmount();
     await renderCryptoProvider();

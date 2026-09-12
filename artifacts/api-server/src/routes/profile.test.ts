@@ -9,6 +9,7 @@ const mockUpdateAccountProfile = vi.hoisted(() => vi.fn());
 const mockGetAccountAccess = vi.hoisted(() => vi.fn());
 const mockIsConfiguredAdmin = vi.hoisted(() => vi.fn());
 const mockGetPublicKey = vi.hoisted(() => vi.fn());
+const mockGetPublicKeyRecord = vi.hoisted(() => vi.fn());
 const mockRegisterPublicKey = vi.hoisted(() => vi.fn());
 
 vi.mock("@clerk/express", () => ({
@@ -31,6 +32,7 @@ vi.mock("../lib/accountAccess", () => ({
 
 vi.mock("../lib/e2eePersistence", () => ({
   getPublicKey: mockGetPublicKey,
+  getPublicKeyRecord: mockGetPublicKeyRecord,
   registerPublicKey: mockRegisterPublicKey,
 }));
 
@@ -61,6 +63,11 @@ beforeEach(() => {
   mockGetAccountAccess.mockReset().mockResolvedValue({ allowed: true });
   mockIsConfiguredAdmin.mockReset().mockReturnValue(false);
   mockGetPublicKey.mockReset().mockResolvedValue(null);
+  mockGetPublicKeyRecord.mockReset().mockResolvedValue({
+    publicKey: null,
+    previousPublicKey: null,
+    registrationVersion: null,
+  });
   mockRegisterPublicKey
     .mockReset()
     .mockImplementation(async (_userId: string, publicKey: string) => ({
@@ -147,6 +154,73 @@ describe("account profile routes", () => {
     await expect(response.json()).resolves.toEqual({ publicKey: rotatedKey });
     expect(mockRegisterPublicKey).toHaveBeenCalledWith("user-ada", rotatedKey, firstKey);
   });
+
+  it("passes a registration version and reports a stale write without changing the key", async () => {
+    const publicKey = Buffer.alloc(32, 1).toString("base64");
+    const registeredPublicKey = Buffer.alloc(32, 2).toString("base64");
+    mockRegisterPublicKey.mockResolvedValue({
+      outcome: "stale",
+      registeredPublicKey,
+      registrationVersion: 3,
+    });
+
+    const response = await fetch(`${baseUrl}/`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        publicKey,
+        previousPublicKey: registeredPublicKey,
+        registrationVersion: 4,
+      }),
+    });
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({
+      error: expect.stringContaining("older"),
+      code: "PUBLIC_KEY_STALE",
+      publicKey: registeredPublicKey,
+      registrationVersion: 3,
+    });
+    expect(mockRegisterPublicKey).toHaveBeenCalledWith(
+      "user-ada",
+      publicKey,
+      registeredPublicKey,
+      4,
+    );
+    expect(mockUpdateAccountProfile).not.toHaveBeenCalled();
+  });
+
+  it.each([0, 2, Number.MAX_SAFE_INTEGER])(
+    "returns PUBLIC_KEY_VERSION_AHEAD for an invalid empty-account revision %s",
+    async (registrationVersion) => {
+      const publicKey = Buffer.alloc(32, 4).toString("base64");
+      mockRegisterPublicKey.mockResolvedValue({
+        outcome: "future",
+        registeredPublicKey: null,
+        registrationVersion: null,
+      });
+
+      const response = await fetch(`${baseUrl}/`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ publicKey, registrationVersion }),
+      });
+
+      expect(response.status).toBe(409);
+      await expect(response.json()).resolves.toEqual({
+        error: expect.stringContaining("ahead"),
+        code: "PUBLIC_KEY_VERSION_AHEAD",
+        publicKey: null,
+        registrationVersion: null,
+      });
+      expect(mockRegisterPublicKey).toHaveBeenCalledWith(
+        "user-ada",
+        publicKey,
+        null,
+        registrationVersion,
+      );
+    },
+  );
 
   it("refuses to overwrite a different registered key and reports the key it kept", async () => {
     const resetKey = Buffer.alloc(32, 2).toString("base64");

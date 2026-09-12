@@ -12,4 +12,9 @@ export interface PublicKeyConflictResponse {
   code: PublicKeyConflictResponseCode;
   /** The public key the account currently holds */
   publicKey?: string | null;
+  /**
+     * The authoritative account revision currently stored
+     * @minimum 0
+     */
+  registrationVersion?: bigint | null;
 }

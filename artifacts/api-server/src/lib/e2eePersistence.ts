@@ -29,6 +29,7 @@ export async function getPublicKey(userId: string): Promise<string | null> {
 export interface PublicKeyRecord {
   publicKey: string | null;
   previousPublicKey: string | null;
+  registrationVersion: number | null;
 }
 
 export async function getPublicKeyRecord(userId: string): Promise<PublicKeyRecord> {
@@ -36,6 +37,7 @@ export async function getPublicKeyRecord(userId: string): Promise<PublicKeyRecor
     .select({
       publicKey: userProfilesTable.publicKey,
       previousPublicKey: userProfilesTable.previousPublicKey,
+      registrationVersion: userProfilesTable.publicKeyRegistrationVersion,
     })
     .from(userProfilesTable)
     .where(eq(userProfilesTable.userId, userId))
@@ -43,12 +45,18 @@ export async function getPublicKeyRecord(userId: string): Promise<PublicKeyRecor
   return {
     publicKey: profile?.publicKey ?? null,
     previousPublicKey: profile?.previousPublicKey ?? null,
+    registrationVersion: profile?.registrationVersion ?? null,
   };
 }
 
 export type PublicKeyRegistration =
   | { outcome: "registered"; publicKey: string }
-  | { outcome: "conflict"; registeredPublicKey: string | null };
+  | { outcome: "conflict"; registeredPublicKey: string | null }
+  | {
+      outcome: "stale" | "future";
+      registeredPublicKey: string | null;
+      registrationVersion: number | null;
+    };
 
 /**
  * Registers a device public key with compare-and-set semantics so that key
@@ -59,6 +67,9 @@ export type PublicKeyRegistration =
  * `publicKey` (an idempotent retry). Anything else is a conflict that leaves
  * the stored key untouched and reports what the server holds, so a delayed
  * registration from an older device or session cannot undo a newer reset.
+ * Versioned writes must advance the account revision by exactly one (or repeat
+ * the same key at its current revision). This bounds client input: a future
+ * client clock or fabricated revision cannot permanently lock the account.
  * Each branch is a single guarded statement, so concurrent writers serialize
  * on the row and exactly one of two competing takeovers wins.
  *
@@ -70,27 +81,84 @@ export async function registerPublicKey(
   userId: string,
   publicKey: string,
   previousPublicKey: string | null,
+  registrationVersion?: number | null,
 ): Promise<PublicKeyRegistration> {
   const updatedAt = new Date();
+  const hasVersion =
+    typeof registrationVersion === "number" &&
+    Number.isSafeInteger(registrationVersion) &&
+    registrationVersion >= 0;
+  const versionCondition = hasVersion
+    ? or(
+        and(
+          isNull(userProfilesTable.publicKeyRegistrationVersion),
+          sql`${registrationVersion} = 1`,
+        ),
+        sql`${userProfilesTable.publicKeyRegistrationVersion} = ${registrationVersion} - 1`,
+        and(
+          eq(
+            userProfilesTable.publicKeyRegistrationVersion,
+            registrationVersion,
+          ),
+          eq(userProfilesTable.publicKey, publicKey),
+        ),
+      )
+    : undefined;
+  // An INSERT can bypass the ON CONFLICT guard when the account has no row.
+  // Reject every non-initial revision before issuing any write so a client
+  // cannot seed an arbitrary future revision into an empty account.
+  if (hasVersion && registrationVersion !== 1 && previousPublicKey === null) {
+    const current = await getPublicKeyRecord(userId);
+    if (current.publicKey === null && current.registrationVersion === null) {
+      return {
+        outcome: "future",
+        registeredPublicKey: null,
+        registrationVersion: null,
+      };
+    }
+  }
   const applied =
     previousPublicKey === null
       ? await db
           .insert(userProfilesTable)
-          .values({ userId, username: userId, publicKey, updatedAt })
+          .values({
+            userId,
+            username: userId,
+            publicKey,
+            updatedAt,
+            ...(hasVersion
+              ? { publicKeyRegistrationVersion: registrationVersion }
+              : {}),
+          })
           .onConflictDoUpdate({
             target: userProfilesTable.userId,
-            set: { publicKey, updatedAt },
-            setWhere: or(
-              isNull(userProfilesTable.publicKey),
-              eq(userProfilesTable.publicKey, publicKey),
+            set: {
+              publicKey,
+              updatedAt,
+              ...(hasVersion
+                ? { publicKeyRegistrationVersion: registrationVersion }
+                : {}),
+            },
+            setWhere: and(
+              or(
+                isNull(userProfilesTable.publicKey),
+                eq(userProfilesTable.publicKey, publicKey),
+              ),
+              ...(versionCondition ? [versionCondition] : []),
             ),
           })
-          .returning({ publicKey: userProfilesTable.publicKey })
+          .returning({
+            publicKey: userProfilesTable.publicKey,
+            registrationVersion: userProfilesTable.publicKeyRegistrationVersion,
+          })
       : await db
           .update(userProfilesTable)
           .set({
             publicKey,
             updatedAt,
+            ...(hasVersion
+              ? { publicKeyRegistrationVersion: registrationVersion }
+              : {}),
             // SET expressions read the row's old values: a real replacement
             // records the displaced key, an idempotent retry keeps the record.
             previousPublicKey: sql`CASE WHEN ${userProfilesTable.publicKey} = ${publicKey} THEN ${userProfilesTable.previousPublicKey} ELSE ${userProfilesTable.publicKey} END`,
@@ -99,12 +167,35 @@ export async function registerPublicKey(
             and(
               eq(userProfilesTable.userId, userId),
               inArray(userProfilesTable.publicKey, [previousPublicKey, publicKey]),
+              ...(versionCondition ? [versionCondition] : []),
             ),
           )
-          .returning({ publicKey: userProfilesTable.publicKey });
+          .returning({
+            publicKey: userProfilesTable.publicKey,
+            registrationVersion: userProfilesTable.publicKeyRegistrationVersion,
+          });
 
   if (applied.length > 0) return { outcome: "registered", publicKey };
-  return { outcome: "conflict", registeredPublicKey: await getPublicKey(userId) };
+  const current = await getPublicKeyRecord(userId);
+  if (hasVersion) {
+    const currentVersion = current.registrationVersion ?? 0;
+    const expectedVersion = currentVersion + 1;
+    if (registrationVersion < expectedVersion) {
+      return {
+        outcome: "stale",
+        registeredPublicKey: current.publicKey,
+        registrationVersion: current.registrationVersion,
+      };
+    }
+    if (registrationVersion > expectedVersion) {
+      return {
+        outcome: "future",
+        registeredPublicKey: current.publicKey,
+        registrationVersion: current.registrationVersion,
+      };
+    }
+  }
+  return { outcome: "conflict", registeredPublicKey: current.publicKey };
 }
 
 export async function getRoomEnvelope(roomId: string, userId: string) {

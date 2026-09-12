@@ -22,4 +22,9 @@ export interface UpsertProfileRequest {
      * @maxLength 64
      */
   previousPublicKey?: string | null;
+  /**
+     * Optional monotonic version for this public-key registration. Writes must advance the authoritative account revision by exactly one; older or future-skewed writes are rejected without changing the registered key. Omit for compatibility with older clients.
+     * @minimum 0
+     */
+  registrationVersion?: bigint;
 }

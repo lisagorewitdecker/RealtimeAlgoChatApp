@@ -102,6 +102,7 @@ const okResponse = () => ({ ok: true, status: 200 }) as Response;
 interface RegistrationWrite {
   publicKey: string;
   previousPublicKey?: string | null;
+  registrationVersion?: number;
 }
 type PutOverride = (write: RegistrationWrite) => Response | Promise<Response>;
 type GetOverride = () => Response | Promise<Response>;
@@ -115,18 +116,54 @@ type GetOverride = () => Response | Promise<Response>;
 function createProfileServer() {
   const state = {
     publicKey: null as string | null,
+    registrationVersion: null as number | null,
     puts: [] as RegistrationWrite[],
+    putVersions: [] as Array<number | undefined>,
     gets: 0,
     nextPut: [] as PutOverride[],
     nextGet: [] as GetOverride[],
   };
   const applyWrite = (write: RegistrationWrite): Response => {
     const expected = write.previousPublicKey ?? null;
+    const currentVersion = state.registrationVersion ?? 0;
+    if (
+      write.registrationVersion !== undefined &&
+      !(
+        state.publicKey === write.publicKey &&
+        write.registrationVersion === currentVersion
+      )
+    ) {
+      if (write.registrationVersion < currentVersion + 1) {
+        return {
+          ok: false,
+          status: 409,
+          json: async () => ({
+            code: "PUBLIC_KEY_STALE",
+            publicKey: state.publicKey,
+            registrationVersion: state.registrationVersion,
+          }),
+        } as Response;
+      }
+      if (write.registrationVersion > currentVersion + 1) {
+        return {
+          ok: false,
+          status: 409,
+          json: async () => ({
+            code: "PUBLIC_KEY_VERSION_AHEAD",
+            publicKey: state.publicKey,
+            registrationVersion: state.registrationVersion,
+          }),
+        } as Response;
+      }
+    }
     if (
       state.publicKey === write.publicKey ||
       state.publicKey === expected
     ) {
       state.publicKey = write.publicKey;
+      if (write.registrationVersion !== undefined) {
+        state.registrationVersion = write.registrationVersion;
+      }
       return okResponse();
     }
     return {
@@ -142,7 +179,13 @@ function createProfileServer() {
   const handler = async (_url: string | URL | Request, init?: RequestInit) => {
     if (init?.method === "PUT") {
       const write = JSON.parse(String(init.body)) as RegistrationWrite;
-      state.puts.push(write);
+      state.putVersions.push(write.registrationVersion);
+      state.puts.push({
+        publicKey: write.publicKey,
+        ...(write.previousPublicKey !== undefined
+          ? { previousPublicKey: write.previousPublicKey }
+          : {}),
+      });
       const override = state.nextPut.shift();
       if (override) return override(write);
       return applyWrite(write);
@@ -153,7 +196,10 @@ function createProfileServer() {
     return {
       ok: true,
       status: 200,
-      json: async () => ({ publicKey: state.publicKey }),
+       json: async () => ({
+         publicKey: state.publicKey,
+         registrationVersion: state.registrationVersion,
+       }),
     } as Response;
   };
   return { state, handler, applyWrite };
@@ -356,6 +402,34 @@ describe("device encryption identity reset", () => {
     view.unmount();
   });
 
+  it("reads an authoritative revision before takeover and completes a reset from behind", async () => {
+    const view = await renderReadyProvider();
+    const currentKey = cryptoValue!.publicKeyB64;
+    // Simulate another session advancing the account's registration sequence
+    // without changing the key this provider currently advertises.
+    server.state.registrationVersion = Date.now() + 10_000;
+
+    await act(async () => {
+      await expect(cryptoValue!.resetDeviceIdentity()).resolves.toMatchObject({
+        status: "reset",
+      });
+    });
+
+    await waitFor(() => expect(cryptoValue?.deviceKeyStatus).toBe("registered"));
+    expect(cryptoValue?.isReady).toBe(true);
+    expect(cryptoValue?.deviceKeyConflict).toBeNull();
+    // The locally persisted revision was behind, so the provider reads the
+    // authoritative revision before sending exactly its next revision.
+    expect(server.state.gets).toBe(1);
+    expect(server.state.putVersions.at(-1)).toBe(
+      server.state.registrationVersion,
+    );
+    expect(server.state.publicKey).toBe(cryptoValue?.publicKeyB64);
+    expect(cryptoValue?.publicKeyB64).not.toBe(currentKey);
+
+    view.unmount();
+  });
+
   it("closes encrypted rooms when the server reports a different registered key", async () => {
     const view = await renderReadyProvider();
     const ownKey = cryptoValue!.publicKeyB64;
@@ -394,6 +468,8 @@ describe("device encryption identity reset", () => {
     for (const racingKey of racingKeys) {
       server.state.nextPut.push((write) => {
         server.state.publicKey = racingKey;
+        server.state.registrationVersion =
+          (server.state.registrationVersion ?? 0) + 1;
         return server.applyWrite(write);
       });
     }
@@ -416,7 +492,9 @@ describe("device encryption identity reset", () => {
       { publicKey: nextPublicKey, previousPublicKey: racingKeys[0] },
       { publicKey: nextPublicKey, previousPublicKey: racingKeys[1] },
     ]);
-    expect(server.state.gets).toBe(3);
+    // Each raced write is followed by the stale-response re-read before the
+    // next exact-revision takeover.
+    expect(server.state.gets).toBe(6);
     expect(server.state.publicKey).toBe(racingKeys[2]);
 
     // A later reset takes over from the current key normally.
@@ -607,6 +685,7 @@ describe("device encryption identity reset", () => {
     // The fake server holds a single account's key; the other account has
     // nothing registered yet, so its own key registers without a conflict.
     server.state.publicKey = null;
+    server.state.registrationVersion = null;
     act(() => {
       view.rerender(
         <CryptoProvider>
@@ -624,9 +703,12 @@ describe("device encryption identity reset", () => {
     await waitFor(() => expect(cryptoValue?.isReady).toBe(true));
 
     // The other account keeps its own stored key and is the active identity.
-    expect(mockSecureStore.get(deviceKeyStorageKey("other-user"))).toBe(
-      JSON.stringify({ secretKey: otherSecret }),
-    );
+    expect(
+      JSON.parse(mockSecureStore.get(deviceKeyStorageKey("other-user")) as string),
+    ).toEqual({
+      secretKey: otherSecret,
+      registrationVersion: expect.any(Number),
+    });
     expect(cryptoValue?.publicKeyB64).toBe(storedPublicKey("other-user"));
     // The first account's replacement key stays in storage for its next sign-in
     // but was never registered under the other account's session.

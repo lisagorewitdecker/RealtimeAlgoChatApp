@@ -33,6 +33,12 @@ Public-key writes are guarded by the key they replace: a write without an assert
 
 **How to apply:** Startup registration is a plain write that never displaces another device (a conflict makes the device "superseded", not retrying). Only an explicit user reset performs a takeover, and it asserts the key it just read back, retrying a bounded number of times when another takeover races it. Keep the guard a single atomic statement so concurrent takeovers serialize on the row. Rosters and key-change notices that show a different key for the device's own account are authoritative conflicts and must close encrypted rooms.
 
+Versioned replacements advance the server's authoritative account revision by exactly one. Never use a client timestamp or accept an arbitrary larger value.
+
+**Why:** Device clocks and local counters are not globally ordered. A future-skewed or maximum client value could otherwise block every later reset, turning sequencing into a durable denial of key recovery.
+
+**How to apply:** Read the server revision before an intentional takeover, submit only the next revision, and re-read/retry after stale or ahead responses. Preserve the new local identity while retrying, but do not mark it ready until the server confirms its key.
+
 ## Creator-account recovery needs a handover, not just re-registration
 
 A fresh device of the room creator's account cannot receive its own rooms' keys from anyone but a session of the same account that still holds them, so a superseded creator session must hand its room key to the account's new key before it closes the room.

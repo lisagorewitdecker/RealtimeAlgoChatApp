@@ -28,6 +28,10 @@ function waitForRetry(delayMs: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, delayMs));
 }
 
+function nextRegistrationVersion(previous: number | null): number {
+  return (previous ?? 0) + 1;
+}
+
 function profileApiUrl(): string {
   const domain = process.env["EXPO_PUBLIC_DOMAIN"];
   return `${domain ? `https://${domain}` : "http://localhost:5000"}/api/profile`;
@@ -163,6 +167,7 @@ export function CryptoProvider({ children }: { children: React.ReactNode }) {
     userId: string;
     publicKey: Uint8Array;
     secretKey: Uint8Array;
+    registrationVersion: number;
     registration: RegistrationMode;
   } | null>(null);
   const [isReady, setIsReady] = useState(false);
@@ -227,14 +232,31 @@ export function CryptoProvider({ children }: { children: React.ReactNode }) {
     void (async () => {
       try {
         const saved = await getStored(deviceKeypairStorageKey(userId));
-        const secretKey = saved ? decodeBase64(JSON.parse(saved).secretKey) : null;
+        const savedIdentity = saved ? JSON.parse(saved) as {
+          secretKey?: string;
+          registrationVersion?: number;
+        } : null;
+        const secretKey = savedIdentity?.secretKey
+          ? decodeBase64(savedIdentity.secretKey)
+          : null;
+        const registrationVersion =
+          typeof savedIdentity?.registrationVersion === "number" &&
+          Number.isSafeInteger(savedIdentity.registrationVersion) &&
+          savedIdentity.registrationVersion >= 0
+            ? savedIdentity.registrationVersion
+            : null;
         const pair = secretKey?.length === nacl.box.secretKeyLength
           ? nacl.box.keyPair.fromSecretKey(secretKey)
           : nacl.box.keyPair();
-        if (!saved) {
+        const persistedVersion =
+          registrationVersion ?? nextRegistrationVersion(null);
+        if (!saved || registrationVersion === null) {
           await setStored(
             deviceKeypairStorageKey(userId),
-            JSON.stringify({ secretKey: encodeBase64(pair.secretKey) }),
+            JSON.stringify({
+              secretKey: encodeBase64(pair.secretKey),
+              registrationVersion: persistedVersion,
+            }),
           );
         }
         if (
@@ -242,7 +264,12 @@ export function CryptoProvider({ children }: { children: React.ReactNode }) {
           identityRef.current.userId === userId &&
           identityRef.current.generation === generation
         ) {
-          setKeypair({ userId, ...pair, registration: "confirm" });
+          setKeypair({
+            userId,
+            ...pair,
+            registrationVersion: persistedVersion,
+            registration: "confirm",
+          });
         }
       } catch {
         const pair = nacl.box.keyPair();
@@ -251,7 +278,12 @@ export function CryptoProvider({ children }: { children: React.ReactNode }) {
           identityRef.current.userId === userId &&
           identityRef.current.generation === generation
         ) {
-          setKeypair({ userId, ...pair, registration: "confirm" });
+          setKeypair({
+            userId,
+            ...pair,
+            registrationVersion: nextRegistrationVersion(null),
+            registration: "confirm",
+          });
         }
       }
     })();
@@ -289,6 +321,7 @@ export function CryptoProvider({ children }: { children: React.ReactNode }) {
       let attempt = 0;
       let takeoverAttempts = 0;
       let warned = false;
+      let requestRegistrationVersion = keypair.registrationVersion;
       const identityChanged = () =>
         cancelled ||
         identityRef.current.userId !== userId ||
@@ -322,8 +355,17 @@ export function CryptoProvider({ children }: { children: React.ReactNode }) {
           // never replaces a different key.
           let previousPublicKey: string | null | undefined;
           if (keypair.registration === "takeover") {
-            previousPublicKey = await readRegisteredPublicKey(profileUrl, token);
+            const serverRecord = await readRegisteredPublicKeyRecord(profileUrl, token);
             if (identityChanged()) return;
+            previousPublicKey = serverRecord.publicKey;
+            requestRegistrationVersion = nextRegistrationVersion(
+              serverRecord.registrationVersion,
+            );
+            await persistRegistrationVersion(
+              userId,
+              keypair.secretKey,
+              requestRegistrationVersion,
+            );
             if (previousPublicKey === publicKeyB64) {
               confirmRegistration();
               return;
@@ -337,8 +379,15 @@ export function CryptoProvider({ children }: { children: React.ReactNode }) {
             },
             body: JSON.stringify(
               previousPublicKey === undefined
-                ? { publicKey: publicKeyB64 }
-                : { publicKey: publicKeyB64, previousPublicKey },
+                ? {
+                    publicKey: publicKeyB64,
+                    registrationVersion: requestRegistrationVersion,
+                  }
+                : {
+                    publicKey: publicKeyB64,
+                    previousPublicKey,
+                    registrationVersion: requestRegistrationVersion,
+                  },
             ),
           });
           const tracked = {
@@ -366,8 +415,54 @@ export function CryptoProvider({ children }: { children: React.ReactNode }) {
             // The account is registered under a different key. Re-read and
             // retry only for an explicit takeover; a plain confirmation must
             // never displace another device's registration.
-            const registeredPublicKeyB64 = await readConflictingPublicKey(response);
+            const conflict = await readConflictingPublicKey(response);
             if (identityChanged()) return;
+            if (
+              conflict.code === "PUBLIC_KEY_STALE" ||
+              conflict.code === "PUBLIC_KEY_VERSION_AHEAD"
+            ) {
+              // A version response is not proof that this device is
+              // registered. Read the authoritative key and revision before
+              // deciding whether rooms can reopen or retrying a takeover.
+              const serverRecord = await readRegisteredPublicKeyRecord(
+                profileUrl,
+                token,
+              );
+              if (identityChanged()) return;
+              const registeredPublicKeyB64 = serverRecord.publicKey;
+              if (
+                keypair.registration === "takeover" &&
+                registeredPublicKeyB64 !== publicKeyB64 &&
+                takeoverAttempts < MAX_TAKEOVER_ATTEMPTS - 1
+              ) {
+                takeoverAttempts += 1;
+                requestRegistrationVersion = nextRegistrationVersion(
+                  serverRecord.registrationVersion,
+                );
+                await persistRegistrationVersion(
+                  userId,
+                  keypair.secretKey,
+                  requestRegistrationVersion,
+                );
+                continue;
+              }
+              if (registeredPublicKeyB64 === publicKeyB64) {
+                await persistRegistrationVersion(
+                  userId,
+                  keypair.secretKey,
+                  serverRecord.registrationVersion ??
+                    requestRegistrationVersion,
+                );
+                confirmRegistration();
+                return;
+              }
+              confirmedPublicKeyRef.current = null;
+              setRegistrationRetrying(false);
+              setIsReady(false);
+              setRegistrationConflict({ userId, registeredPublicKeyB64 });
+              return;
+            }
+            const registeredPublicKeyB64 = conflict.publicKey;
             if (
               keypair.registration === "takeover" &&
               takeoverAttempts < MAX_TAKEOVER_ATTEMPTS - 1
@@ -687,12 +782,18 @@ export function CryptoProvider({ children }: { children: React.ReactNode }) {
     try {
       const generation = identityRef.current.generation;
       const pair = nacl.box.keyPair();
+      const registrationVersion = nextRegistrationVersion(
+        keypair.registrationVersion,
+      );
       try {
         // Persist first: if the write fails the device keeps its current
         // identity, which the server still knows about.
         await setStored(
           deviceKeypairStorageKey(userId),
-          JSON.stringify({ secretKey: encodeBase64(pair.secretKey) }),
+          JSON.stringify({
+            secretKey: encodeBase64(pair.secretKey),
+            registrationVersion,
+          }),
         );
       } catch {
         return { status: "storage_unavailable" };
@@ -710,7 +811,12 @@ export function CryptoProvider({ children }: { children: React.ReactNode }) {
       setRegistrationRetrying(false);
       setIsDeviceKeyRegistrationSlow(false);
       setRegistrationConflict(null);
-      setKeypair({ userId, ...pair, registration: "takeover" });
+      setKeypair({
+        userId,
+        ...pair,
+        registrationVersion,
+        registration: "takeover",
+      });
       return { status: "reset", publicKeyB64: encodeBase64(pair.publicKey) };
     } finally {
       resetInFlightRef.current = false;
@@ -726,26 +832,60 @@ export function useCrypto(): CryptoContextValue {
   return value;
 }
 
-// The key the server currently holds for the signed-in account (null = none).
-async function readRegisteredPublicKey(
+// The key and authoritative revision the server currently holds for the
+// signed-in account. Older servers may omit registrationVersion.
+async function readRegisteredPublicKeyRecord(
   profileUrl: string,
   token: string | null,
-): Promise<string | null> {
+): Promise<{ publicKey: string | null; registrationVersion: number | null }> {
   const response = await fetch(profileUrl, {
     headers: { Authorization: `Bearer ${token ?? ""}` },
   });
   if (!response.ok) {
     throw new Error(`Public key lookup failed (${response.status})`);
   }
-  return publicKeyFromBody(await response.json());
+  const body = await response.json();
+  const registrationVersion =
+    body &&
+    typeof body === "object" &&
+    typeof (body as { registrationVersion?: unknown }).registrationVersion ===
+      "number" &&
+    Number.isSafeInteger(
+      (body as { registrationVersion: number }).registrationVersion,
+    ) &&
+    (body as { registrationVersion: number }).registrationVersion >= 0
+      ? (body as { registrationVersion: number }).registrationVersion
+      : null;
+  return { publicKey: publicKeyFromBody(body), registrationVersion };
+}
+
+async function persistRegistrationVersion(
+  userId: string,
+  secretKey: Uint8Array,
+  registrationVersion: number,
+): Promise<void> {
+  await setStored(
+    deviceKeypairStorageKey(userId),
+    JSON.stringify({ secretKey: encodeBase64(secretKey), registrationVersion }),
+  );
 }
 
 // A 409 body names the key the server kept; older servers may omit it.
-async function readConflictingPublicKey(response: Response): Promise<string | null> {
+async function readConflictingPublicKey(response: Response): Promise<{
+  code: string | null;
+  publicKey: string | null;
+}> {
   try {
-    return publicKeyFromBody(await response.json());
+    const body = await response.json();
+    return {
+      code:
+        body && typeof body === "object" && typeof (body as { code?: unknown }).code === "string"
+          ? (body as { code: string }).code
+          : null,
+      publicKey: publicKeyFromBody(body),
+    };
   } catch {
-    return null;
+    return { code: null, publicKey: null };
   }
 }
 

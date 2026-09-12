@@ -11,4 +11,6 @@ export type PublicKeyConflictResponseCode = typeof PublicKeyConflictResponseCode
 
 export const PublicKeyConflictResponseCode = {
   PUBLIC_KEY_CONFLICT: 'PUBLIC_KEY_CONFLICT',
+  PUBLIC_KEY_STALE: 'PUBLIC_KEY_STALE',
+  PUBLIC_KEY_VERSION_AHEAD: 'PUBLIC_KEY_VERSION_AHEAD',
 } as const;

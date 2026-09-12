@@ -7,7 +7,10 @@ import {
 } from "../lib/accountProfile";
 import { isConfiguredAdmin } from "../lib/accountAccess";
 import { requireAuthorizedUser } from "../lib/requireAccountAccess";
-import { getPublicKey, registerPublicKey } from "../lib/e2eePersistence";
+import {
+  getPublicKeyRecord,
+  registerPublicKey,
+} from "../lib/e2eePersistence";
 
 const router = Router();
 
@@ -26,13 +29,16 @@ router.get("/", async (req, res, next) => {
   const userId = await requireAuthorizedUser(req, res);
   if (!userId) return;
   try {
-    const [profile, publicKey] = await Promise.all([
+    const [profile, publicKeyRecord] = await Promise.all([
       getAccountProfile(userId),
-      getPublicKey(userId),
+      getPublicKeyRecord(userId),
     ]);
     res.json({
       profile,
-      publicKey,
+      publicKey: publicKeyRecord.publicKey,
+      ...(publicKeyRecord.registrationVersion === null
+        ? {}
+        : { registrationVersion: publicKeyRecord.registrationVersion }),
       isAdmin: isConfiguredAdmin(userId),
     });
   } catch (error) {
@@ -50,6 +56,7 @@ router.put("/", async (req, res, next) => {
   const username = body?.["username"];
   const avatarEmoji = body?.["avatarEmoji"];
   const publicKey = body?.["publicKey"];
+  const registrationVersion = body?.["registrationVersion"];
   // Which key this write replaces (`null`: none registered yet). Omitting it
   // only ever registers a first key or re-sends the current one; replacing a
   // different key requires naming it so stale devices cannot overwrite a reset.
@@ -59,6 +66,12 @@ router.put("/", async (req, res, next) => {
       previousPublicKey !== null &&
       !isValidPublicKey(previousPublicKey)) ||
     (previousPublicKey !== undefined && publicKey === undefined) ||
+    (registrationVersion !== undefined &&
+      registrationVersion !== null &&
+      (typeof registrationVersion !== "number" ||
+        !Number.isSafeInteger(registrationVersion) ||
+        registrationVersion < 0)) ||
+    (registrationVersion !== undefined && publicKey === undefined) ||
     (username !== undefined &&
       (typeof username !== "string" ||
         username.trim().replace(/\s+/g, " ").length < 2 ||
@@ -75,11 +88,19 @@ router.put("/", async (req, res, next) => {
 
   try {
     if (typeof publicKey === "string") {
-      const registration = await registerPublicKey(
-        userId,
-        publicKey,
-        typeof previousPublicKey === "string" ? previousPublicKey : null,
-      );
+      const registration =
+        typeof registrationVersion === "number"
+          ? await registerPublicKey(
+              userId,
+              publicKey,
+              typeof previousPublicKey === "string" ? previousPublicKey : null,
+              registrationVersion,
+            )
+          : await registerPublicKey(
+              userId,
+              publicKey,
+              typeof previousPublicKey === "string" ? previousPublicKey : null,
+            );
       if (registration.outcome === "conflict") {
         res.status(409).json({
           error:
@@ -89,8 +110,33 @@ router.put("/", async (req, res, next) => {
         });
         return;
       }
+      if (registration.outcome === "stale") {
+        res.status(409).json({
+          error:
+            "This encryption key registration is older than the key already registered for this account.",
+          code: "PUBLIC_KEY_STALE",
+          publicKey: registration.registeredPublicKey,
+          registrationVersion: registration.registrationVersion,
+        });
+        return;
+      }
+      if (registration.outcome === "future") {
+        res.status(409).json({
+          error:
+            "This encryption key registration is ahead of the account revision.",
+          code: "PUBLIC_KEY_VERSION_AHEAD",
+          publicKey: registration.registeredPublicKey,
+          registrationVersion: registration.registrationVersion,
+        });
+        return;
+      }
       if (username === undefined && avatarEmoji === undefined) {
-        res.json({ publicKey });
+        res.json({
+          publicKey,
+          ...(typeof registrationVersion === "number"
+            ? { registrationVersion }
+            : {}),
+        });
         return;
       }
     }
@@ -108,6 +154,7 @@ router.put("/", async (req, res, next) => {
     res.json({
       profile,
       ...(typeof publicKey === "string" ? { publicKey } : {}),
+      ...(typeof registrationVersion === "number" ? { registrationVersion } : {}),
     });
   } catch (error) {
     next(error);
