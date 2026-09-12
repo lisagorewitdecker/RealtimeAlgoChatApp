@@ -40,7 +40,11 @@ jobs:
             @microsoft/eslint-formatter-sarif@3.1.0 \
             @typescript-eslint/parser@8.43.0 \
             typescript@5.9.3
-          ESLINT_PACKAGE_ROOT="$tmp_dir/node_modules" "$tmp_dir/node_modules/.bin/eslint" . \
+          ESLINT_PACKAGE_ROOT="$tmp_dir/node_modules" "$tmp_dir/node_modules/.bin/eslint" \
+            artifacts \
+            scripts \
+            vendor \
+            .eslintrc.cjs \
             --config .eslintrc.cjs \
             --ext .js,.jsx,.mjs,.cjs,.ts,.tsx \
             --format "$tmp_dir/node_modules/@microsoft/eslint-formatter-sarif" \
