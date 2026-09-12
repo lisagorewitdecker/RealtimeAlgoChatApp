@@ -42,7 +42,7 @@ jobs:
             typescript@5.9.3
           ESLINT_PACKAGE_ROOT="$tmp_dir/node_modules" "$tmp_dir/node_modules/.bin/eslint" . \
             --config .eslintrc.cjs \
-            --ext .js,.jsx,.ts,.tsx \
+            --ext .js,.jsx,.mjs,.cjs,.ts,.tsx \
             --format "$tmp_dir/node_modules/@microsoft/eslint-formatter-sarif" \
             --output-file eslint-results.sarif
 
