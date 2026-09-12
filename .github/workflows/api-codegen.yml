@@ -13,22 +13,26 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
+        id: checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
       - name: Set up pnpm
+        id: setup-pnpm
         uses: pnpm/action-setup@v4
         with:
           version: 10.26.1
 
       - name: Set up Node.js
+        id: setup-node
         uses: actions/setup-node@v4
         with:
           node-version: 24
           cache: pnpm
 
       - name: Install workspace dependencies
+        id: install-dependencies
         run: pnpm install --frozen-lockfile
 
       - name: Verify generated API clients
@@ -42,6 +46,14 @@ jobs:
       # blocked, or approved override with its review evidence) is also published
       # to the job summary through GITHUB_STEP_SUMMARY.
       - name: Check API contract compatibility
+        if: >-
+          ${{
+            always() &&
+            steps.checkout.outcome == 'success' &&
+            steps.setup-pnpm.outcome == 'success' &&
+            steps.setup-node.outcome == 'success' &&
+            steps.install-dependencies.outcome == 'success'
+          }}
         env:
           API_BREAKING_CHANGE_PR_BODY: ${{ github.event.pull_request.body }}
         run: pnpm validate:api-compatibility
