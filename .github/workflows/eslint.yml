@@ -31,28 +31,40 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Run ESLint
+        id: lint
         env:
           SARIF_ESLINT_IGNORE_SUPPRESSED: "true"
         run: |
           tmp_dir="$(mktemp -d)"
+          status=0
+
           npm install --prefix "$tmp_dir" \
             eslint@8.57.1 \
             @microsoft/eslint-formatter-sarif@3.1.0 \
             @typescript-eslint/parser@8.43.0 \
-            typescript@5.9.3
-          ESLINT_PACKAGE_ROOT="$tmp_dir/node_modules" "$tmp_dir/node_modules/.bin/eslint" \
-            artifacts \
-            scripts \
-            vendor \
-            .eslintrc.cjs \
-            --config .eslintrc.cjs \
-            --ext .js,.jsx,.mjs,.cjs,.ts,.tsx \
-            --format "$tmp_dir/node_modules/@microsoft/eslint-formatter-sarif" \
-            --output-file eslint-results.sarif
+            typescript@5.9.3 || status=$?
+
+          if [ "$status" -eq 0 ]; then
+            ESLINT_PACKAGE_ROOT="$tmp_dir/node_modules" "$tmp_dir/node_modules/.bin/eslint" \
+              artifacts \
+              scripts \
+              vendor \
+              .eslintrc.cjs \
+              --config .eslintrc.cjs \
+              --ext .js,.jsx,.mjs,.cjs,.ts,.tsx \
+              --format "$tmp_dir/node_modules/@microsoft/eslint-formatter-sarif" \
+              --output-file eslint-results.sarif || status=$?
+          fi
+
+          echo "exit_code=$status" >> "$GITHUB_OUTPUT"
 
       - name: Upload analysis results to GitHub
-        if: ${{ success() && hashFiles('eslint-results.sarif') != '' }}
+        if: ${{ hashFiles('eslint-results.sarif') != '' }}
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: eslint-results.sarif
           wait-for-processing: true
+
+      - name: Fail on ESLint errors
+        if: ${{ steps.lint.outputs.exit_code != '0' }}
+        run: exit 1
