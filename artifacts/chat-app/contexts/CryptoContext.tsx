@@ -14,6 +14,7 @@ const deviceKeypairStorageKey = (userId: string) =>
 const roomStorageKey = (userId: string, roomId: string) =>
   `devstudio_roomkey:${userId}:${roomId}`;
 const PUBLIC_KEY_SYNC_RETRY_DELAYS_MS = [250, 750, 2_000, 5_000] as const;
+export const DEVICE_KEY_REGISTRATION_SLOW_MS = 25_000;
 // A reset takes over the account's registration with compare-and-set writes.
 // Each attempt re-reads the key the server holds; after this many losses to
 // concurrent takeovers the device reports itself superseded instead.
@@ -85,6 +86,12 @@ export interface CryptoContextValue {
   publicKeyB64: string;
   isReady: boolean;
   deviceKeyStatus: DeviceKeyRegistrationStatus;
+  /**
+   * True when the current registration loop has remained unsettled long
+   * enough to warrant user guidance. This is informational only: it never
+   * settles, cancels, or bypasses an in-flight registration request.
+   */
+  isDeviceKeyRegistrationSlow: boolean;
   /**
    * Present while `deviceKeyStatus` is `superseded`: the key the server holds
    * for this account instead of this device's key, when the server said which.
@@ -160,6 +167,7 @@ export function CryptoProvider({ children }: { children: React.ReactNode }) {
   } | null>(null);
   const [isReady, setIsReady] = useState(false);
   const [registrationRetrying, setRegistrationRetrying] = useState(false);
+  const [isDeviceKeyRegistrationSlow, setIsDeviceKeyRegistrationSlow] = useState(false);
   const [registrationConflict, setRegistrationConflict] = useState<{
     userId: string;
     registeredPublicKeyB64: string | null;
@@ -204,6 +212,7 @@ export function CryptoProvider({ children }: { children: React.ReactNode }) {
     setKeypair(null);
     setIsReady(false);
     setRegistrationRetrying(false);
+    setIsDeviceKeyRegistrationSlow(false);
     setRegistrationConflict(null);
     setRoomKeyPersistenceFailures(new Map());
 
@@ -257,6 +266,20 @@ export function CryptoProvider({ children }: { children: React.ReactNode }) {
     if (!keypair || !userId || keypair.userId !== userId) return;
     const generation = identityRef.current.generation;
     let cancelled = false;
+    setIsDeviceKeyRegistrationSlow(false);
+    const slowWarningTimer = setTimeout(() => {
+      if (
+        !cancelled &&
+        identityRef.current.userId === userId &&
+        identityRef.current.generation === generation
+      ) {
+        setIsDeviceKeyRegistrationSlow(true);
+      }
+    }, DEVICE_KEY_REGISTRATION_SLOW_MS);
+    const clearSlowWarning = () => {
+      clearTimeout(slowWarningTimer);
+      setIsDeviceKeyRegistrationSlow(false);
+    };
     void (async () => {
       if (!isSignedIn || typeof getToken !== "function") {
         setIsReady(true);
@@ -277,6 +300,7 @@ export function CryptoProvider({ children }: { children: React.ReactNode }) {
         confirmedPublicKeyRef.current = { userId, publicKeyB64 };
         setRegistrationConflict(null);
         setRegistrationRetrying(false);
+        clearSlowWarning();
         setIsReady(true);
       };
       while (!cancelled) {
@@ -353,6 +377,7 @@ export function CryptoProvider({ children }: { children: React.ReactNode }) {
             }
             confirmedPublicKeyRef.current = null;
             setRegistrationRetrying(false);
+            clearSlowWarning();
             setIsReady(false);
             setRegistrationConflict({ userId, registeredPublicKeyB64 });
             return;
@@ -410,6 +435,7 @@ export function CryptoProvider({ children }: { children: React.ReactNode }) {
     })();
     return () => {
       cancelled = true;
+      clearTimeout(slowWarningTimer);
     };
   }, [getToken, isSignedIn, keypair, userId]);
 
@@ -633,6 +659,7 @@ export function CryptoProvider({ children }: { children: React.ReactNode }) {
       if (registeredPublicKeyB64 && registeredPublicKeyB64 === ownPublicKeyB64) return;
       confirmedPublicKeyRef.current = null;
       setRegistrationRetrying(false);
+      setIsDeviceKeyRegistrationSlow(false);
       setIsReady(false);
       setRegistrationConflict({ userId, registeredPublicKeyB64 });
     },
@@ -681,6 +708,7 @@ export function CryptoProvider({ children }: { children: React.ReactNode }) {
       // Leave encrypted rooms until the server confirms the replacement key.
       setIsReady(false);
       setRegistrationRetrying(false);
+      setIsDeviceKeyRegistrationSlow(false);
       setRegistrationConflict(null);
       setKeypair({ userId, ...pair, registration: "takeover" });
       return { status: "reset", publicKeyB64: encodeBase64(pair.publicKey) };
@@ -689,7 +717,7 @@ export function CryptoProvider({ children }: { children: React.ReactNode }) {
     }
   }, [isReady, isSignedIn, keypair, registrationConflict, userId]);
 
-  return <CryptoContext.Provider value={{ publicKeyB64: activeKeypair ? encodeBase64(activeKeypair.publicKey) : "", isReady, deviceKeyStatus, deviceKeyConflict, resetDeviceIdentity, markDeviceKeySuperseded, roomKeys: activeRoomKeys, decryptRoomKeyEnvelope, encryptRoomKey, encryptMessage, decryptMessage, encryptBytes, decryptBytes, setRoomKey, getRoomKey, generateRoomKey, loadRoomKey, roomKeyPersistenceFailures, retryRoomKeyPersistence }}>{children}</CryptoContext.Provider>;
+  return <CryptoContext.Provider value={{ publicKeyB64: activeKeypair ? encodeBase64(activeKeypair.publicKey) : "", isReady, deviceKeyStatus, isDeviceKeyRegistrationSlow, deviceKeyConflict, resetDeviceIdentity, markDeviceKeySuperseded, roomKeys: activeRoomKeys, decryptRoomKeyEnvelope, encryptRoomKey, encryptMessage, decryptMessage, encryptBytes, decryptBytes, setRoomKey, getRoomKey, generateRoomKey, loadRoomKey, roomKeyPersistenceFailures, retryRoomKeyPersistence }}>{children}</CryptoContext.Provider>;
 }
 
 export function useCrypto(): CryptoContextValue {

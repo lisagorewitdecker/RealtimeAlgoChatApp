@@ -36,7 +36,13 @@ const mockCryptoState: {
   isReady: boolean;
   publicKeyB64: string;
   deviceKeyStatus: "registering" | "registered" | "superseded";
-} = { isReady: true, publicKeyB64: "public-key", deviceKeyStatus: "registered" };
+  isDeviceKeyRegistrationSlow: boolean;
+} = {
+  isReady: true,
+  publicKeyB64: "public-key",
+  deviceKeyStatus: "registered",
+  isDeviceKeyRegistrationSlow: false,
+};
 
 jest.mock("@expo/vector-icons", () => ({
   Feather: () => null,
@@ -99,6 +105,7 @@ jest.mock("@/contexts/CryptoContext", () => ({
     isReady: mockCryptoState.isReady,
     publicKeyB64: mockCryptoState.publicKeyB64,
     deviceKeyStatus: mockCryptoState.deviceKeyStatus,
+    isDeviceKeyRegistrationSlow: mockCryptoState.isDeviceKeyRegistrationSlow,
     markDeviceKeySuperseded: mockMarkDeviceKeySuperseded,
     getRoomKey: mockGetRoomKey,
     loadRoomKey: mockLoadRoomKey,
@@ -151,6 +158,7 @@ function resetRoomMocks() {
   mockCryptoState.isReady = true;
   mockCryptoState.publicKeyB64 = "public-key";
   mockCryptoState.deviceKeyStatus = "registered";
+  mockCryptoState.isDeviceKeyRegistrationSlow = false;
   globalThis.fetch = jest.fn().mockResolvedValue({
     ok: true,
     json: jest.fn().mockResolvedValue({ ok: true }),
@@ -202,6 +210,22 @@ describe("room ban handling", () => {
 
     expect(queryByTestId("room-loading")).toBeNull();
     expect(getByTestId("room-back-button")).toBeTruthy();
+  });
+
+  it("explains when device-key registration is taking unusually long", () => {
+    mockCryptoState.isReady = false;
+    mockCryptoState.deviceKeyStatus = "registering";
+    mockCryptoState.isDeviceKeyRegistrationSlow = true;
+
+    const { getByTestId, getByText } = render(<RoomScreen />);
+
+    expect(getByTestId("room-loading")).toBeTruthy();
+    expect(
+      getByText(
+        "Still registering your device key. Check your connection; encrypted rooms stay closed until it completes.",
+      ),
+    ).toBeTruthy();
+    expect(socketEmits("join-room")).toHaveLength(0);
   });
 
   it("waits for delayed secure-storage hydration before decrypting persisted history", async () => {

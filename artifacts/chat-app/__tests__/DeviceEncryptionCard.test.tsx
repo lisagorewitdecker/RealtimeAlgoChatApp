@@ -21,13 +21,20 @@ const otherDeviceKeyB64 = encodeBase64(
 const mockResetDeviceIdentity = jest.fn<Promise<DeviceIdentityResetResult>, []>();
 const mockCryptoState: {
   deviceKeyStatus: DeviceKeyRegistrationStatus;
+  isDeviceKeyRegistrationSlow: boolean;
   deviceKeyConflict: { registeredPublicKeyB64: string | null } | null;
   publicKeyB64: string;
-} = { deviceKeyStatus: "registered", deviceKeyConflict: null, publicKeyB64 };
+} = {
+  deviceKeyStatus: "registered",
+  isDeviceKeyRegistrationSlow: false,
+  deviceKeyConflict: null,
+  publicKeyB64,
+};
 
 jest.mock("@/contexts/CryptoContext", () => ({
   useCrypto: () => ({
     deviceKeyStatus: mockCryptoState.deviceKeyStatus,
+    isDeviceKeyRegistrationSlow: mockCryptoState.isDeviceKeyRegistrationSlow,
     deviceKeyConflict: mockCryptoState.deviceKeyConflict,
     publicKeyB64: mockCryptoState.publicKeyB64,
     resetDeviceIdentity: mockResetDeviceIdentity,
@@ -70,6 +77,7 @@ describe("DeviceEncryptionCard", () => {
   beforeEach(() => {
     mockResetDeviceIdentity.mockReset();
     mockCryptoState.deviceKeyStatus = "registered";
+    mockCryptoState.isDeviceKeyRegistrationSlow = false;
     mockCryptoState.deviceKeyConflict = null;
     mockCryptoState.publicKeyB64 = publicKeyB64;
     alertSpy = jest.spyOn(Alert, "alert").mockImplementation(() => undefined);
@@ -192,6 +200,20 @@ describe("DeviceEncryptionCard", () => {
       }
     },
   );
+
+  it("shows connection guidance when registration remains pending", () => {
+    mockCryptoState.deviceKeyStatus = "registering";
+    mockCryptoState.isDeviceKeyRegistrationSlow = true;
+    const { getByText, getByTestId } = render(<DeviceEncryptionCard />);
+
+    expect(getByText("Still registering your device key")).toBeTruthy();
+    expect(
+      getByText("Check your connection; encrypted rooms stay closed until it completes."),
+    ).toBeTruthy();
+    expect(getByTestId("reset-device-key-button").props.accessibilityState).toMatchObject({
+      disabled: true,
+    });
+  });
 
   it("offers the reset as the recovery when another device or session superseded this key", async () => {
     Platform.OS = "web";

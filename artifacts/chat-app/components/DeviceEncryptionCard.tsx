@@ -108,15 +108,28 @@ export function formatPublicKeyFingerprint(publicKeyB64: string): string {
 
 export function DeviceEncryptionCard() {
   const colors = useColors();
-  const { deviceKeyStatus, deviceKeyConflict, publicKeyB64, resetDeviceIdentity } =
-    useCrypto();
+  const {
+    deviceKeyStatus,
+    isDeviceKeyRegistrationSlow,
+    deviceKeyConflict,
+    publicKeyB64,
+    resetDeviceIdentity,
+  } = useCrypto();
   const [isResetting, setIsResetting] = useState(false);
   const [feedback, setFeedback] = useState<{
     kind: "success" | "error";
     message: string;
   } | null>(null);
 
-  const status = STATUS_COPY[deviceKeyStatus];
+  const status =
+    isDeviceKeyRegistrationSlow &&
+    (deviceKeyStatus === "registering" || deviceKeyStatus === "retrying")
+    ? {
+        label: "Still registering your device key",
+        detail:
+          "Check your connection; encrypted rooms stay closed until it completes.",
+      }
+    : STATUS_COPY[deviceKeyStatus];
   const fingerprint = formatPublicKeyFingerprint(publicKeyB64);
   const conflictingFingerprint = deviceKeyConflict?.registeredPublicKeyB64
     ? formatPublicKeyFingerprint(deviceKeyConflict.registeredPublicKeyB64)

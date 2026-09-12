@@ -4,6 +4,7 @@ import nacl from "tweetnacl";
 import { decodeBase64, encodeBase64 } from "tweetnacl-util";
 import {
   CryptoProvider,
+  DEVICE_KEY_REGISTRATION_SLOW_MS,
   type CryptoContextValue,
   type DeviceIdentityResetResult,
   useCrypto,
@@ -502,6 +503,44 @@ describe("device encryption identity reset", () => {
     expect(server.state.publicKey).toBe(resetResult.publicKeyB64);
 
     view.unmount();
+  });
+
+  it("reports a slow pending registration, clears it on completion, and sends nothing early", async () => {
+    jest.useFakeTimers();
+    try {
+      const initialRegistration = deferredPut(server);
+      const view = renderProvider();
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(server.state.puts).toHaveLength(1);
+      expect(cryptoValue?.isDeviceKeyRegistrationSlow).toBe(false);
+
+      act(() => {
+        jest.advanceTimersByTime(DEVICE_KEY_REGISTRATION_SLOW_MS - 1);
+      });
+      expect(cryptoValue?.isDeviceKeyRegistrationSlow).toBe(false);
+      expect(server.state.puts).toHaveLength(1);
+
+      act(() => {
+        jest.advanceTimersByTime(1);
+      });
+      expect(cryptoValue?.isDeviceKeyRegistrationSlow).toBe(true);
+      expect(cryptoValue?.isReady).toBe(false);
+      expect(server.state.puts).toHaveLength(1);
+
+      await act(async () => {
+        initialRegistration.release();
+        await Promise.resolve();
+      });
+      expect(cryptoValue?.isDeviceKeyRegistrationSlow).toBe(false);
+      expect(cryptoValue?.isReady).toBe(true);
+      expect(server.state.puts).toHaveLength(1);
+      view.unmount();
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   it("keeps the current identity when secure storage rejects the new key", async () => {

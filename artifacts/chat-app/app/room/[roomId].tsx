@@ -76,6 +76,7 @@ export default function RoomScreen() {
     publicKeyB64,
     isReady: isCryptoReady,
     deviceKeyStatus,
+    isDeviceKeyRegistrationSlow,
     markDeviceKeySuperseded,
     decryptMessage,
     decryptRoomKeyEnvelope,
@@ -668,7 +669,9 @@ export default function RoomScreen() {
           Opening room…
         </Text>
         <Text style={[styles.blockedDescription, { color: colors.mutedForeground }]}>
-          Connecting securely to the conversation.
+          {isDeviceKeyRegistrationSlow
+            ? "Still registering your device key. Check your connection; encrypted rooms stay closed until it completes."
+            : "Connecting securely to the conversation."}
         </Text>
       </View>
     );
