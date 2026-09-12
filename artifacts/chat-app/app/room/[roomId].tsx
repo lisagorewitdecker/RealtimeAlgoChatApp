@@ -55,6 +55,21 @@ interface RoomKeyEnvelope {
   senderPublicKey: string;
 }
 
+function uniqueMessages(messages: Message[]): Message[] {
+  const seenIds = new Set<string>();
+  return messages.filter((message) => {
+    if (seenIds.has(message.id)) return false;
+    seenIds.add(message.id);
+    return true;
+  });
+}
+
+function appendMessageById(messages: Message[], message: Message): Message[] {
+  return messages.some((existing) => existing.id === message.id)
+    ? messages
+    : [...messages, message];
+}
+
 function apiBaseUrl(): string {
   const domain = process.env["EXPO_PUBLIC_DOMAIN"];
   return domain ? `https://${domain}` : "http://localhost:5000";
@@ -272,7 +287,7 @@ export default function RoomScreen() {
       }
       const finishJoin = () => {
         setRoomReady(true);
-        setMessages(data.messages.map(decryptIncomingMessage));
+        setMessages(uniqueMessages(data.messages.map(decryptIncomingMessage)));
         setUsers(data.users);
         setCanModerate(data.canModerate === true);
         trackEvent("room_joined", {
@@ -300,7 +315,7 @@ export default function RoomScreen() {
       finishAfterEnvelope();
     }
     function onMessage(msg: Message & { ciphertext?: string; nonce?: string }) {
-      setMessages((prev) => [...prev, decryptIncomingMessage(msg)]);
+      setMessages((prev) => appendMessageById(prev, decryptIncomingMessage(msg)));
     }
     function onUserJoined(data: {
       userId: string;
@@ -316,7 +331,7 @@ export default function RoomScreen() {
           { userId: data.userId, username: data.username, avatarEmoji: data.avatarEmoji },
         ];
       });
-      setMessages((prev) => [...prev, data.message]);
+      setMessages((prev) => appendMessageById(prev, data.message));
       if (data.publicKey) sendRoomKeyEnvelope(data.userId, data.publicKey);
     }
     function onUserKeyChanged(data: {
@@ -345,7 +360,7 @@ export default function RoomScreen() {
     }
     function onUserLeft(data: { userId: string; message: Message }) {
       setUsers((prev) => prev.filter((u) => u.userId !== data.userId));
-      setMessages((prev) => [...prev, data.message]);
+      setMessages((prev) => appendMessageById(prev, data.message));
     }
     function onKicked(data: {
       roomId: string;

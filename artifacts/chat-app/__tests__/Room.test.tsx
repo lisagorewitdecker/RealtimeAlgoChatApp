@@ -228,6 +228,73 @@ describe("room ban handling", () => {
     expect(getByTestId("room-back-button")).toBeTruthy();
   });
 
+  it("renders repeated realtime message IDs once in first-seen server order", () => {
+    const view = render(<RoomScreen />);
+    act(() => {
+      mockHandlers.get("room-joined")?.({
+        messages: [],
+        users: [{ userId: "user-ben", username: "Ben" }],
+      });
+    });
+
+    const textMessage = {
+      id: "message-1",
+      content: "First message",
+      userId: "user-ada",
+      username: "Ada",
+      timestamp: 1,
+      type: "text" as const,
+    };
+    const joinMessage = {
+      id: "system-join",
+      content: "Lin joined",
+      userId: "system",
+      username: "System",
+      timestamp: 2,
+      type: "system" as const,
+    };
+    const leaveMessage = {
+      id: "system-leave",
+      content: "Lin left",
+      userId: "system",
+      username: "System",
+      timestamp: 3,
+      type: "system" as const,
+    };
+
+    act(() => {
+      mockHandlers.get("message")?.(textMessage);
+      mockHandlers.get("message")?.(textMessage);
+      mockHandlers.get("user-joined")?.({
+        userId: "user-lin",
+        username: "Lin",
+        message: joinMessage,
+      });
+      mockHandlers.get("user-joined")?.({
+        userId: "user-lin",
+        username: "Lin",
+        message: joinMessage,
+      });
+      mockHandlers.get("user-left")?.({
+        userId: "user-lin",
+        message: leaveMessage,
+      });
+      mockHandlers.get("user-left")?.({
+        userId: "user-lin",
+        message: leaveMessage,
+      });
+    });
+
+    expect(view.getAllByTestId("message-message-1")).toHaveLength(1);
+    expect(view.getAllByTestId("message-system-join")).toHaveLength(1);
+    expect(view.getAllByTestId("message-system-leave")).toHaveLength(1);
+    expect(
+      view.getByTestId("room-message-list").props.data.map(
+        (message: { id: string }) => message.id,
+      ),
+    ).toEqual(["system-leave", "system-join", "message-1"]);
+  });
+
   it("explains when device-key registration is taking unusually long", () => {
     mockCryptoState.isReady = false;
     mockCryptoState.deviceKeyStatus = "registering";
