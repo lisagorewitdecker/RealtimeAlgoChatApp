@@ -127,7 +127,13 @@ jest.mock("@/contexts/CryptoContext", () => ({
   }),
 }));
 
-jest.mock("@/components/MessageBubble", () => () => null);
+jest.mock("@/components/MessageBubble", () => ({
+  __esModule: true,
+  default: ({ message }: { message: { id: string; content: string } }) => {
+    const { Text: MockText } = require("react-native");
+    return <MockText testID={`message-${message.id}`}>{message.content}</MockText>;
+  },
+}));
 
 jest.mock("@/hooks/useColors", () => ({
   useColors: () => ({
@@ -921,5 +927,105 @@ describe("room device-key registration ordering", () => {
     expect(mockSetRoomKey).toHaveBeenCalledWith("room-42", freshKey);
     expect(view.queryByTestId("room-key-waiting")).toBeNull();
     expect(view.getByTestId("room-composer-input").props.editable).toBe(true);
+  });
+
+  it("applies repeated recovery envelopes once without duplicating or reordering history", async () => {
+    const freshKey = new Uint8Array(32).fill(4);
+    let finishSaving!: () => void;
+    mockGetRoomKey.mockReturnValue(null);
+    mockSetRoomKey.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          finishSaving = () => {
+            mockGetRoomKey.mockReturnValue(freshKey);
+            resolve();
+          };
+        }),
+    );
+    mockDecryptRoomKeyEnvelope.mockReturnValue(freshKey);
+    mockDecryptMessage.mockImplementation((ciphertext: string) => {
+      const plaintext: Record<string, string> = {
+        "cipher-first": "First recovered",
+        "cipher-second": "Second recovered",
+        "cipher-live": "Arrived during recovery",
+      };
+      return plaintext[ciphertext] ?? null;
+    });
+    const view = render(<RoomScreen />);
+
+    act(() => {
+      mockHandlers.get("room-joined")?.({
+        messages: [
+          {
+            id: "first",
+            content: "",
+            ciphertext: "cipher-first",
+            nonce: "nonce-first",
+            userId: "user-ada",
+            username: "Ada",
+            timestamp: 1,
+            type: "text",
+          },
+          {
+            id: "plain",
+            content: "Ada joined",
+            userId: "system",
+            username: "System",
+            timestamp: 2,
+            type: "system",
+          },
+          {
+            id: "second",
+            content: "",
+            ciphertext: "cipher-second",
+            nonce: "nonce-second",
+            userId: "user-ada",
+            username: "Ada",
+            timestamp: 3,
+            type: "text",
+          },
+        ],
+        users: [],
+      });
+    });
+
+    await act(async () => {
+      const deliverEnvelope = () =>
+        mockHandlers.get("room-key-envelope")?.({
+          roomId: "room-42",
+          senderPublicKey: "creator-key",
+          ciphertext: "fresh-cipher",
+          nonce: "fresh-nonce",
+        });
+      deliverEnvelope();
+      deliverEnvelope();
+      mockHandlers.get("message")?.({
+        id: "live",
+        content: "",
+        ciphertext: "cipher-live",
+        nonce: "nonce-live",
+        userId: "user-ada",
+        username: "Ada",
+        timestamp: 4,
+        type: "text",
+      });
+      finishSaving();
+      await Promise.resolve();
+    });
+
+    expect(mockDecryptRoomKeyEnvelope).toHaveBeenCalledTimes(1);
+    expect(mockSetRoomKey).toHaveBeenCalledTimes(1);
+    expect(
+      view.UNSAFE_getByType(require("react-native").FlatList).props.data.map(
+        (message: { id: string }) => message.id,
+      ),
+    ).toEqual(["live", "second", "plain", "first"]);
+    expect(view.getAllByTestId(/^message-/)).toHaveLength(4);
+    expect(view.getByTestId("message-first").props.children).toBe("First recovered");
+    expect(view.getByTestId("message-plain").props.children).toBe("Ada joined");
+    expect(view.getByTestId("message-second").props.children).toBe("Second recovered");
+    expect(view.getByTestId("message-live").props.children).toBe(
+      "Arrived during recovery",
+    );
   });
 });

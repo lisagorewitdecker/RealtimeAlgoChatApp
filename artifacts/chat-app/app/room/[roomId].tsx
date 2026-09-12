@@ -102,6 +102,7 @@ export default function RoomScreen() {
   const inputRef = useRef<TextInput>(null);
   const hasTrackedRoomJoin = useRef(false);
   const roomKeyLoadRef = useRef<Promise<void> | null>(null);
+  const roomKeyEnvelopeRecoveryRef = useRef<Promise<boolean> | null>(null);
   // Mirrors `canModerate` for socket handlers, which must not re-subscribe
   // (and re-join) whenever moderation rights change.
   const canModerateRef = useRef(false);
@@ -126,18 +127,33 @@ export default function RoomScreen() {
   );
 
   const acceptRoomKeyEnvelope = useCallback(
-    async (envelope: RoomKeyEnvelope | null | undefined) => {
-      if (!envelope || getRoomKey(roomId)) return false;
-      const roomKey = decryptRoomKeyEnvelope(
-        envelope.ciphertext,
-        envelope.nonce,
-        envelope.senderPublicKey,
-      );
-      if (!roomKey) return false;
-      await setRoomKey(roomId, roomKey);
-      setHasRoomKey(true);
-      setMessages((current) => current.map(decryptIncomingMessage));
-      return true;
+    (envelope: RoomKeyEnvelope | null | undefined): Promise<boolean> => {
+      if (!envelope || getRoomKey(roomId)) return Promise.resolve(false);
+      if (roomKeyEnvelopeRecoveryRef.current) {
+        return roomKeyEnvelopeRecoveryRef.current;
+      }
+      const recovery = (async () => {
+        const roomKey = decryptRoomKeyEnvelope(
+          envelope.ciphertext,
+          envelope.nonce,
+          envelope.senderPublicKey,
+        );
+        if (!roomKey) return false;
+        await setRoomKey(roomId, roomKey);
+        setHasRoomKey(true);
+        // Re-decrypt the current array in place. Messages that arrived while
+        // the key was being saved are included without changing order or ids.
+        setMessages((current) => current.map(decryptIncomingMessage));
+        return true;
+      })();
+      roomKeyEnvelopeRecoveryRef.current = recovery;
+      const clearRecovery = () => {
+        if (roomKeyEnvelopeRecoveryRef.current === recovery) {
+          roomKeyEnvelopeRecoveryRef.current = null;
+        }
+      };
+      void recovery.then(clearRecovery, clearRecovery);
+      return recovery;
     },
     [
       decryptIncomingMessage,
