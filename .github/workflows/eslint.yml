@@ -53,7 +53,7 @@ jobs:
             typescript@5.9.3 || status=$?
 
           if [ "$status" -eq 0 ]; then
-            ESLINT_PACKAGE_ROOT="$tmp_dir/node_modules" "$tmp_dir/node_modules/.bin/eslint" \
+            ESLINT_PACKAGE_ROOT="$tmp_dir" "$tmp_dir/node_modules/.bin/eslint" \
               artifacts \
               scripts \
               vendor \
