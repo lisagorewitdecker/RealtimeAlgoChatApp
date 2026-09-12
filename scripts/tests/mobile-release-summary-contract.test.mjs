@@ -55,6 +55,10 @@ const workflowPath = path.join(
   ".github/workflows/mobile-release.yml",
 );
 const workflow = YAML.parse(readFileSync(workflowPath, "utf8"));
+const playwrightConfig = readFileSync(
+  path.join(workspaceRoot, "artifacts/api-server/e2e/playwright.config.ts"),
+  "utf8",
+);
 const bashPath = locateExecutable("bash");
 
 const iosGateScript = "artifacts/chat-app/e2e/native-large-text/run.sh";
@@ -470,6 +474,64 @@ test("idle-profile registration check blocks release and reports its result", ()
     runStep["continue-on-error"],
     true,
     "a repeated profile registration must fail the idle-profile job",
+  );
+
+  const runStepIndex = idleJob.steps.indexOf(runStep);
+  const uploadStep = idleJob.steps.find(
+    (step) => step.name === "Upload idle-profile browser failure evidence",
+  );
+  assert.ok(
+    uploadStep,
+    "idle-profile job must upload Playwright browser failure evidence",
+  );
+  assert.ok(
+    idleJob.steps.indexOf(uploadStep) > runStepIndex,
+    "browser evidence must be uploaded after the Playwright check",
+  );
+  assert.equal(
+    uploadStep.if,
+    "${{ always() }}",
+    "browser evidence upload must run even when the Playwright check fails",
+  );
+  assert.equal(uploadStep.uses, "actions/upload-artifact@v4");
+  assert.equal(
+    uploadStep.with.name,
+    "idle-profile-registration-browser-evidence",
+  );
+  assert.equal(
+    uploadStep.with.path,
+    "artifacts/api-server/test-results/**",
+    "browser evidence upload must target Playwright's configured output directory",
+  );
+  assert.equal(
+    uploadStep.with["if-no-files-found"],
+    "warn",
+    "missing browser evidence must be visible without hiding the original failure",
+  );
+  assert.equal(
+    uploadStep.with["retention-days"],
+    14,
+    "browser evidence retention must remain explicit and bounded",
+  );
+  assert.equal(
+    uploadStep.with.overwrite,
+    true,
+    "rerunning the idle-profile job must replace its prior artifact instead of failing on an immutable-name conflict",
+  );
+  assert.match(
+    playwrightConfig,
+    /outputDir:\s*["']\.\.\/test-results["']/,
+    "Playwright must write browser evidence to the uploaded directory",
+  );
+  assert.match(
+    playwrightConfig,
+    /screenshot:\s*["']only-on-failure["']/,
+    "Playwright must retain a screenshot for failed browser checks",
+  );
+  assert.match(
+    playwrightConfig,
+    /trace:\s*["']retain-on-failure["']/,
+    "Playwright must retain a trace for failed browser checks",
   );
 
   const summaryStep = idleJob.steps.find(

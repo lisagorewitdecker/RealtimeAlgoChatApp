@@ -605,6 +605,16 @@ jobs:
           done
           pnpm --filter @workspace/api-server run test:e2e:idle-profile-registration
 
+      - name: Upload idle-profile browser failure evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: idle-profile-registration-browser-evidence
+          path: artifacts/api-server/test-results/**
+          if-no-files-found: warn
+          retention-days: 14
+          overwrite: true
+
       - name: Summarize idle-profile registration check
         if: ${{ always() }}
         env:
