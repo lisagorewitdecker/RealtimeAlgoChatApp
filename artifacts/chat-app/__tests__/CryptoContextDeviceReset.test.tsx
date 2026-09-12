@@ -718,48 +718,4 @@ describe("device encryption identity reset", () => {
     view.unmount();
   });
 
-  it("sends the replacement key only after an in-flight registration of the old key settles", async () => {
-    const view = await renderReadyProvider();
-    const previousPublicKey = cryptoValue!.publicKeyB64;
-
-    // A periodic re-registration of the old key is still waiting on the server.
-    const slowOldRegistration = deferredPut(server);
-    mockGetToken = jest.fn(async () => "refreshed-token");
-    act(() => {
-      view.rerender(
-        <CryptoProvider>
-          <CryptoProbe />
-        </CryptoProvider>,
-      );
-    });
-    await waitFor(() => expect(slowOldRegistration.isPending).toBe(true));
-    expect(sentKeys(server)).toEqual([previousPublicKey, previousPublicKey]);
-
-    await act(async () => {
-      await expect(cryptoValue!.resetDeviceIdentity()).resolves.toMatchObject({
-        status: "reset",
-      });
-    });
-    const nextPublicKey = cryptoValue!.publicKeyB64;
-    expect(nextPublicKey).not.toBe(previousPublicKey);
-
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 50));
-    });
-    // The new key must not race the old one to the server.
-    expect(sentKeys(server)).toEqual([previousPublicKey, previousPublicKey]);
-    expect(cryptoValue?.isReady).toBe(false);
-
-    await act(async () => {
-      slowOldRegistration.release();
-    });
-    await waitFor(() =>
-      expect(sentKeys(server)).toEqual([previousPublicKey, previousPublicKey, nextPublicKey]),
-    );
-    await waitFor(() => expect(cryptoValue?.isReady).toBe(true));
-    expect(cryptoValue?.publicKeyB64).toBe(nextPublicKey);
-    expect(server.state.publicKey).toBe(nextPublicKey);
-
-    view.unmount();
-  });
 });

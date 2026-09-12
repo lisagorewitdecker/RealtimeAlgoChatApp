@@ -163,6 +163,7 @@ const CryptoContext = createContext<CryptoContextValue | null>(null);
 
 export function CryptoProvider({ children }: { children: React.ReactNode }) {
   const { getToken, isSignedIn, userId } = useAuth();
+  const getTokenRef = useRef(getToken);
   const [keypair, setKeypair] = useState<{
     userId: string;
     publicKey: Uint8Array;
@@ -199,6 +200,10 @@ export function CryptoProvider({ children }: { children: React.ReactNode }) {
     publicKeyB64: string;
   } | null>(null);
   const resetInFlightRef = useRef(false);
+
+  useLayoutEffect(() => {
+    getTokenRef.current = getToken;
+  }, [getToken]);
 
   useLayoutEffect(() => {
     identityRef.current = {
@@ -313,7 +318,7 @@ export function CryptoProvider({ children }: { children: React.ReactNode }) {
       setIsDeviceKeyRegistrationSlow(false);
     };
     void (async () => {
-      if (!isSignedIn || typeof getToken !== "function") {
+      if (!isSignedIn || typeof getTokenRef.current !== "function") {
         setIsReady(true);
         return;
       }
@@ -338,7 +343,7 @@ export function CryptoProvider({ children }: { children: React.ReactNode }) {
       };
       while (!cancelled) {
         try {
-          const token = await getToken();
+          const token = await getTokenRef.current();
           if (identityChanged()) return;
           // Earlier registrations (for example the key this one replaces) may
           // still be in flight. Wait for them to settle, however long that
@@ -532,7 +537,7 @@ export function CryptoProvider({ children }: { children: React.ReactNode }) {
       cancelled = true;
       clearTimeout(slowWarningTimer);
     };
-  }, [getToken, isSignedIn, keypair, userId]);
+  }, [isSignedIn, keypair, userId]);
 
   const persistRoomKey = useCallback(async (
     roomId: string,

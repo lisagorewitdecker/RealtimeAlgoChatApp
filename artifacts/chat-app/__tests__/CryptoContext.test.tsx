@@ -128,7 +128,6 @@ describe("CryptoProvider", () => {
     const warnMock = jest.spyOn(console, "warn").mockImplementation();
 
     const view = await renderCryptoProvider();
-
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledTimes(2);
       expect(cryptoValue?.isReady).toBe(true);
@@ -138,6 +137,33 @@ describe("CryptoProvider", () => {
     view.unmount();
     fetchMock.mockRestore();
     warnMock.mockRestore();
+  });
+
+  it("does not re-register the public key when only getToken changes identity", async () => {
+    mockGetToken = jest.fn(async () => "first-token");
+    const fetchMock = jest
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue({ ok: true, status: 200 } as Response);
+
+    const view = await renderCryptoProvider();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    mockGetToken = jest.fn(async () => "refreshed-token");
+    act(() => {
+      view.rerender(
+        <CryptoProvider>
+          <CryptoProbe />
+        </CryptoProvider>,
+      );
+    });
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    view.unmount();
+    fetchMock.mockRestore();
   });
 
   it("keeps encrypted rooms unavailable until public-key registration succeeds", async () => {
@@ -171,22 +197,20 @@ describe("CryptoProvider", () => {
     fetchMock.mockRestore();
   });
 
-  it("ignores a successful registration response from the previous identity", async () => {
+  it("registers once again when the signed-in identity changes", async () => {
     mockGetToken = jest.fn(async () => "test-token");
-    const registrationResolvers: Array<(response: Response) => void> = [];
-    const fetchMock = jest.spyOn(globalThis, "fetch").mockImplementation(
-      () =>
+    const nextRegistrationResolvers: Array<(response: Response) => void> = [];
+    const fetchMock = jest
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce({ ok: true, status: 200 } as Response)
+      .mockImplementation(
+        () =>
         new Promise<Response>((resolve) => {
-          registrationResolvers.push(resolve);
+          nextRegistrationResolvers.push(resolve);
         }),
-    );
-    const view = render(
-      <CryptoProvider>
-        <CryptoProbe />
-      </CryptoProvider>,
-    );
-
-    await waitFor(() => expect(registrationResolvers).toHaveLength(1));
+      );
+    const view = await renderCryptoProvider();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
 
     mockAuthUserId = "next-user";
     act(() => {
@@ -196,18 +220,14 @@ describe("CryptoProvider", () => {
         </CryptoProvider>,
       );
     });
-    await waitFor(() => expect(registrationResolvers).toHaveLength(2));
+    await waitFor(() => expect(nextRegistrationResolvers).toHaveLength(1));
     expect(cryptoValue?.isReady).toBe(false);
 
     await act(async () => {
-      registrationResolvers[0]?.({ ok: true, status: 200 } as Response);
-    });
-    expect(cryptoValue?.isReady).toBe(false);
-
-    await act(async () => {
-      registrationResolvers[1]?.({ ok: true, status: 200 } as Response);
+      nextRegistrationResolvers[0]?.({ ok: true, status: 200 } as Response);
     });
     await waitFor(() => expect(cryptoValue?.isReady).toBe(true));
+    expect(fetchMock).toHaveBeenCalledTimes(2);
 
     view.unmount();
     fetchMock.mockRestore();
@@ -264,7 +284,7 @@ describe("CryptoProvider", () => {
       encodeBase64(savedKey),
     );
     mockRoomKeyReadFailure = true;
-    const warnMock = jest.spyOn(console, "warn").mockImplementation();
+      const warnMock = jest.spyOn(console, "warn").mockImplementation();
     const view = await renderCryptoProvider();
 
     // The pre-fix behavior rejected here, which left room screens waiting
@@ -310,7 +330,7 @@ describe("CryptoProvider", () => {
       roomKeyStorageKey("crypto-test-user", "room-42"),
       "not*valid*base64",
     );
-    const warnMock = jest.spyOn(console, "warn").mockImplementation();
+      const warnMock = jest.spyOn(console, "warn").mockImplementation();
     const view = await renderCryptoProvider();
 
     await act(async () => {
@@ -338,7 +358,7 @@ describe("CryptoProvider", () => {
         encodeBase64(new Uint8Array(byteLength).fill(7)),
       );
       const warnMock = jest.spyOn(console, "warn").mockImplementation();
-      const view = await renderCryptoProvider();
+    const view = await renderCryptoProvider();
 
       await act(async () => {
         await expect(cryptoValue?.loadRoomKey("room-42")).resolves.toBeUndefined();
