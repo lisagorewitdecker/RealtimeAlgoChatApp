@@ -33,11 +33,28 @@ type DisposableUser = {
   username: string;
 };
 
+type SignedInPage = {
+  context: BrowserContext;
+  page: Page;
+};
+
+const PHASE_TIMEOUTS = {
+  provisionUsers: 90_000,
+  signInAndCreateRoom: 60_000,
+  signInAndJoinRoom: 60_000,
+  storeEncryptedHistory: 20_000,
+  resetMemberKey: 60_000,
+  recoverFreshEnvelope: 45_000,
+  confirmDecryption: 20_000,
+  confirmReloadPersistence: 30_000,
+  confirmRoomReentry: 30_000,
+} as const;
+
 async function createSignedInPage(
   browser: Browser,
   user: DisposableUser,
   contexts: BrowserContext[],
-): Promise<{ context: BrowserContext; page: Page }> {
+): Promise<SignedInPage> {
   const context = await browser.newContext();
   contexts.push(context);
   await setupClerkTestingToken({ context });
@@ -118,187 +135,233 @@ test("a member recovers a live encrypted room after resetting their device key",
   let testFailure: unknown;
 
   try {
-    console.info("[key-reset-recovery-e2e] provisioning users");
-    for (const role of ["creator", "member"] as const) {
-      const email = `key-reset-${role}-${suffix}+clerk_test@example.com`;
-      const username =
-        role === "creator" ? `Creator ${suffix}` : `Member ${suffix}`;
-      const created = await withClerkRetry(`create ${role} user`, () =>
-        clerkClient.users.createUser({
-          emailAddress: [email],
-          password,
-          firstName: role === "creator" ? "Creator" : "Member",
-          lastName: "E2E",
-          skipLegalChecks: true,
-          privateMetadata: { purpose: "key-reset-recovery-e2e" },
-        }),
-      );
-      clerkUserIds.push(created.id);
-      const apiSession = await withClerkRetry(`create ${role} session`, () =>
-        clerkClient.sessions.createSession({
-          userId: created.id,
-        }),
-      );
-      const token = await withClerkRetry(`mint ${role} token`, () =>
-        clerkClient.sessions.getToken(apiSession.id, undefined, 300),
-      );
-      users.push({
-        id: created.id,
-        email,
-        password,
-        token: token.jwt,
-        username,
-      });
-    }
-
-    console.info("[key-reset-recovery-e2e] creating encrypted room");
-    const creator = await createSignedInPage(browser, users[0]!, contexts);
-    await creator.page.getByTestId("new-room-button").click();
-    await creator.page.getByTestId("room-name-input").fill(roomName);
-    await Promise.all([
-      creator.page.waitForURL(/\/room\/[^/?#]+/),
-      creator.page.getByTestId("room-submit-button").click(),
-    ]);
-    roomId = decodeURIComponent(
-      new URL(creator.page.url()).pathname.split("/").filter(Boolean).at(-1) ??
-        "",
-    );
-    expect(roomId).not.toBe("");
-
-    console.info("[key-reset-recovery-e2e] joining member");
-    const member = await createSignedInPage(browser, users[1]!, contexts);
-    await roomJoinButton(member.page, roomName).click();
-    await expect(creator.page.getByTestId("room-participant-count")).toHaveText(
-      "2 people",
-    );
-    await expect(member.page.getByTestId("room-key-waiting")).toBeHidden();
-
-    await expect
-      .poll(() => readMemberEnvelope(roomId, users[1]!.id))
-      .toBeTruthy();
-    const originalEnvelope = await readMemberEnvelope(roomId, users[1]!.id);
-    expect(originalEnvelope).toBeTruthy();
-
-    console.info("[key-reset-recovery-e2e] storing encrypted history");
-    await creator.page.getByTestId("room-composer-input").fill(historyMessage);
-    await creator.page.getByTestId("room-send-button").click();
-    await expect(
-      member.page.getByText(historyMessage, { exact: true }),
-    ).toBeVisible();
-
-    console.info(
-      "[key-reset-recovery-e2e] resetting member key from a second session",
-    );
-    // Keep the first member session in the room. The server must retain this
-    // account's presence, so the reset session's later join produces the
-    // explicit user-key-changed path rather than a user-left/user-joined pair.
-    const resetSession = await createSignedInPage(browser, users[1]!, contexts);
-    await resetSession.page.getByRole("tab", { name: /Profile/ }).click();
-    await expect(resetSession.page.getByTestId("device-key-status")).toHaveText(
-      "Replaced by another device or session",
-    );
-    const fingerprint = resetSession.page.getByTestId("device-key-fingerprint");
-    const originalFingerprint = await fingerprint.innerText();
-
-    resetSession.page.once("dialog", (dialog) => dialog.accept());
-    await resetSession.page.getByTestId("reset-device-key-button").click();
-    await expect(
-      resetSession.page.getByTestId("device-key-feedback"),
-    ).toContainText("New device key created");
-    await expect(fingerprint).not.toHaveText(originalFingerprint);
-    await expect(resetSession.page.getByTestId("device-key-status")).toHaveText(
-      "Registered with your account",
-    );
-
-    // Remove any room key inherited through browser state and reload to clear
-    // the provider's in-memory copy. Recovery must depend on a fresh envelope
-    // encrypted to the replacement device identity.
-    await resetSession.page.evaluate(
-      ({ memberId, recoveredRoomId }) => {
-        globalThis.localStorage.removeItem(
-          `devstudio_roomkey:${memberId}:${recoveredRoomId}`,
-        );
+    await test.step(
+      "provision creator and member accounts",
+      async () => {
+        for (const role of ["creator", "member"] as const) {
+          const email = `key-reset-${role}-${suffix}+clerk_test@example.com`;
+          const username =
+            role === "creator" ? `Creator ${suffix}` : `Member ${suffix}`;
+          const created = await withClerkRetry(`create ${role} user`, () =>
+            clerkClient.users.createUser({
+              emailAddress: [email],
+              password,
+              firstName: role === "creator" ? "Creator" : "Member",
+              lastName: "E2E",
+              skipLegalChecks: true,
+              privateMetadata: { purpose: "key-reset-recovery-e2e" },
+            }),
+          );
+          clerkUserIds.push(created.id);
+          const apiSession = await withClerkRetry(`create ${role} session`, () =>
+            clerkClient.sessions.createSession({ userId: created.id }),
+          );
+          const token = await withClerkRetry(`mint ${role} token`, () =>
+            clerkClient.sessions.getToken(apiSession.id, undefined, 300),
+          );
+          users.push({
+            id: created.id,
+            email,
+            password,
+            token: token.jwt,
+            username,
+          });
+        }
       },
-      { memberId: users[1]!.id, recoveredRoomId: roomId },
-    );
-    await resetSession.page.reload();
-    await expect(resetSession.page.getByTestId("device-key-status")).toHaveText(
-      "Registered with your account",
+      { timeout: PHASE_TIMEOUTS.provisionUsers },
     );
 
-    console.info("[key-reset-recovery-e2e] waiting for a fresh envelope");
-    const recoveryRoomUrl = `${chatUrl}/room/${encodeURIComponent(roomId)}?roomName=${encodeURIComponent(roomName)}`;
-    await resetSession.page.goto(recoveryRoomUrl);
-    await expect(resetSession.page.getByTestId("room-key-waiting")).toBeHidden({
-      timeout: 15_000,
-    });
-    await expect(creator.page.getByTestId("room-participant-count")).toHaveText(
-      "2 people",
+    let creator!: SignedInPage;
+    await test.step(
+      "sign in creator and create encrypted room",
+      async () => {
+        creator = await createSignedInPage(browser, users[0]!, contexts);
+        await creator.page.getByTestId("new-room-button").click();
+        await creator.page.getByTestId("room-name-input").fill(roomName);
+        await Promise.all([
+          creator.page.waitForURL(/\/room\/[^/?#]+/),
+          creator.page.getByTestId("room-submit-button").click(),
+        ]);
+        roomId = decodeURIComponent(
+          new URL(creator.page.url()).pathname
+            .split("/")
+            .filter(Boolean)
+            .at(-1) ?? "",
+        );
+        expect(roomId).not.toBe("");
+      },
+      { timeout: PHASE_TIMEOUTS.signInAndCreateRoom },
     );
 
-    await expect
-      .poll(
-        async () =>
-          (await readMemberEnvelope(roomId, users[1]!.id))?.ciphertext,
-      )
-      .not.toBe(originalEnvelope!.ciphertext);
-
-    console.info("[key-reset-recovery-e2e] confirming history decryption");
-    await expect(
-      resetSession.page.getByText(historyMessage, { exact: true }),
-    ).toBeVisible();
-    await expect(
-      resetSession.page.getByText("Unable to decrypt this message."),
-    ).toHaveCount(0);
-
-    console.info("[key-reset-recovery-e2e] confirming new message decryption");
-    await creator.page
-      .getByTestId("room-composer-input")
-      .fill(postResetMessage);
-    await creator.page.getByTestId("room-send-button").click();
-    await expect(
-      resetSession.page.getByText(postResetMessage, { exact: true }),
-    ).toBeVisible();
-    await expect(
-      resetSession.page.getByText("Unable to decrypt this message."),
-    ).toHaveCount(0);
-
-    console.info(
-      "[key-reset-recovery-e2e] confirming recovered key survives reload",
+    let member!: SignedInPage;
+    let originalEnvelope!: NonNullable<
+      Awaited<ReturnType<typeof readMemberEnvelope>>
+    >;
+    await test.step(
+      "sign in member and receive initial room key",
+      async () => {
+        member = await createSignedInPage(browser, users[1]!, contexts);
+        await roomJoinButton(member.page, roomName).click();
+        await expect(
+          creator.page.getByTestId("room-participant-count"),
+        ).toHaveText("2 people");
+        await expect(member.page.getByTestId("room-key-waiting")).toBeHidden();
+        await expect
+          .poll(() => readMemberEnvelope(roomId, users[1]!.id))
+          .toBeTruthy();
+        const envelope = await readMemberEnvelope(roomId, users[1]!.id);
+        expect(envelope).toBeTruthy();
+        originalEnvelope = envelope!;
+      },
+      { timeout: PHASE_TIMEOUTS.signInAndJoinRoom },
     );
-    await resetSession.page.reload();
-    await expect(resetSession.page.getByTestId("room-key-waiting")).toBeHidden({
-      timeout: 15_000,
-    });
-    await expect(
-      resetSession.page.getByText(historyMessage, { exact: true }),
-    ).toBeVisible();
-    await expect(
-      resetSession.page.getByText(postResetMessage, { exact: true }),
-    ).toBeVisible();
-    await expect(
-      resetSession.page.getByText("Unable to decrypt this message."),
-    ).toHaveCount(0);
 
-    console.info(
-      "[key-reset-recovery-e2e] reopening room with recovered key",
+    await test.step(
+      "store encrypted history before key reset",
+      async () => {
+        await creator.page
+          .getByTestId("room-composer-input")
+          .fill(historyMessage);
+        await creator.page.getByTestId("room-send-button").click();
+        await expect(
+          member.page.getByText(historyMessage, { exact: true }),
+        ).toBeVisible();
+      },
+      { timeout: PHASE_TIMEOUTS.storeEncryptedHistory },
     );
-    await resetSession.page.getByTestId("room-back-button").click();
-    const recoveredRoomCard = roomJoinButton(resetSession.page, roomName);
-    await expect(recoveredRoomCard).toBeVisible();
-    await recoveredRoomCard.click();
-    await expect(resetSession.page.getByTestId("room-key-waiting")).toBeHidden({
-      timeout: 15_000,
-    });
-    await expect(
-      resetSession.page.getByText(historyMessage, { exact: true }),
-    ).toBeVisible();
-    await expect(
-      resetSession.page.getByText(postResetMessage, { exact: true }),
-    ).toBeVisible();
-    await expect(
-      resetSession.page.getByText("Unable to decrypt this message."),
-    ).toHaveCount(0);
+
+    let resetSession!: SignedInPage;
+    await test.step(
+      "reset member device key in a second session",
+      async () => {
+        // Keep the first member session in the room so the reset session's
+        // later join takes the explicit user-key-changed recovery path.
+        resetSession = await createSignedInPage(
+          browser,
+          users[1]!,
+          contexts,
+        );
+        await resetSession.page.getByRole("tab", { name: /Profile/ }).click();
+        await expect(
+          resetSession.page.getByTestId("device-key-status"),
+        ).toHaveText("Replaced by another device or session");
+        const fingerprint = resetSession.page.getByTestId(
+          "device-key-fingerprint",
+        );
+        const originalFingerprint = await fingerprint.innerText();
+
+        resetSession.page.once("dialog", (dialog) => dialog.accept());
+        await resetSession.page.getByTestId("reset-device-key-button").click();
+        await expect(
+          resetSession.page.getByTestId("device-key-feedback"),
+        ).toContainText("New device key created");
+        await expect(fingerprint).not.toHaveText(originalFingerprint);
+        await expect(
+          resetSession.page.getByTestId("device-key-status"),
+        ).toHaveText("Registered with your account");
+
+        await resetSession.page.evaluate(
+          ({ memberId, recoveredRoomId }) => {
+            globalThis.localStorage.removeItem(
+              `devstudio_roomkey:${memberId}:${recoveredRoomId}`,
+            );
+          },
+          { memberId: users[1]!.id, recoveredRoomId: roomId },
+        );
+        await resetSession.page.reload();
+        await expect(
+          resetSession.page.getByTestId("device-key-status"),
+        ).toHaveText("Registered with your account");
+      },
+      { timeout: PHASE_TIMEOUTS.resetMemberKey },
+    );
+
+    await test.step(
+      "recover a fresh room-key envelope after reset",
+      async () => {
+        const recoveryRoomUrl = `${chatUrl}/room/${encodeURIComponent(roomId)}?roomName=${encodeURIComponent(roomName)}`;
+        await resetSession.page.goto(recoveryRoomUrl);
+        await expect(
+          resetSession.page.getByTestId("room-key-waiting"),
+        ).toBeHidden({ timeout: 15_000 });
+        await expect(
+          creator.page.getByTestId("room-participant-count"),
+        ).toHaveText("2 people");
+        await expect
+          .poll(
+            async () =>
+              (await readMemberEnvelope(roomId, users[1]!.id))?.ciphertext,
+          )
+          .not.toBe(originalEnvelope.ciphertext);
+      },
+      { timeout: PHASE_TIMEOUTS.recoverFreshEnvelope },
+    );
+
+    await test.step(
+      "decrypt history and a new message with recovered key",
+      async () => {
+        await expect(
+          resetSession.page.getByText(historyMessage, { exact: true }),
+        ).toBeVisible();
+        await expect(
+          resetSession.page.getByText("Unable to decrypt this message."),
+        ).toHaveCount(0);
+        await creator.page
+          .getByTestId("room-composer-input")
+          .fill(postResetMessage);
+        await creator.page.getByTestId("room-send-button").click();
+        await expect(
+          resetSession.page.getByText(postResetMessage, { exact: true }),
+        ).toBeVisible();
+        await expect(
+          resetSession.page.getByText("Unable to decrypt this message."),
+        ).toHaveCount(0);
+      },
+      { timeout: PHASE_TIMEOUTS.confirmDecryption },
+    );
+
+    await test.step(
+      "reload room and reuse recovered key",
+      async () => {
+        await resetSession.page.reload();
+        await expect(
+          resetSession.page.getByTestId("room-key-waiting"),
+        ).toBeHidden({ timeout: 15_000 });
+        await expect(
+          resetSession.page.getByText(historyMessage, { exact: true }),
+        ).toBeVisible();
+        await expect(
+          resetSession.page.getByText(postResetMessage, { exact: true }),
+        ).toBeVisible();
+        await expect(
+          resetSession.page.getByText("Unable to decrypt this message."),
+        ).toHaveCount(0);
+      },
+      { timeout: PHASE_TIMEOUTS.confirmReloadPersistence },
+    );
+
+    await test.step(
+      "leave and reopen room with recovered key",
+      async () => {
+        await resetSession.page.getByTestId("room-back-button").click();
+        const recoveredRoomCard = roomJoinButton(resetSession.page, roomName);
+        await expect(recoveredRoomCard).toBeVisible();
+        await recoveredRoomCard.click();
+        await expect(
+          resetSession.page.getByTestId("room-key-waiting"),
+        ).toBeHidden({ timeout: 15_000 });
+        await expect(
+          resetSession.page.getByText(historyMessage, { exact: true }),
+        ).toBeVisible();
+        await expect(
+          resetSession.page.getByText(postResetMessage, { exact: true }),
+        ).toBeVisible();
+        await expect(
+          resetSession.page.getByText("Unable to decrypt this message."),
+        ).toHaveCount(0);
+      },
+      { timeout: PHASE_TIMEOUTS.confirmRoomReentry },
+    );
   } catch (error) {
     testFailure = error;
   } finally {
