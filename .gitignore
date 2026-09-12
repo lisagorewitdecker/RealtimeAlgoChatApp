@@ -181,6 +181,7 @@ out-tsc
 /.sass-cache
 /connect.lock
 /libpeerconnection.log
+artifacts/api-server/test-results/.last-run.json
 testem.log
 /typings
 .DS_Store
