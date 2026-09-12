@@ -32,8 +32,11 @@ pnpm --filter @workspace/chat-app test:native-large-text ios
 pnpm --filter @workspace/chat-app test:native-large-text android
 ```
 
-The runner refuses a non-SE iOS simulator or an Android emulator larger than
-320×568 dp for release runs. It does not mutate simulator settings.
+The runner resolves the booted iPhone SE (3rd generation) by its UDID and passes
+that exact device to Maestro, even when other simulators are also booted.
+`runner-metadata.txt` records the selected `device_udid`. The runner refuses a
+non-SE iOS simulator or an Android emulator larger than 320×568 dp for release
+runs. It does not mutate simulator settings.
 
 ### Diagnostic-only runs on a larger iOS simulator
 
@@ -74,7 +77,9 @@ smallest-size simulators:
   device-configuration problem in the job summary, and the evidence job is not
   scheduled until the preflight reports `READY`.
 - iOS runners must have the labels `self-hosted`, `macos`, `ios`, and
-  `smallest-simulator`, with an iPhone SE (3rd generation) booted.
+  `smallest-simulator`, with an iPhone SE (3rd generation) booted. The workflow
+  resolves that simulator once, uses its UDID for native branding inspection,
+  and requires the evidence gate to use the same UDID for Maestro screenshots.
 - Android runners must have the labels `self-hosted`, `linux`, `android`, and
   `smallest-simulator`, with an emulator at or below 320×568 dp already booted.
 - Both runners must have `pnpm`, `maestro`, and the platform tooling available.

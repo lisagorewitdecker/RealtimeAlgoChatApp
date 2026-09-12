@@ -25,9 +25,11 @@ for command in cat date dirname find head mkdir sed tr wc; do
 done
 
 SMALLEST_DEVICE="iPhone SE (3rd generation)"
-SMALLEST_DEVICE_BOOTED="$SMALLEST_DEVICE (00000000-0000-0000-0000-000000000000) (Booted)"
+SMALLEST_DEVICE_UDID="00000000-0000-0000-0000-000000000000"
+SMALLEST_DEVICE_BOOTED="$SMALLEST_DEVICE ($SMALLEST_DEVICE_UDID) (Booted)"
 LARGER_DEVICE="iPhone 14"
-LARGER_DEVICE_BOOTED="$LARGER_DEVICE (00000000-0000-0000-0000-000000000000) (Booted)"
+LARGER_DEVICE_UDID="11111111-1111-1111-1111-111111111111"
+LARGER_DEVICE_BOOTED="$LARGER_DEVICE ($LARGER_DEVICE_UDID) (Booted)"
 
 make_stub() {
   local path="$1"
@@ -46,7 +48,12 @@ make_command_path() {
   for utility in "$utilities"/*; do
     "$LN_BIN" -s "$utility" "$path/$(basename "$utility")"
   done
-  make_stub "$path" maestro
+  cat >"$path/maestro" <<EOF
+#!${BASH_BIN}
+printf 'maestro args: %s\n' "\$*"
+exit 0
+EOF
+  chmod +x "$path/maestro"
   make_stub "$path" pnpm
   printf '%s\n' "$path"
 }
@@ -199,6 +206,29 @@ assert_contains "$(result_file_of supported-model runner-metadata.txt)" "run_mod
 assert_contains \
   "$(result_file_of supported-model runner-metadata.txt)" \
   "device=iPhone SE (3rd generation)"
+assert_contains \
+  "$(result_file_of supported-model runner-metadata.txt)" \
+  "device_udid=$SMALLEST_DEVICE_UDID"
+
+# The exact SE is selected even when another booted simulator appears first.
+multiple_booted_path="$(make_command_path multiple-booted)"
+make_xcrun_stub "$multiple_booted_path" "$LARGER_DEVICE_BOOTED
+$SMALLEST_DEVICE_BOOTED"
+multiple_booted_output="$(
+  run_case multiple-booted 1 "$multiple_booted_path"
+)"
+assert_contains \
+  "$multiple_booted_output" \
+  "Expected at least 11 native screenshots, found 0."
+assert_contains \
+  "$multiple_booted_output" \
+  "maestro args: --device $SMALLEST_DEVICE_UDID test"
+assert_contains \
+  "$(summary_of multiple-booted)" \
+  "Booted iPhone SE (3rd generation): **READY**"
+assert_contains \
+  "$(result_file_of multiple-booted runner-metadata.txt)" \
+  "device_udid=$SMALLEST_DEVICE_UDID"
 
 # Strict release path: a larger simulator is refused without the override.
 wrong_model_path="$(make_command_path wrong-model)"
@@ -280,6 +310,9 @@ assert_contains \
 assert_contains \
   "$(result_file_of diagnostic-override runner-metadata.txt)" \
   "device=iPhone 14"
+assert_contains \
+  "$(result_file_of diagnostic-override runner-metadata.txt)" \
+  "device_udid=$LARGER_DEVICE_UDID"
 
 # The override marks the run diagnostic-only even when the smallest supported
 # simulator happens to be booted.

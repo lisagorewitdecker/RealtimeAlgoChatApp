@@ -53,6 +53,7 @@ IOS_SIMULATOR_STATUS="BLOCKED"
 IOS_SIMULATOR_DETAIL=""
 IOS_RELEASE_CONFIGURATION_STATUS="BLOCKED"
 BOOTED_DEVICE=""
+IOS_DEVICE_UDID=""
 
 record_ios_readiness_failure() {
   IOS_READINESS_BLOCKERS+=("$1")
@@ -186,10 +187,35 @@ if [[ "$PLATFORM" == "ios" ]]; then
     record_ios_readiness_failure "xcrun is required for the iOS smoke test."
   else
     IOS_XCRUN_STATUS="READY"
-    BOOTED_DEVICE="$(xcrun simctl list devices booted | sed -n 's/^[[:space:]]*\(.*\) ([-A-F0-9]\{8,\}) (Booted)$/\1/p' | head -n 1)"
+    BOOTED_DEVICES="$(xcrun simctl list devices booted)"
+    IOS_DEVICE_UDID="$(
+      sed -n "s/^[[:space:]]*${SMALLEST_IOS_DEVICE//\//\\/} (\([0-9A-F-]\{8,\}\)) (Booted)$/\1/p" <<<"$BOOTED_DEVICES" |
+        head -n 1
+    )"
+    if [[ -n "$IOS_DEVICE_UDID" ]]; then
+      BOOTED_DEVICE="$SMALLEST_IOS_DEVICE"
+    else
+      BOOTED_DEVICE="$(
+        sed -n 's/^[[:space:]]*\(.*\) ([0-9A-F-]\{8,\}) (Booted)$/\1/p' <<<"$BOOTED_DEVICES" |
+          head -n 1
+      )"
+    fi
+    if [[ -z "$IOS_DEVICE_UDID" && "$RUN_MODE" == "diagnostic-only" ]]; then
+      IOS_DEVICE_UDID="$(
+        sed -n 's/^[[:space:]]*.* (\([0-9A-F-]\{8,\}\)) (Booted)$/\1/p' <<<"$BOOTED_DEVICES" |
+          head -n 1
+      )"
+    fi
     if [[ -z "$BOOTED_DEVICE" ]]; then
       echo "Boot the smallest supported iOS simulator (iPhone SE, 3rd generation) first." >&2
       record_ios_readiness_failure "No booted ${SMALLEST_IOS_DEVICE} simulator was found."
+    elif [[ -z "$IOS_DEVICE_UDID" ]]; then
+      echo "Expected a booted iPhone SE simulator, found: $BOOTED_DEVICE" >&2
+      echo "Set NATIVE_SMOKE_ALLOW_LARGER_DEVICE=1 only for a local, non-release diagnostic run." >&2
+      record_ios_readiness_failure "Expected ${SMALLEST_IOS_DEVICE}; found: $BOOTED_DEVICE"
+    elif [[ -n "${NATIVE_SMOKE_IOS_DEVICE_UDID:-}" && "$IOS_DEVICE_UDID" != "$NATIVE_SMOKE_IOS_DEVICE_UDID" ]]; then
+      echo "The prepared iPhone SE simulator changed after workflow verification." >&2
+      record_ios_readiness_failure "The booted ${SMALLEST_IOS_DEVICE} does not match the simulator selected by the workflow verification step."
     elif [[ "$BOOTED_DEVICE" == "$SMALLEST_IOS_DEVICE" ]]; then
       IOS_SIMULATOR_STATUS="READY"
     elif [[ "$RUN_MODE" == "diagnostic-only" ]]; then
@@ -213,6 +239,7 @@ run_mode=$RUN_MODE
 candidate_build_id=${NATIVE_SMOKE_BUILD_ID:-}
 app_id=${NATIVE_SMOKE_APP_ID:-}
 device=$BOOTED_DEVICE
+device_udid=$IOS_DEVICE_UDID
 recorded_at_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 EOF
 else
@@ -274,10 +301,17 @@ else
   echo "Running $PLATFORM native large-text smoke test; artifacts: $RESULTS_DIR"
 fi
 cd "$CHAT_APP_DIR"
-maestro test \
-  --format JUNIT \
-  --output "$RESULTS_DIR/maestro-results.xml" \
-  e2e/native-large-text/flows
+if [[ "$PLATFORM" == "ios" ]]; then
+  maestro --device "$IOS_DEVICE_UDID" test \
+    --format JUNIT \
+    --output "$RESULTS_DIR/maestro-results.xml" \
+    e2e/native-large-text/flows
+else
+  maestro test \
+    --format JUNIT \
+    --output "$RESULTS_DIR/maestro-results.xml" \
+    e2e/native-large-text/flows
+fi
 
 cd "$ROOT_DIR"
 pnpm --filter @workspace/api-server exec vitest run \

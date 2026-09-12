@@ -132,11 +132,17 @@ jobs:
         run: |
           set -euo pipefail
           booted_devices="$(xcrun simctl list devices booted)"
-          if ! grep -q "iPhone SE (3rd generation)" <<<"$booted_devices"; then
+          device_udid="$(
+            sed -n 's/^[[:space:]]*iPhone SE (3rd generation) (\([0-9A-F-]\{8,\}\)) (Booted)$/\1/p' <<<"$booted_devices" |
+              head -n 1
+          )"
+          if [[ -z "$device_udid" ]]; then
             echo "A booted iPhone SE (3rd generation) is required on the iOS runner." >&2
             xcrun simctl list devices booted >&2
             exit 2
           fi
+          printf 'NATIVE_SMOKE_IOS_DEVICE_UDID=%s\n' "$device_udid" >> "$GITHUB_ENV"
+          echo "Prepared iPhone SE (3rd generation): $device_udid"
 
       - name: Inspect installed iOS native branding
         id: ios-native-branding
@@ -147,13 +153,9 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "$NATIVE_SMOKE_RESULTS_DIR"
-          device_udid="$(
-            xcrun simctl list devices booted |
-              sed -n 's/.* (\([0-9A-F-]\{8,\}\)) (Booted)$/\1/p' |
-              head -n 1
-          )"
+          device_udid="${NATIVE_SMOKE_IOS_DEVICE_UDID:-}"
           if [[ -z "$device_udid" ]]; then
-            echo "Could not determine the booted iOS simulator UDID." >&2
+            echo "The prepared iPhone SE simulator UDID was not carried forward from verification." >&2
             exit 2
           fi
           app_container="$(xcrun simctl get_app_container "$device_udid" "$NATIVE_SMOKE_APP_ID" app)"
