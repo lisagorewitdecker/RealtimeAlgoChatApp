@@ -1196,7 +1196,7 @@ test("Android preflight keeps private values out of its log and step summary", (
       status: "BLOCKED",
       marker: "ANDROID_RELEASE_PREFLIGHT=BLOCKED",
       diagnostic:
-        "The release-candidate application (NATIVE_SMOKE_APP_ID) is not installed on the connected Android device.",
+        "The release-candidate application is not installed on the connected device.",
     },
     {
       name: "android-ready",

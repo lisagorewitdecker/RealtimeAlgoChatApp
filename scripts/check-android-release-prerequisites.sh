@@ -129,7 +129,7 @@ if ((device_ready)); then
 
   # The application ID is a release secret: name the condition, never the value.
   if [[ -n "${NATIVE_SMOKE_APP_ID:-}" ]] && ! adb shell pm path "$NATIVE_SMOKE_APP_ID" >/dev/null 2>&1; then
-    record_failure "The release-candidate application (NATIVE_SMOKE_APP_ID) is not installed on the connected Android device."
+    record_failure "The release-candidate application is not installed on the connected device."
   fi
 fi
 

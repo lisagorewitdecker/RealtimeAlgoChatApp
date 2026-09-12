@@ -249,7 +249,7 @@ missing_app_output="$(
 )"
 assert_contains \
   "$missing_app_output" \
-  "The release-candidate application (NATIVE_SMOKE_APP_ID) is not installed on the connected Android device."
+  "The release-candidate application is not installed on the connected device."
 assert_not_contains "$missing_app_output" "secret-value-must-not-print"
 assert_not_contains "$missing_app_output" "com.example"
 
