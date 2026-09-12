@@ -198,6 +198,7 @@ jobs:
         env:
           NATIVE_SMOKE_APP_ID: ${{ secrets.NATIVE_SMOKE_IOS_APP_ID }}
           NATIVE_SMOKE_BUILD_ID: ${{ secrets.NATIVE_SMOKE_IOS_BUILD_ID }}
+          NATIVE_SMOKE_IOS_DEVICE_UDID: ${{ env.NATIVE_SMOKE_IOS_DEVICE_UDID }}
           NATIVE_SENTRY_MARKER: native-${{ github.run_id }}-${{ github.run_attempt }}-ios
         run: pnpm --filter @workspace/chat-app test:native-sentry ios
 

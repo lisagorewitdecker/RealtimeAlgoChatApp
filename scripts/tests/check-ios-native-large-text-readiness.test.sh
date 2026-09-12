@@ -6,6 +6,7 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 WORKSPACE_ROOT="$(cd -- "$SCRIPT_DIR/../.." && pwd)"
 GATE_RELATIVE_PATH="artifacts/chat-app/e2e/native-large-text/run.sh"
 GATE="$WORKSPACE_ROOT/$GATE_RELATIVE_PATH"
+SENTRY_GATE="$WORKSPACE_ROOT/artifacts/chat-app/e2e/sentry-source-map/run.sh"
 TEMPLATE_WRITER_RELATIVE_PATH="artifacts/chat-app/e2e/native-large-text/write-review-record-template.sh"
 TEMPLATE_WRITER="$WORKSPACE_ROOT/$TEMPLATE_WRITER_RELATIVE_PATH"
 WORKFLOW="$WORKSPACE_ROOT/.github/workflows/mobile-release.yml"
@@ -122,7 +123,7 @@ result_file_of() {
 }
 
 # The release workflow must export the verified iPhone SE UDID and explicitly
-# pass that same value to both native consumers. This static contract runs on
+# pass that same value to every device-sensitive native consumer. This static contract runs on
 # Linux and catches workflow drift without requiring Xcode or booted simulators.
 ios_simulator_step="$(workflow_step "Verify prepared iPhone SE simulator")"
 assert_contains \
@@ -130,6 +131,10 @@ assert_contains \
   'printf '"'"'NATIVE_SMOKE_IOS_DEVICE_UDID=%s\n'"'"' "$device_udid" >> "$GITHUB_ENV"'
 assert_workflow_device_handoff "Inspect installed iOS native branding"
 assert_workflow_device_handoff "Run iOS native large-text release gate"
+assert_workflow_device_handoff "Send controlled iOS JavaScript error"
+assert_contains \
+  "$(<"$SENTRY_GATE")" \
+  'maestro_device_args=(--device "$NATIVE_SMOKE_IOS_DEVICE_UDID")'
 
 # Runs the gate for one case. Optional globals:
 # - RUN_CASE_GATE: alternate gate path (defaults to the workspace gate).

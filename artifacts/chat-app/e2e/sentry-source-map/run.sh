@@ -28,7 +28,11 @@ export NATIVE_SMOKE_APP_ID NATIVE_SMOKE_BUILD_ID NATIVE_SMOKE_SCHEME
 export NATIVE_SENTRY_MARKER
 
 mkdir -p "$NATIVE_SMOKE_RESULTS_DIR"
-maestro test \
+maestro_device_args=()
+if [[ "$PLATFORM" == "ios" && -n "${NATIVE_SMOKE_IOS_DEVICE_UDID:-}" ]]; then
+  maestro_device_args=(--device "$NATIVE_SMOKE_IOS_DEVICE_UDID")
+fi
+maestro "${maestro_device_args[@]}" test \
   --format JUNIT \
   --output "$NATIVE_SMOKE_RESULTS_DIR/sentry-maestro-results.xml" \
   "$(dirname "${BASH_SOURCE[0]}")/flow.yaml"
