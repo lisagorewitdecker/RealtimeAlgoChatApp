@@ -16,11 +16,31 @@ const workflow = YAML.parse(
     "utf8",
   ),
 );
+const rootPackage = JSON.parse(
+  readFileSync(path.join(workspaceRoot, "package.json"), "utf8"),
+);
 
 const steps = workflow.jobs?.["check-generated"]?.steps ?? [];
 const compatibilityStep = steps.find(
-  (step) => step.run === "pnpm validate:api-compatibility",
+  (step) => step.name === "Check API contract compatibility",
 );
+
+function resolveRootPackageScript(command) {
+  const match = String(command).trim().match(/^pnpm(?:\s+run)?\s+([^\s]+)$/);
+  assert.ok(
+    match,
+    `expected a single root pnpm package script command, received: ${command}`,
+  );
+
+  const scriptName = match[1];
+  const resolvedCommand = rootPackage.scripts?.[scriptName];
+  assert.equal(
+    typeof resolvedCommand,
+    "string",
+    `expected root package.json to define the ${scriptName} script`,
+  );
+  return resolvedCommand;
+}
 
 test("API compatibility still runs after generated-client failures", () => {
   assert.ok(
@@ -64,5 +84,18 @@ test("API compatibility still runs after generated-client failures", () => {
     [...new Set(guardedStepIds)].sort(),
     [...requiredPrerequisites].sort(),
     "only setup prerequisites may guard compatibility; generated-client failure must not skip it",
+  );
+});
+
+test("API compatibility workflow command resolves to the maintained contract checker", () => {
+  assert.ok(
+    compatibilityStep,
+    "expected the API codegen workflow to contain the compatibility step",
+  );
+
+  assert.equal(
+    resolveRootPackageScript(compatibilityStep.run),
+    "node lib/api-spec/scripts/check-contract-compatibility.mjs",
+    "the compatibility workflow must invoke the repository's maintained contract compatibility checker through the root package script",
   );
 });
