@@ -149,6 +149,7 @@ jobs:
         env:
           NATIVE_SMOKE_APP_ID: ${{ secrets.NATIVE_SMOKE_IOS_APP_ID }}
           NATIVE_SMOKE_BUILD_ID: ${{ secrets.NATIVE_SMOKE_IOS_BUILD_ID }}
+          NATIVE_SMOKE_IOS_DEVICE_UDID: ${{ env.NATIVE_SMOKE_IOS_DEVICE_UDID }}
         shell: bash
         run: |
           set -euo pipefail
@@ -188,6 +189,7 @@ jobs:
           NATIVE_SMOKE_PASSWORD: ${{ secrets.NATIVE_SMOKE_PASSWORD }}
           NATIVE_SMOKE_DISPLAY_NAME: ${{ secrets.NATIVE_SMOKE_DISPLAY_NAME }}
           NATIVE_SMOKE_BUILD_ID: ${{ secrets.NATIVE_SMOKE_IOS_BUILD_ID }}
+          NATIVE_SMOKE_IOS_DEVICE_UDID: ${{ env.NATIVE_SMOKE_IOS_DEVICE_UDID }}
           NATIVE_SMOKE_SUMMARY_DEFER: "1"
         run: pnpm --filter @workspace/chat-app test:native-large-text ios
 
