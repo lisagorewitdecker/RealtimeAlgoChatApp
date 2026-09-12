@@ -1,11 +1,21 @@
 const RETRYABLE_CLERK_STATUSES = new Set([429, 500, 502, 503, 504]);
 
-type ClerkRetryOptions = {
+export type ClerkRetryOptions = {
   attempts?: number;
   baseDelayMs?: number;
   logPrefix?: string;
   sleep?: (delayMs: number) => Promise<void>;
 };
+
+export function withClerkSetupRetry<T>(
+  operation: () => Promise<T>,
+  options: ClerkRetryOptions = {},
+): Promise<T> {
+  return withClerkRetry("obtain testing token", operation, {
+    logPrefix: "[clerk-e2e-setup]",
+    ...options,
+  });
+}
 
 function clerkErrorStatus(error: unknown) {
   if (typeof error !== "object" || error === null) return undefined;

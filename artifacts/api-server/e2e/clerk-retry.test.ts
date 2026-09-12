@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   throwTestAndCleanupFailures,
   withClerkRetry,
+  withClerkSetupRetry,
 } from "./clerk-retry.js";
 
 describe("withClerkRetry", () => {
@@ -52,6 +53,46 @@ describe("withClerkRetry", () => {
     ).rejects.toBe(failure);
     expect(operation).toHaveBeenCalledOnce();
   });
+});
+
+describe("withClerkSetupRetry", () => {
+  it("retries temporary Clerk setup failures with bounded backoff", async () => {
+    const operation = vi
+      .fn<() => Promise<void>>()
+      .mockRejectedValueOnce({ status: 429 })
+      .mockRejectedValueOnce({ statusCode: 503 })
+      .mockResolvedValue();
+    const sleep = vi.fn<() => Promise<void>>().mockResolvedValue();
+
+    await expect(
+      withClerkSetupRetry(operation, {
+        attempts: 3,
+        baseDelayMs: 25,
+        sleep,
+      }),
+    ).resolves.toBeUndefined();
+    expect(operation).toHaveBeenCalledTimes(3);
+    expect(sleep.mock.calls).toEqual([[25], [50]]);
+  });
+
+  it.each([401, 403])(
+    "fails immediately for permanent Clerk setup status %i",
+    async (status) => {
+      const failure = { status };
+      const operation = vi.fn().mockRejectedValue(failure);
+      const sleep = vi.fn<() => Promise<void>>().mockResolvedValue();
+
+      await expect(
+        withClerkSetupRetry(operation, {
+          attempts: 5,
+          baseDelayMs: 25,
+          sleep,
+        }),
+      ).rejects.toBe(failure);
+      expect(operation).toHaveBeenCalledOnce();
+      expect(sleep).not.toHaveBeenCalled();
+    },
+  );
 });
 
 describe("throwTestAndCleanupFailures", () => {
