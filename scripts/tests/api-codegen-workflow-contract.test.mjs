@@ -54,6 +54,45 @@ function resolveRootPackageScript(command) {
   return resolvedCommand;
 }
 
+function resolveApiSpecPackageScript(command) {
+  const match = String(command)
+    .trim()
+    .match(
+      /^pnpm\s+--filter\s+@workspace\/api-spec\s+run\s+([^\s]+)$/,
+    );
+  assert.ok(
+    match,
+    `expected an API specification package script command, received: ${command}`,
+  );
+
+  const scriptName = match[1];
+  const resolvedCommand = apiSpecPackage.scripts?.[scriptName];
+  assert.equal(
+    typeof resolvedCommand,
+    "string",
+    `expected lib/api-spec/package.json to define the ${scriptName} script`,
+  );
+  return resolvedCommand;
+}
+
+test("root unit validation invokes the maintained API compatibility behavior suite", () => {
+  const unitCommands = String(rootPackage.scripts?.["test:unit"] ?? "")
+    .split("&&")
+    .map((command) => command.trim());
+  const compatibilityCommand =
+    "pnpm --filter @workspace/api-spec run test:compatibility";
+
+  assert.ok(
+    unitCommands.includes(compatibilityCommand),
+    "the root test:unit script must invoke the API specification package's maintained compatibility behavior suite",
+  );
+  assert.equal(
+    resolveApiSpecPackageScript(compatibilityCommand),
+    apiSpecPackage.scripts?.["test:compatibility"],
+    "the root unit command must resolve the named API specification package script",
+  );
+});
+
 test("generated-client drift evidence remains visible in the CI job log", () => {
   assert.ok(
     generatedClientStep,
