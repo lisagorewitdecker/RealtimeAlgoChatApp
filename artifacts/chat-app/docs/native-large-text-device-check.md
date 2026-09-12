@@ -417,7 +417,10 @@ reviewer=<full name or handle>
 reviewed_at_utc=<output of: date -u +%Y-%m-%dT%H:%M:%SZ>
 candidate_build_id=<prefilled by the runner>
 decision=<APPROVED or REJECTED>
-notes=<optional one-line summary of platform-specific findings>
+# Keep notes=... for an optional one-line summary, or use this block for detailed findings.
+notes<<END_NOTES
+<optional multi-line findings; headings, bullets, links, and backticks are stored literally>
+END_NOTES
 ```
 
 - `reviewer` is the person who opened the screenshots and findings, not the
@@ -433,6 +436,12 @@ notes=<optional one-line summary of platform-specific findings>
   exact tested binary rather than a run-directory name.
 - `decision` is `APPROVED` or `REJECTED`. Use `REJECTED` for any blocking
   finding and describe it in `notes` so the release check prints it.
+- Existing `notes=...` records remain valid for a one-line note. For a checklist
+  or multi-step finding, put the content between `notes<<END_NOTES` and the
+  closing `END_NOTES` line. The closing delimiter must exactly match the one
+  named after `notes<<`. The check prefixes every output line and treats
+  headings, bullets, links, and backticks as literal evidence rather than
+  Markdown.
 
 Write one record per platform run; an iOS review never covers Android. Keep
 the record in the run directory that is uploaded or stored under

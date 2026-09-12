@@ -200,7 +200,10 @@ reviewer=<full name or handle>
 reviewed_at_utc=<output of: date -u +%Y-%m-%dT%H:%M:%SZ>
 candidate_build_id=build-$platform
 decision=<APPROVED or REJECTED>
-notes=<optional one-line summary of platform-specific findings>
+# Keep notes=... for an optional one-line summary, or use this block for detailed findings.
+notes<<END_NOTES
+<optional multi-line findings; headings, bullets, links, and backticks are stored literally>
+END_NOTES
 EOF
 done
 valid_output="$(bash "$CHECKER" "$valid_root" 2>&1)"
@@ -271,10 +274,55 @@ if rejected_output="$(bash "$CHECKER" "$rejected_root" 2>&1)"; then
   echo "rejected review case unexpectedly passed" >&2
   exit 1
 fi
-assert_contains "$rejected_output" "[android] The review record at $rejected_root/android/20260909T120000Z/review-record.txt records decision=REJECTED by Ada Reviewer at 2026-09-09T13:00:00Z (notes: Checked all eleven native screenshots and both call-surface captures.)."
+assert_contains "$rejected_output" "[android] The review record at $rejected_root/android/20260909T120000Z/review-record.txt records decision=REJECTED by Ada Reviewer at 2026-09-09T13:00:00Z."
+assert_contains "$rejected_output" "[android] Review notes (literal evidence):"
+assert_contains "$rejected_output" "[android]   | Checked all eleven native screenshots and both call-surface captures."
 assert_contains "$rejected_output" "A rejected review blocks release"
 assert_contains "$rejected_output" "completeness check FAILED with 1 issue(s)"
 assert_not_contains "$rejected_output" "[ios] Review record missing"
+
+multiline_rejected_root="$TEST_ROOT/multiline-rejected"
+write_valid_run "$multiline_rejected_root" ios
+write_valid_run "$multiline_rejected_root" android
+write_review_record "$multiline_rejected_root" ios APPROVED
+cat > "$multiline_rejected_root/android/20260909T120000Z/review-record.txt" <<'EOF'
+platform=android
+reviewer=Ada Reviewer
+reviewed_at_utc=2026-09-09T13:00:00Z
+candidate_build_id=build-android
+decision=REJECTED
+notes<<END_NOTES
+# Layout finding
+- The `Send` button overlaps the final line.
+- See [capture](screenshots/screen-11.png).
+END_NOTES
+EOF
+if multiline_rejected_output="$(bash "$CHECKER" "$multiline_rejected_root" 2>&1)"; then
+  echo "multi-line rejected review case unexpectedly passed" >&2
+  exit 1
+fi
+assert_contains "$multiline_rejected_output" "[android] Review notes (literal evidence):"
+assert_contains "$multiline_rejected_output" '[android]   | # Layout finding'
+assert_contains "$multiline_rejected_output" '[android]   | - The `Send` button overlaps the final line.'
+assert_contains "$multiline_rejected_output" '[android]   | - See [capture](screenshots/screen-11.png).'
+assert_contains "$multiline_rejected_output" "completeness check FAILED with 1 issue(s)"
+
+unterminated_notes_root="$TEST_ROOT/unterminated-notes"
+write_valid_run "$unterminated_notes_root" ios
+write_valid_run "$unterminated_notes_root" android
+write_review_record "$unterminated_notes_root" ios APPROVED
+write_review_record "$unterminated_notes_root" android APPROVED
+cat >> "$unterminated_notes_root/android/20260909T120000Z/review-record.txt" <<'EOF'
+notes<<FINDINGS
+- This block was not closed.
+EOF
+if unterminated_notes_output="$(bash "$CHECKER" "$unterminated_notes_root" 2>&1)"; then
+  echo "unterminated notes block case unexpectedly passed" >&2
+  exit 1
+fi
+assert_contains "$unterminated_notes_output" "[android] Review record has an unterminated notes block"
+assert_contains "$unterminated_notes_output" "Close it with the exact delimiter named after notes<<."
+assert_contains "$unterminated_notes_output" "completeness check FAILED with 1 issue(s)"
 
 mismatched_root="$TEST_ROOT/mismatched"
 write_valid_run "$mismatched_root" ios

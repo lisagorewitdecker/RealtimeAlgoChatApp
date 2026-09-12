@@ -41,6 +41,69 @@ trimmed_value() {
   metadata_value "$metadata_path" "$key" | tr -d '\r' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//'
 }
 
+review_notes() {
+  local record_path="$1"
+  local block_declaration
+  local delimiter
+
+  block_declaration="$(sed -n '/^notes<</{p;q;}' "$record_path" | tr -d '\r')"
+  if [[ -n "$block_declaration" ]]; then
+    delimiter="${block_declaration#notes<<}"
+    if [[ -n "$delimiter" ]]; then
+      awk -v declaration="$block_declaration" -v delimiter="$delimiter" '
+        BEGIN { in_notes = 0 }
+        {
+          sub(/\r$/, "")
+          if (!in_notes && $0 == declaration) {
+            in_notes = 1
+            next
+          }
+          if (in_notes && $0 == delimiter) exit
+          if (in_notes) print
+        }
+      ' "$record_path"
+      return
+    fi
+  fi
+
+  trimmed_value "$record_path" notes
+}
+
+review_notes_block_is_closed() {
+  local record_path="$1"
+  local block_declaration
+  local delimiter
+
+  block_declaration="$(sed -n '/^notes<</{p;q;}' "$record_path" | tr -d '\r')"
+  [[ -z "$block_declaration" ]] && return 0
+
+  delimiter="${block_declaration#notes<<}"
+  [[ -n "$delimiter" ]] || return 1
+  awk -v declaration="$block_declaration" -v delimiter="$delimiter" '
+    {
+      sub(/\r$/, "")
+      if (!opened && $0 == declaration) {
+        opened = 1
+        next
+      }
+      if (opened && $0 == delimiter) {
+        closed = 1
+        exit
+      }
+    }
+    END { exit !closed }
+  ' "$record_path"
+}
+
+print_literal_evidence() {
+  local platform="$1"
+  local text="$2"
+
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    printf '[%s]   | %s\n' "$platform" "$line" >&2
+  done <<<"$text"
+}
+
 first_line_trimmed() {
   head -n 1 "$1" | tr -d '\r' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//'
 }
@@ -281,7 +344,12 @@ validate_review_record() {
   record_build_id="$(trimmed_value "$record_path" candidate_build_id)"
   record_platform="$(trimmed_value "$record_path" platform)"
   approval_scope="$(trimmed_value "$record_path" approval_scope)"
-  notes="$(trimmed_value "$record_path" notes)"
+  notes="$(review_notes "$record_path")"
+
+  if ! review_notes_block_is_closed "$record_path"; then
+    issue "$platform" "Review record has an unterminated notes block in ${record_path}. Close it with the exact delimiter named after notes<<."
+    record_valid=0
+  fi
 
   for required_key in reviewer reviewed_at_utc candidate_build_id decision; do
     value="$(trimmed_value "$record_path" "$required_key")"
@@ -337,7 +405,11 @@ validate_review_record() {
     APPROVED | "")
       ;;
     REJECTED)
-      issue "$platform" "The review record at ${record_path} records decision=REJECTED by ${reviewer:-an unnamed reviewer} at ${reviewed_at:-an unrecorded time}${notes:+ (notes: ${notes})}. A rejected review blocks release; resolve the recorded findings, rerun the native large-text gate, and record a new review."
+      issue "$platform" "The review record at ${record_path} records decision=REJECTED by ${reviewer:-an unnamed reviewer} at ${reviewed_at:-an unrecorded time}. A rejected review blocks release; resolve the recorded findings, rerun the native large-text gate, and record a new review."
+      if [[ -n "$notes" ]]; then
+        printf '[%s] Review notes (literal evidence):\n' "$platform" >&2
+        print_literal_evidence "$platform" "$notes"
+      fi
       record_valid=0
       ;;
     *)

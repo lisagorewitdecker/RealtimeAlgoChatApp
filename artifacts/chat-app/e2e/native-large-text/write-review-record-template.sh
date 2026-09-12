@@ -12,5 +12,8 @@ reviewer=<full name or handle>
 reviewed_at_utc=<output of: date -u +%Y-%m-%dT%H:%M:%SZ>
 candidate_build_id=$CANDIDATE_BUILD_ID
 decision=<APPROVED or REJECTED>
-notes=<optional one-line summary of platform-specific findings>
+# Keep notes=... for an optional one-line summary, or use this block for detailed findings.
+notes<<END_NOTES
+<optional multi-line findings; headings, bullets, links, and backticks are stored literally>
+END_NOTES
 EOF
