@@ -67,7 +67,7 @@ jobs:
           echo "exit_code=$status" >> "$GITHUB_OUTPUT"
 
       - name: Upload analysis results to GitHub
-        if: ${{ always() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false) && hashFiles('eslint-results.sarif') != '' }}
+        if: ${{ always() && (github.event.pull_request == null || github.event.pull_request.head.repo.fork == false) && hashFiles('eslint-results.sarif') != '' }}
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: eslint-results.sarif
