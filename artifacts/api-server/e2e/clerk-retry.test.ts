@@ -41,6 +41,58 @@ describe("withClerkRetry", () => {
     ).resolves.toBe("token");
   });
 
+  it("uses numeric Clerk retry guidance when it exceeds backoff", async () => {
+    const operation = vi
+      .fn<() => Promise<string>>()
+      .mockRejectedValueOnce({ status: 429, retryAfter: 3 })
+      .mockResolvedValue("session");
+    const sleep = vi.fn<() => Promise<void>>().mockResolvedValue();
+
+    await expect(
+      withClerkRetry("create session", operation, {
+        attempts: 2,
+        baseDelayMs: 10,
+        sleep,
+      }),
+    ).resolves.toBe("session");
+    expect(sleep).toHaveBeenCalledWith(3_000);
+  });
+
+  it.each(["later", Number.NaN, Number.POSITIVE_INFINITY, -1])(
+    "falls back to exponential backoff for malformed retry guidance %s",
+    async (retryAfter) => {
+      const operation = vi
+        .fn<() => Promise<string>>()
+        .mockRejectedValueOnce({ status: 429, retryAfter })
+        .mockResolvedValue("session");
+      const sleep = vi.fn<() => Promise<void>>().mockResolvedValue();
+
+      await withClerkRetry("create session", operation, {
+        attempts: 2,
+        baseDelayMs: 25,
+        sleep,
+      });
+      expect(sleep).toHaveBeenCalledWith(25);
+    },
+  );
+
+  it("uses bounded exponential backoff when retry guidance is absent", async () => {
+    const operation = vi
+      .fn<() => Promise<string>>()
+      .mockRejectedValueOnce({ status: 429 })
+      .mockRejectedValueOnce({ status: 429 })
+      .mockResolvedValue("session");
+    const sleep = vi.fn<() => Promise<void>>().mockResolvedValue();
+
+    await withClerkRetry("create session", operation, {
+      attempts: 3,
+      baseDelayMs: 20_000,
+      sleep,
+    });
+    expect(sleep).toHaveBeenNthCalledWith(1, 20_000);
+    expect(sleep).toHaveBeenNthCalledWith(2, 30_000);
+  });
+
   it("does not retry permanent failures", async () => {
     const failure = { status: 400 };
     const operation = vi.fn().mockRejectedValue(failure);

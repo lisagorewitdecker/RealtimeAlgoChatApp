@@ -1,4 +1,5 @@
 const RETRYABLE_CLERK_STATUSES = new Set([429, 500, 502, 503, 504]);
+const MAX_EXPONENTIAL_DELAY_MS = 30_000;
 
 export type ClerkRetryOptions = {
   attempts?: number;
@@ -25,6 +26,16 @@ function clerkErrorStatus(error: unknown) {
     : typeof candidate.statusCode === "number"
       ? candidate.statusCode
       : undefined;
+}
+
+function clerkRetryAfterMs(error: unknown): number | undefined {
+  if (typeof error !== "object" || error === null) return undefined;
+  const retryAfter = (error as { retryAfter?: unknown }).retryAfter;
+  return typeof retryAfter === "number" &&
+    Number.isFinite(retryAfter) &&
+    retryAfter >= 0
+    ? retryAfter * 1_000
+    : undefined;
 }
 
 export async function withClerkRetry<T>(
@@ -57,7 +68,14 @@ export async function withClerkRetry<T>(
         break;
       }
 
-      const delayMs = baseDelayMs * 2 ** attempt;
+      const exponentialDelayMs = Math.min(
+        MAX_EXPONENTIAL_DELAY_MS,
+        baseDelayMs * 2 ** attempt,
+      );
+      const delayMs = Math.max(
+        exponentialDelayMs,
+        clerkRetryAfterMs(error) ?? 0,
+      );
       console.info(
         `${options.logPrefix ?? "[clerk-e2e]"} ${phase} returned ${status}; retrying in ${delayMs}ms`,
       );
