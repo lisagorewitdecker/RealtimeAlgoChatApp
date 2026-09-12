@@ -59,12 +59,12 @@ jobs:
           echo "exit_code=$status" >> "$GITHUB_OUTPUT"
 
       - name: Upload analysis results to GitHub
-        if: ${{ hashFiles('eslint-results.sarif') != '' }}
+        if: ${{ always() && hashFiles('eslint-results.sarif') != '' }}
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: eslint-results.sarif
           wait-for-processing: true
 
       - name: Fail on ESLint errors
-        if: ${{ steps.lint.outputs.exit_code != '0' }}
+        if: ${{ always() && steps.lint.outputs.exit_code != '0' }}
         run: exit 1
