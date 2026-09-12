@@ -32,6 +32,7 @@ artifacts/api-server/test-results/banned-room-an-active-bann-8aa21-nd-sees-it-ag
 !test-results/native-large-text/
 test-results/native-large-text/*
 !test-results/native-large-text/physical-device-supplement.md
+!test-results/native-large-text/native-branding-summary-check.md
 !test-results/native-large-text/android/
 test-results/native-large-text/android/*
 !test-results/native-large-text/android/runner-check.txt
@@ -191,6 +192,9 @@ Thumbs.db
 
 # Replit
 .local/
+
+# Playwright runtime result pointer
+/artifacts/api-server/test-results/.last-run.json
 
 # Local npm global artifacts
 .config/npm/
