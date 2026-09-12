@@ -262,6 +262,43 @@ test("a member recovers a live encrypted room after resetting their device key",
     await expect(
       resetSession.page.getByText("Unable to decrypt this message."),
     ).toHaveCount(0);
+
+    console.info(
+      "[key-reset-recovery-e2e] confirming recovered key survives reload",
+    );
+    await resetSession.page.reload();
+    await expect(resetSession.page.getByTestId("room-key-waiting")).toBeHidden({
+      timeout: 15_000,
+    });
+    await expect(
+      resetSession.page.getByText(historyMessage, { exact: true }),
+    ).toBeVisible();
+    await expect(
+      resetSession.page.getByText(postResetMessage, { exact: true }),
+    ).toBeVisible();
+    await expect(
+      resetSession.page.getByText("Unable to decrypt this message."),
+    ).toHaveCount(0);
+
+    console.info(
+      "[key-reset-recovery-e2e] reopening room with recovered key",
+    );
+    await resetSession.page.getByTestId("room-back-button").click();
+    const recoveredRoomCard = roomJoinButton(resetSession.page, roomName);
+    await expect(recoveredRoomCard).toBeVisible();
+    await recoveredRoomCard.click();
+    await expect(resetSession.page.getByTestId("room-key-waiting")).toBeHidden({
+      timeout: 15_000,
+    });
+    await expect(
+      resetSession.page.getByText(historyMessage, { exact: true }),
+    ).toBeVisible();
+    await expect(
+      resetSession.page.getByText(postResetMessage, { exact: true }),
+    ).toBeVisible();
+    await expect(
+      resetSession.page.getByText("Unable to decrypt this message."),
+    ).toHaveCount(0);
   } catch (error) {
     testFailure = error;
   } finally {
