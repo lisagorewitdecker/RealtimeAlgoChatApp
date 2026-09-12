@@ -274,6 +274,7 @@ function workspacePackages() {
 const scriptTokenPattern = /[\w@.+$/{}-]*\.(?:sh|bash|mjs|cjs|js|ts)\b/g;
 const pnpmScriptPattern =
   /\bpnpm\s+(?:-r\s+)?--filter[= ]("?)([^\s"]+)\1\s+(?:run\s+)?([\w:.-]+)/g;
+const pnpmBuiltInCommands = new Set(["exec"]);
 const shellCommentPattern = /^\s*#.*$/gm;
 
 /**
@@ -356,14 +357,24 @@ function discoverInvokedScripts() {
     for (const [, , packageName, scriptName] of commandText.matchAll(
       pnpmScriptPattern,
     )) {
-      const command = packages.get(packageName)?.scripts[scriptName];
-      if (!command) {
+      if (pnpmBuiltInCommands.has(scriptName)) {
         continue;
       }
+      const packageEntry = packages.get(packageName);
+      assert.ok(
+        packageEntry,
+        `${origin.label} invokes pnpm package "${packageName}", but no workspace package defines that name.`,
+      );
+      const command = packageEntry.scripts[scriptName];
+      assert.equal(
+        typeof command,
+        "string",
+        `${origin.label} invokes pnpm script "${scriptName}" in "${packageName}", but that package does not define the script.`,
+      );
       nested.push({
         key: `${packageName}#${scriptName}`,
         text: command,
-        baseDirectories: [packages.get(packageName).directory, workspaceRoot],
+        baseDirectories: [packageEntry.directory, workspaceRoot],
       });
     }
 
