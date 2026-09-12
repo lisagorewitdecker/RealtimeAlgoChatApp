@@ -38,15 +38,15 @@ jobs:
       - name: Verify generated API clients
         run: pnpm validate:api-codegen
 
-      # Breaking contract changes fail this step unless the pull request
-      # description declares both pieces of review evidence. Values may be inline:
+      # Pull request runs fail for breaking contract changes unless the description
+      # declares both pieces of review evidence. Values may be inline:
       #   API_BREAKING_CHANGE_JUSTIFICATION: <why the existing contract must break>
       #   API_BREAKING_CHANGE_MIGRATION_PLAN: <how existing consumers move to the new contract>
       # or an indented/bulleted block directly below either marker, ending at the
       # next blank line or marker. An override that omits either value is rejected.
-      # The decision (compatible,
-      # blocked, or approved override with its review evidence) is also published
-      # to the job summary through GITHUB_STEP_SUMMARY.
+      # Push runs skip compatibility enforcement because the change was enforced
+      # on its pull request before merge, and print that reason in the log and job
+      # summary. Every decision is published through GITHUB_STEP_SUMMARY.
       - name: Check API contract compatibility
         if: >-
           ${{
