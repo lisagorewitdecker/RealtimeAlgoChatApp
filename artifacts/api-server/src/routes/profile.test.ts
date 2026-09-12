@@ -89,6 +89,7 @@ describe("account profile routes", () => {
     const response = await fetch(`${baseUrl}/`);
 
     expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
     await expect(response.json()).resolves.toEqual({
       profile: { username: "Ada", avatarEmoji: "👩‍💻" },
       publicKey: null,
@@ -104,6 +105,18 @@ describe("account profile routes", () => {
 
     await expect(response.json()).resolves.toMatchObject({ isAdmin: true });
     expect(mockIsConfiguredAdmin).toHaveBeenCalledWith("user-ada");
+  });
+
+  it("does not cache the administrator profile response", async () => {
+    mockIsConfiguredAdmin.mockReturnValue(true);
+
+    const response = await fetch(`${baseUrl}/`, {
+      headers: { "If-None-Match": "\"stale-profile\"" },
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    await expect(response.json()).resolves.toMatchObject({ isAdmin: true });
   });
 
   it("writes normalized profile fields for the authenticated account only", async () => {

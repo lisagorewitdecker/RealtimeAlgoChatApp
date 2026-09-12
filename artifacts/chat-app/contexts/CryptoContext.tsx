@@ -844,7 +844,11 @@ async function readRegisteredPublicKeyRecord(
   token: string | null,
 ): Promise<{ publicKey: string | null; registrationVersion: number | null }> {
   const response = await fetch(profileUrl, {
-    headers: { Authorization: `Bearer ${token ?? ""}` },
+    cache: "no-store",
+    headers: {
+      Authorization: `Bearer ${token ?? ""}`,
+      "Cache-Control": "no-cache",
+    },
   });
   if (!response.ok) {
     throw new Error(`Public key lookup failed (${response.status})`);

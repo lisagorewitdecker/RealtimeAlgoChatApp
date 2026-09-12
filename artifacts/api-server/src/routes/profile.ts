@@ -28,6 +28,10 @@ function isValidPublicKey(value: unknown): value is string {
 router.get("/", async (req, res, next) => {
   const userId = await requireAuthorizedUser(req, res);
   if (!userId) return;
+  // This response contains account-specific data, including the server-owned
+  // admin flag and the device public key. It must never be reused as a cached
+  // response for a later profile load.
+  res.set("Cache-Control", "no-store");
   try {
     const [profile, publicKeyRecord] = await Promise.all([
       getAccountProfile(userId),
@@ -49,6 +53,7 @@ router.get("/", async (req, res, next) => {
 router.put("/", async (req, res, next) => {
   const userId = await requireAuthorizedUser(req, res);
   if (!userId) return;
+  res.set("Cache-Control", "no-store");
   const body =
     req.body !== null && typeof req.body === "object" && !Array.isArray(req.body)
       ? (req.body as Record<string, unknown>)
