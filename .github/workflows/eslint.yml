@@ -47,7 +47,7 @@ jobs:
             --output-file eslint-results.sarif
 
       - name: Upload analysis results to GitHub
-        if: ${{ always() && hashFiles('eslint-results.sarif') != '' }}
+        if: ${{ hashFiles('eslint-results.sarif') != '' }}
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: eslint-results.sarif
