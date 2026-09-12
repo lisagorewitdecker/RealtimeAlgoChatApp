@@ -181,3 +181,6 @@ ADMIN_USER_IDS = ""
 EXPO_PUBLIC_ADMIN_USER_IDS = ""
 
 [userenv.development]
+
+[objectStorage]
+defaultBucketID = "replit-objstore-6a255b4b-ad2d-4e4e-86dd-174ca70c17f1"
