@@ -453,6 +453,148 @@ test("release workflow passes secrets to steps only through their environment", 
   );
 });
 
+test("publish requires candidate-bound approvals from the current run attempt", () => {
+  const attemptSuffix = "${{ github.run_id }}-${{ github.run_attempt }}";
+  for (const [jobId, platform] of [
+    ["native-ios", "ios"],
+    ["native-android", "android"],
+  ]) {
+    assert.ok(
+      workflow.jobs[jobId].env.NATIVE_SMOKE_RESULTS_DIR.endsWith(
+        `/${attemptSuffix}`,
+      ),
+      `${jobId} evidence directory must be unique to the GitHub run attempt`,
+    );
+    const upload = workflow.jobs[jobId].steps.find(
+      (step) => step[`uses`] === "actions/upload-artifact@v4",
+    );
+    assert.equal(
+      upload?.with?.name,
+      `native-large-text-${platform}`,
+      `${jobId} must use a stable artifact name so partial reruns retain the other platform`,
+    );
+    assert.equal(
+      upload?.with?.overwrite,
+      true,
+      `${jobId} must replace its own prior-attempt artifact after a rerun`,
+    );
+    assert.ok(
+      workflow.jobs[jobId].steps.some(
+        (step) =>
+          step.run === `rm -rf test-results/native-large-text/${platform}`,
+      ),
+      `${jobId} must clear stale self-hosted-runner evidence before collection`,
+    );
+  }
+
+  for (const jobId of ["mobile-release-gate", "mobile-publish"]) {
+    const downloads = workflow.jobs[jobId].steps.filter(
+      (step) => step[`uses`] === "actions/download-artifact@v4",
+    );
+    assert.deepEqual(
+      downloads.map((step) => step.with.name).sort(),
+      ["native-large-text-android", "native-large-text-ios"],
+      `${jobId} must support mixed-attempt artifacts after a partial rerun`,
+    );
+  }
+
+  const publishSteps = workflow.jobs["mobile-publish"].steps;
+  assert.equal(
+    workflow.jobs["mobile-publish"].environment.name,
+    "mobile-store-submission",
+    "store submission must use its dedicated protected environment",
+  );
+  assert.match(
+    workflow.jobs["mobile-publish"].if,
+    /github\.event_name == 'workflow_dispatch'[\s\S]*inputs\.publish == true/,
+    "only an explicit manual dispatch may enter the store submission job",
+  );
+  assert.doesNotMatch(
+    workflow.jobs["mobile-publish"].if,
+    /workflow_call|push/,
+    "automated callers and tags must not enter the store submission job",
+  );
+  const approvalIndex = publishSteps.findIndex(
+    (step) => step.name === "Attach candidate-bound human approvals",
+  );
+  const strictIndex = publishSteps.findIndex(
+    (step) => step.name === "Require approved iOS and Android evidence",
+  );
+  const submitIndex = publishSteps.findIndex(
+    (step) => step.name === "Submit the tested iOS and Android candidates",
+  );
+  assert.ok(approvalIndex >= 0, "publish job must attach human approvals");
+  assert.ok(
+    strictIndex > approvalIndex,
+    "strict check must follow approval intake",
+  );
+  assert.ok(
+    submitIndex > strictIndex,
+    "strict check must run before store submission",
+  );
+  assert.equal(
+    publishSteps[strictIndex].env.NATIVE_EVIDENCE_REQUIRE_APPROVAL,
+    "1",
+    "publish evidence validation must enable strict approval mode",
+  );
+  assert.ok(
+    publishSteps[approvalIndex].run.includes(
+      'if [[ "$approved_build_id" != "$tested_build_id" ]]',
+    ),
+    "publish approval intake must match approval and evidence candidate IDs",
+  );
+  assert.ok(
+    publishSteps[approvalIndex].run.includes(
+      'if [[ "$submit_build_id" != "$tested_build_id" ]]',
+    ),
+    "publish approval intake must bind submitted build IDs to validated evidence",
+  );
+  assert.equal(
+    publishSteps[approvalIndex].env.IOS_SUBMIT_BUILD_ID,
+    "${{ secrets.NATIVE_SMOKE_IOS_BUILD_ID }}",
+  );
+  assert.equal(
+    publishSteps[approvalIndex].env.ANDROID_SUBMIT_BUILD_ID,
+    "${{ secrets.NATIVE_SMOKE_ANDROID_BUILD_ID }}",
+  );
+  assert.equal(
+    workflow.permissions.actions,
+    "read",
+    "the workflow needs read-only Actions access to verify environment reviews",
+  );
+  assert.equal(
+    publishSteps[approvalIndex].env.GH_TOKEN,
+    "${{ github.token }}",
+    "approval verification must use the scoped workflow token",
+  );
+  assert.match(
+    publishSteps[approvalIndex].run,
+    /actions\/runs\/\$GH_RUN_ID\/approvals/,
+    "review records must query the current run's approval history",
+  );
+  assert.match(
+    publishSteps[approvalIndex].run,
+    /review\.state === "approved"[\s\S]*environment\.name === "mobile-store-submission"/,
+    "review records must use the actual approver of the protected submission environment",
+  );
+  assert.doesNotMatch(
+    JSON.stringify(publishSteps[approvalIndex]),
+    /github\.actor/,
+    "the workflow dispatcher must not be recorded as the environment approver",
+  );
+  assert.match(
+    publishSteps[approvalIndex].run,
+    /date -u \+%Y-%m-%dT%H:%M:%SZ/,
+    "review records must derive their timestamp at the protected publish gate",
+  );
+  assert.ok(
+    !Object.keys(workflow.on.workflow_dispatch.inputs).some((name) =>
+      /reviewer|reviewed_at/.test(name),
+    ),
+    "manual callers must not be able to supply reviewer identity or review time",
+  );
+});
+
 function summaryEnvExpressionProblem(expression, { jobId, job }) {
   const trimmed = expression.trim();
   if (

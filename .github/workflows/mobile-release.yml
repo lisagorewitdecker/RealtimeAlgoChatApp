@@ -8,6 +8,14 @@ on:
         required: true
         default: false
         type: boolean
+      ios_review_candidate_build_id:
+        description: Approved iOS candidate build ID (must match the tested build)
+        required: false
+        type: string
+      android_review_candidate_build_id:
+        description: Approved Android candidate build ID (must match the tested build)
+        required: false
+        type: string
   push:
     tags:
       - "mobile-v*"
@@ -41,6 +49,7 @@ on:
         required: true
 
 permissions:
+  actions: read
   contents: read
 
 env:
@@ -57,10 +66,13 @@ jobs:
     environment:
       name: mobile-release
     env:
-      NATIVE_SMOKE_RESULTS_DIR: ${{ github.workspace }}/test-results/native-large-text/ios/${{ github.run_id }}
+      NATIVE_SMOKE_RESULTS_DIR: ${{ github.workspace }}/test-results/native-large-text/ios/${{ github.run_id }}-${{ github.run_attempt }}
     steps:
       - name: Check out release candidate
         uses: actions/checkout@v4
+
+      - name: Clear prior iOS evidence from this runner
+        run: rm -rf test-results/native-large-text/ios
 
       - name: Set up pnpm
         id: setup-pnpm
@@ -278,6 +290,7 @@ jobs:
           path: test-results/native-large-text/ios/**
           if-no-files-found: warn
           retention-days: 30
+          overwrite: true
 
       - name: Summarize iOS native branding
         if: always()
@@ -342,10 +355,13 @@ jobs:
     environment:
       name: mobile-release
     env:
-      NATIVE_SMOKE_RESULTS_DIR: ${{ github.workspace }}/test-results/native-large-text/android/${{ github.run_id }}
+      NATIVE_SMOKE_RESULTS_DIR: ${{ github.workspace }}/test-results/native-large-text/android/${{ github.run_id }}-${{ github.run_attempt }}
     steps:
       - name: Check out release candidate
         uses: actions/checkout@v4
+
+      - name: Clear prior Android evidence from this runner
+        run: rm -rf test-results/native-large-text/android
 
       - name: Set up pnpm
         uses: pnpm/action-setup@v4
@@ -498,6 +514,7 @@ jobs:
           path: test-results/native-large-text/android/**
           if-no-files-found: warn
           retention-days: 30
+          overwrite: true
 
       - name: Summarize Android native branding
         if: always()
@@ -578,17 +595,14 @@ jobs:
     if: >-
       ${{
         needs.mobile-release-gate.result == 'success' &&
-        (
-          github.event_name == 'workflow_call' ||
-          (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/mobile-v')) ||
-          (github.event_name == 'workflow_dispatch' && inputs.publish == true)
-        )
+        github.event_name == 'workflow_dispatch' &&
+        inputs.publish == true
       }}
     needs:
       - mobile-release-gate
     runs-on: ubuntu-latest
     environment:
-      name: mobile-release
+      name: mobile-store-submission
     steps:
       - name: Check out release candidate
         uses: actions/checkout@v4
@@ -602,6 +616,115 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 24
+
+      - name: Download iOS native smoke artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: native-large-text-ios
+          path: test-results/native-large-text/ios
+
+      - name: Download Android native smoke artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: native-large-text-android
+          path: test-results/native-large-text/android
+
+      - name: Attach candidate-bound human approvals
+        env:
+          IOS_REVIEW_BUILD_ID: ${{ inputs.ios_review_candidate_build_id }}
+          IOS_SUBMIT_BUILD_ID: ${{ secrets.NATIVE_SMOKE_IOS_BUILD_ID }}
+          ANDROID_REVIEW_BUILD_ID: ${{ inputs.android_review_candidate_build_id }}
+          ANDROID_SUBMIT_BUILD_ID: ${{ secrets.NATIVE_SMOKE_ANDROID_BUILD_ID }}
+          GH_TOKEN: ${{ github.token }}
+          GH_REPOSITORY: ${{ github.repository }}
+          GH_RUN_ID: ${{ github.run_id }}
+          GH_API_URL: ${{ github.api_url }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          reviewer="$(
+            curl --fail --silent --show-error \
+              --header "Accept: application/vnd.github+json" \
+              --header "Authorization: Bearer $GH_TOKEN" \
+              --header "X-GitHub-Api-Version: 2022-11-28" \
+              "$GH_API_URL/repos/$GH_REPOSITORY/actions/runs/$GH_RUN_ID/approvals" |
+              node -e '
+                let input = "";
+                process.stdin.setEncoding("utf8");
+                process.stdin.on("data", (chunk) => { input += chunk; });
+                process.stdin.on("end", () => {
+                  const reviews = JSON.parse(input);
+                  const approval = [...reviews].reverse().find(
+                    (review) =>
+                      review.state === "approved" &&
+                      review.environments?.some(
+                        (environment) =>
+                          environment.name === "mobile-store-submission",
+                      ),
+                  );
+                  if (!approval?.user?.login) process.exit(1);
+                  process.stdout.write(approval.user.login);
+                });
+              '
+          )"
+          if [[ -z "$reviewer" || "$reviewer" == *$'\n'* || "$reviewer" == *$'\r'* ]]; then
+            echo "Could not verify the reviewer who approved the mobile-store-submission environment." >&2
+            exit 1
+          fi
+
+          attach_approval() {
+            local platform="$1"
+            local approved_build_id="$2"
+            local submit_build_id="$3"
+            local platform_dir="test-results/native-large-text/$platform"
+            local run_dirs=()
+            local run_dir
+            local tested_build_id
+            local reviewed_at
+
+            if [[ -z "$approved_build_id" ]]; then
+              echo "Store submission requires the ${platform} review candidate build ID." >&2
+              exit 1
+            fi
+            if [[ "$approved_build_id" == *$'\n'* || "$approved_build_id" == *$'\r'* ]]; then
+              echo "The ${platform} review candidate build ID must contain exactly one line." >&2
+              exit 1
+            fi
+            mapfile -t run_dirs < <(find "$platform_dir" -mindepth 1 -maxdepth 1 -type d -print | sort)
+            if ((${#run_dirs[@]} != 1)); then
+              echo "Expected exactly one ${platform} evidence run, found ${#run_dirs[@]}." >&2
+              exit 1
+            fi
+            run_dir="${run_dirs[0]}"
+            tested_build_id="$(head -n 1 "$run_dir/candidate-build-id.txt" | tr -d '\r' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
+            if [[ "$approved_build_id" != "$tested_build_id" ]]; then
+              echo "The ${platform} approval is for a different candidate build than the downloaded evidence." >&2
+              exit 1
+            fi
+            if [[ "$submit_build_id" != "$tested_build_id" ]]; then
+              echo "The ${platform} build configured for store submission does not match the downloaded and approved evidence." >&2
+              exit 1
+            fi
+            reviewed_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            {
+              printf 'platform=%s\n' "$platform"
+              printf 'reviewer=%s\n' "$reviewer"
+              printf 'reviewed_at_utc=%s\n' "$reviewed_at"
+              printf 'candidate_build_id=%s\n' "$approved_build_id"
+              printf 'decision=APPROVED\n'
+              printf 'approval_scope=candidate\n'
+              printf 'notes=Approval supplied to the store submission workflow.\n'
+            } > "$run_dir/review-record.txt"
+          }
+
+          attach_approval ios "$IOS_REVIEW_BUILD_ID" "$IOS_SUBMIT_BUILD_ID"
+          attach_approval android "$ANDROID_REVIEW_BUILD_ID" "$ANDROID_SUBMIT_BUILD_ID"
+
+      - name: Require approved iOS and Android evidence
+        env:
+          NATIVE_EVIDENCE_REQUIRE_APPROVAL: "1"
+        run: bash scripts/check-native-large-text-evidence.sh
 
       - name: Verify publishing inputs
         env:

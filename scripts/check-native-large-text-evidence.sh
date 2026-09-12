@@ -6,8 +6,14 @@ RESULTS_ROOT="${1:-$ROOT_DIR/test-results/native-large-text}"
 FAILURE_COUNT=0
 REVIEW_PENDING_PLATFORMS=()
 REVIEW_DECISIONS=()
+REQUIRE_APPROVAL="${NATIVE_EVIDENCE_REQUIRE_APPROVAL:-0}"
 UTC_TIMESTAMP_PATTERN='^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$'
 TEMPLATE_PLACEHOLDER_PATTERN='^<.*>$'
+
+if [[ "$REQUIRE_APPROVAL" != "0" && "$REQUIRE_APPROVAL" != "1" ]]; then
+  echo "NATIVE_EVIDENCE_REQUIRE_APPROVAL must be 0 or 1." >&2
+  exit 2
+fi
 
 issue() {
   local platform="$1"
@@ -256,7 +262,11 @@ validate_review_record() {
 
   if [[ ! -e "$record_path" ]]; then
     REVIEW_PENDING_PLATFORMS+=("$platform")
-    notice "$platform" "Review record missing: ${record_path} does not exist. No person has recorded a review of this run's native screenshots, call-surface screenshots, and platform-specific findings, so it is not yet reviewed device evidence. After reviewing the run, complete review-record.template.txt and rename it to review-record.txt."
+    if [[ "$REQUIRE_APPROVAL" == "1" ]]; then
+      issue "$platform" "Required approval missing: ${record_path} does not exist. Store submission requires an APPROVED review record for this candidate build. After reviewing the run, complete review-record.template.txt and rename it to review-record.txt."
+    else
+      notice "$platform" "Review record missing: ${record_path} does not exist. No person has recorded a review of this run's native screenshots, call-surface screenshots, and platform-specific findings, so it is not yet reviewed device evidence. After reviewing the run, complete review-record.template.txt and rename it to review-record.txt."
+    fi
     return
   fi
   if [[ ! -s "$record_path" ]]; then
@@ -264,12 +274,13 @@ validate_review_record() {
     return
   fi
 
-  local reviewer reviewed_at decision record_build_id record_platform notes
+  local reviewer reviewed_at decision record_build_id record_platform approval_scope notes
   reviewer="$(trimmed_value "$record_path" reviewer)"
   reviewed_at="$(trimmed_value "$record_path" reviewed_at_utc)"
   decision="$(trimmed_value "$record_path" decision)"
   record_build_id="$(trimmed_value "$record_path" candidate_build_id)"
   record_platform="$(trimmed_value "$record_path" platform)"
+  approval_scope="$(trimmed_value "$record_path" approval_scope)"
   notes="$(trimmed_value "$record_path" notes)"
 
   for required_key in reviewer reviewed_at_utc candidate_build_id decision; do
@@ -285,6 +296,11 @@ validate_review_record() {
 
   if [[ -n "$record_platform" && "$record_platform" != "$platform" ]]; then
     issue "$platform" "Review record identifies platform '${record_platform}', not '${platform}', in ${record_path}. Each platform run needs its own review record."
+    record_valid=0
+  fi
+
+  if [[ -n "$approval_scope" && "$approval_scope" != "candidate" ]]; then
+    issue "$platform" "Review record approval_scope '${approval_scope}' in ${record_path} is not supported. Omit approval_scope for a per-run review or use approval_scope=candidate for a publish approval keyed to the candidate build ID."
     record_valid=0
   fi
 
@@ -336,6 +352,9 @@ validate_review_record() {
 }
 
 echo "Checking native large-text evidence under ${RESULTS_ROOT}"
+if [[ "$REQUIRE_APPROVAL" == "1" ]]; then
+  echo "Strict review mode enabled: both platform evidence sets require an APPROVED review record."
+fi
 validate_platform ios
 validate_platform android
 

@@ -154,12 +154,19 @@ branch/tag protection, or call this workflow from a publishing workflow with
 `workflow_call` and make the publishing job depend on its result. This workflow
 also provides a `Publish tested mobile builds` job: it depends on
 `mobile-release-gate` and submits the exact iOS and Android EAS build IDs used
-by the smoke jobs. It never submits `--latest`. A `mobile-v*` tag publishes
-automatically; a manual run must set its `publish` input to true; reusable
-workflow callers publish when they pass the required EAS secrets. Each platform
-job uploads its complete `test-results/native-large-text/<platform>/` directory
-even when the smoke command fails, including JUnit, native screenshots, and
-call-surface screenshots.
+by the smoke jobs. It never submits `--latest`. Tags and reusable workflow
+callers run the evidence gate but cannot enter the store-submission job. A
+manual run must set its `publish` input to true, provide both reviewed candidate
+build IDs, and receive approval from the protected `mobile-store-submission`
+GitHub environment. Each
+platform job uploads its complete `test-results/native-large-text/<platform>/`
+directory even when the smoke command fails, including JUnit, native
+screenshots, and call-surface screenshots. Workflow evidence directories include
+both the GitHub run ID and run-attempt number. Each platform uses a stable
+artifact name and replaces only its own previous artifact after a successful
+rerun. This lets a partial rerun combine fresh evidence from the failed platform
+with the retained successful evidence from the other platform, and lets a
+publish-only rerun retrieve both reviewed candidates.
 
 Each run clears app data, enables the same persisted accessibility preferences
 as the Profile controls, signs in, and exercises sign-in, setup, new-room create
@@ -253,11 +260,50 @@ The check also reads each run's `review-record.txt` (see
   whose `reviewed_at_utc` is earlier than the run's `recorded_at_utc`, whose
   `platform` names the other platform, or whose required fields are empty,
   still hold template placeholders, or use an unknown decision, fails the
-  check. A review record covers exactly one evidence set; it cannot be copied
-  from an earlier run of the same candidate.
+  check. An ordinary review record covers exactly one evidence set. Only the
+  publish workflow creates candidate-scoped records that can follow the same
+  tested binary across workflow reruns.
 - `decision=APPROVED` with consistent fields is echoed as an `APPROVED` review
   line naming the reviewer, review time, and candidate build ID, so the check
   output records who reviewed the evidence.
+
+The default check intentionally allows missing records so the automated gate and
+the pre-review local run can report `Review pending`. Store submission uses
+strict mode:
+
+```sh
+NATIVE_EVIDENCE_REQUIRE_APPROVAL=1 pnpm run validate:native-large-text-evidence
+```
+
+Strict mode fails unless both platform runs contain valid `APPROVED` records.
+The publish job always runs this strict check before either `eas submit`.
+
+### Supplying approvals to the publish job
+
+Configure the GitHub `mobile-store-submission` environment with required
+reviewers and place the publish-only `EAS_TOKEN` and candidate build-ID secrets
+there. Do not permit self-review. This protected environment is the trusted
+human approval boundary; the general `mobile-release` environment used by the
+automated evidence jobs is not sufficient.
+
+For **Actions → Mobile release accessibility gate**, set `publish` to true and
+provide each platform's approved candidate build ID. The publish job waits for
+the protected-environment approval, uses the read-only GitHub Actions API to
+verify and record the actual environment approver, derives the review time from
+the job clock, downloads the evidence, confirms each supplied candidate build
+ID matches `candidate-build-id.txt`, confirms the EAS build IDs configured for
+submission match that same evidence, writes the platform review records, and
+runs the strict check before submission. Tags and reusable workflow callers
+cannot reach the publish job.
+
+The approval is keyed by candidate build ID rather than the workflow run ID. If
+the evidence jobs are rerun and create new run directories for the same tested
+candidates, the same recorded decisions can be supplied again; the publish job
+marks these records with `approval_scope=candidate`. Every generated record,
+including a candidate-scoped record, must postdate the evidence. A rebuilt
+candidate has a different build ID and requires a new review. Tag-triggered runs
+and reusable workflow callers cannot reach the publish job; use a manual
+workflow dispatch with the reviewed candidate IDs to publish.
 
 ## Reviewing the evidence
 
@@ -377,6 +423,9 @@ notes=<optional one-line summary of platform-specific findings>
   candidate is rebuilt or the gate is rerun, review the new evidence and write
   a new record from that run's prefilled template; do not copy the old one or
   retype the build ID.
+- Do not manually add `approval_scope=candidate`. That marker is reserved for
+  approval records created by the protected publish workflow and follows the
+  exact tested binary rather than a run-directory name.
 - `decision` is `APPROVED` or `REJECTED`. Use `REJECTED` for any blocking
   finding and describe it in `notes` so the release check prints it.
 

@@ -211,6 +211,15 @@ assert_contains "$valid_output" "Review pending for: ios android"
 assert_contains "$valid_output" "complete review-record.template.txt and rename it to review-record.txt"
 assert_not_contains "$valid_output" "Review record: APPROVED"
 
+if strict_missing_output="$(NATIVE_EVIDENCE_REQUIRE_APPROVAL=1 bash "$CHECKER" "$valid_root" 2>&1)"; then
+  echo "strict missing-review case unexpectedly passed" >&2
+  exit 1
+fi
+assert_contains "$strict_missing_output" "Strict review mode enabled"
+assert_contains "$strict_missing_output" "[ios] Required approval missing:"
+assert_contains "$strict_missing_output" "[android] Required approval missing:"
+assert_contains "$strict_missing_output" "completeness check FAILED with 2 issue(s)"
+
 reviewed_root="$TEST_ROOT/reviewed"
 write_valid_run "$reviewed_root" ios
 write_valid_run "$reviewed_root" android
@@ -222,6 +231,36 @@ assert_contains "$reviewed_output" "[ios] Review record: APPROVED by Ada Reviewe
 assert_contains "$reviewed_output" "[android] Review record: APPROVED by Grace Reviewer at 2026-09-09T14:45:00Z for candidate build-android."
 assert_not_contains "$reviewed_output" "Review record missing"
 assert_not_contains "$reviewed_output" "Review pending"
+
+strict_reviewed_output="$(
+  NATIVE_EVIDENCE_REQUIRE_APPROVAL=1 bash "$CHECKER" "$reviewed_root" 2>&1
+)"
+assert_contains "$strict_reviewed_output" "Strict review mode enabled"
+assert_contains "$strict_reviewed_output" "[ios] Review record: APPROVED"
+assert_contains "$strict_reviewed_output" "[android] Review record: APPROVED"
+assert_contains "$strict_reviewed_output" "passed for iOS and Android"
+
+candidate_scoped_root="$TEST_ROOT/candidate-scoped-rerun"
+write_valid_run "$candidate_scoped_root" ios
+write_valid_run "$candidate_scoped_root" android
+write_review_record "$candidate_scoped_root" ios APPROVED "2026-09-09T13:00:00Z"
+write_review_record "$candidate_scoped_root" android APPROVED "2026-09-09T13:00:00Z"
+printf 'approval_scope=candidate\n' >> "$candidate_scoped_root/ios/20260909T120000Z/review-record.txt"
+printf 'approval_scope=candidate\n' >> "$candidate_scoped_root/android/20260909T120000Z/review-record.txt"
+mv "$candidate_scoped_root/ios/20260909T120000Z" "$candidate_scoped_root/ios/20260910T120000Z"
+mv "$candidate_scoped_root/android/20260909T120000Z" "$candidate_scoped_root/android/20260910T120000Z"
+candidate_scoped_output="$(
+  NATIVE_EVIDENCE_REQUIRE_APPROVAL=1 bash "$CHECKER" "$candidate_scoped_root" 2>&1
+)"
+assert_contains "$candidate_scoped_output" "[ios] Review record: APPROVED"
+assert_contains "$candidate_scoped_output" "[android] Review record: APPROVED"
+assert_contains "$candidate_scoped_output" "passed for iOS and Android"
+
+if invalid_mode_output="$(NATIVE_EVIDENCE_REQUIRE_APPROVAL=yes bash "$CHECKER" "$reviewed_root" 2>&1)"; then
+  echo "invalid strict-mode value unexpectedly passed" >&2
+  exit 1
+fi
+assert_contains "$invalid_mode_output" "NATIVE_EVIDENCE_REQUIRE_APPROVAL must be 0 or 1."
 
 rejected_root="$TEST_ROOT/rejected"
 write_valid_run "$rejected_root" ios
