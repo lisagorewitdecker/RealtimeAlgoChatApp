@@ -24,12 +24,15 @@ coverage
 
 # Test runner output
 **/test-results/
+# API Playwright error context is generated output; durable redacted evidence lives under test-results/.
+artifacts/api-server/test-results/banned-room-an-active-bann-8aa21-nd-sees-it-again-on-revisit-chromium/error-context.md
 # Keep the persistent native release-gate blocker and runner evidence auditable;
 # generated timestamped screenshots and test output remain ignored.
 !test-results/
 !test-results/native-large-text/
 test-results/native-large-text/*
 !test-results/native-large-text/physical-device-supplement.md
+!test-results/native-large-text/native-branding-summary-check.md
 !test-results/native-large-text/android/
 test-results/native-large-text/android/*
 !test-results/native-large-text/android/runner-check.txt
@@ -179,6 +182,7 @@ out-tsc
 /.sass-cache
 /connect.lock
 /libpeerconnection.log
+artifacts/api-server/test-results/.last-run.json
 testem.log
 /typings
 .DS_Store
@@ -188,6 +192,9 @@ Thumbs.db
 
 # Replit
 .local/
+
+# Playwright runtime result pointer
+/artifacts/api-server/test-results/.last-run.json
 
 # Local npm global artifacts
 .config/npm/
