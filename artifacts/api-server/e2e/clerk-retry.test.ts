@@ -186,7 +186,19 @@ describe("throwTestAndCleanupFailures", () => {
 });
 
 describe("key-reset recovery Playwright diagnostics", () => {
-  const laterRecoveryPhases = [
+  const recoveryPhases = [
+    {
+      phase: "sign in member and receive initial room key",
+      action: "locator.click",
+    },
+    {
+      phase: "store encrypted history before key reset",
+      action: "locator.fill",
+    },
+    {
+      phase: "reset member device key in a second session",
+      action: "locator.click",
+    },
     {
       phase: "recover a fresh room-key envelope after reset",
       action: "page.goto",
@@ -206,7 +218,7 @@ describe("key-reset recovery Playwright diagnostics", () => {
   ] as const;
 
   it(
-    "reports every later recovery phase and its underlying action without external services",
+    "reports every recovery phase and its underlying action without external services",
     () => {
       const apiServerDirectory = fileURLToPath(new URL("..", import.meta.url));
       const outputDirectory = mkdtempSync(
@@ -233,7 +245,7 @@ describe("key-reset recovery Playwright diagnostics", () => {
             env: {
               ...process.env,
               E2E_RECOVERY_DIAGNOSTIC_CONTRACT: "1",
-               E2E_RECOVERY_DIAGNOSTIC_PHASES: laterRecoveryPhases
+              E2E_RECOVERY_DIAGNOSTIC_PHASES: recoveryPhases
                  .map(({ phase }) => phase)
                  .join(","),
               E2E_RECOVERY_DIAGNOSTIC_CLEANUP: "database",
@@ -245,7 +257,7 @@ describe("key-reset recovery Playwright diagnostics", () => {
 
         expect(result.error).toBeUndefined();
         expect(result.status).toBe(1);
-        for (const { phase, action } of laterRecoveryPhases) {
+        for (const { phase, action } of recoveryPhases) {
           expect(report).toContain(phase);
           expect(report).toContain(action);
         }
