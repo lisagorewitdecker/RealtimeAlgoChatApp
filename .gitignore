@@ -187,6 +187,7 @@ out-tsc
 artifacts/api-server/test-results/.last-run.json
 testem.log
 /typings
+eslint-results.sarif
 .DS_Store
 Thumbs.db
 .cursor/rules/nx-rules.mdc
@@ -194,6 +195,7 @@ Thumbs.db
 
 # Replit
 .local/
+.agents/skills~*
 
 # Playwright runtime result pointer
 /artifacts/api-server/test-results/.last-run.json
