@@ -59,4 +59,3 @@ jobs:
         uses: github/codeql-action/upload-sarif@6f5948dfacef28e207b48d0905cf90c03365536d
         with:
           sarif_file: results.sarif
-          category: codacy
