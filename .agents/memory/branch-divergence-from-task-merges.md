@@ -21,7 +21,19 @@ squash commit is not a clean per-task diff. When the target lacks a shared
 history it falls back to a single commit holding the task-tip versions of the
 files the task touched.
 
+**Task snapshots come back on merge.** A task environment is cloned from the
+workspace checkout at the moment the task starts. If the wrong branch was
+checked out then, the task's history shares no commit with the trunk and its
+merge lands as the task's *whole tip tree*: every file that differs between the
+stale snapshot and the trunk is overwritten (older manifests, tsconfig,
+committed build output, memory notes), which broke the frozen install and the
+publish build even though the task itself touched two files.
+
 **How to apply:**
+- After any merge from a task that started during a wrong checkout, diff the
+  merge against its parent, keep only the files the task's own agent commits
+  touched (verify their deltas match), and restore everything else from the
+  pre-merge commit. Expect one such cleanup per affected task.
 - Treat the task's *own* commits at the top of its `subrepl-*` branch (after the
   last replayed lineage commit) as the source of truth, not the squash commit on
   the wrong branch. Cherry-pick them onto the trunk (`-n`, then commit with the
