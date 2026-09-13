@@ -188,6 +188,10 @@ describe("throwTestAndCleanupFailures", () => {
 describe("key-reset recovery Playwright diagnostics", () => {
   const recoveryPhases = [
     {
+      phase: "sign in creator and create encrypted room",
+      action: "page.goto",
+    },
+    {
       phase: "sign in member and receive initial room key",
       action: "locator.click",
     },
@@ -250,7 +254,7 @@ describe("key-reset recovery Playwright diagnostics", () => {
                  .join(","),
               E2E_RECOVERY_DIAGNOSTIC_CLEANUP: "database",
             },
-            timeout: 30_000,
+            timeout: 40_000,
           },
         );
         const report = `${result.stdout}\n${result.stderr}`;
@@ -274,6 +278,6 @@ describe("key-reset recovery Playwright diagnostics", () => {
         rmSync(outputDirectory, { recursive: true, force: true });
       }
     },
-    35_000,
+    45_000,
   );
 });
