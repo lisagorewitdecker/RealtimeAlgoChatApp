@@ -10,6 +10,7 @@ const mockRouter = {
 };
 const mockHandlers = new Map<string, (payload?: any) => void>();
 const mockSocket = {
+  connected: true,
   on: jest.fn((event: string, handler: (payload?: any) => void) => {
     mockHandlers.set(event, handler);
   }),
@@ -293,6 +294,73 @@ describe("room ban handling", () => {
         (message: { id: string }) => message.id,
       ),
     ).toEqual(["system-leave", "system-join", "message-1"]);
+  });
+
+  it("rejoins on socket reconnect without duplicating mounted history", () => {
+    const view = render(<RoomScreen />);
+    const existingMessage = {
+      id: "existing",
+      content: "Already visible",
+      userId: "user-ada",
+      username: "Ada",
+      timestamp: 1,
+      type: "text" as const,
+    };
+    const joinedMessage = {
+      id: "joined",
+      content: "Lin joined",
+      userId: "system",
+      username: "System",
+      timestamp: 2,
+      type: "system" as const,
+    };
+    const missedFirst = {
+      id: "missed-first",
+      content: "Missed first",
+      userId: "user-ada",
+      username: "Ada",
+      timestamp: 3,
+      type: "text" as const,
+    };
+    const missedSecond = {
+      id: "missed-second",
+      content: "Missed second",
+      userId: "user-ada",
+      username: "Ada",
+      timestamp: 4,
+      type: "text" as const,
+    };
+
+    act(() => {
+      mockHandlers.get("room-joined")?.({
+        messages: [existingMessage, joinedMessage],
+        users: [],
+      });
+    });
+    expect(socketEmits("join-room")).toHaveLength(1);
+
+    act(() => {
+      mockHandlers.get("connect")?.();
+      mockHandlers.get("room-joined")?.({
+        messages: [
+          existingMessage,
+          joinedMessage,
+          existingMessage,
+          missedFirst,
+          missedSecond,
+        ],
+        users: [],
+      });
+    });
+
+    expect(socketEmits("join-room")).toHaveLength(2);
+    expect(view.getAllByTestId("message-existing")).toHaveLength(1);
+    expect(view.getAllByTestId("message-joined")).toHaveLength(1);
+    expect(
+      view.getByTestId("room-message-list").props.data.map(
+        (message: { id: string }) => message.id,
+      ),
+    ).toEqual(["missed-second", "missed-first", "joined", "existing"]);
   });
 
   it("explains when device-key registration is taking unusually long", () => {

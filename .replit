@@ -104,6 +104,10 @@ args = "key-reset-recovery-e2e"
 task = "workflow.run"
 args = "idle-profile-registration-e2e"
 
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "reconnect-delivery-e2e"
+
 [[workflows.workflow]]
 name = "typecheck"
 author = "agent"
@@ -188,6 +192,17 @@ author = "agent"
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "E2E_CHAT_URL=https://$REPLIT_EXPO_DEV_DOMAIN E2E_API_URL=https://$REPLIT_DEV_DOMAIN flock -w 900 /tmp/replit-heavy-validation.lock pnpm --filter @workspace/api-server run test:e2e:idle-profile-registration"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow]]
+name = "reconnect-delivery-e2e"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "E2E_CHAT_URL=https://$REPLIT_EXPO_DEV_DOMAIN E2E_API_URL=https://$REPLIT_DEV_DOMAIN flock -w 900 /tmp/replit-heavy-validation.lock pnpm --filter @workspace/api-server run test:e2e:reconnect-delivery"
 
 [workflows.workflow.metadata]
 isValidation = true

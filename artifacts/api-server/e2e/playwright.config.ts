@@ -3,7 +3,7 @@ import { defineConfig, devices } from "@playwright/test";
 export default defineConfig({
   testDir: ".",
   testMatch:
-    /(banned-room|key-reset-recovery|idle-profile-registration)\.spec\.ts/,
+    /(banned-room|key-reset-recovery|reconnect-delivery|idle-profile-registration)\.spec\.ts/,
   outputDir: "../test-results",
   timeout: 120_000,
   fullyParallel: false,

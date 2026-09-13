@@ -399,6 +399,15 @@ export default function RoomScreen() {
       }
     }
 
+    const joinRoom = () => {
+      socket.emit("join-room", {
+        roomId,
+        createIfMissing: createIfMissing !== false,
+        roomName,
+      });
+    };
+
+    socket.on("connect", joinRoom);
     socket.on("room-joined", onRoomJoined);
     socket.on("message", onMessage);
     socket.on("user-joined", onUserJoined);
@@ -408,14 +417,11 @@ export default function RoomScreen() {
     socket.on("error", onSocketError);
     socket.on("room-banned", onRoomBanned);
     socket.on("room-key-envelope", onRoomKeyEnvelope);
-    socket.emit("join-room", {
-      roomId,
-      createIfMissing: createIfMissing !== false,
-      roomName,
-    });
+    if (socket.connected) joinRoom();
 
     return () => {
       disposed = true;
+      socket.off("connect", joinRoom);
       socket.off("room-joined", onRoomJoined);
       socket.off("message", onMessage);
       socket.off("user-joined", onUserJoined);
