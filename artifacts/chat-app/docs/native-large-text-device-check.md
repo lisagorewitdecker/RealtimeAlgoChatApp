@@ -131,6 +131,39 @@ their SHA-256 fingerprints in the release summary. Reusable-workflow callers
 instead pass the required `native_smoke_ios_build_id` and
 `native_smoke_android_build_id` inputs.
 
+### Updating reusable-workflow callers
+
+Callers maintained in another repository must pass both candidate IDs through
+`with`, not through `secrets`. Keep authentication and account credentials in
+the existing secrets contract:
+
+```yaml
+jobs:
+  mobile-release:
+    uses: <owner>/<repository>/.github/workflows/mobile-release.yml@<ref>
+    with:
+      native_smoke_ios_build_id: ${{ vars.NATIVE_SMOKE_IOS_BUILD_ID }}
+      native_smoke_android_build_id: ${{ vars.NATIVE_SMOKE_ANDROID_BUILD_ID }}
+    secrets: inherit
+```
+
+If the caller receives the IDs from an earlier build job, use that job's
+outputs for the two `with` values instead. The called workflow requires both
+inputs, so a caller that omits either one fails before the release jobs start.
+
+Migrate and retire the old caller-side build-ID secrets in this order:
+
+1. Add both non-secret variables or build-job outputs to the caller.
+2. Pass both values through `with` and run the reusable workflow successfully
+   for the exact installed candidates.
+3. Confirm the release summary shows those candidate IDs and fingerprints.
+4. Delete only the caller-side `NATIVE_SMOKE_IOS_BUILD_ID` and
+   `NATIVE_SMOKE_ANDROID_BUILD_ID` secrets.
+
+Do not replace `secrets: inherit` while making this change. The authentication,
+test-account, Sentry, Clerk, and database values listed below still cross the
+reusable-workflow secrets boundary.
+
 Store the following values as **secrets** in the GitHub Actions
 `mobile-release` environment. Authentication values are injected only into the process that
 needs them and are never written to the repository or printed by the workflow.
