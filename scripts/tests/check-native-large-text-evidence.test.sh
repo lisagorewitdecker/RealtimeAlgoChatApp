@@ -315,7 +315,8 @@ printf '%s\r\n' \
   'notes<<END_NOTES' \
   '# Layout finding' \
   '- The `Send` button overlaps the final line.' \
-  '- See [capture](screenshots/screen-11.png).' \
+  '' \
+  '  - See [capture](screenshots/screen-11.png).' \
   'END_NOTES' \
   > "$multiline_rejected_root/android/20260909T120000Z/review-record.txt"
 if multiline_rejected_output="$(bash "$CHECKER" "$multiline_rejected_root" 2>&1)"; then
@@ -323,9 +324,7 @@ if multiline_rejected_output="$(bash "$CHECKER" "$multiline_rejected_root" 2>&1)
   exit 1
 fi
 assert_contains "$multiline_rejected_output" "[android] Review notes (literal evidence):"
-assert_contains "$multiline_rejected_output" '[android]   | # Layout finding'
-assert_contains "$multiline_rejected_output" '[android]   | - The `Send` button overlaps the final line.'
-assert_contains "$multiline_rejected_output" '[android]   | - See [capture](screenshots/screen-11.png).'
+assert_contains "$multiline_rejected_output" $'[android]   | # Layout finding\n[android]   | - The `Send` button overlaps the final line.\n[android]   | \n[android]   |   - See [capture](screenshots/screen-11.png).'
 assert_contains "$multiline_rejected_output" "completeness check FAILED with 1 issue(s)"
 assert_not_contains "$multiline_rejected_output" $'\r'
 assert_not_contains "$multiline_rejected_output" "unterminated notes block"
