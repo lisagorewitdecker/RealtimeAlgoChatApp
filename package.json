@@ -8,6 +8,8 @@
     "typecheck:libs": "tsc --build",
     "typecheck": "pnpm run typecheck:libs && pnpm -r --filter \"./artifacts/**\" --filter \"./scripts\" --if-present run typecheck && pnpm --filter @workspace/api-server run typecheck:e2e",
     "validate:api-codegen": "pnpm --filter @workspace/api-spec run check-generated",
+    "sync:api-break-guidance": "node lib/api-spec/scripts/sync-contract-guidance.mjs",
+    "validate:api-break-guidance": "node lib/api-spec/scripts/sync-contract-guidance.mjs --check",
     "validate:api-compatibility": "node lib/api-spec/scripts/check-contract-compatibility.mjs",
     "validate:mockup-clean": "pnpm --filter @workspace/mockup-sandbox run typecheck:clean",
     "test:unit": "node --test artifacts/api-server/tests/profileIdentity.test.ts && pnpm --filter @workspace/scripts run test:android-preflight && bash scripts/tests/check-ios-native-large-text-readiness.test.sh"
