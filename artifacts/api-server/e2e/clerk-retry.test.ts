@@ -186,8 +186,27 @@ describe("throwTestAndCleanupFailures", () => {
 });
 
 describe("key-reset recovery Playwright diagnostics", () => {
+  const laterRecoveryPhases = [
+    {
+      phase: "recover a fresh room-key envelope after reset",
+      action: "page.goto",
+    },
+    {
+      phase: "decrypt history and a new message with recovered key",
+      action: "locator.fill",
+    },
+    {
+      phase: "reload room and reuse recovered key",
+      action: "page.reload",
+    },
+    {
+      phase: "leave and reopen room with recovered key",
+      action: "locator.click",
+    },
+  ] as const;
+
   it(
-    "reports the bounded phase and stalled cleanup without hiding the original failure",
+    "reports every later recovery phase and its underlying action without external services",
     () => {
       const apiServerDirectory = fileURLToPath(new URL("..", import.meta.url));
       const outputDirectory = mkdtempSync(
@@ -214,16 +233,21 @@ describe("key-reset recovery Playwright diagnostics", () => {
             env: {
               ...process.env,
               E2E_RECOVERY_DIAGNOSTIC_CONTRACT: "1",
+               E2E_RECOVERY_DIAGNOSTIC_PHASES: laterRecoveryPhases
+                 .map(({ phase }) => phase)
+                 .join(","),
             },
-            timeout: 15_000,
+            timeout: 30_000,
           },
         );
         const report = `${result.stdout}\n${result.stderr}`;
 
         expect(result.error).toBeUndefined();
         expect(result.status).toBe(1);
-        expect(report).toContain("sign in creator and create encrypted room");
-        expect(report).toContain("page.goto");
+        for (const { phase, action } of laterRecoveryPhases) {
+          expect(report).toContain(phase);
+          expect(report).toContain(action);
+        }
         expect(report).toContain(
           "[key-reset-recovery-e2e] diagnostic cleanup executed",
         );
@@ -237,6 +261,6 @@ describe("key-reset recovery Playwright diagnostics", () => {
         rmSync(outputDirectory, { recursive: true, force: true });
       }
     },
-    20_000,
+    35_000,
   );
 });
