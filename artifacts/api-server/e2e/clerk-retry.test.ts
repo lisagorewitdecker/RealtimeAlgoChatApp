@@ -236,6 +236,7 @@ describe("key-reset recovery Playwright diagnostics", () => {
                E2E_RECOVERY_DIAGNOSTIC_PHASES: laterRecoveryPhases
                  .map(({ phase }) => phase)
                  .join(","),
+              E2E_RECOVERY_DIAGNOSTIC_CLEANUP: "database",
             },
             timeout: 30_000,
           },
@@ -255,7 +256,7 @@ describe("key-reset recovery Playwright diagnostics", () => {
           "Key-reset recovery verification and cleanup both failed",
         );
         expect(report).toContain(
-          "Browser context cleanup timed out after 250ms",
+          "Recovery room database cleanup timed out after 250ms",
         );
       } finally {
         rmSync(outputDirectory, { recursive: true, force: true });
