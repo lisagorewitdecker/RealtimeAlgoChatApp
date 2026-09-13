@@ -52,3 +52,4 @@
 - [Release summary secret contract](release-summary-secret-contract.md) — secret masking is per-job and exact-match only; every workflow summary writer needs an inventoried sentinel contract.
 - [Node sleeping fixtures](node-sleeping-fixtures.md) — an unresolved top-level promise does not keep Node alive; use an active handle for signal-waiting fixtures.
 - [Generated-check test controls](generated-check-fault-controls.md) — test-only environment faults and fixture paths require explicit, separate subprocess opt-ins.
+- [GitHub probe write permissions](github-probe-write-permissions.md) — verify commit/tree access before planning a live CI probe; ref creation alone is not enough.
