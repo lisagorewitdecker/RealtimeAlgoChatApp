@@ -31,6 +31,13 @@
           "origin": "https://replit.com/"
         }
       ],
+      [
+        "@sentry/react-native/expo",
+        {
+          "organization": "lisagorewitdecker-06",
+          "project": "react-native"
+        }
+      ],
       "expo-font",
       [
         "expo-splash-screen",

@@ -18,5 +18,10 @@
     "**/*.tsx",
     ".expo/types/**/*.ts",
     "expo-env.d.ts"
+  ],
+  "references": [
+    {
+      "path": "../../lib/api-client-react"
+    }
   ]
 }
