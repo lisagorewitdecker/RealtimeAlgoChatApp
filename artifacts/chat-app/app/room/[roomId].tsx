@@ -112,12 +112,15 @@ export default function RoomScreen() {
   const [moderatingUserId, setModeratingUserId] = useState<string | null>(null);
   const [roomBanned, setRoomBanned] = useState(false);
   const [roomReady, setRoomReady] = useState(false);
+  const [messageReplayGap, setMessageReplayGap] = useState(false);
   const [retryingRoomKey, setRetryingRoomKey] = useState(false);
   const [hasRoomKey, setHasRoomKey] = useState(() => !!getRoomKey(roomId));
   const inputRef = useRef<TextInput>(null);
   const hasTrackedRoomJoin = useRef(false);
   const roomKeyLoadRef = useRef<Promise<void> | null>(null);
   const roomKeyEnvelopeRecoveryRef = useRef<Promise<boolean> | null>(null);
+  const messagesRef = useRef<Message[]>([]);
+  messagesRef.current = messages;
   // Mirrors `canModerate` for socket handlers, which must not re-subscribe
   // (and re-join) whenever moderation rights change.
   const canModerateRef = useRef(false);
@@ -268,6 +271,8 @@ export default function RoomScreen() {
       users: User[];
       canModerate?: boolean;
       keyEnvelope?: RoomKeyEnvelope | null;
+      replayAfterMessageId?: string;
+      replayGap?: boolean;
     }) {
       // The roster carries the key the server holds for every member, this
       // device included. A different key for this account means another
@@ -287,7 +292,13 @@ export default function RoomScreen() {
       }
       const finishJoin = () => {
         setRoomReady(true);
-        setMessages(uniqueMessages(data.messages.map(decryptIncomingMessage)));
+        const incomingMessages = data.messages.map(decryptIncomingMessage);
+        setMessages((current) =>
+          data.replayAfterMessageId
+            ? uniqueMessages([...current, ...incomingMessages])
+            : uniqueMessages(incomingMessages),
+        );
+        setMessageReplayGap(data.replayGap === true);
         setUsers(data.users);
         setCanModerate(data.canModerate === true);
         trackEvent("room_joined", {
@@ -400,10 +411,12 @@ export default function RoomScreen() {
     }
 
     const joinRoom = () => {
+      const lastSeenMessageId = messagesRef.current.at(-1)?.id;
       socket.emit("join-room", {
         roomId,
         createIfMissing: createIfMissing !== false,
         roomName,
+        ...(lastSeenMessageId ? { lastSeenMessageId } : {}),
       });
     };
 
@@ -882,8 +895,31 @@ export default function RoomScreen() {
         </View>
       ) : null}
 
+      {messageReplayGap ? (
+        <View
+          testID="room-message-gap-warning"
+          accessibilityRole="alert"
+          style={[
+            styles.keyWarning,
+            { backgroundColor: colors.card, borderBottomColor: colors.destructive },
+          ]}
+        >
+          <Feather name="alert-triangle" size={18} color={colors.destructive} />
+          <View style={styles.keyWarningCopy}>
+            <Text style={[styles.keyWarningTitle, { color: colors.foreground }]}>
+              Some messages could not be recovered
+            </Text>
+            <Text style={[styles.keyWarningText, { color: colors.mutedForeground }]}>
+              This device was disconnected longer than the room history kept for
+              reconnects. Newer messages are shown below.
+            </Text>
+          </View>
+        </View>
+      ) : null}
+
       <FlatList
         testID="room-message-list"
+        accessibilityLabel={`${messages.length} messages`}
         data={[...messages].reverse()}
         keyExtractor={(m) => m.id}
         renderItem={({ item }) => (

@@ -342,18 +342,17 @@ describe("room ban handling", () => {
     act(() => {
       mockHandlers.get("connect")?.();
       mockHandlers.get("room-joined")?.({
-        messages: [
-          existingMessage,
-          joinedMessage,
-          existingMessage,
-          missedFirst,
-          missedSecond,
-        ],
+        messages: [missedFirst, missedSecond],
         users: [],
+        replayAfterMessageId: "joined",
+        replayGap: false,
       });
     });
 
     expect(socketEmits("join-room")).toHaveLength(2);
+    expect(socketEmits("join-room")[1]?.[1]).toEqual(
+      expect.objectContaining({ lastSeenMessageId: "joined" }),
+    );
     expect(view.getAllByTestId("message-existing")).toHaveLength(1);
     expect(view.getAllByTestId("message-joined")).toHaveLength(1);
     expect(
@@ -361,6 +360,25 @@ describe("room ban handling", () => {
         (message: { id: string }) => message.id,
       ),
     ).toEqual(["missed-second", "missed-first", "joined", "existing"]);
+  });
+
+  it("warns when retained reconnect history cannot reach the last visible message", () => {
+    const view = render(<RoomScreen />);
+    act(() => {
+      mockHandlers.get("room-joined")?.({
+        messages: [],
+        users: [],
+      });
+      mockHandlers.get("room-joined")?.({
+        messages: [],
+        users: [],
+        replayAfterMessageId: "expired-cursor",
+        replayGap: true,
+      });
+    });
+
+    expect(view.getByTestId("room-message-gap-warning")).toBeTruthy();
+    expect(view.getByText("Some messages could not be recovered")).toBeTruthy();
   });
 
   it("explains when device-key registration is taking unusually long", () => {
