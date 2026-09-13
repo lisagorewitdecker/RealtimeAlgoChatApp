@@ -121,6 +121,7 @@ export default function RoomScreen() {
   const roomKeyEnvelopeRecoveryRef = useRef<Promise<boolean> | null>(null);
   const messagesRef = useRef<Message[]>([]);
   messagesRef.current = messages;
+  const recoveryRequestRef = useRef<string | null>(null);
   // Mirrors `canModerate` for socket handlers, which must not re-subscribe
   // (and re-join) whenever moderation rights change.
   const canModerateRef = useRef(false);
@@ -143,6 +144,20 @@ export default function RoomScreen() {
     },
     [decryptMessage, roomId],
   );
+
+  const mergeMessages = useCallback((incoming: Message[]) => {
+    setMessages((current) => {
+      const byId = new Map(current.map((message) => [message.id, message]));
+      for (const message of incoming) byId.set(message.id, message);
+      const merged = [...byId.values()].sort(
+        (left, right) =>
+          (left.timestamp ?? 0) - (right.timestamp ?? 0) ||
+          left.id.localeCompare(right.id),
+      );
+      messagesRef.current = merged;
+      return merged;
+    });
+  }, []);
 
   const acceptRoomKeyEnvelope = useCallback(
     (envelope: RoomKeyEnvelope | null | undefined): Promise<boolean> => {
@@ -292,12 +307,25 @@ export default function RoomScreen() {
       }
       const finishJoin = () => {
         setRoomReady(true);
+        const knownCursor = [...messagesRef.current]
+          .reverse()
+          .find((message) => message.type === "text");
         const incomingMessages = data.messages.map(decryptIncomingMessage);
-        setMessages((current) =>
-          data.replayAfterMessageId
-            ? uniqueMessages([...current, ...incomingMessages])
-            : uniqueMessages(incomingMessages),
-        );
+        if (knownCursor) {
+          mergeMessages(incomingMessages);
+          const requestId = `${roomId}:${Date.now()}`;
+          recoveryRequestRef.current = requestId;
+          socket?.emit("recover-messages", {
+            requestId,
+            roomId,
+            afterMessageId: knownCursor.id,
+            afterTimestamp: knownCursor.timestamp,
+          });
+        } else {
+          const initialMessages = uniqueMessages(incomingMessages);
+          messagesRef.current = initialMessages;
+          setMessages(initialMessages);
+        }
         setMessageReplayGap(data.replayGap === true);
         setUsers(data.users);
         setCanModerate(data.canModerate === true);
@@ -329,7 +357,34 @@ export default function RoomScreen() {
       finishAfterEnvelope();
     }
     function onMessage(msg: Message & { ciphertext?: string; nonce?: string }) {
-      setMessages((prev) => appendMessageById(prev, decryptIncomingMessage(msg)));
+      mergeMessages([decryptIncomingMessage(msg)]);
+    }
+    function onMessageRecoveryPage(data: {
+      requestId: string;
+      messages: Array<Message & { ciphertext?: string; nonce?: string }>;
+      hasMore: boolean;
+      nextCursor: { id: string; timestamp: number };
+    }) {
+      if (data.requestId !== recoveryRequestRef.current) return;
+      mergeMessages(data.messages.map(decryptIncomingMessage));
+      if (data.hasMore) {
+        const requestId = `${roomId}:${Date.now()}:${data.nextCursor.id}`;
+        recoveryRequestRef.current = requestId;
+        socket?.emit("recover-messages", {
+          requestId,
+          roomId,
+          afterMessageId: data.nextCursor.id,
+          afterTimestamp: data.nextCursor.timestamp,
+        });
+      } else {
+        recoveryRequestRef.current = null;
+        setMessageReplayGap(false);
+      }
+    }
+    function onMessageRecoveryError(data: { requestId?: string }) {
+      if (data.requestId === recoveryRequestRef.current) {
+        recoveryRequestRef.current = null;
+      }
     }
     function onUserJoined(data: {
       userId: string;
@@ -423,6 +478,8 @@ export default function RoomScreen() {
     socket.on("connect", joinRoom);
     socket.on("room-joined", onRoomJoined);
     socket.on("message", onMessage);
+    socket.on("message-recovery-page", onMessageRecoveryPage);
+    socket.on("message-recovery-error", onMessageRecoveryError);
     socket.on("user-joined", onUserJoined);
     socket.on("user-key-changed", onUserKeyChanged);
     socket.on("user-left", onUserLeft);
@@ -437,6 +494,8 @@ export default function RoomScreen() {
       socket.off("connect", joinRoom);
       socket.off("room-joined", onRoomJoined);
       socket.off("message", onMessage);
+      socket.off("message-recovery-page", onMessageRecoveryPage);
+      socket.off("message-recovery-error", onMessageRecoveryError);
       socket.off("user-joined", onUserJoined);
       socket.off("user-key-changed", onUserKeyChanged);
       socket.off("user-left", onUserLeft);
@@ -456,6 +515,7 @@ export default function RoomScreen() {
     handleRoomBanned,
     acceptRoomKeyEnvelope,
     decryptIncomingMessage,
+    mergeMessages,
     encryptRoomKey,
     getRoomKey,
     markDeviceKeySuperseded,

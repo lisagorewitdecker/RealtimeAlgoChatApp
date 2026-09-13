@@ -211,6 +211,41 @@ describe("room ban handling", () => {
     expect(errorRegistrationOrder).toBeLessThan(joinOrder);
   });
 
+  it("rejoins with the saved message cursor after the socket reconnects", () => {
+    render(<RoomScreen />);
+    act(() => {
+      mockHandlers.get("room-joined")?.({
+        messages: [
+          {
+            id: "before-outage",
+            userId: "user-ada",
+            username: "Ada",
+            type: "text",
+            timestamp: 10,
+            ciphertext: "ciphertext",
+            nonce: "nonce",
+          },
+        ],
+        users: [],
+      });
+    });
+
+    act(() => {
+      mockHandlers.get("connect")?.();
+      mockHandlers.get("room-joined")?.({
+        messages: [],
+        users: [],
+      });
+    });
+
+    expect(socketEmits("join-room")).toHaveLength(2);
+    expect(socketEmits("recover-messages")[0]?.[1]).toMatchObject({
+      roomId: "room-42",
+      afterMessageId: "before-outage",
+      afterTimestamp: 10,
+    });
+  });
+
   it("shows room loading feedback until the server confirms the join", () => {
     const { getByTestId, getByText, queryByTestId } = render(<RoomScreen />);
 
@@ -442,6 +477,60 @@ describe("room ban handling", () => {
       "nonce",
       "room-42",
     );
+  });
+
+  it("continues requesting persisted recovery pages until the missed range is complete", () => {
+    render(<RoomScreen />);
+    const knownMessage = {
+      id: "known-message",
+      userId: "user-ada",
+      username: "Ada",
+      type: "text",
+      timestamp: 1,
+      ciphertext: "known-ciphertext",
+      nonce: "known-nonce",
+    };
+
+    act(() => {
+      mockHandlers.get("room-joined")?.({
+        messages: [knownMessage],
+        users: [],
+      });
+      mockHandlers.get("room-joined")?.({
+        messages: [],
+        users: [],
+      });
+    });
+
+    const firstRecovery = socketEmits("recover-messages")[0];
+    expect(firstRecovery?.[1]).toMatchObject({
+      roomId: "room-42",
+      afterMessageId: "known-message",
+      afterTimestamp: 1,
+    });
+
+    act(() => {
+      mockHandlers.get("message-recovery-page")?.({
+        requestId: firstRecovery?.[1].requestId,
+        messages: [
+          {
+            ...knownMessage,
+            id: "missed-message",
+            timestamp: 2,
+            ciphertext: "missed-ciphertext",
+          },
+        ],
+        hasMore: true,
+        nextCursor: { id: "missed-message", timestamp: 2 },
+      });
+    });
+
+    expect(socketEmits("recover-messages")).toHaveLength(2);
+    expect(socketEmits("recover-messages")[1]?.[1]).toMatchObject({
+      roomId: "room-42",
+      afterMessageId: "missed-message",
+      afterTimestamp: 2,
+    });
   });
 
   it("lets a room creator confirm and ban another member", async () => {

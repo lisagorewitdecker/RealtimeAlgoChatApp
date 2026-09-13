@@ -30,6 +30,7 @@ import {
   getPublicKeyRecord,
   getRoomEnvelope,
   loadEncryptedMessages,
+  loadEncryptedMessagesAfter,
   loadEncryptedSandboxState,
   saveEncryptedMessage,
   saveEncryptedSandboxState,
@@ -145,6 +146,8 @@ const ROOM_SOCKET_MAX = 64;
 const CALL_PARTICIPANTS_MAX = 16;
 const PENDING_SANDBOX_SAVES_MAX = 256;
 const PERSISTENCE_OPERATIONS_MAX = 256;
+
+const MESSAGE_RECOVERY_PAGE_SIZE = 80;
 let activeServer: AppServer | null = null;
 
 interface ConnectionLease {
@@ -1042,6 +1045,92 @@ function setupConnectedSocket(
     }
   });
 
+  let messageRecoveryInFlight = false;
+  socket.on("recover-messages", async (payload: unknown) => {
+    if (!consumeEventBudget(socket, eventBudgetRegistry, payload)) return;
+    if (messageRecoveryInFlight) return;
+    messageRecoveryInFlight = true;
+    const data = getRecord(payload);
+    const requestId = getText(data?.["requestId"], 100);
+    const roomId = getRoomId(data?.["roomId"]);
+    const afterMessageId = getText(data?.["afterMessageId"], 200);
+    const afterTimestamp = data?.["afterTimestamp"];
+    try {
+      if (
+        !requestId ||
+        !roomId ||
+        !afterMessageId ||
+        typeof afterTimestamp !== "number" ||
+        !Number.isSafeInteger(afterTimestamp) ||
+        afterTimestamp < 0 ||
+        socket.data.roomId !== roomId ||
+        !socket.rooms.has(roomId)
+      ) {
+        socket.emit("message-recovery-error", {
+          requestId,
+          code: "INVALID_RECOVERY_REQUEST",
+        });
+        return;
+      }
+      if (await hasActiveRoomBan(roomId, authenticatedUser.userId)) {
+        socket.emit("message-recovery-error", {
+          requestId,
+          code: "ROOM_BANNED",
+        });
+        return;
+      }
+      const page = await loadEncryptedMessagesAfter(
+        roomId,
+        { id: afterMessageId, timestamp: afterTimestamp },
+        MESSAGE_RECOVERY_PAGE_SIZE,
+      );
+      if (
+        socket.data.roomId !== roomId ||
+        !socket.rooms.has(roomId) ||
+        (await hasActiveRoomBan(roomId, authenticatedUser.userId))
+      ) {
+        socket.emit("message-recovery-error", {
+          requestId,
+          code: "ROOM_ACCESS_REVOKED",
+        });
+        return;
+      }
+      const messages = page.messages.map((message) => ({
+        id: message.id,
+        ciphertext: message.ciphertext ?? undefined,
+        nonce: message.nonce ?? undefined,
+        content: message.systemContent ?? undefined,
+        userId: message.userId,
+        username: message.username,
+        avatarEmoji: DEFAULT_AVATAR_EMOJI,
+        timestamp: Number(message.timestamp),
+        type: message.type,
+      }));
+      socket.emit("message-recovery-page", {
+        requestId,
+        messages,
+        hasMore: page.hasMore,
+        nextCursor: messages.at(-1)
+          ? {
+              id: messages.at(-1)!.id,
+              timestamp: messages.at(-1)!.timestamp,
+            }
+          : { id: afterMessageId, timestamp: afterTimestamp },
+      });
+    } catch (error) {
+      reportSocketHandlerError("recover-messages", error, {
+        roomId,
+        userId: authenticatedUser.userId,
+      });
+      socket.emit("message-recovery-error", {
+        requestId,
+        code: "RECOVERY_FAILED",
+      });
+    } finally {
+      messageRecoveryInFlight = false;
+    }
+  });
+
     socket.on("assistant-request", (payload: unknown) => {
     if (!consumeEventBudget(socket, eventBudgetRegistry, payload)) return;
       if (authenticatedUser.purpose !== "sandbox") {
@@ -1074,7 +1163,7 @@ function setupConnectedSocket(
       abortAssistantRequest(true);
     });
 
-    socket.on("message", (payload: unknown) => {
+    socket.on("message", async (payload: unknown) => {
     if (!consumeEventBudget(socket, eventBudgetRegistry, payload)) return;
       if (authenticatedUser.purpose !== "chat") return;
       const data = getRecord(payload);
@@ -1099,22 +1188,30 @@ function setupConnectedSocket(
         timestamp: Date.now(),
         type: "text",
       };
-      room.messages.push(msg);
-      if (room.messages.length > 200) room.messages = room.messages.slice(-200);
-      emitRoomEvent(io, room, "message", msg);
-       void saveEncryptedMessage({
-         id: msg.id,
-         roomId: room.id,
-         userId: authenticatedUser.userId,
-         username: authenticatedUser.username,
-         ciphertext: encrypted.ciphertext,
-         nonce: encrypted.nonce,
-         timestamp: msg.timestamp,
-       }).catch((error) => {
+      try {
+        await saveEncryptedMessage({
+          id: msg.id,
+          roomId: room.id,
+          userId: authenticatedUser.userId,
+          username: authenticatedUser.username,
+          ciphertext: encrypted.ciphertext,
+          nonce: encrypted.nonce,
+          timestamp: msg.timestamp,
+        });
+        room.messages.push(msg);
+        if (room.messages.length > 200) room.messages = room.messages.slice(-200);
+        emitRoomEvent(io, room, "message", msg);
+      } catch (error) {
          reportSocketHandlerError("save-encrypted-message", error, {
            roomId: room.id,
          });
-       }).finally(() => releasePersistence(persistenceBudget));
+        socket.emit("error", {
+          code: "MESSAGE_NOT_SAVED",
+          message: "Unable to save this message. Please try again.",
+        });
+      } finally {
+        releasePersistence(persistenceBudget);
+      }
     });
 
     socket.on("sandbox-update", (payload: unknown) => {

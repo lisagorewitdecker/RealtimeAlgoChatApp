@@ -12,6 +12,7 @@ const mockGetPublicKey = vi.hoisted(() => vi.fn());
 const mockGetPublicKeyRecord = vi.hoisted(() => vi.fn());
 const mockGetRoomEnvelope = vi.hoisted(() => vi.fn());
 const mockLoadEncryptedMessages = vi.hoisted(() => vi.fn());
+const mockLoadEncryptedMessagesAfter = vi.hoisted(() => vi.fn());
 const mockLoadEncryptedSandboxState = vi.hoisted(() => vi.fn());
 const mockSaveEncryptedMessage = vi.hoisted(() => vi.fn());
 const mockSaveEncryptedSandboxState = vi.hoisted(() => vi.fn());
@@ -35,6 +36,7 @@ vi.mock("./lib/e2eePersistence", () => ({
   getPublicKeyRecord: mockGetPublicKeyRecord,
   getRoomEnvelope: mockGetRoomEnvelope,
   loadEncryptedMessages: mockLoadEncryptedMessages,
+  loadEncryptedMessagesAfter: mockLoadEncryptedMessagesAfter,
   loadEncryptedSandboxState: mockLoadEncryptedSandboxState,
   saveEncryptedMessage: mockSaveEncryptedMessage,
   saveEncryptedSandboxState: mockSaveEncryptedSandboxState,
@@ -78,6 +80,10 @@ beforeEach(async () => {
   }));
   mockGetRoomEnvelope.mockReset().mockResolvedValue(null);
   mockLoadEncryptedMessages.mockReset().mockResolvedValue([]);
+  mockLoadEncryptedMessagesAfter.mockReset().mockResolvedValue({
+    messages: [],
+    hasMore: false,
+  });
   mockLoadEncryptedSandboxState.mockReset().mockResolvedValue(null);
   mockSaveEncryptedMessage.mockReset().mockResolvedValue(undefined);
   mockSaveEncryptedSandboxState.mockReset().mockResolvedValue(undefined);
@@ -598,6 +604,132 @@ describe("room Socket.IO lifecycle", () => {
     expect(mockGetRoomEnvelope).toHaveBeenCalledWith(roomId, "user-ben");
   });
 
+  it("pages persisted missed messages when the in-memory cursor is unavailable", async () => {
+    const roomId = `recovery-restart-${Date.now()}`;
+    const persisted = (id: string, timestamp: number) => ({
+      id,
+      ciphertext: `ciphertext-${id}`,
+      nonce: `nonce-${id}`,
+      userId: "user-ada",
+      username: "Ada",
+      timestamp,
+      type: "text" as const,
+      systemContent: null,
+    });
+    mockLoadEncryptedMessagesAfter
+      .mockResolvedValueOnce({
+        messages: [persisted("missed-1", 2)],
+        hasMore: true,
+      })
+      .mockResolvedValueOnce({
+        messages: [persisted("missed-2", 3)],
+        hasMore: false,
+      });
+    const client = createRoomClient("token-ben");
+    await waitForEvent(client, "connect");
+    const joined = waitForEvent(client, "room-joined");
+    client.emit("join-room", { roomId });
+    await joined;
+
+    const firstPage = waitForEvent<{
+      messages: Array<{ id: string }>;
+      hasMore: boolean;
+      nextCursor: { id: string; timestamp: number };
+    }>(client, "message-recovery-page");
+    client.emit("recover-messages", {
+      requestId: "page-1",
+      roomId,
+      afterMessageId: "known-before-restart",
+      afterTimestamp: 1,
+    });
+    await expect(firstPage).resolves.toMatchObject({
+      messages: [{ id: "missed-1" }],
+      hasMore: true,
+      nextCursor: { id: "missed-1", timestamp: 2 },
+    });
+
+    const secondPage = waitForEvent<{
+      messages: Array<{ id: string }>;
+      hasMore: boolean;
+    }>(client, "message-recovery-page");
+    client.emit("recover-messages", {
+      requestId: "page-2",
+      roomId,
+      afterMessageId: "missed-1",
+      afterTimestamp: 2,
+    });
+    await expect(secondPage).resolves.toMatchObject({
+      messages: [{ id: "missed-2" }],
+      hasMore: false,
+    });
+    expect(mockLoadEncryptedMessagesAfter).toHaveBeenNthCalledWith(
+      1,
+      roomId,
+      { id: "known-before-restart", timestamp: 1 },
+      80,
+    );
+    expect(mockLoadEncryptedMessagesAfter).toHaveBeenNthCalledWith(
+      2,
+      roomId,
+      { id: "missed-1", timestamp: 2 },
+      80,
+    );
+  });
+
+  it("does not deliver a recovery page after room access is revoked mid-read", async () => {
+    const roomId = `recovery-revoked-${Date.now()}`;
+    const persistedMessage = (id: string) => ({
+      id,
+      ciphertext: "ciphertext",
+      nonce: "nonce",
+      userId: "user-ada",
+      username: "Ada",
+      timestamp: 2,
+      type: "text" as const,
+      systemContent: null,
+    });
+    let resolveRecovery!: (value: {
+      messages: Array<ReturnType<typeof persistedMessage>>;
+      hasMore: boolean;
+    }) => void;
+    mockLoadEncryptedMessagesAfter.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveRecovery = resolve;
+      }),
+    );
+    const client = createRoomClient("token-ben");
+    await waitForEvent(client, "connect");
+    const joined = waitForEvent(client, "room-joined");
+    client.emit("join-room", { roomId });
+    await joined;
+
+    const accessRevoked = waitForEvent<{ code: string }>(
+      client,
+      "message-recovery-error",
+    );
+    const receivedPage = vi.fn();
+    client.on("message-recovery-page", receivedPage);
+    client.emit("recover-messages", {
+      requestId: "revoked-read",
+      roomId,
+      afterMessageId: "known",
+      afterTimestamp: 1,
+    });
+    await waitFor(() => expect(mockLoadEncryptedMessagesAfter).toHaveBeenCalled());
+    client.emit("leave-room", { roomId });
+    await waitFor(() => expect(getRooms()).toEqual([]));
+    resolveRecovery({
+      messages: [persistedMessage("must-not-be-delivered")],
+      hasMore: false,
+    });
+
+    await expect(accessRevoked).resolves.toEqual({
+      requestId: "revoked-read",
+      code: "ROOM_ACCESS_REVOKED",
+    });
+    expect(receivedPage).not.toHaveBeenCalled();
+  });
+
   it("rejects an unauthenticated client before it can create or join a room", async () => {
     const client = createRoomClient();
     const error = await waitForEvent<Error>(client, "connect_error");
@@ -832,7 +964,7 @@ describe("room Socket.IO lifecycle", () => {
     await waitFor(
       () => {
         expect(mockSaveEncryptedMessage).toHaveBeenCalledTimes(256);
-        expect(received).toHaveBeenCalledTimes(256);
+        expect(received).not.toHaveBeenCalled();
       },
       { attempts: 100, delayMs: 20 },
     );
@@ -849,6 +981,6 @@ describe("room Socket.IO lifecycle", () => {
     });
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(mockSaveEncryptedMessage).toHaveBeenCalledTimes(256);
-    expect(received).toHaveBeenCalledTimes(256);
+    expect(received).not.toHaveBeenCalled();
   });
 });
