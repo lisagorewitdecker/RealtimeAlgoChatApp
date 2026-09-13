@@ -222,6 +222,38 @@ describe("key-reset recovery Playwright diagnostics", () => {
     },
   ] as const;
 
+  it("reports a browser setup error before recovery diagnostics can be misleading", () => {
+    const emptyBrowserDirectory = mkdtempSync(
+      join(tmpdir(), "missing-playwright-browser-"),
+    );
+    try {
+      const result = spawnSync(
+        "node",
+        ["e2e/check-playwright-runtime.mjs"],
+        {
+          cwd: apiServerDirectory,
+          encoding: "utf8",
+          env: {
+            ...process.env,
+            PLAYWRIGHT_BROWSERS_PATH: emptyBrowserDirectory,
+          },
+          timeout: 10_000,
+        },
+      );
+      const report = `${result.stdout}\n${result.stderr}`;
+
+      expect(result.error).toBeUndefined();
+      expect(result.status).toBe(1);
+      expect(report).toContain("[api-server browser setup]");
+      expect(report).toContain("Chromium is not ready for API tests");
+      expect(report).not.toContain(
+        "Key-reset recovery verification and cleanup both failed",
+      );
+    } finally {
+      rmSync(emptyBrowserDirectory, { recursive: true, force: true });
+    }
+  });
+
   it(
     "reports every recovery phase and its underlying action without external services",
     () => {
