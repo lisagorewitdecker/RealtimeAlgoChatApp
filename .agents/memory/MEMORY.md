@@ -56,3 +56,5 @@
 - [pnpm drizzle-orm / OpenTelemetry peer duplication](pnpm-drizzle-otel-duplication.md) — adding @opentelemetry/api-dependent packages alongside drizzle-orm can fork incompatible type instances; converge peers and avoid externalizing otel interfaces.
 - [Hook rollback replacement](hook-rollback-replacement.md) — restore preserved hooks by atomic replacement; never remove the active hook before restoration succeeds.
 - [Playwright runtime setup](playwright-runtime-setup.md) — declare Chromium libraries through Replit Nix and launch once before diagnostics so setup failures are unmistakable.
+- [Evidence metadata duplicate detection](evidence-duplicate-detection.md) — detect duplicate keys generically (no allowlists) and mirror the producer's full field set in fixtures.
+- [Task merge against an unrelated main](task-merge-unrelated-main.md) — a rebase replaying from "Initial commit" with no merge base means main-repl HEAD was transiently swapped; abandon and retry, never resolve.

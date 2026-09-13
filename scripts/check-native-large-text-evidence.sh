@@ -34,6 +34,61 @@ metadata_value() {
   sed -n "s/^${key}=//p" "$metadata_path" | head -n 1
 }
 
+# Runner metadata and pass/fail records are machine-generated key=value files
+# that declare each field once. A repeated key means two runs' output were
+# merged or the file was edited, so the checker refuses to pick either value.
+metadata_declaration_count() {
+  local metadata_path="$1"
+  local key="$2"
+  awk -v key="$key" '
+    {
+      sub(/\r$/, "")
+      if (index($0, key "=") == 1) count++
+    }
+    END { print count + 0 }
+  ' "$metadata_path"
+}
+
+metadata_key_is_unambiguous() {
+  local metadata_path="$1"
+  local key="$2"
+  (($(metadata_declaration_count "$metadata_path" "$key") <= 1))
+}
+
+# Prints "<count>\t<key>" for every key declared more than once, in first-seen
+# order, so no field can hide a conflicting value behind first-match parsing.
+duplicate_metadata_keys() {
+  local metadata_path="$1"
+  awk '
+    {
+      sub(/\r$/, "")
+      separator = index($0, "=")
+      if (separator < 2) next
+      key = substr($0, 1, separator - 1)
+      if (key ~ /[[:space:]]/) next
+      count[key]++
+      if (count[key] == 2) order[++duplicates] = key
+    }
+    END {
+      for (i = 1; i <= duplicates; i++) printf "%d\t%s\n", count[order[i]], order[i]
+    }
+  ' "$metadata_path"
+}
+
+report_duplicate_metadata_keys() {
+  local platform="$1"
+  local metadata_path="$2"
+  local file_label="$3"
+  local file_noun="$4"
+  local count
+  local key
+
+  while IFS=$'\t' read -r count key; do
+    [[ -n "$key" ]] || continue
+    issue "$platform" "${file_label} has ${count} ${key} declarations in ${metadata_path}. Declare ${key}=... at most once so the ${file_noun} is unambiguous; regenerate it from a single completed run instead of merging or editing results."
+  done < <(duplicate_metadata_keys "$metadata_path")
+}
+
 # Hand-written review records may carry Windows line endings or stray spaces.
 trimmed_value() {
   local metadata_path="$1"
@@ -229,18 +284,23 @@ validate_platform() {
   check_required_file "$platform" "$run_dir" "sentry-trigger.txt" "controlled Sentry probe metadata"
   check_required_file "$platform" "$run_dir" "sentry-source-map-evidence.json" "Sentry source-map evidence"
 
-  if [[ -s "$run_dir/pass-fail-record.txt" ]] &&
-    ! grep -Eq '^status=PASS[[:space:]]*$' "$run_dir/pass-fail-record.txt"; then
-    issue "$platform" "The pass/fail record at ${run_dir}/pass-fail-record.txt is not PASS. Failed or blocked runner output is not reviewed device evidence; complete the run before release review."
-  fi
-
   if [[ -s "$run_dir/pass-fail-record.txt" ]]; then
+    local pass_fail_path="$run_dir/pass-fail-record.txt"
+    report_duplicate_metadata_keys "$platform" "$pass_fail_path" "Pass/fail record" "pass/fail record"
+
+    if metadata_key_is_unambiguous "$pass_fail_path" status &&
+      [[ "$(metadata_value "$pass_fail_path" status | tr -d '\r' | sed 's/[[:space:]]*$//')" != "PASS" ]]; then
+      issue "$platform" "The pass/fail record at ${pass_fail_path} is not PASS. Failed or blocked runner output is not reviewed device evidence; complete the run before release review."
+    fi
+
     local run_mode
-    run_mode="$(metadata_value "$run_dir/pass-fail-record.txt" run_mode)"
-    if [[ "$run_mode" == "diagnostic-only" ]]; then
-      issue "$platform" "The pass/fail record at ${run_dir}/pass-fail-record.txt is from a diagnostic-only run (NATIVE_SMOKE_ALLOW_LARGER_DEVICE=1), not release evidence. Re-run the release gate on the smallest supported device without the override."
-    elif [[ "$run_mode" != "release-gate" ]]; then
-      issue "$platform" "The pass/fail record at ${run_dir}/pass-fail-record.txt does not declare run_mode=release-gate. Only release-gate runs on the smallest supported device are release evidence; re-run the current native large-text gate."
+    if metadata_key_is_unambiguous "$pass_fail_path" run_mode; then
+      run_mode="$(metadata_value "$pass_fail_path" run_mode)"
+      if [[ "$run_mode" == "diagnostic-only" ]]; then
+        issue "$platform" "The pass/fail record at ${pass_fail_path} is from a diagnostic-only run (NATIVE_SMOKE_ALLOW_LARGER_DEVICE=1), not release evidence. Re-run the release gate on the smallest supported device without the override."
+      elif [[ "$run_mode" != "release-gate" ]]; then
+        issue "$platform" "The pass/fail record at ${pass_fail_path} does not declare run_mode=release-gate. Only release-gate runs on the smallest supported device are release evidence; re-run the current native large-text gate."
+      fi
     fi
   fi
 
@@ -260,15 +320,20 @@ validate_platform() {
   fi
 
   if [[ -s "$run_dir/runner-metadata.txt" ]]; then
+    local runner_metadata_path="$run_dir/runner-metadata.txt"
     local actual_platform
     local required_key
     local required_keys=(platform candidate_build_id recorded_at_utc)
-    actual_platform="$(metadata_value "$run_dir/runner-metadata.txt" platform)"
-    if [[ "$actual_platform" != "$platform" ]]; then
-      issue "$platform" "Runner metadata identifies platform '${actual_platform:-missing}', not '${platform}'. Upload metadata from the matching platform run."
+    report_duplicate_metadata_keys "$platform" "$runner_metadata_path" "Runner metadata" "runner metadata"
+    if metadata_key_is_unambiguous "$runner_metadata_path" platform; then
+      actual_platform="$(metadata_value "$runner_metadata_path" platform)"
+      if [[ "$actual_platform" != "$platform" ]]; then
+        issue "$platform" "Runner metadata identifies platform '${actual_platform:-missing}', not '${platform}'. Upload metadata from the matching platform run."
+      fi
     fi
     for required_key in "${required_keys[@]}"; do
-      if [[ -z "$(metadata_value "$run_dir/runner-metadata.txt" "$required_key")" ]]; then
+      if metadata_key_is_unambiguous "$runner_metadata_path" "$required_key" &&
+        [[ -z "$(metadata_value "$runner_metadata_path" "$required_key")" ]]; then
         issue "$platform" "Runner metadata is missing ${required_key}=... in ${run_dir}/runner-metadata.txt. Device details and run identity must be recorded before review."
       fi
     done
@@ -278,7 +343,8 @@ validate_platform() {
       required_keys=(device_serial device_model android_release android_api screen_dp density_dpi user_rotation)
     fi
     for required_key in "${required_keys[@]}"; do
-      if [[ -z "$(metadata_value "$run_dir/runner-metadata.txt" "$required_key")" ]]; then
+      if metadata_key_is_unambiguous "$runner_metadata_path" "$required_key" &&
+        [[ -z "$(metadata_value "$runner_metadata_path" "$required_key")" ]]; then
         issue "$platform" "Runner metadata is missing ${required_key}=... in ${run_dir}/runner-metadata.txt. Record the tested device details before review."
       fi
     done
@@ -483,10 +549,12 @@ validate_review_record() {
   # time the evidence could have been produced. Fall back to the runner metadata
   # for runs that never wrote a completion time.
   local evidence_recorded_at=""
-  if [[ -s "$run_dir/pass-fail-record.txt" ]]; then
+  if [[ -s "$run_dir/pass-fail-record.txt" ]] &&
+    metadata_key_is_unambiguous "$run_dir/pass-fail-record.txt" recorded_at_utc; then
     evidence_recorded_at="$(trimmed_value "$run_dir/pass-fail-record.txt" recorded_at_utc)"
   fi
-  if [[ -z "$evidence_recorded_at" && -s "$run_dir/runner-metadata.txt" ]]; then
+  if [[ -z "$evidence_recorded_at" && -s "$run_dir/runner-metadata.txt" ]] &&
+    metadata_key_is_unambiguous "$run_dir/runner-metadata.txt" recorded_at_utc; then
     evidence_recorded_at="$(trimmed_value "$run_dir/runner-metadata.txt" recorded_at_utc)"
   fi
   if [[ "$reviewed_at" =~ $UTC_TIMESTAMP_PATTERN && "$evidence_recorded_at" =~ $UTC_TIMESTAMP_PATTERN && "$reviewed_at" < "$evidence_recorded_at" ]]; then

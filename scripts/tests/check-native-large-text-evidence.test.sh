@@ -49,21 +49,29 @@ write_valid_run() {
 
   mkdir -p "$run_dir/screenshots" "$run_dir/call-surface"
   printf 'build-%s\n' "$platform" > "$run_dir/candidate-build-id.txt"
+  # Mirror every field the native large-text runner writes, so duplicate-field
+  # coverage tracks the real producer rather than a minimal subset.
   if [[ "$platform" == "ios" ]]; then
     cat > "$run_dir/runner-metadata.txt" <<EOF
 platform=ios
+run_mode=release-gate
 candidate_build_id=build-ios
+app_id=com.example.chat
 device=iPhone SE (3rd generation)
+device_udid=00000000-0000-0000-0000-000000000000
 recorded_at_utc=2026-09-09T12:00:00Z
 EOF
   else
     cat > "$run_dir/runner-metadata.txt" <<EOF
 platform=android
+run_mode=release-gate
 candidate_build_id=build-android
+app_id=com.example.chat
 device_serial=emulator-5554
 device_model=Smallest supported emulator
 android_release=16
 android_api=36
+screen_px=320x568
 screen_dp=320x568
 density_dpi=160
 user_rotation=0
@@ -73,7 +81,10 @@ EOF
   cat > "$run_dir/pass-fail-record.txt" <<EOF
 platform=$platform
 run_mode=release-gate
+candidate_build_id=build-$platform
 status=PASS
+native_screenshot_count=11
+call_surface_screenshot_count=2
 recorded_at_utc=2026-09-09T12:30:00Z
 EOF
   printf '{}\n' > "$run_dir/native-info.json"
@@ -108,6 +119,18 @@ EOF
   for index in 1 2; do
     printf 'call-%s\n' "$index" > "$run_dir/call-surface/call-$index.png"
   done
+}
+
+metadata_keys_of() {
+  cut -d= -f1 "$1"
+}
+
+# Appends a conflicting second declaration for every key already in the file.
+append_conflicting_duplicates() {
+  local metadata_path="$1"
+  local conflicting_lines
+  conflicting_lines="$(awk -F= '{ print $1 "=must-not-be-printed-" NR }' "$metadata_path")"
+  printf '%s\n' "$conflicting_lines" >> "$metadata_path"
 }
 
 blocked_root="$TEST_ROOT/blocked"
@@ -402,6 +425,104 @@ assert_not_contains "$duplicate_single_values_output" "another-build"
 assert_not_contains "$duplicate_single_values_output" "decision=REJECTED by"
 assert_not_contains "$duplicate_single_values_output" "approval_scope '"
 assert_not_contains "$duplicate_single_values_output" "identifies platform"
+
+# Every generated field in runner-metadata.txt and pass-fail-record.txt is
+# duplicated with a conflicting value on both platforms. Each duplicate must be
+# named without selecting, comparing, or printing either value.
+duplicate_machine_metadata_root="$TEST_ROOT/duplicate-machine-metadata"
+write_valid_run "$duplicate_machine_metadata_root" ios
+write_valid_run "$duplicate_machine_metadata_root" android
+expected_duplicate_issues=0
+for platform in ios android; do
+  for metadata_file in runner-metadata.txt pass-fail-record.txt; do
+    metadata_path="$duplicate_machine_metadata_root/$platform/20260909T120000Z/$metadata_file"
+    expected_duplicate_issues=$((expected_duplicate_issues + $(metadata_keys_of "$metadata_path" | wc -l)))
+    append_conflicting_duplicates "$metadata_path"
+  done
+done
+if duplicate_machine_metadata_output="$(bash "$CHECKER" "$duplicate_machine_metadata_root" 2>&1)"; then
+  echo "duplicate machine metadata case unexpectedly passed" >&2
+  exit 1
+fi
+for platform in ios android; do
+  runner_metadata_path="$duplicate_machine_metadata_root/$platform/20260909T120000Z/runner-metadata.txt"
+  for duplicated_field in $(metadata_keys_of "$runner_metadata_path" | sort -u); do
+    assert_contains "$duplicate_machine_metadata_output" "[$platform] Runner metadata has 2 ${duplicated_field} declarations in ${runner_metadata_path}."
+    assert_contains "$duplicate_machine_metadata_output" "Declare ${duplicated_field}=... at most once so the runner metadata is unambiguous"
+  done
+  pass_fail_path="$duplicate_machine_metadata_root/$platform/20260909T120000Z/pass-fail-record.txt"
+  for duplicated_field in $(metadata_keys_of "$pass_fail_path" | sort -u); do
+    assert_contains "$duplicate_machine_metadata_output" "[$platform] Pass/fail record has 2 ${duplicated_field} declarations in ${pass_fail_path}."
+    assert_contains "$duplicate_machine_metadata_output" "Declare ${duplicated_field}=... at most once so the pass/fail record is unambiguous"
+  done
+done
+# Fields the producer writes but the checker never validates by value must be
+# covered too, not just the fields that feed a comparison.
+for duplicated_field in run_mode app_id device_udid; do
+  assert_contains "$duplicate_machine_metadata_output" "[ios] Runner metadata has 2 ${duplicated_field} declarations"
+done
+for duplicated_field in run_mode app_id screen_px device_model android_release android_api screen_dp density_dpi user_rotation; do
+  assert_contains "$duplicate_machine_metadata_output" "[android] Runner metadata has 2 ${duplicated_field} declarations"
+done
+for duplicated_field in candidate_build_id native_screenshot_count call_surface_screenshot_count; do
+  assert_contains "$duplicate_machine_metadata_output" "[ios] Pass/fail record has 2 ${duplicated_field} declarations"
+  assert_contains "$duplicate_machine_metadata_output" "[android] Pass/fail record has 2 ${duplicated_field} declarations"
+done
+assert_contains "$duplicate_machine_metadata_output" "completeness check FAILED with ${expected_duplicate_issues} issue(s)"
+assert_not_contains "$duplicate_machine_metadata_output" "must-not-be-printed"
+assert_not_contains "$duplicate_machine_metadata_output" "Runner metadata identifies platform"
+assert_not_contains "$duplicate_machine_metadata_output" "Runner metadata is missing"
+assert_not_contains "$duplicate_machine_metadata_output" "is not PASS"
+assert_not_contains "$duplicate_machine_metadata_output" "does not declare run_mode=release-gate"
+assert_not_contains "$duplicate_machine_metadata_output" "is from a diagnostic-only run"
+
+# A duplicate only silences the checks for that field; the remaining
+# single-declaration fields are still validated by value.
+partial_duplicate_root="$TEST_ROOT/partial-duplicate"
+write_valid_run "$partial_duplicate_root" ios
+write_valid_run "$partial_duplicate_root" android
+cat > "$partial_duplicate_root/android/20260909T120000Z/pass-fail-record.txt" <<'EOF'
+platform=android
+run_mode=diagnostic-only
+candidate_build_id=build-android
+status=PASS
+status=FAIL
+native_screenshot_count=11
+call_surface_screenshot_count=2
+recorded_at_utc=2026-09-09T12:30:00Z
+EOF
+printf 'platform=android\r\n' >> "$partial_duplicate_root/ios/20260909T120000Z/runner-metadata.txt"
+if partial_duplicate_output="$(bash "$CHECKER" "$partial_duplicate_root" 2>&1)"; then
+  echo "partial duplicate metadata case unexpectedly passed" >&2
+  exit 1
+fi
+assert_contains "$partial_duplicate_output" "[android] Pass/fail record has 2 status declarations"
+assert_contains "$partial_duplicate_output" "[android] The pass/fail record at $partial_duplicate_root/android/20260909T120000Z/pass-fail-record.txt is from a diagnostic-only run"
+assert_contains "$partial_duplicate_output" "[ios] Runner metadata has 2 platform declarations"
+assert_contains "$partial_duplicate_output" "completeness check FAILED with 3 issue(s)"
+assert_not_contains "$partial_duplicate_output" "is not PASS"
+assert_not_contains "$partial_duplicate_output" "status=FAIL"
+assert_not_contains "$partial_duplicate_output" "Runner metadata identifies platform"
+assert_not_contains "$partial_duplicate_output" "Runner metadata is missing"
+
+# Conflicting completion times must not be compared against the review time:
+# first-value parsing would accept a review that predates the later value.
+duplicate_recorded_at_root="$TEST_ROOT/duplicate-recorded-at"
+write_valid_run "$duplicate_recorded_at_root" ios
+write_valid_run "$duplicate_recorded_at_root" android
+write_review_record "$duplicate_recorded_at_root" ios APPROVED
+write_review_record "$duplicate_recorded_at_root" android APPROVED "2026-09-09T13:00:00Z"
+printf 'recorded_at_utc=2026-09-09T23:59:00Z\n' >> "$duplicate_recorded_at_root/android/20260909T120000Z/pass-fail-record.txt"
+printf 'recorded_at_utc=2026-09-09T23:59:00Z\n' >> "$duplicate_recorded_at_root/android/20260909T120000Z/runner-metadata.txt"
+if duplicate_recorded_at_output="$(bash "$CHECKER" "$duplicate_recorded_at_root" 2>&1)"; then
+  echo "duplicate recorded_at_utc case unexpectedly passed" >&2
+  exit 1
+fi
+assert_contains "$duplicate_recorded_at_output" "[android] Pass/fail record has 2 recorded_at_utc declarations"
+assert_contains "$duplicate_recorded_at_output" "[android] Runner metadata has 2 recorded_at_utc declarations"
+assert_contains "$duplicate_recorded_at_output" "completeness check FAILED with 2 issue(s)"
+assert_not_contains "$duplicate_recorded_at_output" "predates the evidence"
+assert_not_contains "$duplicate_recorded_at_output" "23:59:00Z"
 
 field_text_in_notes_root="$TEST_ROOT/field-text-in-notes"
 write_valid_run "$field_text_in_notes_root" ios
