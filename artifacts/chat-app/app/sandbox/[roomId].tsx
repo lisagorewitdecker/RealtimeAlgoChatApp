@@ -79,10 +79,19 @@ export default function SandboxScreen() {
 
   useEffect(() => {
     let mounted = true;
-    void loadRoomKey(roomId).then(() => {
-      const key = getRoomKey(roomId);
-      if (mounted) setRoomKeyB64(key ? encodeBase64(key) : "");
-    });
+    // Always settle: a rejected hydration must not leave the sandbox on its
+    // loading state forever.
+    void loadRoomKey(roomId)
+      .catch((error: unknown) => {
+        console.warn(
+          "Room key hydration failed",
+          error instanceof Error ? error.message : error,
+        );
+      })
+      .then(() => {
+        const key = getRoomKey(roomId);
+        if (mounted) setRoomKeyB64(key ? encodeBase64(key) : "");
+      });
     return () => {
       mounted = false;
     };
@@ -188,11 +197,14 @@ export default function SandboxScreen() {
         >
           <Feather name="alert-triangle" size={32} color={colors.destructive} />
           <Text style={[styles.blockedTitle, { color: colors.foreground }]}>
-            Sandbox blocked until the room key is saved
+            {roomKeyPersistenceFailure.kind === "load"
+              ? "Sandbox blocked until the room key can be read"
+              : "Sandbox blocked until the room key is saved"}
           </Text>
           <Text style={[styles.authError, { color: colors.mutedForeground }]}>
-            Keep this screen open, make secure storage available, and retry before
-            opening the shared sandbox.
+            {roomKeyPersistenceFailure.kind === "load"
+              ? "This device could not read its saved encryption keys. Make secure storage available, then retry before opening the shared sandbox."
+              : "Keep this screen open, make secure storage available, and retry before opening the shared sandbox."}
           </Text>
           <TouchableOpacity
             testID="retry-sandbox-room-key-save-button"
@@ -202,7 +214,11 @@ export default function SandboxScreen() {
             style={[styles.retryButton, { borderColor: colors.destructive }]}
           >
             <Text style={{ color: colors.destructive, fontSize: 14, fontWeight: "700" }}>
-              {retryingRoomKey ? "Retrying…" : "Retry saving key"}
+              {retryingRoomKey
+                ? "Retrying…"
+                : roomKeyPersistenceFailure.kind === "load"
+                  ? "Retry reading key"
+                  : "Retry saving key"}
             </Text>
           </TouchableOpacity>
         </View>

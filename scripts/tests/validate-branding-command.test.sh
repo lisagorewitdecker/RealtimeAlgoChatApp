@@ -1,0 +1,78 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+TEST_ROOT="$(mktemp -d)"
+trap 'rm -rf "$TEST_ROOT"' EXIT
+
+assert_contains() {
+  local file="$1"
+  local expected="$2"
+  if ! grep -Fq -- "$expected" "$file"; then
+    printf 'Expected %s to contain: %s\n' "$file" "$expected" >&2
+    cat "$file" >&2
+    exit 1
+  fi
+}
+
+assert_not_contains() {
+  local file="$1"
+  local unexpected="$2"
+  if grep -Fq -- "$unexpected" "$file"; then
+    printf 'Expected %s not to contain: %s\n' "$file" "$unexpected" >&2
+    cat "$file" >&2
+    exit 1
+  fi
+}
+
+cd "$ROOT_DIR"
+
+pnpm --filter @workspace/chat-app run validate:branding
+
+cat > "$TEST_ROOT/ios-native-info.json" <<'JSON'
+{
+  "CFBundleDisplayName": "RealtimeAlgoChatApp Studio",
+  "CFBundleName": "RealtimeAlgoChatApp Studio",
+  "NSCameraUsageDescription": "RealtimeAlgoChatApp Studio uses your camera for video calls.",
+  "NSMicrophoneUsageDescription": "RealtimeAlgoChatApp Studio uses your microphone for voice and video calls."
+}
+JSON
+
+pnpm --filter @workspace/chat-app run validate:branding:native -- \
+  --platform ios \
+  --metadata "$TEST_ROOT/ios-native-info.json" \
+  --build-id ios-command-test \
+  --results-dir "$TEST_ROOT/ios-results"
+
+assert_contains "$TEST_ROOT/ios-results/native-branding-check.md" "- Status: **PASS**"
+assert_contains "$TEST_ROOT/ios-results/native-branding-check.md" "Candidate build ID: \`ios-command-test\`"
+# Candidate build IDs are non-secret release configuration and remain visible
+# beside the fingerprint in the GitHub summary.
+assert_contains "$TEST_ROOT/ios-results/native-branding-summary.md" "- Status: **PASS**"
+assert_contains "$TEST_ROOT/ios-results/native-branding-summary.md" "Candidate build ID: \`ios-command-test\`"
+assert_contains "$TEST_ROOT/ios-results/native-branding-summary.md" "Candidate build fingerprint (SHA-256):"
+
+cat > "$TEST_ROOT/android-native-info.json" <<'JSON'
+{
+  "applicationLabel": "Old App",
+  "permissions": ["android.permission.CAMERA"]
+}
+JSON
+
+if pnpm --filter @workspace/chat-app run validate:branding:native -- \
+  --platform android \
+  --metadata "$TEST_ROOT/android-native-info.json" \
+  --build-id android-command-test \
+  --results-dir "$TEST_ROOT/android-results"; then
+  echo "Expected the mismatched Android branding command to fail." >&2
+  exit 1
+fi
+
+assert_contains "$TEST_ROOT/android-results/native-branding-check.md" "- Status: **FAIL**"
+assert_contains "$TEST_ROOT/android-results/native-branding-check.md" "Candidate build ID: \`android-command-test\`"
+assert_contains "$TEST_ROOT/android-results/native-branding-summary.md" "- Status: **FAIL**"
+assert_contains "$TEST_ROOT/android-results/native-branding-summary.md" "Candidate build ID: \`android-command-test\`"
+assert_contains "$TEST_ROOT/android-results/native-branding-summary.md" "Candidate build fingerprint (SHA-256):"
+assert_contains "$TEST_ROOT/android-results/native-branding-summary.md" "Mismatch:"
+
+echo "Native branding command regression tests passed."

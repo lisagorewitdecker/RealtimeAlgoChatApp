@@ -27,6 +27,7 @@ import { getAccountAccess, isConfiguredAdmin } from "./lib/accountAccess";
 import { streamSandboxAssistant } from "./lib/sandboxAssistant";
 import {
   getPublicKey,
+  getPublicKeyRecord,
   getRoomEnvelope,
   loadEncryptedMessages,
   loadEncryptedSandboxState,
@@ -951,6 +952,7 @@ function setupConnectedSocket(
         return;
       }
       const isNewPresence = !existingUser;
+      const previousPublicKey = existingUser?.publicKey ?? null;
       let publicKey: string | null = null;
       try {
         publicKey = await getPublicKey(authenticatedUser.userId);
@@ -976,10 +978,22 @@ function setupConnectedSocket(
       socket.join(roomId);
       socket.data.roomId = roomId;
 
+      const replayAfterMessageId = getText(data?.["lastSeenMessageId"], 120);
+      const replayCursorIndex = replayAfterMessageId
+        ? room.messages.findIndex((message) => message.id === replayAfterMessageId)
+        : -1;
+      const replayGap = !!replayAfterMessageId && replayCursorIndex === -1;
+      const replayMessages =
+        replayAfterMessageId && replayCursorIndex >= 0
+          ? room.messages.slice(replayCursorIndex + 1)
+          : room.messages.slice(-80);
+
       socket.emit("room-joined", {
         roomId,
         roomName: room.name,
-        messages: room.messages.slice(-80),
+        messages: replayMessages,
+        replayAfterMessageId,
+        replayGap,
         users: getRoomMembers(io, room, authenticatedUser.purpose).map((member) => ({
           userId: member.userId,
           username: member.username,
@@ -1002,6 +1016,19 @@ function setupConnectedSocket(
            publicKey: user.publicKey,
           message: sysMsg,
         }, socket.id);
+      } else if (publicKey && publicKey !== previousPublicKey) {
+        // Presence is per account, so while another session of this account
+        // stays in the room no `user-joined` fires. Peers still have to learn
+        // that the registered device key changed (for example after a device
+        // key reset): the stored envelope targets the old key, and only the
+        // creator can deliver a fresh one to the new key.
+        emitRoomEvent(io, room, "user-key-changed", {
+          roomId,
+          userId: user.userId,
+          username: user.username,
+          publicKey,
+        }, socket.id);
+        logger.info({ roomId, userId: user.userId }, "member device key changed");
       }
       logger.info({ roomId, userId: user.userId }, "user joined room");
     } catch (error) {
@@ -1142,8 +1169,21 @@ function setupConnectedSocket(
         return;
       }
        try {
-         const registeredSenderKey = await getPublicKey(authenticatedUser.userId);
-         if (!registeredSenderKey || registeredSenderKey !== senderPublicKey) {
+         const registration = await getPublicKeyRecord(authenticatedUser.userId);
+         const isRegisteredKey =
+           registration.publicKey !== null && registration.publicKey === senderPublicKey;
+         // Device-key handover: after another device of the creator's account
+         // took over the registration, a creator session that still holds the
+         // room key hands it to the account's new key. Only the key the
+         // registry recorded as displaced is accepted, and only for the
+         // creator's own account, so a superseded session never becomes the
+         // key authority for other members.
+         const isHandover =
+           !isRegisteredKey &&
+           targetUserId === authenticatedUser.userId &&
+           registration.previousPublicKey !== null &&
+           registration.previousPublicKey === senderPublicKey;
+         if (!isRegisteredKey && !isHandover) {
            return;
          }
          await saveRoomEnvelope({
@@ -1162,6 +1202,8 @@ function setupConnectedSocket(
        const target = room.users.get(targetUserId);
        if (!target) return;
        for (const targetSocketId of target.socketIds) {
+         // The sending session cannot open its own envelope.
+         if (targetSocketId === socket.id) continue;
          io.to(targetSocketId).emit("room-key-envelope", {
            roomId,
            ciphertext: encrypted.ciphertext,

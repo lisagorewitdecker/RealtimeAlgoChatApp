@@ -24,6 +24,14 @@ jest.mock("@/contexts/SocketContext", () => ({
   useSocket: () => ({ isConnected: true, connectionError: null }),
 }));
 
+jest.mock("@/contexts/CryptoContext", () => ({
+  useCrypto: () => ({
+    deviceKeyStatus: "registered",
+    publicKeyB64: "",
+    resetDeviceIdentity: jest.fn(),
+  }),
+}));
+
 jest.mock("@/hooks/useColors", () => ({
   useColors: () => ({
     background: "#10131a",
@@ -97,6 +105,18 @@ describe("profile moderation controls", () => {
     fireEvent.press(getByTestId("accessibility-high-contrast-toggle"));
 
     expect(accessibilityValue.setHighContrast).toHaveBeenCalledWith(true);
+  });
+
+  it("keeps non-sensitive build information available on the profile screen", () => {
+    const { getByTestId, getByText } = render(<ProfileScreen />);
+
+    expect(getByTestId("build-identity")).toBeTruthy();
+    expect(getByText("BUILD INFORMATION")).toBeTruthy();
+    expect(getByText("App version")).toBeTruthy();
+    expect(getByText("Build ID")).toBeTruthy();
+    expect(getByText("Update created")).toBeTruthy();
+    expect(getByText("Runtime")).toBeTruthy();
+    expect(getByText("Client")).toBeTruthy();
   });
 
   it("lets users choose a text size from accessibility settings", () => {

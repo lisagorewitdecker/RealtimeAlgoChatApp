@@ -74,7 +74,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         const domain = process.env["EXPO_PUBLIC_DOMAIN"];
         const response = await fetch(
           `${domain ? `https://${domain}` : "http://localhost:5000"}/api/profile`,
-          { headers: { Authorization: `Bearer ${token ?? ""}` } },
+          {
+            cache: "no-store",
+            headers: {
+              Authorization: `Bearer ${token ?? ""}`,
+              "Cache-Control": "no-cache",
+            },
+          },
         );
         if (!response.ok) {
           const error = (await response.json().catch(() => null)) as {

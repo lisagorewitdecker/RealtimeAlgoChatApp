@@ -23,6 +23,7 @@ import type {
   CreateRoomRequest,
   HealthStatus,
   ProfileResponse,
+  PublicKeyConflictResponse,
   RoomResponse,
   RoomsListResponse,
   UnauthorizedResponse,
@@ -245,7 +246,7 @@ return customFetch<ProfileResponse>(getUpsertProfileUrl(),
 
 export const getUpsertProfileMutationKey = () => ['upsertProfile'] as const;
 
-export const getUpsertProfileMutationOptions = <TError = ErrorType<void | UnauthorizedResponse>,
+export const getUpsertProfileMutationOptions = <TError = ErrorType<void | UnauthorizedResponse | PublicKeyConflictResponse>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof upsertProfile>>, TError,UpsertProfileMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
 ): UseMutationOptions<Awaited<ReturnType<typeof upsertProfile>>, TError,UpsertProfileMutationVariables, TContext> => {
 
@@ -274,13 +275,13 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type UpsertProfileMutationResult = NonNullable<Awaited<ReturnType<typeof upsertProfile>>>
     export type UpsertProfileMutationBody = BodyType<UpsertProfileRequest>
-    export type UpsertProfileMutationError = ErrorType<void | UnauthorizedResponse>
+    export type UpsertProfileMutationError = ErrorType<void | UnauthorizedResponse | PublicKeyConflictResponse>
     export type UpsertProfileMutationVariables = {data: BodyType<UpsertProfileRequest>}
 
     /**
  * @summary Create or update current user profile
  */
-export const useUpsertProfile = <TError = ErrorType<void | UnauthorizedResponse>,
+export const useUpsertProfile = <TError = ErrorType<void | UnauthorizedResponse | PublicKeyConflictResponse>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof upsertProfile>>, TError,UpsertProfileMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
  ): UseMutationResult<
         Awaited<ReturnType<typeof upsertProfile>>,

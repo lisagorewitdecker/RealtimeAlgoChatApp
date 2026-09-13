@@ -1,0 +1,14 @@
+Probe recorded (UTC): 2026-09-10T21:05:11Z
+Workspace: Linux x86_64 (Replit Linux container)
+Source revision: aebcfc4
+Project SDK: Expo SDK 57.0.0
+Device client distinction: Expo Go may report its own client patch version; that is not the project SDK version.
+
+Device/runner tooling:
+  adb: missing
+  sdkmanager: missing
+  avdmanager: missing
+  emulator: missing
+  java: missing
+  maestro: missing
+  xcrun: missing

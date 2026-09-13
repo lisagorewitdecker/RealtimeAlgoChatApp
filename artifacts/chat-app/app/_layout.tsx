@@ -24,7 +24,7 @@ import { AppProvider, useApp } from "@/contexts/AppContext";
 import { CryptoProvider } from "@/contexts/CryptoContext";
 import { SocketProvider } from "@/contexts/SocketContext";
 import { clerkTokenCache } from "@/lib/clerkTokenCache";
-import { Sentry } from "@/lib/sentry";
+import { Sentry, sentryEnabled } from "@/lib/sentry";
 
 if (process.env["EXPO_PUBLIC_DOMAIN"]) {
   setBaseUrl(`https://${process.env["EXPO_PUBLIC_DOMAIN"]}`);
@@ -42,7 +42,10 @@ function RootLayoutContent() {
   const router = useRouter();
   const segments = useSegments();
   const isSetupRoute = segments[0] === "setup";
+  const isSentrySmokeRoute =
+    (segments as readonly string[])[0] === "sentry-smoke";
   const isAuthRoute =
+    isSentrySmokeRoute ||
     (segments as readonly string[]).includes("(auth)") ||
     segments[0] === "sign-in" ||
     segments[0] === "sign-up";
@@ -69,6 +72,7 @@ function RootLayoutContent() {
       isReady &&
       accessStatus === "ready" &&
       username &&
+      !isSentrySmokeRoute &&
       (isSetupRoute || isAuthRoute)
     ) {
       router.replace("/(tabs)");
@@ -78,6 +82,7 @@ function RootLayoutContent() {
     isAuthRoute,
     isLoaded,
     isReady,
+    isSentrySmokeRoute,
     isSetupRoute,
     isSignedIn,
     router,
@@ -294,4 +299,4 @@ function RootLayout() {
   );
 }
 
-export default Sentry.wrap(RootLayout);
+export default sentryEnabled ? Sentry.wrap(RootLayout) : RootLayout;

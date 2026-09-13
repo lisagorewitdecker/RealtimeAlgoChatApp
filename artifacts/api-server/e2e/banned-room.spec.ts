@@ -9,6 +9,10 @@ import {
 } from "@playwright/test";
 import { db, pool, roomsTable, userProfilesTable } from "@workspace/db";
 import { eq, inArray, or } from "drizzle-orm";
+import {
+  throwTestAndCleanupFailures,
+  withClerkRetry,
+} from "./clerk-retry.js";
 
 const chatUrl = process.env["E2E_CHAT_URL"];
 const apiUrl = process.env["E2E_API_URL"];
@@ -69,64 +73,6 @@ function roomJoinButton(page: Page, roomName: string) {
 
 function roomParticipantCount(page: Page) {
   return page.getByTestId("room-participant-count");
-}
-
-function clerkErrorStatus(error: unknown) {
-  if (typeof error !== "object" || error === null) return undefined;
-  const candidate = error as { status?: unknown; statusCode?: unknown };
-  return typeof candidate.status === "number"
-    ? candidate.status
-    : typeof candidate.statusCode === "number"
-      ? candidate.statusCode
-      : undefined;
-}
-
-async function withClerkRetry<T>(
-  phase: string,
-  operation: () => Promise<T>,
-): Promise<T> {
-  let lastError: unknown;
-  for (let attempt = 0; attempt < 4; attempt += 1) {
-    try {
-      return await operation();
-    } catch (error) {
-      lastError = error;
-      const status = clerkErrorStatus(error);
-      const retryable =
-        status === 429 ||
-        status === 500 ||
-        status === 502 ||
-        status === 503 ||
-        status === 504;
-      if (!retryable || attempt === 3) break;
-      const delayMs = 1_000 * 2 ** attempt;
-      console.info(
-        `[banned-room-e2e] ${phase} returned ${status}; retrying in ${delayMs}ms`,
-      );
-      await new Promise((resolve) => setTimeout(resolve, delayMs));
-    }
-  }
-  throw lastError;
-}
-
-async function deleteClerkUserWithRetry(
-  clerkClient: ReturnType<typeof createClerkClient>,
-  userId: string,
-) {
-  let lastError: unknown;
-  for (let attempt = 0; attempt < 5; attempt += 1) {
-    try {
-      await clerkClient.users.deleteUser(userId);
-      return;
-    } catch (error) {
-      lastError = error;
-      if (attempt === 4) break;
-      await new Promise((resolve) =>
-        setTimeout(resolve, 1_000 * 2 ** attempt),
-      );
-    }
-  }
-  throw lastError;
 }
 
 test("an active banned member sees the explanation and sees it again on revisit", async ({
@@ -281,24 +227,20 @@ test("an active banned member sees the explanation and sees it again on revisit"
 
     for (const userId of clerkUserIds) {
       try {
-        await deleteClerkUserWithRetry(clerkClient, userId);
+        await withClerkRetry(`delete user ${userId}`, () =>
+          clerkClient.users.deleteUser(userId),
+        );
       } catch (error) {
         cleanupErrors.push(error);
       }
     }
     collectCleanupErrors(await Promise.allSettled([pool.end()]));
 
-    if (cleanupErrors.length > 0) {
-      throw new AggregateError(
-        testFailure === undefined
-          ? cleanupErrors
-          : [testFailure, ...cleanupErrors],
-        testFailure === undefined
-          ? "Banned-room E2E cleanup failed"
-          : "Banned-room verification and cleanup both failed",
-      );
-    }
+    throwTestAndCleanupFailures(
+      testFailure,
+      cleanupErrors,
+      "Banned-room E2E cleanup failed",
+      "Banned-room verification and cleanup both failed",
+    );
   }
-
-  if (testFailure !== undefined) throw testFailure;
 });

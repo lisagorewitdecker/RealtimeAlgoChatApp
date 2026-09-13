@@ -127,8 +127,9 @@ if ((device_ready)); then
     record_failure "The Android runner must be in portrait orientation; found user_rotation=${rotation:-unknown}."
   fi
 
+  # The application ID is a release secret: name the condition, never the value.
   if [[ -n "${NATIVE_SMOKE_APP_ID:-}" ]] && ! adb shell pm path "$NATIVE_SMOKE_APP_ID" >/dev/null 2>&1; then
-    record_failure "The release-candidate application is not installed for application ID ${NATIVE_SMOKE_APP_ID}."
+    record_failure "The release-candidate application is not installed on the connected device."
   fi
 fi
 

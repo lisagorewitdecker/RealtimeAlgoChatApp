@@ -80,6 +80,41 @@ describe("account access", () => {
     vi.useRealTimers();
   });
 
+  it("interprets numeric Clerk retry guidance as seconds", async () => {
+    vi.useFakeTimers();
+    mockGetUser
+      .mockRejectedValueOnce({ status: 429, retryAfter: 3 })
+      .mockResolvedValueOnce(clerkUser());
+
+    const access = getAccountAccess("user-numeric-retry");
+    await vi.advanceTimersByTimeAsync(2_999);
+    expect(mockGetUser).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
+
+    await expect(access).resolves.toEqual({ allowed: true });
+    expect(mockGetUser).toHaveBeenCalledTimes(2);
+    vi.useRealTimers();
+  });
+
+  it.each(["later", Number.NaN, Number.POSITIVE_INFINITY, -1])(
+    "falls back to bounded backoff for malformed retry guidance %s",
+    async (retryAfter) => {
+      vi.useFakeTimers();
+      mockGetUser
+        .mockRejectedValueOnce({ status: 429, retryAfter })
+        .mockResolvedValueOnce(clerkUser());
+
+      const access = getAccountAccess(`user-malformed-${String(retryAfter)}`);
+      await vi.advanceTimersByTimeAsync(249);
+      expect(mockGetUser).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(1);
+
+      await expect(access).resolves.toEqual({ allowed: true });
+      expect(mockGetUser).toHaveBeenCalledTimes(2);
+      vi.useRealTimers();
+    },
+  );
+
   it("persists a ban without overwriting the account profile metadata", async () => {
     mockGetUser.mockResolvedValue(
       clerkUser({

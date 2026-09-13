@@ -20,6 +20,10 @@ export const HealthCheckResponse = zod.object({
 /**
  * @summary Get current user profile
  */
+export const getProfileResponseRegistrationVersionMin = 0;
+
+
+
 export const GetProfileResponse = zod.object({
   "profile": zod.object({
   "userId": zod.string(),
@@ -28,7 +32,9 @@ export const GetProfileResponse = zod.object({
   "publicKey": zod.string().nullish().describe('Base64-encoded X25519 public key for E2EE'),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()
-})
+}),
+  "publicKey": zod.string().nullish().describe('The account\'s registered X25519 public key'),
+  "registrationVersion": zod.int().min(getProfileResponseRegistrationVersionMin).nullish().describe('The monotonic version of the registered public key')
 })
 
 
@@ -39,13 +45,23 @@ export const upsertProfileBodyUsernameMax = 64;
 
 export const upsertProfileBodyPublicKeyMax = 64;
 
+export const upsertProfileBodyPreviousPublicKeyMax = 64;
+
+export const upsertProfileBodyRegistrationVersionMin = 0;
+
 
 
 export const UpsertProfileBody = zod.object({
   "username": zod.string().max(upsertProfileBodyUsernameMax).optional(),
   "avatar": zod.enum(['🧑‍💻', '🚀', '🦊', '🐼', '🐸', '🐙', '🦄', '🌻', '🍕', '🎮', '🔥', '💎']).nullish(),
-  "publicKey": zod.string().max(upsertProfileBodyPublicKeyMax).nullish().describe('Base64-encoded X25519 public key')
+  "publicKey": zod.string().max(upsertProfileBodyPublicKeyMax).nullish().describe('Base64-encoded X25519 public key'),
+  "previousPublicKey": zod.string().max(upsertProfileBodyPreviousPublicKeyMax).nullish().describe('Compare-and-set guard for publicKey: the key currently registered for the account (null when none). Omitted, publicKey only registers a first key or re-sends the current one; replacing a different key without naming it is rejected with 409.'),
+  "registrationVersion": zod.int().min(upsertProfileBodyRegistrationVersionMin).optional().describe('Optional monotonic version for this public-key registration. Writes must advance the authoritative account revision by exactly one; older or future-skewed writes are rejected without changing the registered key. Omit for compatibility with older clients.')
 })
+
+export const upsertProfileResponseRegistrationVersionMin = 0;
+
+
 
 export const UpsertProfileResponse = zod.object({
   "profile": zod.object({
@@ -55,7 +71,9 @@ export const UpsertProfileResponse = zod.object({
   "publicKey": zod.string().nullish().describe('Base64-encoded X25519 public key for E2EE'),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()
-})
+}),
+  "publicKey": zod.string().nullish().describe('The account\'s registered X25519 public key'),
+  "registrationVersion": zod.int().min(upsertProfileResponseRegistrationVersionMin).nullish().describe('The monotonic version of the registered public key')
 })
 
 

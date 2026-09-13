@@ -71,6 +71,14 @@ paths:
           description: Validation error
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "409":
+          description: >-
+            A different public key is registered for the account and the request
+            did not name it in previousPublicKey. The stored key is unchanged.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PublicKeyConflictResponse"
 
   /rooms:
     get:
@@ -200,6 +208,16 @@ components:
       properties:
         profile:
           $ref: "#/components/schemas/UserProfile"
+        publicKey:
+          type: string
+          nullable: true
+          description: The account's registered X25519 public key
+        registrationVersion:
+          type: integer
+          format: int64
+          nullable: true
+          minimum: 0
+          description: The monotonic version of the registered public key
       required:
         - profile
 
@@ -219,6 +237,46 @@ components:
           nullable: true
           maxLength: 64
           description: Base64-encoded X25519 public key
+        previousPublicKey:
+          type: string
+          nullable: true
+          maxLength: 64
+          description: >-
+            Compare-and-set guard for publicKey: the key currently registered
+            for the account (null when none). Omitted, publicKey only registers
+            a first key or re-sends the current one; replacing a different key
+            without naming it is rejected with 409.
+        registrationVersion:
+          type: integer
+          format: int64
+          minimum: 0
+          description: >-
+            Optional monotonic version for this public-key registration. Writes
+            must advance the authoritative account revision by exactly one;
+            older or future-skewed writes are rejected without changing the
+            registered key. Omit for compatibility with older clients.
+
+    PublicKeyConflictResponse:
+      type: object
+      properties:
+        error:
+          type: string
+        code:
+          type: string
+          enum: [PUBLIC_KEY_CONFLICT, PUBLIC_KEY_STALE, PUBLIC_KEY_VERSION_AHEAD]
+        publicKey:
+          type: string
+          nullable: true
+          description: The public key the account currently holds
+        registrationVersion:
+          type: integer
+          format: int64
+          nullable: true
+          minimum: 0
+          description: The authoritative account revision currently stored
+      required:
+        - error
+        - code
 
     Room:
       type: object

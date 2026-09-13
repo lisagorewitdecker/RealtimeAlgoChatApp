@@ -43,6 +43,13 @@ export interface UserProfile {
 
 export interface ProfileResponse {
   profile: UserProfile;
+  /** The account's registered X25519 public key */
+  publicKey?: string | null;
+  /**
+     * The monotonic version of the registered public key
+     * @minimum 0
+     */
+  registrationVersion?: number | null;
 }
 
 /**
@@ -76,6 +83,37 @@ export interface UpsertProfileRequest {
      * @maxLength 64
      */
   publicKey?: string | null;
+  /**
+     * Compare-and-set guard for publicKey: the key currently registered for the account (null when none). Omitted, publicKey only registers a first key or re-sends the current one; replacing a different key without naming it is rejected with 409.
+     * @maxLength 64
+     */
+  previousPublicKey?: string | null;
+  /**
+     * Optional monotonic version for this public-key registration. Writes must advance the authoritative account revision by exactly one; older or future-skewed writes are rejected without changing the registered key. Omit for compatibility with older clients.
+     * @minimum 0
+     */
+  registrationVersion?: number;
+}
+
+export type PublicKeyConflictResponseCode = typeof PublicKeyConflictResponseCode[keyof typeof PublicKeyConflictResponseCode];
+
+
+export const PublicKeyConflictResponseCode = {
+  PUBLIC_KEY_CONFLICT: 'PUBLIC_KEY_CONFLICT',
+  PUBLIC_KEY_STALE: 'PUBLIC_KEY_STALE',
+  PUBLIC_KEY_VERSION_AHEAD: 'PUBLIC_KEY_VERSION_AHEAD',
+} as const;
+
+export interface PublicKeyConflictResponse {
+  error: string;
+  code: PublicKeyConflictResponseCode;
+  /** The public key the account currently holds */
+  publicKey?: string | null;
+  /**
+     * The authoritative account revision currently stored
+     * @minimum 0
+     */
+  registrationVersion?: number | null;
 }
 
 export interface Room {

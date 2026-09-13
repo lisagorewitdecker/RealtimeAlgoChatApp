@@ -1,0 +1,24 @@
+Encrypted-room recovery automated evidence — Android companion record
+====================================================================
+Recorded (UTC): 2026-09-03T19:02:38Z
+Source revision: c3abfdbb1f0db194c38eef4df027f00f08660955
+
+These checks are not physical-device evidence and do not change the overall
+Android result from BLOCKED.
+
+PASS | pnpm --filter @workspace/chat-app exec jest __tests__/CryptoContext.test.tsx __tests__/Room.test.tsx --runInBand --coverage=false
+  2 suites passed; 21 tests passed.
+  Existing React test act(...) warnings were emitted; no test failed.
+
+PASS | pnpm --filter @workspace/api-server exec vitest run src/socket.rooms.test.ts --maxWorkers=1
+  1 file passed; 10 tests passed.
+  Covers ciphertext-only relay/storage, per-account envelope restoration,
+  creator/registered-key envelope authority, and authenticated room access.
+
+PASS | pnpm --filter @workspace/api-server exec vitest run src/socket.assistant.test.ts src/socket.security.test.ts src/routes/profile.test.ts --maxWorkers=1
+  3 files passed; 14 tests passed.
+  Covers encrypted-room assistant rejection without model invocation,
+  room-scoped capability boundaries, and public-key registration/rotation.
+
+No credentials, private keys, room plaintext, tokens, or database payloads were
+written to this evidence directory.

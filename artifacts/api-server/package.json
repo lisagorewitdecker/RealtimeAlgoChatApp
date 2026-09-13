@@ -8,8 +8,11 @@
     "build": "node ./build.mjs",
     "start": "node --enable-source-maps --import ./dist/instrument.mjs ./dist/index.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run src --maxWorkers=1",
-    "test:e2e:banned-room": "playwright install chromium && playwright test --config e2e/playwright.config.ts",
+    "test": "playwright install chromium && vitest run src e2e/clerk-retry.test.ts --maxWorkers=1",
+    "test:e2e:banned-room": "playwright install chromium && playwright test e2e/banned-room.spec.ts --config e2e/playwright.config.ts",
+    "test:e2e:key-reset-recovery": "playwright install chromium && playwright test e2e/key-reset-recovery.spec.ts --config e2e/playwright.config.ts",
+    "test:e2e:reconnect-delivery": "playwright install chromium && playwright test e2e/reconnect-delivery.spec.ts --config e2e/playwright.config.ts",
+    "test:e2e:idle-profile-registration": "playwright install chromium && playwright test e2e/idle-profile-registration.spec.ts --config e2e/playwright.config.ts",
     "typecheck:e2e": "tsc -p e2e/tsconfig.json --noEmit"
   },
   "dependencies": {

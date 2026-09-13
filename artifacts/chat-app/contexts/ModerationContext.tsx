@@ -2,7 +2,8 @@
  * ModerationContext — provides moderator/admin status and mod actions.
  *
  * isModerator: true when the current user is the room creator.
- * isAdmin:     true when userId is listed in EXPO_PUBLIC_ADMIN_USER_IDS.
+ * isAdmin:     true when the API has confirmed the current account is an
+ * administrator. The client never receives the full administrator list.
  */
 import React, {
   createContext,
@@ -32,13 +33,6 @@ interface ModerationContextValue {
 
 const ModerationContext = createContext<ModerationContextValue | null>(null);
 
-const ADMIN_IDS = new Set(
-  (process.env["EXPO_PUBLIC_ADMIN_USER_IDS"] ?? "")
-    .split(",")
-    .map((s: string) => s.trim())
-    .filter(Boolean),
-);
-
 async function modFetch(
   path: string,
   method: string,
@@ -64,11 +58,10 @@ async function modFetch(
 }
 
 export function ModerationProvider({ children }: { children: React.ReactNode }) {
-  const { userId } = useApp();
+  const { userId, isAdmin } = useApp();
   const { getToken } = useAuth();
   const [moderatorId, setModeratorId] = useState<string | null>(null);
 
-  const isAdmin = ADMIN_IDS.has(userId);
   const isModerator = isAdmin || moderatorId === userId;
 
   const setRoomCreator = useCallback((creatorId: string) => {

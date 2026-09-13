@@ -42,6 +42,13 @@ timestamped JUnit and screenshot evidence under
 `test-results/native-large-text/ios/`. This blocker must remain in place until
 that evidence is attached and reviewed.
 
+**Review record:** none. `ios/runner-check.txt` is runner diagnostics, not a
+device run, so there is nothing to review and no `review-record.txt` may be
+written for it. This section changes from Blocked only when the iOS run
+directory contains a `review-record.txt` naming the reviewer, the UTC review
+time, the tested candidate build ID, and `decision=APPROVED`, and
+`pnpm run validate:native-large-text-evidence` echoes that approval.
+
 ---
 
 # Android physical-device supplement blocker
@@ -96,26 +103,50 @@ timestamped JUnit and screenshot evidence under
 until that evidence is attached and reviewed. The detailed runner evidence is
 in `test-results/native-large-text/android/runner-check.txt`.
 
+**Review record:** none. `android/runner-check.txt` is runner diagnostics, not
+a device run, so there is nothing to review and no `review-record.txt` may be
+written for it. This section changes from Blocked only when the Android run
+directory contains a `review-record.txt` naming the reviewer, the UTC review
+time, the tested candidate build ID, and `decision=APPROVED`, and
+`pnpm run validate:native-large-text-evidence` echoes that approval.
+
 ---
 
 # Cross-platform accessibility evidence review
 
 **Reviewed:** 2026-09-03  
+**Updated:** 2026-09-10 — per-run review records are now required; the evidence
+status is unchanged.  
 **Decision:** Release blocker remains active — neither platform has reviewed
 physical-device evidence.
 
 ## Evidence inventory
 
-| Platform | Available evidence              | Physical-device result                                                                                    |
-| -------- | ------------------------------- | --------------------------------------------------------------------------------------------------------- |
-| iOS      | `ios/runner-check.txt` only     | Blocked before simulator/device discovery because the Linux workspace lacks Maestro and iOS tooling       |
-| Android  | `android/runner-check.txt` only | Blocked before device discovery because the workspace lacks Maestro, Android SDK tooling, Java, and `adb` |
+| Platform | Available evidence              | Review record                       | Physical-device result                                                                                    |
+| -------- | ------------------------------- | ----------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| iOS      | `ios/runner-check.txt` only     | None — diagnostics are not evidence | Blocked before simulator/device discovery because the Linux workspace lacks Maestro and iOS tooling       |
+| Android  | `android/runner-check.txt` only | None — diagnostics are not evidence | Blocked before device discovery because the workspace lacks Maestro, Android SDK tooling, Java, and `adb` |
 
 Neither platform has a timestamped `maestro-results.xml`, JUnit result, native
 screenshot set, call-surface screenshot set, device model, OS version,
 OEM-keyboard/locale record, or reviewed clipping and keyboard-obscured-action
 findings. The runner-check files are environment evidence only; they do not
-establish that any app flow passed.
+establish that any app flow passed, and nobody has reviewed device screenshots
+because none exist.
+
+## Who reviews and how the decision is recorded
+
+Each platform's timestamped run directory must carry its own
+`review-record.txt` (`platform`, `reviewer`, `reviewed_at_utc`,
+`candidate_build_id`, `decision=APPROVED|REJECTED`, optional `notes`). The
+reviewer is the person who opened all eleven native screenshots, both
+call-surface captures, `maestro-results.xml`, and `native-branding-check.md`
+for that run, following the review steps in
+`artifacts/chat-app/docs/native-large-text-device-check.md`. The evidence
+check reports a missing record as `Review pending`, fails on
+`decision=REJECTED`, and fails on a record whose candidate build ID or review
+time does not belong to the run. Runner diagnostics such as `runner-check.txt`
+and `ios-readiness.md` never receive a review record.
 
 ## Shared flow comparison
 
@@ -147,5 +178,7 @@ representative Android device produces reviewed evidence. After that run:
   locale, permission prompts, and all keyboard-open actions match the supported
   fleet and the reviewed screenshots and JUnit results are clean.
 - Do not remove this blocker until the Android and iOS evidence sets are both
-  attached, reviewed against the same rows above, and any platform-specific
-  findings are recorded.
+  attached, reviewed against the same rows above, any platform-specific
+  findings are recorded, and each run directory holds an `APPROVED`
+  `review-record.txt` that `pnpm run validate:native-large-text-evidence`
+  echoes for both platforms.

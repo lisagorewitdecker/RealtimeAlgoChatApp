@@ -55,6 +55,21 @@ interface RoomKeyEnvelope {
   senderPublicKey: string;
 }
 
+function uniqueMessages(messages: Message[]): Message[] {
+  const seenIds = new Set<string>();
+  return messages.filter((message) => {
+    if (seenIds.has(message.id)) return false;
+    seenIds.add(message.id);
+    return true;
+  });
+}
+
+function appendMessageById(messages: Message[], message: Message): Message[] {
+  return messages.some((existing) => existing.id === message.id)
+    ? messages
+    : [...messages, message];
+}
+
 function apiBaseUrl(): string {
   const domain = process.env["EXPO_PUBLIC_DOMAIN"];
   return domain ? `https://${domain}` : "http://localhost:5000";
@@ -75,6 +90,9 @@ export default function RoomScreen() {
   const {
     publicKeyB64,
     isReady: isCryptoReady,
+    deviceKeyStatus,
+    isDeviceKeyRegistrationSlow,
+    markDeviceKeySuperseded,
     decryptMessage,
     decryptRoomKeyEnvelope,
     encryptMessage,
@@ -94,11 +112,19 @@ export default function RoomScreen() {
   const [moderatingUserId, setModeratingUserId] = useState<string | null>(null);
   const [roomBanned, setRoomBanned] = useState(false);
   const [roomReady, setRoomReady] = useState(false);
+  const [messageReplayGap, setMessageReplayGap] = useState(false);
   const [retryingRoomKey, setRetryingRoomKey] = useState(false);
   const [hasRoomKey, setHasRoomKey] = useState(() => !!getRoomKey(roomId));
   const inputRef = useRef<TextInput>(null);
   const hasTrackedRoomJoin = useRef(false);
   const roomKeyLoadRef = useRef<Promise<void> | null>(null);
+  const roomKeyEnvelopeRecoveryRef = useRef<Promise<boolean> | null>(null);
+  const messagesRef = useRef<Message[]>([]);
+  messagesRef.current = messages;
+  // Mirrors `canModerate` for socket handlers, which must not re-subscribe
+  // (and re-join) whenever moderation rights change.
+  const canModerateRef = useRef(false);
+  canModerateRef.current = canModerate;
   const roomKeyPersistenceFailure = roomKeyPersistenceFailures.get(roomId);
 
   const decryptIncomingMessage = useCallback(
@@ -119,18 +145,33 @@ export default function RoomScreen() {
   );
 
   const acceptRoomKeyEnvelope = useCallback(
-    async (envelope: RoomKeyEnvelope | null | undefined) => {
-      if (!envelope || getRoomKey(roomId)) return false;
-      const roomKey = decryptRoomKeyEnvelope(
-        envelope.ciphertext,
-        envelope.nonce,
-        envelope.senderPublicKey,
-      );
-      if (!roomKey) return false;
-      await setRoomKey(roomId, roomKey);
-      setHasRoomKey(true);
-      setMessages((current) => current.map(decryptIncomingMessage));
-      return true;
+    (envelope: RoomKeyEnvelope | null | undefined): Promise<boolean> => {
+      if (!envelope || getRoomKey(roomId)) return Promise.resolve(false);
+      if (roomKeyEnvelopeRecoveryRef.current) {
+        return roomKeyEnvelopeRecoveryRef.current;
+      }
+      const recovery = (async () => {
+        const roomKey = decryptRoomKeyEnvelope(
+          envelope.ciphertext,
+          envelope.nonce,
+          envelope.senderPublicKey,
+        );
+        if (!roomKey) return false;
+        await setRoomKey(roomId, roomKey);
+        setHasRoomKey(true);
+        // Re-decrypt the current array in place. Messages that arrived while
+        // the key was being saved are included without changing order or ids.
+        setMessages((current) => current.map(decryptIncomingMessage));
+        return true;
+      })();
+      roomKeyEnvelopeRecoveryRef.current = recovery;
+      const clearRecovery = () => {
+        if (roomKeyEnvelopeRecoveryRef.current === recovery) {
+          roomKeyEnvelopeRecoveryRef.current = null;
+        }
+      };
+      void recovery.then(clearRecovery, clearRecovery);
+      return recovery;
     },
     [
       decryptIncomingMessage,
@@ -143,7 +184,14 @@ export default function RoomScreen() {
 
   useEffect(() => {
     let cancelled = false;
-    const loading = loadRoomKey(roomId);
+    // The join below waits on this promise, so it must always settle: a
+    // rejected hydration would otherwise leave the room on "Opening room…".
+    const loading = loadRoomKey(roomId).catch((error: unknown) => {
+      console.warn(
+        "Room key hydration failed",
+        error instanceof Error ? error.message : error,
+      );
+    });
     roomKeyLoadRef.current = loading;
     void loading.then(() => {
       if (!cancelled) setHasRoomKey(!!getRoomKey(roomId));
@@ -167,17 +215,90 @@ export default function RoomScreen() {
       setCanModerate(false);
       return;
     }
-    if (!socket || !userId || !isCryptoReady || !publicKeyB64) return;
+    if (!socket || !userId || !isCryptoReady || !publicKeyB64) {
+      // Encrypted rooms are only joined with a server-confirmed device key.
+      // While the key is missing or being (re)registered, keep the room in its
+      // connecting state instead of showing a stale, un-joined conversation.
+      setRoomReady(false);
+      return;
+    }
+
+    let disposed = false;
+
+    // Encrypts this device's copy of the room key to a member's current device
+    // key. The server only persists and forwards envelopes from the creator.
+    function sendRoomKeyEnvelope(targetUserId: string, targetPublicKey: string) {
+      const roomKey = getRoomKey(roomId);
+      if (!roomKey || targetUserId === userId) return;
+      const envelope = encryptRoomKey(roomKey, targetPublicKey);
+      if (!envelope) return;
+      socket?.emit("room-key-envelope", {
+        roomId,
+        targetUserId,
+        senderPublicKey: publicKeyB64,
+        ciphertext: envelope.ciphertextB64,
+        nonce: envelope.nonceB64,
+      });
+    }
+
+    // Another device or session of this account registered `newPublicKey`
+    // and this device's key is now superseded. Before this room closes here,
+    // a creator session that still holds the room key hands it to the new
+    // key, so the account's fresh device can recover rooms it created. The
+    // server accepts this only from the creator and only under the key it
+    // recorded as displaced; the envelope is encrypted to the new key, so
+    // no room plaintext or private key material is exposed.
+    function handOverRoomKey(newPublicKey: string, isCreator: boolean) {
+      if (disposed) return;
+      const roomKey = getRoomKey(roomId);
+      if (isCreator && roomKey) {
+        const envelope = encryptRoomKey(roomKey, newPublicKey);
+        if (envelope) {
+          socket?.emit("room-key-envelope", {
+            roomId,
+            targetUserId: userId,
+            senderPublicKey: publicKeyB64,
+            ciphertext: envelope.ciphertextB64,
+            nonce: envelope.nonceB64,
+          });
+        }
+      }
+      markDeviceKeySuperseded(newPublicKey);
+    }
 
     function onRoomJoined(data: {
       messages: Array<Message & { ciphertext?: string; nonce?: string }>;
       users: User[];
       canModerate?: boolean;
       keyEnvelope?: RoomKeyEnvelope | null;
+      replayAfterMessageId?: string;
+      replayGap?: boolean;
     }) {
+      // The roster carries the key the server holds for every member, this
+      // device included. A different key for this account means another
+      // device or session took over the registration: fresh room keys would
+      // go to that key, so close encrypted rooms here until the user resets.
+      const self = data.users.find((member) => member.userId === userId);
+      if (self?.publicKey && self.publicKey !== publicKeyB64) {
+        const newPublicKey = self.publicKey;
+        const isCreator = data.canModerate === true;
+        // The saved room key may still be hydrating; the handover needs it.
+        if (!getRoomKey(roomId) && roomKeyLoadRef.current) {
+          void roomKeyLoadRef.current.then(() => handOverRoomKey(newPublicKey, isCreator));
+        } else {
+          handOverRoomKey(newPublicKey, isCreator);
+        }
+        return;
+      }
       const finishJoin = () => {
         setRoomReady(true);
-        setMessages(data.messages.map(decryptIncomingMessage));
+        const incomingMessages = data.messages.map(decryptIncomingMessage);
+        setMessages((current) =>
+          data.replayAfterMessageId
+            ? uniqueMessages([...current, ...incomingMessages])
+            : uniqueMessages(incomingMessages),
+        );
+        setMessageReplayGap(data.replayGap === true);
         setUsers(data.users);
         setCanModerate(data.canModerate === true);
         trackEvent("room_joined", {
@@ -187,26 +308,16 @@ export default function RoomScreen() {
           participant_count: data.users.length,
         });
         hasTrackedRoomJoin.current = true;
-        const roomKey = getRoomKey(roomId);
-        if (roomKey) {
-          for (const member of data.users) {
-            if (!member.publicKey || member.userId === userId) continue;
-            const envelope = encryptRoomKey(roomKey, member.publicKey);
-            if (envelope) {
-              socket?.emit("room-key-envelope", {
-                roomId,
-                targetUserId: member.userId,
-                senderPublicKey: publicKeyB64,
-                ciphertext: envelope.ciphertextB64,
-                nonce: envelope.nonceB64,
-              });
-            }
-          }
+        for (const member of data.users) {
+          if (member.publicKey) sendRoomKeyEnvelope(member.userId, member.publicKey);
         }
       };
       const finishAfterEnvelope = () => {
         if (data.keyEnvelope && !getRoomKey(roomId)) {
-          void acceptRoomKeyEnvelope(data.keyEnvelope).then(finishJoin);
+          void acceptRoomKeyEnvelope(data.keyEnvelope).then(
+            finishJoin,
+            () => undefined,
+          );
         } else {
           finishJoin();
         }
@@ -218,7 +329,7 @@ export default function RoomScreen() {
       finishAfterEnvelope();
     }
     function onMessage(msg: Message & { ciphertext?: string; nonce?: string }) {
-      setMessages((prev) => [...prev, decryptIncomingMessage(msg)]);
+      setMessages((prev) => appendMessageById(prev, decryptIncomingMessage(msg)));
     }
     function onUserJoined(data: {
       userId: string;
@@ -234,24 +345,36 @@ export default function RoomScreen() {
           { userId: data.userId, username: data.username, avatarEmoji: data.avatarEmoji },
         ];
       });
-      setMessages((prev) => [...prev, data.message]);
-      const roomKey = getRoomKey(roomId);
-      if (roomKey && data.publicKey) {
-        const envelope = encryptRoomKey(roomKey, data.publicKey);
-        if (envelope) {
-          socket?.emit("room-key-envelope", {
-            roomId,
-            targetUserId: data.userId,
-            senderPublicKey: publicKeyB64,
-            ciphertext: envelope.ciphertextB64,
-            nonce: envelope.nonceB64,
-          });
+      setMessages((prev) => appendMessageById(prev, data.message));
+      if (data.publicKey) sendRoomKeyEnvelope(data.userId, data.publicKey);
+    }
+    function onUserKeyChanged(data: {
+      roomId?: string;
+      userId: string;
+      publicKey?: string | null;
+    }) {
+      // A member re-registered a new device key while another session of
+      // theirs kept the room presence alive, so no `user-joined` arrives. The
+      // envelope stored for them targets the old key; deliver a fresh one.
+      if (data.roomId !== roomId) return;
+      if (data.userId === userId) {
+        // Another session of this account registered a new key while this
+        // device was in the room; this device's key no longer receives keys.
+        if (data.publicKey && data.publicKey !== publicKeyB64) {
+          handOverRoomKey(data.publicKey, canModerateRef.current);
         }
+        return;
       }
+      setUsers((prev) =>
+        prev.map((member) =>
+          member.userId === data.userId ? { ...member, publicKey: data.publicKey } : member,
+        ),
+      );
+      if (data.publicKey) sendRoomKeyEnvelope(data.userId, data.publicKey);
     }
     function onUserLeft(data: { userId: string; message: Message }) {
       setUsers((prev) => prev.filter((u) => u.userId !== data.userId));
-      setMessages((prev) => [...prev, data.message]);
+      setMessages((prev) => appendMessageById(prev, data.message));
     }
     function onKicked(data: {
       roomId: string;
@@ -279,28 +402,43 @@ export default function RoomScreen() {
     }
     function onRoomKeyEnvelope(data: RoomKeyEnvelope & { roomId?: string }) {
       if (data.roomId === roomId) {
-        void acceptRoomKeyEnvelope(data);
+        // Persistence failures are exposed by CryptoContext through
+        // roomKeyPersistenceFailures. This listener is intentionally
+        // fire-and-forget, so consume the matching rejection here while the
+        // screen switches to its existing retry warning.
+        void acceptRoomKeyEnvelope(data).catch(() => undefined);
       }
     }
 
+    const joinRoom = () => {
+      const lastSeenMessageId = messagesRef.current.at(-1)?.id;
+      socket.emit("join-room", {
+        roomId,
+        createIfMissing: createIfMissing !== false,
+        roomName,
+        ...(lastSeenMessageId ? { lastSeenMessageId } : {}),
+      });
+    };
+
+    socket.on("connect", joinRoom);
     socket.on("room-joined", onRoomJoined);
     socket.on("message", onMessage);
     socket.on("user-joined", onUserJoined);
+    socket.on("user-key-changed", onUserKeyChanged);
     socket.on("user-left", onUserLeft);
     socket.on("kicked", onKicked);
     socket.on("error", onSocketError);
     socket.on("room-banned", onRoomBanned);
     socket.on("room-key-envelope", onRoomKeyEnvelope);
-    socket.emit("join-room", {
-      roomId,
-      createIfMissing: createIfMissing !== false,
-      roomName,
-    });
+    if (socket.connected) joinRoom();
 
     return () => {
+      disposed = true;
+      socket.off("connect", joinRoom);
       socket.off("room-joined", onRoomJoined);
       socket.off("message", onMessage);
       socket.off("user-joined", onUserJoined);
+      socket.off("user-key-changed", onUserKeyChanged);
       socket.off("user-left", onUserLeft);
       socket.off("kicked", onKicked);
       socket.off("error", onSocketError);
@@ -320,6 +458,7 @@ export default function RoomScreen() {
     decryptIncomingMessage,
     encryptRoomKey,
     getRoomKey,
+    markDeviceKeySuperseded,
     publicKeyB64,
     roomKeyPersistenceFailure,
     router,
@@ -413,11 +552,14 @@ export default function RoomScreen() {
   const retrySavingRoomKey = useCallback(async () => {
     setRetryingRoomKey(true);
     try {
-      await retryRoomKeyPersistence(roomId);
+      const persisted = await retryRoomKeyPersistence(roomId);
+      if (persisted) {
+        setHasRoomKey(!!getRoomKey(roomId));
+      }
     } finally {
       setRetryingRoomKey(false);
     }
-  }, [retryRoomKeyPersistence, roomId]);
+  }, [getRoomKey, retryRoomKeyPersistence, roomId]);
 
   const openCall = useCallback(() => {
     if (roomKeyPersistenceFailure) return;
@@ -479,6 +621,7 @@ export default function RoomScreen() {
   }
 
   if (roomKeyPersistenceFailure) {
+    const isLoadFailure = roomKeyPersistenceFailure.kind === "load";
     return (
       <View
         testID="room-key-storage-warning"
@@ -497,7 +640,9 @@ export default function RoomScreen() {
           accessibilityRole="header"
           style={[styles.blockedTitle, { color: colors.foreground }]}
         >
-          Encryption key not saved
+          {isLoadFailure
+            ? "Saved encryption key could not be read"
+            : "Encryption key not saved"}
         </Text>
         <Text style={[styles.blockedDescription, { color: colors.mutedForeground }]}>
           {roomKeyPersistenceFailure.message}
@@ -505,14 +650,61 @@ export default function RoomScreen() {
         <TouchableOpacity
           testID="retry-room-key-save-button"
           accessibilityRole="button"
-          accessibilityLabel="Retry saving room encryption key"
+          accessibilityLabel={
+            isLoadFailure
+              ? "Retry reading room encryption key"
+              : "Retry saving room encryption key"
+          }
           disabled={retryingRoomKey}
           onPress={() => void retrySavingRoomKey()}
           style={[styles.keyWarningButton, { borderColor: colors.destructive }]}
         >
           <Text style={[styles.keyWarningButtonText, { color: colors.destructive }]}>
-            {retryingRoomKey ? "Retrying…" : "Retry saving key"}
+            {retryingRoomKey
+              ? "Retrying…"
+              : isLoadFailure
+                ? "Retry reading key"
+                : "Retry saving key"}
           </Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
+  if (!roomReady && deviceKeyStatus === "superseded") {
+    return (
+      <View
+        testID="room-key-superseded"
+        accessibilityRole="alert"
+        style={[
+          styles.blockedRoot,
+          {
+            backgroundColor: colors.background,
+            paddingTop: headerTop + 24,
+            paddingBottom: Math.max(insets.bottom, 24),
+          },
+        ]}
+      >
+        <Feather name="shield-off" size={40} color={colors.destructive} />
+        <Text
+          accessibilityRole="header"
+          style={[styles.blockedTitle, { color: colors.foreground }]}
+        >
+          Encryption key replaced
+        </Text>
+        <Text style={[styles.blockedDescription, { color: colors.mutedForeground }]}>
+          Another device or session registered a different encryption key for
+          your account, so new room keys no longer reach this device. Reset the
+          device encryption key in your profile to use encrypted rooms here.
+        </Text>
+        <TouchableOpacity
+          testID="room-key-superseded-profile"
+          accessibilityRole="button"
+          accessibilityLabel="Open profile to reset the device encryption key"
+          onPress={() => router.replace("/(tabs)/profile" as never)}
+          style={[styles.blockedButton, { backgroundColor: colors.primary }]}
+        >
+          <Text style={styles.blockedButtonText}>Open profile</Text>
         </TouchableOpacity>
       </View>
     );
@@ -537,7 +729,9 @@ export default function RoomScreen() {
           Opening room…
         </Text>
         <Text style={[styles.blockedDescription, { color: colors.mutedForeground }]}>
-          Connecting securely to the conversation.
+          {isDeviceKeyRegistrationSlow
+            ? "Still registering your device key. Check your connection; encrypted rooms stay closed until it completes."
+            : "Connecting securely to the conversation."}
         </Text>
       </View>
     );
@@ -678,8 +872,54 @@ export default function RoomScreen() {
         </ScrollView>
       )}
 
+      {!hasRoomKey ? (
+        <View
+          testID="room-key-waiting"
+          accessibilityRole="alert"
+          style={[
+            styles.keyWarning,
+            { backgroundColor: colors.card, borderBottomColor: colors.border },
+          ]}
+        >
+          <Feather name="key" size={18} color={colors.mutedForeground} />
+          <View style={styles.keyWarningCopy}>
+            <Text style={[styles.keyWarningTitle, { color: colors.foreground }]}>
+              Waiting for this room's encryption key
+            </Text>
+            <Text style={[styles.keyWarningText, { color: colors.mutedForeground }]}>
+              {canModerate
+                ? "You created this room, so only another signed-in device or session of yours that still holds the key can hand it to this device key; it does so while it has this room open. Messages stay locked until it arrives."
+                : "The room creator's device sends it to your current device key while they are online. Messages stay locked until it arrives."}
+            </Text>
+          </View>
+        </View>
+      ) : null}
+
+      {messageReplayGap ? (
+        <View
+          testID="room-message-gap-warning"
+          accessibilityRole="alert"
+          style={[
+            styles.keyWarning,
+            { backgroundColor: colors.card, borderBottomColor: colors.destructive },
+          ]}
+        >
+          <Feather name="alert-triangle" size={18} color={colors.destructive} />
+          <View style={styles.keyWarningCopy}>
+            <Text style={[styles.keyWarningTitle, { color: colors.foreground }]}>
+              Some messages could not be recovered
+            </Text>
+            <Text style={[styles.keyWarningText, { color: colors.mutedForeground }]}>
+              This device was disconnected longer than the room history kept for
+              reconnects. Newer messages are shown below.
+            </Text>
+          </View>
+        </View>
+      ) : null}
+
       <FlatList
         testID="room-message-list"
+        accessibilityLabel={`${messages.length} messages`}
         data={[...messages].reverse()}
         keyExtractor={(m) => m.id}
         renderItem={({ item }) => (
