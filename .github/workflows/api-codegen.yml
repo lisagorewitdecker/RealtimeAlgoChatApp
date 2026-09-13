@@ -38,6 +38,9 @@ jobs:
       - name: Verify generated API clients
         run: pnpm validate:api-codegen
 
+      - name: Verify generated API-break guidance
+        run: pnpm validate:api-break-guidance
+
       # For an intentional versioned break, add both declarations to the pull request description.
       # Inline example:
       #   API_BREAKING_CHANGE_JUSTIFICATION: <why the existing contract must break>

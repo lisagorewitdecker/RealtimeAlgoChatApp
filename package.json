@@ -12,6 +12,8 @@
     "hooks:dispatcher:uninstall": "node lib/api-spec/scripts/install-repository-git-hooks.mjs --uninstall-dispatcher",
     "validate:staged-codegen-backups": "node lib/api-spec/scripts/check-staged-codegen-backups.mjs",
     "validate:api-codegen": "pnpm --filter @workspace/api-spec run check-generated",
+    "sync:api-break-guidance": "node lib/api-spec/scripts/sync-contract-guidance.mjs",
+    "validate:api-break-guidance": "node lib/api-spec/scripts/sync-contract-guidance.mjs --check",
     "validate:api-compatibility": "node lib/api-spec/scripts/check-contract-compatibility.mjs",
     "validate:native-large-text-evidence": "bash scripts/check-native-large-text-evidence.sh",
     "validate:mockup-clean": "pnpm --filter @workspace/mockup-sandbox run typecheck:clean",
