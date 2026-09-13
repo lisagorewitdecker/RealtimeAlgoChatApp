@@ -73,6 +73,25 @@ jobs:
           sarif_file: eslint-results.sarif
           wait-for-processing: true
 
+      - name: Print ESLint diagnostics
+        if: ${{ always() && steps.lint.outputs.exit_code != '0' && hashFiles('eslint-results.sarif') != '' }}
+        run: |
+          node -e '
+          const fs = require("node:fs");
+          const sarif = JSON.parse(fs.readFileSync("eslint-results.sarif", "utf8"));
+          const runs = Array.isArray(sarif.runs) ? sarif.runs : [];
+          for (const run of runs) {
+            const results = Array.isArray(run.results) ? run.results : [];
+            for (const result of results) {
+              const location = result.locations?.[0]?.physicalLocation;
+              const path = location?.artifactLocation?.uri ?? "<unknown-file>";
+              const line = location?.region?.startLine ?? "?";
+              const message = result.message?.text ?? "<no message>";
+              const rule = result.ruleId ?? "eslint";
+              console.log(`${path}:${line} [${rule}] ${message}`);
+            }
+          }'
+
       - name: Fail on ESLint errors
         if: ${{ always() && steps.lint.outputs.exit_code != '0' }}
         run: exit 1

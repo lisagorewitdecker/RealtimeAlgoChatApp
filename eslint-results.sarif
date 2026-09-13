@@ -1,0 +1,459 @@
+{
+  "version": "2.1.0",
+  "$schema": "http://json.schemastore.org/sarif-2.1.0-rtm.5",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "ESLint",
+          "informationUri": "https://eslint.org",
+          "rules": [],
+          "version": "8.57.1"
+        }
+      },
+      "artifacts": [
+        {
+          "location": {
+            "uri": "file:///home/runner/work/RealtimeAlgoChatApp/RealtimeAlgoChatApp/artifacts/api-server/build.mjs"
+          }
+        },
+        {
+          "location": {
+            "uri": "file:///home/runner/work/RealtimeAlgoChatApp/RealtimeAlgoChatApp/artifacts/api-server/vitest.config.ts"
+          }
+        },
+        {
+          "location": {
+            "uri": "file:///home/runner/work/RealtimeAlgoChatApp/RealtimeAlgoChatApp/artifacts/chat-app/__tests__/AccessibilityContext.test.tsx"
+          }
+        },
+        {
+          "location": {
+            "uri": "file:///home/runner/work/RealtimeAlgoChatApp/RealtimeAlgoChatApp/artifacts/chat-app/__tests__/AiPanel.test.tsx"
+          }
+        },
+        {
+          "location": {
+            "uri": "file:///home/runner/work/RealtimeAlgoChatApp/RealtimeAlgoChatApp/artifacts/chat-app/__tests__/Analytics.test.ts"
+          }
+        },
+        {
+          "location": {
+            "uri": "file:///home/runner/work/RealtimeAlgoChatApp/RealtimeAlgoChatApp/artifacts/chat-app/__tests__/AppFooter.test.tsx"
+          }
+        },
+        {
+          "location": {
+            "uri": "file:///home/runner/work/RealtimeAlgoChatApp/RealtimeAlgoChatApp/artifacts/chat-app/__tests__/Call.test.tsx"
+          }
+        },
+        {
+          "location": {
+            "uri": "file:///home/runner/work/RealtimeAlgoChatApp/RealtimeAlgoChatApp/artifacts/chat-app/__tests__/CryptoContext.test.tsx"
+          }
+        },
+        {
+          "location": {
+            "uri": "file:///home/runner/work/RealtimeAlgoChatApp/RealtimeAlgoChatApp/artifacts/chat-app/__tests__/EntryBranding.test.tsx"
+          }
+        },
+        {
+          "location": {
+            "uri": "file:///home/runner/work/RealtimeAlgoChatApp/RealtimeAlgoChatApp/artifacts/chat-app/__tests__/Home.test.tsx"
+          }
+        },
+        {
+          "location": {
+            "uri": "file:///home/runner/work/RealtimeAlgoChatApp/RealtimeAlgoChatApp/artifacts/chat-app/__tests__/NewRoom.test.tsx"
+          }
+        },
+        {
+          "location": {
+            "uri": "file:///home/runner/work/RealtimeAlgoChatApp/RealtimeAlgoChatApp/artifacts/chat-app/__tests__/ProfileModeration.test.tsx"
+          }
+        },
+        {
+          "location": {
+            "uri": "file:///home/runner/work/RealtimeAlgoChatApp/RealtimeAlgoChatApp/artifacts/chat-app/__tests__/Room.test.tsx"
+          }
+        },
+        {
+          "location": {
+            "uri": "file:///home/runner/work/RealtimeAlgoChatApp/RealtimeAlgoChatApp/artifacts/chat-app/__tests__/ScaledText.test.ts"
+          }
+        },
+        {
+          "location": {
+            "uri": "file:///home/runner/work/RealtimeAlgoChatApp/RealtimeAlgoChatApp/artifacts/chat-app/__tests__/Setup.test.tsx"
+          }
+        },
+        {
+          "location": {
+            "uri": "file:///home/runner/work/RealtimeAlgoChatApp/RealtimeAlgoChatApp/artifacts/chat-app/__tests__/SignIn.test.tsx"
+          }
+        },
+        {
+          "location": {
+            "uri": "file:///home/runner/work/RealtimeAlgoChatApp/RealtimeAlgoChatApp/artifacts/chat-app/__tests__/SignUp.test.tsx"
+          }
+        },
+        {
+          "location": {
+            "uri": "file:///home/runner/work/RealtimeAlgoChatApp/RealtimeAlgoChatApp/artifacts/chat-app/__tests__/sentry.test.ts"
+          }
+        },
+        {
+          "location": {
+            "uri": "file:///home/runner/work/RealtimeAlgoChatApp/RealtimeAlgoChatApp/artifacts/chat-app/babel.config.js"
+          }
+        },
+        {
+          "location": {
+            "uri": "file:///home/runner/work/RealtimeAlgoChatApp/RealtimeAlgoChatApp/artifacts/chat-app/expo-env.d.ts"
+          }
+        },
+        {
+          "location": {
+            "uri": "file:///home/runner/work/RealtimeAlgoChatApp/RealtimeAlgoChatApp/artifacts/chat-app/jest.setup.js"
+          }
+        },
+        {
+          "location": {
+            "uri": "file:///home/runner/work/RealtimeAlgoChatApp/RealtimeAlgoChatApp/artifacts/chat-app/metro.config.js"
+          }
+        },
+        {
+          "location": {
+            "uri": "file:///home/runner/work/RealtimeAlgoChatApp/RealtimeAlgoChatApp/artifacts/mockup-sandbox/mockupPreviewPlugin.ts"
+          }
+        },
+        {
+          "location": {
+            "uri": "file:///home/runner/work/RealtimeAlgoChatApp/RealtimeAlgoChatApp/artifacts/mockup-sandbox/src/App.tsx"
+          }
+        },
+        {
+          "location": {
+            "uri": "file:///home/runner/work/RealtimeAlgoChatApp/RealtimeAlgoChatApp/artifacts/mockup-sandbox/src/components/ui/accordion.tsx"
+          }
+        },
+        {
+          "location": {
+            "uri": "file:///home/runner/work/RealtimeAlgoChatApp/RealtimeAlgoChatApp/artifacts/mockup-sandbox/src/components/ui/alert-dialog.tsx"
+          }
+        },
+        {
+          "location": {
+            "uri": "file:///home/runner/work/RealtimeAlgoChatApp/RealtimeAlgoChatApp/artifacts/mockup-sandbox/src/components/ui/alert.tsx"
+          }
+        },
+        {
+          "location": {
+            "uri": "file:///home/runner/work/RealtimeAlgoChatApp/RealtimeAlgoChatApp/artifacts/mockup-sandbox/src/components/ui/aspect-ratio.tsx"
+          }
+        },
+        {
+          "location": {
+            "uri": "file:///home/runner/work/RealtimeAlgoChatApp/RealtimeAlgoChatApp/artifacts/mockup-sandbox/src/components/ui/avatar.tsx"
+          }
+        },
+        {
+          "location": {
+            "uri": "file:///home/runner/work/RealtimeAlgoChatApp/RealtimeAlgoChatApp/artifacts/mockup-sandbox/src/components/ui/badge.tsx"
+          }
+        },
+        {
+          "location": {
+            "uri": "file:///home/runner/work/RealtimeAlgoChatApp/RealtimeAlgoChatApp/artifacts/mockup-sandbox/src/components/ui/breadcrumb.tsx"
+          }
+        },
+        {
+          "location": {
+            "uri": "file:///home/runner/work/RealtimeAlgoChatApp/RealtimeAlgoChatApp/artifacts/mockup-sandbox/src/components/ui/button-group.tsx"
+          }
+        },
+        {
+          "location": {
+            "uri": "file:///home/runner/work/RealtimeAlgoChatApp/RealtimeAlgoChatApp/artifacts/mockup-sandbox/src/components/ui/button.tsx"
+          }
+        },
+        {
+          "location": {
+            "uri": "file:///home/runner/work/RealtimeAlgoChatApp/RealtimeAlgoChatApp/artifacts/mockup-sandbox/src/components/ui/calendar.tsx"
+          }
+        },
+        {
+          "location": {
+            "uri": "file:///home/runner/work/RealtimeAlgoChatApp/RealtimeAlgoChatApp/artifacts/mockup-sandbox/src/components/ui/card.tsx"
+          }
+        },
+        {
+          "location": {
+            "uri": "file:///home/runner/work/RealtimeAlgoChatApp/RealtimeAlgoChatApp/artifacts/mockup-sandbox/src/components/ui/carousel.tsx"
+          }
+        },
+        {
+          "location": {
+            "uri": "file:///home/runner/work/RealtimeAlgoChatApp/RealtimeAlgoChatApp/artifacts/mockup-sandbox/src/components/ui/chart.tsx"
+          }
+        },
+        {
+          "location": {
+            "uri": "file:///home/runner/work/RealtimeAlgoChatApp/RealtimeAlgoChatApp/artifacts/mockup-sandbox/src/components/ui/checkbox.tsx"
+          }
+        },
+        {
+          "location": {
+            "uri": "file:///home/runner/work/RealtimeAlgoChatApp/RealtimeAlgoChatApp/artifacts/mockup-sandbox/src/components/ui/collapsible.tsx"
+          }
+        },
+        {
+          "location": {
+            "uri": "file:///home/runner/work/RealtimeAlgoChatApp/RealtimeAlgoChatApp/artifacts/mockup-sandbox/src/components/ui/command.tsx"
+          }
+        },
+        {
+          "location": {
+            "uri": "file:///home/runner/work/RealtimeAlgoChatApp/RealtimeAlgoChatApp/artifacts/mockup-sandbox/src/components/ui/context-menu.tsx"
+          }
+        },
+        {
+          "location": {
+            "uri": "file:///home/runner/work/RealtimeAlgoChatApp/RealtimeAlgoChatApp/artifacts/mockup-sandbox/src/components/ui/dialog.tsx"
+          }
+        },
+        {
+          "location": {
+            "uri": "file:///home/runner/work/RealtimeAlgoChatApp/RealtimeAlgoChatApp/artifacts/mockup-sandbox/src/components/ui/drawer.tsx"
+          }
+        },
+        {
+          "location": {
+            "uri": "file:///home/runner/work/RealtimeAlgoChatApp/RealtimeAlgoChatApp/artifacts/mockup-sandbox/src/components/ui/dropdown-menu.tsx"
+          }
+        },
+        {
+          "location": {
+            "uri": "file:///home/runner/work/RealtimeAlgoChatApp/RealtimeAlgoChatApp/artifacts/mockup-sandbox/src/components/ui/empty.tsx"
+          }
+        },
+        {
+          "location": {
+            "uri": "file:///home/runner/work/RealtimeAlgoChatApp/RealtimeAlgoChatApp/artifacts/mockup-sandbox/src/components/ui/field.tsx"
+          }
+        },
+        {
+          "location": {
+            "uri": "file:///home/runner/work/RealtimeAlgoChatApp/RealtimeAlgoChatApp/artifacts/mockup-sandbox/src/components/ui/form.tsx"
+          }
+        },
+        {
+          "location": {
+            "uri": "file:///home/runner/work/RealtimeAlgoChatApp/RealtimeAlgoChatApp/artifacts/mockup-sandbox/src/components/ui/hover-card.tsx"
+          }
+        },
+        {
+          "location": {
+            "uri": "file:///home/runner/work/RealtimeAlgoChatApp/RealtimeAlgoChatApp/artifacts/mockup-sandbox/src/components/ui/input-group.tsx"
+          }
+        },
+        {
+          "location": {
+            "uri": "file:///home/runner/work/RealtimeAlgoChatApp/RealtimeAlgoChatApp/artifacts/mockup-sandbox/src/components/ui/input-otp.tsx"
+          }
+        },
+        {
+          "location": {
+            "uri": "file:///home/runner/work/RealtimeAlgoChatApp/RealtimeAlgoChatApp/artifacts/mockup-sandbox/src/components/ui/input.tsx"
+          }
+        },
+        {
+          "location": {
+            "uri": "file:///home/runner/work/RealtimeAlgoChatApp/RealtimeAlgoChatApp/artifacts/mockup-sandbox/src/components/ui/item.tsx"
+          }
+        },
+        {
+          "location": {
+            "uri": "file:///home/runner/work/RealtimeAlgoChatApp/RealtimeAlgoChatApp/artifacts/mockup-sandbox/src/components/ui/kbd.tsx"
+          }
+        },
+        {
+          "location": {
+            "uri": "file:///home/runner/work/RealtimeAlgoChatApp/RealtimeAlgoChatApp/artifacts/mockup-sandbox/src/components/ui/label.tsx"
+          }
+        },
+        {
+          "location": {
+            "uri": "file:///home/runner/work/RealtimeAlgoChatApp/RealtimeAlgoChatApp/artifacts/mockup-sandbox/src/components/ui/menubar.tsx"
+          }
+        },
+        {
+          "location": {
+            "uri": "file:///home/runner/work/RealtimeAlgoChatApp/RealtimeAlgoChatApp/artifacts/mockup-sandbox/src/components/ui/navigation-menu.tsx"
+          }
+        },
+        {
+          "location": {
+            "uri": "file:///home/runner/work/RealtimeAlgoChatApp/RealtimeAlgoChatApp/artifacts/mockup-sandbox/src/components/ui/pagination.tsx"
+          }
+        },
+        {
+          "location": {
+            "uri": "file:///home/runner/work/RealtimeAlgoChatApp/RealtimeAlgoChatApp/artifacts/mockup-sandbox/src/components/ui/popover.tsx"
+          }
+        },
+        {
+          "location": {
+            "uri": "file:///home/runner/work/RealtimeAlgoChatApp/RealtimeAlgoChatApp/artifacts/mockup-sandbox/src/components/ui/progress.tsx"
+          }
+        },
+        {
+          "location": {
+            "uri": "file:///home/runner/work/RealtimeAlgoChatApp/RealtimeAlgoChatApp/artifacts/mockup-sandbox/src/components/ui/radio-group.tsx"
+          }
+        },
+        {
+          "location": {
+            "uri": "file:///home/runner/work/RealtimeAlgoChatApp/RealtimeAlgoChatApp/artifacts/mockup-sandbox/src/components/ui/resizable.tsx"
+          }
+        },
+        {
+          "location": {
+            "uri": "file:///home/runner/work/RealtimeAlgoChatApp/RealtimeAlgoChatApp/artifacts/mockup-sandbox/src/components/ui/scroll-area.tsx"
+          }
+        },
+        {
+          "location": {
+            "uri": "file:///home/runner/work/RealtimeAlgoChatApp/RealtimeAlgoChatApp/artifacts/mockup-sandbox/src/components/ui/select.tsx"
+          }
+        },
+        {
+          "location": {
+            "uri": "file:///home/runner/work/RealtimeAlgoChatApp/RealtimeAlgoChatApp/artifacts/mockup-sandbox/src/components/ui/separator.tsx"
+          }
+        },
+        {
+          "location": {
+            "uri": "file:///home/runner/work/RealtimeAlgoChatApp/RealtimeAlgoChatApp/artifacts/mockup-sandbox/src/components/ui/sheet.tsx"
+          }
+        },
+        {
+          "location": {
+            "uri": "file:///home/runner/work/RealtimeAlgoChatApp/RealtimeAlgoChatApp/artifacts/mockup-sandbox/src/components/ui/sidebar.tsx"
+          }
+        },
+        {
+          "location": {
+            "uri": "file:///home/runner/work/RealtimeAlgoChatApp/RealtimeAlgoChatApp/artifacts/mockup-sandbox/src/components/ui/skeleton.tsx"
+          }
+        },
+        {
+          "location": {
+            "uri": "file:///home/runner/work/RealtimeAlgoChatApp/RealtimeAlgoChatApp/artifacts/mockup-sandbox/src/components/ui/slider.tsx"
+          }
+        },
+        {
+          "location": {
+            "uri": "file:///home/runner/work/RealtimeAlgoChatApp/RealtimeAlgoChatApp/artifacts/mockup-sandbox/src/components/ui/sonner.tsx"
+          }
+        },
+        {
+          "location": {
+            "uri": "file:///home/runner/work/RealtimeAlgoChatApp/RealtimeAlgoChatApp/artifacts/mockup-sandbox/src/components/ui/spinner.tsx"
+          }
+        },
+        {
+          "location": {
+            "uri": "file:///home/runner/work/RealtimeAlgoChatApp/RealtimeAlgoChatApp/artifacts/mockup-sandbox/src/components/ui/switch.tsx"
+          }
+        },
+        {
+          "location": {
+            "uri": "file:///home/runner/work/RealtimeAlgoChatApp/RealtimeAlgoChatApp/artifacts/mockup-sandbox/src/components/ui/table.tsx"
+          }
+        },
+        {
+          "location": {
+            "uri": "file:///home/runner/work/RealtimeAlgoChatApp/RealtimeAlgoChatApp/artifacts/mockup-sandbox/src/components/ui/tabs.tsx"
+          }
+        },
+        {
+          "location": {
+            "uri": "file:///home/runner/work/RealtimeAlgoChatApp/RealtimeAlgoChatApp/artifacts/mockup-sandbox/src/components/ui/textarea.tsx"
+          }
+        },
+        {
+          "location": {
+            "uri": "file:///home/runner/work/RealtimeAlgoChatApp/RealtimeAlgoChatApp/artifacts/mockup-sandbox/src/components/ui/toast.tsx"
+          }
+        },
+        {
+          "location": {
+            "uri": "file:///home/runner/work/RealtimeAlgoChatApp/RealtimeAlgoChatApp/artifacts/mockup-sandbox/src/components/ui/toaster.tsx"
+          }
+        },
+        {
+          "location": {
+            "uri": "file:///home/runner/work/RealtimeAlgoChatApp/RealtimeAlgoChatApp/artifacts/mockup-sandbox/src/components/ui/toggle-group.tsx"
+          }
+        },
+        {
+          "location": {
+            "uri": "file:///home/runner/work/RealtimeAlgoChatApp/RealtimeAlgoChatApp/artifacts/mockup-sandbox/src/components/ui/toggle.tsx"
+          }
+        },
+        {
+          "location": {
+            "uri": "file:///home/runner/work/RealtimeAlgoChatApp/RealtimeAlgoChatApp/artifacts/mockup-sandbox/src/components/ui/tooltip.tsx"
+          }
+        },
+        {
+          "location": {
+            "uri": "file:///home/runner/work/RealtimeAlgoChatApp/RealtimeAlgoChatApp/artifacts/mockup-sandbox/src/hooks/use-mobile.tsx"
+          }
+        },
+        {
+          "location": {
+            "uri": "file:///home/runner/work/RealtimeAlgoChatApp/RealtimeAlgoChatApp/artifacts/mockup-sandbox/src/hooks/use-toast.ts"
+          }
+        },
+        {
+          "location": {
+            "uri": "file:///home/runner/work/RealtimeAlgoChatApp/RealtimeAlgoChatApp/artifacts/mockup-sandbox/src/lib/utils.ts"
+          }
+        },
+        {
+          "location": {
+            "uri": "file:///home/runner/work/RealtimeAlgoChatApp/RealtimeAlgoChatApp/artifacts/mockup-sandbox/src/main.tsx"
+          }
+        },
+        {
+          "location": {
+            "uri": "file:///home/runner/work/RealtimeAlgoChatApp/RealtimeAlgoChatApp/artifacts/mockup-sandbox/vite.config.ts"
+          }
+        },
+        {
+          "location": {
+            "uri": "file:///home/runner/work/RealtimeAlgoChatApp/RealtimeAlgoChatApp/scripts/src/hello.js"
+          }
+        },
+        {
+          "location": {
+            "uri": "file:///home/runner/work/RealtimeAlgoChatApp/RealtimeAlgoChatApp/vendor/image-size-secure/index.d.ts"
+          }
+        },
+        {
+          "location": {
+            "uri": "file:///home/runner/work/RealtimeAlgoChatApp/RealtimeAlgoChatApp/vendor/image-size-secure/index.js"
+          }
+        },
+        {
+          "location": {
+            "uri": "file:///home/runner/work/RealtimeAlgoChatApp/RealtimeAlgoChatApp/vendor/image-size-secure/test.js"
+          }
+        }
+      ],
+      "results": []
+    }
+  ]
+}
