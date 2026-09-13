@@ -53,5 +53,12 @@ module.exports = {
         },
       },
     },
+    {
+      files: ["**/__tests__/**/*.{ts,tsx,js,jsx}", "**/*.test.{ts,tsx,js,jsx}"],
+      rules: {
+        "@typescript-eslint/no-require-imports": "off",
+        "@typescript-eslint/no-explicit-any": "off",
+      },
+    },
   ],
 };
