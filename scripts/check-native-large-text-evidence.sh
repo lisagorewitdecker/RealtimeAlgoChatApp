@@ -41,6 +41,30 @@ trimmed_value() {
   metadata_value "$metadata_path" "$key" | tr -d '\r' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//'
 }
 
+review_notes_declaration_count() {
+  local record_path="$1"
+
+  awk '
+    {
+      sub(/\r$/, "")
+      if (in_notes) {
+        if ($0 == delimiter) in_notes = 0
+        next
+      }
+      if ($0 ~ /^notes=/) {
+        count++
+        next
+      }
+      if ($0 ~ /^notes<</) {
+        count++
+        delimiter = substr($0, length("notes<<") + 1)
+        if (delimiter != "") in_notes = 1
+      }
+    }
+    END { print count + 0 }
+  ' "$record_path"
+}
+
 review_notes() {
   local record_path="$1"
   local block_declaration
@@ -337,14 +361,22 @@ validate_review_record() {
     return
   fi
 
-  local reviewer reviewed_at decision record_build_id record_platform approval_scope notes
+  local reviewer reviewed_at decision record_build_id record_platform approval_scope notes notes_declaration_count
   reviewer="$(trimmed_value "$record_path" reviewer)"
   reviewed_at="$(trimmed_value "$record_path" reviewed_at_utc)"
   decision="$(trimmed_value "$record_path" decision)"
   record_build_id="$(trimmed_value "$record_path" candidate_build_id)"
   record_platform="$(trimmed_value "$record_path" platform)"
   approval_scope="$(trimmed_value "$record_path" approval_scope)"
-  notes="$(review_notes "$record_path")"
+  notes_declaration_count="$(review_notes_declaration_count "$record_path")"
+  notes=""
+
+  if ((notes_declaration_count > 1)); then
+    issue "$platform" "Review record has ${notes_declaration_count} notes declarations in ${record_path}. Use exactly one notes=... line or one notes<<... block so the review finding is unambiguous."
+    record_valid=0
+  else
+    notes="$(review_notes "$record_path")"
+  fi
 
   if ! review_notes_block_is_closed "$record_path"; then
     issue "$platform" "Review record has an unterminated notes block in ${record_path}. Close it with the exact delimiter named after notes<<."

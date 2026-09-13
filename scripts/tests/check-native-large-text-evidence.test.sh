@@ -330,12 +330,60 @@ assert_contains "$multiline_rejected_output" "completeness check FAILED with 1 i
 assert_not_contains "$multiline_rejected_output" $'\r'
 assert_not_contains "$multiline_rejected_output" "unterminated notes block"
 
+conflicting_notes_root="$TEST_ROOT/conflicting-notes"
+write_valid_run "$conflicting_notes_root" ios
+write_valid_run "$conflicting_notes_root" android
+write_review_record "$conflicting_notes_root" ios APPROVED
+write_review_record "$conflicting_notes_root" android REJECTED
+cat >> "$conflicting_notes_root/android/20260909T120000Z/review-record.txt" <<'EOF'
+notes<<FINDINGS
+This content must not be selected or printed.
+FINDINGS
+EOF
+if conflicting_notes_output="$(bash "$CHECKER" "$conflicting_notes_root" 2>&1)"; then
+  echo "conflicting notes declarations case unexpectedly passed" >&2
+  exit 1
+fi
+assert_contains "$conflicting_notes_output" "[android] Review record has 2 notes declarations"
+assert_contains "$conflicting_notes_output" "Use exactly one notes=... line or one notes<<... block so the review finding is unambiguous."
+assert_not_contains "$conflicting_notes_output" "This content must not be selected or printed."
+assert_not_contains "$conflicting_notes_output" "[android] Review notes (literal evidence):"
+assert_contains "$conflicting_notes_output" "completeness check FAILED with 2 issue(s)"
+
+duplicate_notes_blocks_root="$TEST_ROOT/duplicate-notes-blocks"
+write_valid_run "$duplicate_notes_blocks_root" ios
+write_valid_run "$duplicate_notes_blocks_root" android
+write_review_record "$duplicate_notes_blocks_root" ios APPROVED
+cat > "$duplicate_notes_blocks_root/android/20260909T120000Z/review-record.txt" <<'EOF'
+platform=android
+reviewer=Ada Reviewer
+reviewed_at_utc=2026-09-09T13:00:00Z
+candidate_build_id=build-android
+decision=APPROVED
+notes<<FIRST
+First finding.
+FIRST
+notes<<SECOND
+Second finding.
+SECOND
+EOF
+if duplicate_notes_blocks_output="$(bash "$CHECKER" "$duplicate_notes_blocks_root" 2>&1)"; then
+  echo "duplicate notes blocks case unexpectedly passed" >&2
+  exit 1
+fi
+assert_contains "$duplicate_notes_blocks_output" "[android] Review record has 2 notes declarations"
+assert_contains "$duplicate_notes_blocks_output" "completeness check FAILED with 1 issue(s)"
+
 unterminated_notes_root="$TEST_ROOT/unterminated-notes"
 write_valid_run "$unterminated_notes_root" ios
 write_valid_run "$unterminated_notes_root" android
 write_review_record "$unterminated_notes_root" ios APPROVED
-write_review_record "$unterminated_notes_root" android APPROVED
-cat >> "$unterminated_notes_root/android/20260909T120000Z/review-record.txt" <<'EOF'
+cat > "$unterminated_notes_root/android/20260909T120000Z/review-record.txt" <<'EOF'
+platform=android
+reviewer=Ada Reviewer
+reviewed_at_utc=2026-09-09T13:00:00Z
+candidate_build_id=build-android
+decision=APPROVED
 notes<<FINDINGS
 - This block was not closed.
 EOF
