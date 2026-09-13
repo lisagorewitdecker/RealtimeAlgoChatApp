@@ -65,6 +65,9 @@ const PHASE_TIMEOUTS = {
 
 const RECOVERY_PHASE_NAMES = {
   signInAndCreateRoom: "sign in creator and create encrypted room",
+  signInAndJoinRoom: "sign in member and receive initial room key",
+  storeEncryptedHistory: "store encrypted history before key reset",
+  resetMemberKey: "reset member device key in a second session",
   recoverFreshEnvelope: "recover a fresh room-key envelope after reset",
   confirmDecryption: "decrypt history and a new message with recovered key",
   confirmReloadPersistence: "reload room and reuse recovered key",
@@ -252,7 +255,7 @@ test("a member recovers a live encrypted room after resetting their device key",
       Awaited<ReturnType<typeof readMemberEnvelope>>
     >;
     await test.step(
-      "sign in member and receive initial room key",
+      RECOVERY_PHASE_NAMES.signInAndJoinRoom,
       async () => {
         member = await createSignedInPage(browser, users[1]!, contexts);
         await roomJoinButton(member.page, roomName).click();
@@ -271,7 +274,7 @@ test("a member recovers a live encrypted room after resetting their device key",
     );
 
     await test.step(
-      "store encrypted history before key reset",
+      RECOVERY_PHASE_NAMES.storeEncryptedHistory,
       async () => {
         await creator.page
           .getByTestId("room-composer-input")
@@ -286,7 +289,7 @@ test("a member recovers a live encrypted room after resetting their device key",
 
     let resetSession!: SignedInPage;
     await test.step(
-      "reset member device key in a second session",
+      RECOVERY_PHASE_NAMES.resetMemberKey,
       async () => {
         // Keep the first member session in the room so the reset session's
         // later join takes the explicit user-key-changed recovery path.
@@ -506,6 +509,15 @@ const diagnosticActions: Record<string, (page: Page) => Promise<void>> = {
   [RECOVERY_PHASE_NAMES.signInAndCreateRoom]: async (page: Page) => {
     await page.route("**/*", () => new Promise<void>(() => {}));
     await page.goto("http://recovery-diagnostic.invalid/");
+  },
+  [RECOVERY_PHASE_NAMES.signInAndJoinRoom]: async (page: Page) => {
+    await page.getByRole("button", { name: "Join diagnostic room" }).click();
+  },
+  [RECOVERY_PHASE_NAMES.storeEncryptedHistory]: async (page: Page) => {
+    await page.getByTestId("room-composer-input").fill("diagnostic history");
+  },
+  [RECOVERY_PHASE_NAMES.resetMemberKey]: async (page: Page) => {
+    await page.getByTestId("reset-device-key-button").click();
   },
   [RECOVERY_PHASE_NAMES.recoverFreshEnvelope]: async (page: Page) => {
     await page.goto("http://recovery-diagnostic.invalid/");
