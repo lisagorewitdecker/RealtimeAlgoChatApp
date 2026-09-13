@@ -7,6 +7,12 @@ const tsParser = process.env.ESLINT_PACKAGE_ROOT
 module.exports = {
   root: true,
   extends: ["eslint:recommended"],
+  env: {
+    browser: true,
+    es2021: true,
+    jest: true,
+    node: true,
+  },
   ignorePatterns: [
     "**/node_modules/**",
     "artifacts/chat-app/static-build/**",
