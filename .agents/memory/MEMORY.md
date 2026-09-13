@@ -53,3 +53,5 @@
 - [Node sleeping fixtures](node-sleeping-fixtures.md) — an unresolved top-level promise does not keep Node alive; use an active handle for signal-waiting fixtures.
 - [Generated-check test controls](generated-check-fault-controls.md) — test-only environment faults and fixture paths require explicit, separate subprocess opt-ins.
 - [GitHub PR template discovery](github-pr-template-discovery.md) — validate templates on the live default branch; a correct workspace copy does not populate GitHub’s new-PR form.
+- [pnpm drizzle-orm / OpenTelemetry peer duplication](pnpm-drizzle-otel-duplication.md) — adding @opentelemetry/api-dependent packages alongside drizzle-orm can fork incompatible type instances; converge peers and avoid externalizing otel interfaces.
+- [Hook rollback replacement](hook-rollback-replacement.md) — restore preserved hooks by atomic replacement; never remove the active hook before restoration succeeds.
