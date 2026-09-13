@@ -8,6 +8,8 @@
     "typecheck:libs": "tsc --build",
     "typecheck": "pnpm run typecheck:libs && pnpm -r --filter \"./artifacts/**\" --filter \"./scripts\" --if-present run typecheck && pnpm --filter @workspace/api-server run typecheck:e2e",
     "prepare": "node lib/api-spec/scripts/install-repository-git-hooks.mjs",
+    "hooks:dispatcher:install": "node lib/api-spec/scripts/install-repository-git-hooks.mjs --install-dispatcher",
+    "hooks:dispatcher:uninstall": "node lib/api-spec/scripts/install-repository-git-hooks.mjs --uninstall-dispatcher",
     "validate:staged-codegen-backups": "node lib/api-spec/scripts/check-staged-codegen-backups.mjs",
     "validate:api-codegen": "pnpm --filter @workspace/api-spec run check-generated",
     "validate:api-compatibility": "node lib/api-spec/scripts/check-contract-compatibility.mjs",
