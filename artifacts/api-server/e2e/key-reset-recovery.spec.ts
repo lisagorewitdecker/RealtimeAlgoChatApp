@@ -26,6 +26,7 @@ const publishableKey = process.env["CLERK_PUBLISHABLE_KEY"];
 const secretKey = process.env["CLERK_SECRET_KEY"];
 const diagnosticContract =
   process.env["E2E_RECOVERY_DIAGNOSTIC_CONTRACT"] === "1";
+const CONTEXT_CLEANUP_TIMEOUT_MS = diagnosticContract ? 250 : 5_000;
 
 type DisposableUser = {
   id: string;
@@ -51,6 +52,31 @@ const PHASE_TIMEOUTS = {
   confirmReloadPersistence: 30_000,
   confirmRoomReentry: 30_000,
 } as const;
+
+async function closeContextWithTimeout(
+  context: BrowserContext,
+  timeoutMs = CONTEXT_CLEANUP_TIMEOUT_MS,
+): Promise<void> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      context.close(),
+      new Promise<never>((_, reject) => {
+        timeout = setTimeout(
+          () =>
+            reject(
+              new Error(
+                `Browser context cleanup timed out after ${timeoutMs}ms`,
+              ),
+            ),
+          timeoutMs,
+        );
+      }),
+    ]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
+}
 
 async function createSignedInPage(
   browser: Browser,
@@ -376,7 +402,9 @@ test("a member recovers a live encrypted room after resetting their device key",
     };
 
     collectCleanupErrors(
-      await Promise.allSettled(contexts.map((context) => context.close())),
+      await Promise.allSettled(
+        contexts.map((context) => closeContextWithTimeout(context)),
+      ),
     );
 
     const databaseCleanup: Promise<unknown>[] = [];
@@ -447,10 +475,20 @@ test("reports a stalled recovery phase and preserves cleanup failures", async ({
     testFailure = error;
   } finally {
     console.info("[key-reset-recovery-e2e] diagnostic cleanup executed");
-    await context?.close().catch(() => undefined);
+    const cleanupErrors: unknown[] = [];
+    if (context) {
+      const realClose = context.close.bind(context);
+      context.close = () => new Promise<void>(() => {});
+      const result = await Promise.allSettled([closeContextWithTimeout(context)]);
+      if (result[0]?.status === "rejected") {
+        cleanupErrors.push(result[0].reason);
+      }
+      context.close = realClose;
+      await context.close();
+    }
     throwTestAndCleanupFailures(
       testFailure,
-      [new Error("diagnostic cleanup failed")],
+      cleanupErrors,
       "Key-reset recovery E2E cleanup failed",
       "Key-reset recovery verification and cleanup both failed",
     );

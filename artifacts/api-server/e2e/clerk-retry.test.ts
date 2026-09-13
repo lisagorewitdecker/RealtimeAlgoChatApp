@@ -187,7 +187,7 @@ describe("throwTestAndCleanupFailures", () => {
 
 describe("key-reset recovery Playwright diagnostics", () => {
   it(
-    "reports the bounded phase, page action, and cleanup without hiding the original failure",
+    "reports the bounded phase and stalled cleanup without hiding the original failure",
     () => {
       const apiServerDirectory = fileURLToPath(new URL("..", import.meta.url));
       const outputDirectory = mkdtempSync(
@@ -230,7 +230,9 @@ describe("key-reset recovery Playwright diagnostics", () => {
         expect(report).toContain(
           "Key-reset recovery verification and cleanup both failed",
         );
-        expect(report).toContain("diagnostic cleanup failed");
+        expect(report).toContain(
+          "Browser context cleanup timed out after 250ms",
+        );
       } finally {
         rmSync(outputDirectory, { recursive: true, force: true });
       }
