@@ -645,6 +645,71 @@ describe("room ban handling", () => {
     expect(view.getByPlaceholderText("Message…").props.editable).toBe(true);
     expect(view.getByTestId("room-sandbox-button").props.disabled).not.toBe(true);
   });
+
+  it("shows recovery and resumes joining when saving the initial join envelope fails", async () => {
+    const recoveredKey = new Uint8Array(32).fill(13);
+    mockGetRoomKey.mockReturnValue(null);
+    mockDecryptRoomKeyEnvelope.mockReturnValue(recoveredKey);
+    mockSetRoomKey.mockRejectedValueOnce(new Error("Secure storage unavailable"));
+    const view = render(<RoomScreen />);
+
+    mockRoomKeyPersistenceFailures.set("room-42", {
+      roomId: "room-42",
+      kind: "save",
+      message:
+        "Keep this room open, make secure storage available, and retry before continuing.",
+    });
+    await act(async () => {
+      mockHandlers.get("room-joined")?.({
+        messages: [],
+        users: [{ userId: "user-ben", username: "Ben" }],
+        keyEnvelope: {
+          senderPublicKey: "creator-key",
+          ciphertext: "initial-ciphertext",
+          nonce: "initial-nonce",
+        },
+      });
+      await expect(mockSetRoomKey.mock.results[0]?.value).rejects.toThrow(
+        "Secure storage unavailable",
+      );
+      view.rerender(<RoomScreen />);
+    });
+
+    expect(mockDecryptRoomKeyEnvelope).toHaveBeenCalledWith(
+      "initial-ciphertext",
+      "initial-nonce",
+      "creator-key",
+    );
+    expect(mockSetRoomKey).toHaveBeenCalledWith("room-42", recoveredKey);
+    expect(view.getByTestId("room-key-storage-warning")).toBeTruthy();
+    expect(view.getByText("Encryption key not saved")).toBeTruthy();
+    expect(view.getByText("Retry saving key")).toBeTruthy();
+
+    mockRetryRoomKeyPersistence.mockImplementationOnce(async () => {
+      mockGetRoomKey.mockReturnValue(recoveredKey);
+      return true;
+    });
+    await act(async () => {
+      fireEvent.press(view.getByTestId("retry-room-key-save-button"));
+    });
+    expect(mockRetryRoomKeyPersistence).toHaveBeenCalledWith("room-42");
+
+    mockRoomKeyPersistenceFailures.delete("room-42");
+    act(() => {
+      view.rerender(<RoomScreen />);
+    });
+    expect(view.queryByTestId("room-key-storage-warning")).toBeNull();
+    expect(socketEmits("join-room")).toHaveLength(2);
+
+    act(() => {
+      mockHandlers.get("room-joined")?.({
+        messages: [],
+        users: [{ userId: "user-ben", username: "Ben" }],
+      });
+    });
+    expect(view.getByPlaceholderText("Message…").props.editable).toBe(true);
+    expect(view.getByTestId("room-sandbox-button").props.disabled).not.toBe(true);
+  });
 });
 
 describe("room device-key registration ordering", () => {
