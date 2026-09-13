@@ -1,3 +1,8 @@
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
 import {
   throwTestAndCleanupFailures,
@@ -178,4 +183,58 @@ describe("throwTestAndCleanupFailures", () => {
       ),
     ).toThrow(testFailure);
   });
+});
+
+describe("key-reset recovery Playwright diagnostics", () => {
+  it(
+    "reports the bounded phase, page action, and cleanup without hiding the original failure",
+    () => {
+      const apiServerDirectory = fileURLToPath(new URL("..", import.meta.url));
+      const outputDirectory = mkdtempSync(
+        join(tmpdir(), "recovery-diagnostic-"),
+      );
+      try {
+        const result = spawnSync(
+          "pnpm",
+          [
+            "exec",
+            "playwright",
+            "test",
+            "e2e/key-reset-recovery.spec.ts",
+            "--config",
+            "e2e/playwright.config.ts",
+            "--grep",
+            "reports a stalled recovery phase",
+            "--output",
+            outputDirectory,
+          ],
+          {
+            cwd: apiServerDirectory,
+            encoding: "utf8",
+            env: {
+              ...process.env,
+              E2E_RECOVERY_DIAGNOSTIC_CONTRACT: "1",
+            },
+            timeout: 15_000,
+          },
+        );
+        const report = `${result.stdout}\n${result.stderr}`;
+
+        expect(result.error).toBeUndefined();
+        expect(result.status).toBe(1);
+        expect(report).toContain("sign in creator and create encrypted room");
+        expect(report).toContain("page.goto");
+        expect(report).toContain(
+          "[key-reset-recovery-e2e] diagnostic cleanup executed",
+        );
+        expect(report).toContain(
+          "Key-reset recovery verification and cleanup both failed",
+        );
+        expect(report).toContain("diagnostic cleanup failed");
+      } finally {
+        rmSync(outputDirectory, { recursive: true, force: true });
+      }
+    },
+    20_000,
+  );
 });

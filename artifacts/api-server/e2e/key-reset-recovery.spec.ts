@@ -24,6 +24,8 @@ const chatUrl = process.env["E2E_CHAT_URL"];
 const apiUrl = process.env["E2E_API_URL"];
 const publishableKey = process.env["CLERK_PUBLISHABLE_KEY"];
 const secretKey = process.env["CLERK_SECRET_KEY"];
+const diagnosticContract =
+  process.env["E2E_RECOVERY_DIAGNOSTIC_CONTRACT"] === "1";
 
 type DisposableUser = {
   id: string;
@@ -117,7 +119,7 @@ test("a member recovers a live encrypted room after resetting their device key",
   // longer than the banned-room path before the recovery assertions begin.
   test.setTimeout(270_000);
   test.skip(
-    !chatUrl || !apiUrl || !publishableKey || !secretKey,
+    diagnosticContract || !chatUrl || !apiUrl || !publishableKey || !secretKey,
     "E2E_CHAT_URL, E2E_API_URL, and Clerk development keys are required",
   );
 
@@ -416,6 +418,39 @@ test("a member recovers a live encrypted room after resetting their device key",
     throwTestAndCleanupFailures(
       testFailure,
       cleanupErrors,
+      "Key-reset recovery E2E cleanup failed",
+      "Key-reset recovery verification and cleanup both failed",
+    );
+  }
+});
+
+test("reports a stalled recovery phase and preserves cleanup failures", async ({
+  browser,
+}) => {
+  test.skip(!diagnosticContract, "Only run by the diagnostic contract test");
+  test.setTimeout(10_000);
+
+  let context: BrowserContext | undefined;
+  let testFailure: unknown;
+  try {
+    await test.step(
+      "sign in creator and create encrypted room",
+      async () => {
+        context = await browser.newContext();
+        const page = await context.newPage();
+        await page.route("**/*", () => new Promise<void>(() => {}));
+        await page.goto("http://recovery-diagnostic.invalid/");
+      },
+      { timeout: 250 },
+    );
+  } catch (error) {
+    testFailure = error;
+  } finally {
+    console.info("[key-reset-recovery-e2e] diagnostic cleanup executed");
+    await context?.close().catch(() => undefined);
+    throwTestAndCleanupFailures(
+      testFailure,
+      [new Error("diagnostic cleanup failed")],
       "Key-reset recovery E2E cleanup failed",
       "Key-reset recovery verification and cleanup both failed",
     );
