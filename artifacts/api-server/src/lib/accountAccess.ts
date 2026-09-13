@@ -1,4 +1,5 @@
 import { clerkClient } from "@clerk/express";
+import { clerkErrorStatus, clerkRetryDelayMs } from "./clerkRetry.js";
 
 const ACCESS_METADATA_KEY = "devStudioAccess";
 const pendingAccessChecks = new Map<string, Promise<AccountAccess>>();
@@ -35,17 +36,11 @@ function hasVerifiedPrimaryEmail(user: {
 }
 
 function retryDelayMs(error: unknown, attempt: number): number | null {
-  if (typeof error !== "object" || error === null) return null;
-  const candidate = error as { status?: unknown; retryAfter?: unknown };
-  const status = typeof candidate.status === "number" ? candidate.status : null;
-  if (status !== 429 && (status === null || status < 500 || status >= 600)) {
+  const status = clerkErrorStatus(error);
+  if (status !== 429 && (status === undefined || status < 500 || status >= 600)) {
     return null;
   }
-  const retryAfter =
-    typeof candidate.retryAfter === "number" && candidate.retryAfter >= 0
-      ? candidate.retryAfter * 1_000
-      : 0;
-  return Math.max(retryAfter, 250 * 2 ** attempt);
+  return clerkRetryDelayMs(error, attempt, 250);
 }
 
 async function loadAccountAccess(userId: string): Promise<AccountAccess> {
