@@ -37,8 +37,8 @@ catalogs:
       specifier: ^2.1.1
       version: 2.1.1
     framer-motion:
-      specifier: ^12.43.0
-      version: 12.43.0
+      specifier: ^13.2.0
+      version: 13.2.0
     lucide-react:
       specifier: ^0.545.0
       version: 0.545.0
@@ -61,8 +61,8 @@ catalogs:
       specifier: ^7.3.6
       version: 7.3.6
     zod:
-      specifier: ^3.25.76
-      version: 3.25.76
+      specifier: ^4.6.1
+      version: 4.6.1
 
 overrides:
   esbuild>@esbuild/darwin-arm64: '-'
@@ -211,6 +211,8 @@ importers:
         specifier: ^7.29.7
         version: 7.29.7(supports-color@8.1.1)
       '@clerk/expo':
+        specifier: ^4.6.1
+        version: 4.6.1(@types/react@19.1.17)(expo-auth-session@7.0.11(expo@54.0.37)(react-native@0.81.5(@babel/core@7.29.7(supports-color@8.1.1))(@types/react@19.1.17)(react@19.2.3)(supports-color@8.1.1))(react@19.2.3)(supports-color@8.1.1))(expo-constants@18.0.14)(expo-crypto@15.0.9(expo@54.0.37))(expo-secure-store@15.0.8(expo@54.0.37))(expo-web-browser@15.0.11(expo@54.0.37)(react-native@0.81.5(@babel/core@7.29.7(supports-color@8.1.1))(@types/react@19.1.17)(react@19.2.3)(supports-color@8.1.1)))(expo@54.0.37)(react-dom@19.2.3(react@19.2.3))(react-native@0.81.5(@babel/core@7.29.7(supports-color@8.1.1))(@types/react@19.1.17)(react@19.2.3)(supports-color@8.1.1))(react@19.2.3)(typescript@5.9.3)(use-sync-external-store@1.7.0(react@19.2.3))(zod@4.6.1)
         specifier: ^4.6.6
         version: 4.6.6(@types/react@19.1.17)(expo-auth-session@7.0.11(expo@54.0.37)(react-native@0.81.5(@babel/core@7.29.7(supports-color@8.1.1))(@types/react@19.1.17)(react@19.2.3)(supports-color@8.1.1))(react@19.2.3)(supports-color@8.1.1))(expo-constants@18.0.14)(expo-crypto@15.0.9(expo@54.0.37))(expo-secure-store@15.0.8(expo@54.0.37))(expo-web-browser@57.0.2(expo@54.0.37)(react-native@0.81.5(@babel/core@7.29.7(supports-color@8.1.1))(@types/react@19.1.17)(react@19.2.3)(supports-color@8.1.1)))(expo@54.0.37)(react-dom@19.2.3(react@19.2.3))(react-native@0.81.5(@babel/core@7.29.7(supports-color@8.1.1))(@types/react@19.1.17)(react@19.2.3)(supports-color@8.1.1))(react@19.2.3)(typescript@5.9.3)(use-sync-external-store@1.7.0(react@19.2.3))(zod@3.25.76)
       '@expo-google-fonts/inter':
@@ -356,10 +358,10 @@ importers:
         version: 5.9.3
       zod:
         specifier: 'catalog:'
-        version: 3.25.76
+        version: 4.6.1
       zod-validation-error:
-        specifier: ^3.5.4
-        version: 3.5.4(zod@3.25.76)
+        specifier: ^5.0.0
+        version: 5.0.0(zod@4.6.1)
 
   artifacts/mockup-sandbox:
     devDependencies:
@@ -491,7 +493,7 @@ importers:
         version: 3.3.3
       framer-motion:
         specifier: 'catalog:'
-        version: 12.43.0(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+        version: 13.2.0(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
       input-otp:
         specifier: ^1.4.2
         version: 1.5.0(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
@@ -542,7 +544,7 @@ importers:
         version: 7.3.6(@types/node@25.9.5)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.48.0)(tsx@4.23.13)(yaml@2.9.0)
       zod:
         specifier: 'catalog:'
-        version: 3.25.76
+        version: 4.6.1
 
   scripts:
     devDependencies:
@@ -4275,15 +4277,12 @@ packages:
     resolution: {integrity: sha512-vKatAh4SlVfgbv+YtmhiRjhEMJsYpsG1Y2rMQtR+SVSbytsSD1YGzDIcrAJmdFec88u/+VoGmxnl+80gL1tRCQ==}
     engines: {node: '>= 6'}
 
-  framer-motion@12.43.0:
-    resolution: {integrity: sha512-1eaL3RvR/kAlbG7UYcpMptEyzPoENO0c6w7ZnB3/hh2vSAz/6uGAFn6fdoqTBguNstf3MsFhJHsD/0DHiclG+g==}
+  framer-motion@13.2.0:
+    resolution: {integrity: sha512-9E33ebgMaO33w1nN/jEdW8z3/GO483fMi4rqbMG9rt83XgW9QLKRe4NcmJ8s+fQ3O34++UHrIQwlIWGIWTITjA==}
     peerDependencies:
-      '@emotion/is-prop-valid': '*'
       react: ^18.0.0 || ^19.0.0
       react-dom: ^18.0.0 || ^19.0.0
     peerDependenciesMeta:
-      '@emotion/is-prop-valid':
-        optional: true
       react:
         optional: true
       react-dom:
@@ -5094,11 +5093,11 @@ packages:
   modern-screenshot@4.7.0:
     resolution: {integrity: sha512-9YxN+ddPSMMlhylOv25VHzXrl9u67QRxoh7+SEewGtgUw7t6hHTrjptSDJUSne9oG4Xk/h2cwG15nIt4Hc9ujg==}
 
-  motion-dom@12.43.0:
-    resolution: {integrity: sha512-azKON4d9S65PEoFUiQTMTgPheEmzf2QngdRc50AKfJp9Q9mmcBVw22c8eMq9k8kxOFHdL7+WZY7N/5F/lwiDag==}
+  motion-dom@13.2.0:
+    resolution: {integrity: sha512-N6gdSoWRDk0Rh/fVtlqUtLs+fEN3ELFZI3cn3IQE9Mnf3E+Mh8wjO6MstzCOPFh4Yf0L1as5m2eUyYWj8ylVSQ==}
 
-  motion-utils@12.39.0:
-    resolution: {integrity: sha512-8nadJAJjTtqRkmRF36FoJTrywK9nnFmnPwnSMyxaOCU7GDjN9RTMJIxx9De8ErM+vpPhMccr/6fo5WciyQLnMQ==}
+  motion-utils@13.0.0:
+    resolution: {integrity: sha512-7DnN7TmbLcYXcG4RVadXIihWlyuM9afoUww8Y5Agg431kGKiuL2/OMyP4mJ5wLz+pvN3t5ySClLOaVXJ+wekRQ==}
 
   ms@2.0.0:
     resolution: {integrity: sha512-Tpp60P6IUJDTuOq/5Z8cdskzJujfwqfOTkrwIwj7IRISpnkJnT6SyJ4PCPnGMoFjC9ddhal5KVIYtAt97ix05A==}
@@ -6451,14 +6450,14 @@ packages:
     resolution: {integrity: sha512-rVksvsnNCdJ/ohGc6xgPwyN8eheCxsiLM8mxuE/t/mOVqJewPuO1miLpTHQiRgTKCLexL4MeAFVagts7HmNZ2Q==}
     engines: {node: '>=10'}
 
-  zod-validation-error@3.5.4:
-    resolution: {integrity: sha512-+hEiRIiPobgyuFlEojnqjJnhFvg4r/i3cqgcm67eehZf/WBaK3g6cD02YU9mtdVxZjv8CzCA9n/Rhrs3yAAvAw==}
+  zod-validation-error@5.0.0:
+    resolution: {integrity: sha512-hmk+pkyKq7Q71PiWVSDUc3VfpzpvcRHZ3QPw9yEMVvmtCekaMeOHnbr3WbxfrgEnQTv6haGP4cmv0Ojmihzsxw==}
     engines: {node: '>=18.0.0'}
     peerDependencies:
-      zod: ^3.24.4
+      zod: ^3.25.0 || ^4.0.0
 
-  zod@3.25.76:
-    resolution: {integrity: sha512-gzUt/qt81nXsFGKIFcC3YnfEAx5NkunCfnDlvuBSSFS02bcXu4Lmea0AFIUwbLWxWPx3d9p8S5QoaujKcNQxcQ==}
+  zod@4.6.1:
+    resolution: {integrity: sha512-341aRWQsve0rvronKNTqZpjmzdbUDlFuzHaI/XLg/Ej82qffDJRRfBTCuv7+9q/rMjB6LSLyEBnW4InJeMtt/Q==}
 
   zustand@5.0.3:
     resolution: {integrity: sha512-14fwWQtU3pH4dE0dOpdMiWjddcH+QzKIgk1cl8epwSE7yag43k/AD/m4L6+K7DytAOr9gGBe3/EXj9g7cdostg==}
@@ -7121,14 +7120,15 @@ snapshots:
       '@babel/helper-string-parser': 7.29.7
       '@babel/helper-validator-identifier': 7.29.7
 
-  '@base-org/account@2.0.1(@types/react@19.1.17)(react@19.2.3)(typescript@5.9.3)(use-sync-external-store@1.7.0(react@19.2.3))(zod@3.25.76)':
+  '@base-org/account@2.0.1(@types/react@19.1.17)(react@19.2.3)(typescript@5.9.3)(use-sync-external-store@1.7.0(react@19.2.3))(zod@4.6.1)':
     dependencies:
       '@noble/hashes': 1.4.0
       clsx: 1.2.1
       eventemitter3: 5.0.1
       idb-keyval: 6.2.1
-      ox: 0.6.9(typescript@5.9.3)(zod@3.25.76)
+      ox: 0.6.9(typescript@5.9.3)(zod@4.6.1)
       preact: 10.24.2
+      viem: 2.55.19(typescript@5.9.3)(zod@4.6.1)
       viem: 2.56.3(typescript@5.9.3)(zod@3.25.76)
       zustand: 5.0.3(@types/react@19.1.17)(react@19.2.3)(use-sync-external-store@1.7.0(react@19.2.3))
     transitivePeerDependencies:
@@ -7143,6 +7143,11 @@ snapshots:
 
   '@bcoe/v8-coverage@0.2.3': {}
 
+  '@clerk/clerk-js@6.30.2(@types/react@19.1.17)(react-dom@19.2.3(react@19.2.3))(react-native@0.81.5(@babel/core@7.29.7(supports-color@8.1.1))(@types/react@19.1.17)(react@19.2.3)(supports-color@8.1.1))(react@19.2.3)(typescript@5.9.3)(use-sync-external-store@1.7.0(react@19.2.3))(zod@4.6.1)':
+    dependencies:
+      '@base-org/account': 2.0.1(@types/react@19.1.17)(react@19.2.3)(typescript@5.9.3)(use-sync-external-store@1.7.0(react@19.2.3))(zod@4.6.1)
+      '@clerk/shared': 4.30.2(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+      '@coinbase/wallet-sdk': 4.3.7(typescript@5.9.3)(zod@4.6.1)
   '@clerk/clerk-js@6.31.1(@types/react@19.1.17)(react-dom@19.2.3(react@19.2.3))(react-native@0.81.5(@babel/core@7.29.7(supports-color@8.1.1))(@types/react@19.1.17)(react@19.2.3)(supports-color@8.1.1))(react@19.2.3)(typescript@5.9.3)(use-sync-external-store@1.7.0(react@19.2.3))(zod@3.25.76)':
     dependencies:
       '@base-org/account': 2.0.1(@types/react@19.1.17)(react@19.2.3)(typescript@5.9.3)(use-sync-external-store@1.7.0(react@19.2.3))(zod@3.25.76)
@@ -7179,6 +7184,12 @@ snapshots:
       - zod
 
   '@clerk/expo@4.6.6(@types/react@19.1.17)(expo-auth-session@7.0.11(expo@54.0.37)(react-native@0.81.5(@babel/core@7.29.7(supports-color@8.1.1))(@types/react@19.1.17)(react@19.2.3)(supports-color@8.1.1))(react@19.2.3)(supports-color@8.1.1))(expo-constants@18.0.14)(expo-crypto@15.0.9(expo@54.0.37))(expo-secure-store@15.0.8(expo@54.0.37))(expo-web-browser@57.0.2(expo@54.0.37)(react-native@0.81.5(@babel/core@7.29.7(supports-color@8.1.1))(@types/react@19.1.17)(react@19.2.3)(supports-color@8.1.1)))(expo@54.0.37)(react-dom@19.2.3(react@19.2.3))(react-native@0.81.5(@babel/core@7.29.7(supports-color@8.1.1))(@types/react@19.1.17)(react@19.2.3)(supports-color@8.1.1))(react@19.2.3)(typescript@5.9.3)(use-sync-external-store@1.7.0(react@19.2.3))(zod@3.25.76)':
+  '@clerk/expo@4.6.1(@types/react@19.1.17)(expo-auth-session@7.0.11(expo@54.0.37)(react-native@0.81.5(@babel/core@7.29.7(supports-color@8.1.1))(@types/react@19.1.17)(react@19.2.3)(supports-color@8.1.1))(react@19.2.3)(supports-color@8.1.1))(expo-constants@18.0.14)(expo-crypto@15.0.9(expo@54.0.37))(expo-secure-store@15.0.8(expo@54.0.37))(expo-web-browser@15.0.11(expo@54.0.37)(react-native@0.81.5(@babel/core@7.29.7(supports-color@8.1.1))(@types/react@19.1.17)(react@19.2.3)(supports-color@8.1.1)))(expo@54.0.37)(react-dom@19.2.3(react@19.2.3))(react-native@0.81.5(@babel/core@7.29.7(supports-color@8.1.1))(@types/react@19.1.17)(react@19.2.3)(supports-color@8.1.1))(react@19.2.3)(typescript@5.9.3)(use-sync-external-store@1.7.0(react@19.2.3))(zod@4.6.1)':
+    dependencies:
+      '@clerk/clerk-js': 6.30.2(@types/react@19.1.17)(react-dom@19.2.3(react@19.2.3))(react-native@0.81.5(@babel/core@7.29.7(supports-color@8.1.1))(@types/react@19.1.17)(react@19.2.3)(supports-color@8.1.1))(react@19.2.3)(typescript@5.9.3)(use-sync-external-store@1.7.0(react@19.2.3))(zod@4.6.1)
+      '@clerk/react': 6.14.8(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+      '@clerk/shared': 4.30.2(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+  '@clerk/expo@4.6.6(@types/react@19.1.17)(expo-auth-session@7.0.11(expo@54.0.37)(react-native@0.81.5(@babel/core@7.29.7(supports-color@8.1.1))(@types/react@19.1.17)(react@19.2.3)(supports-color@8.1.1))(react@19.2.3)(supports-color@8.1.1))(expo-constants@18.0.14)(expo-crypto@15.0.9(expo@54.0.37))(expo-secure-store@15.0.8(expo@54.0.37))(expo-web-browser@15.0.11(expo@54.0.37)(react-native@0.81.5(@babel/core@7.29.7(supports-color@8.1.1))(@types/react@19.1.17)(react@19.2.3)(supports-color@8.1.1)))(expo@54.0.37)(react-dom@19.2.3(react@19.2.3))(react-native@0.81.5(@babel/core@7.29.7(supports-color@8.1.1))(@types/react@19.1.17)(react@19.2.3)(supports-color@8.1.1))(react@19.2.3)(typescript@5.9.3)(use-sync-external-store@1.7.0(react@19.2.3))(zod@3.25.76)':
     dependencies:
       '@clerk/clerk-js': 6.31.1(@types/react@19.1.17)(react-dom@19.2.3(react@19.2.3))(react-native@0.81.5(@babel/core@7.29.7(supports-color@8.1.1))(@types/react@19.1.17)(react@19.2.3)(supports-color@8.1.1))(react@19.2.3)(typescript@5.9.3)(use-sync-external-store@1.7.0(react@19.2.3))(zod@3.25.76)
       '@clerk/react': 6.15.2(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
@@ -7226,12 +7237,13 @@ snapshots:
       react: 19.2.3
       react-dom: 19.2.3(react@19.2.3)
 
-  '@coinbase/wallet-sdk@4.3.7(typescript@5.9.3)(zod@3.25.76)':
+  '@coinbase/wallet-sdk@4.3.7(typescript@5.9.3)(zod@4.6.1)':
     dependencies:
       '@noble/hashes': 1.8.0
       clsx: 1.2.1
       eventemitter3: 5.0.4
       preact: 10.29.8
+      viem: 2.55.19(typescript@5.9.3)(zod@4.6.1)
       viem: 2.56.3(typescript@5.9.3)(zod@3.25.76)
     transitivePeerDependencies:
       - bufferutil
@@ -9189,6 +9201,7 @@ snapshots:
       '@solana/kit': 7.1.1(typescript@5.9.3)
       '@solana/wallet-standard-features': 1.4.0
       '@solana/wallet-standard-util': 1.1.3
+      '@wallet-standard/core': 1.1.1
       '@wallet-standard/core': 1.1.2
       react-native: 0.81.5(@babel/core@7.29.7(supports-color@8.1.1))(@types/react@19.1.17)(react@19.2.3)(supports-color@8.1.1)
     transitivePeerDependencies:
@@ -9204,6 +9217,7 @@ snapshots:
       '@solana-mobile/wallet-standard-mobile': 0.6.0(react-native@0.81.5(@babel/core@7.29.7(supports-color@8.1.1))(@types/react@19.1.17)(react@19.2.3)(supports-color@8.1.1))(typescript@5.9.3)
       '@solana/wallet-adapter-base': 0.9.27
       '@solana/wallet-standard-features': 1.4.0
+      '@wallet-standard/core': 1.1.1
       '@wallet-standard/core': 1.1.2
       react-native: 0.81.5(@babel/core@7.29.7(supports-color@8.1.1))(@types/react@19.1.17)(react@19.2.3)(supports-color@8.1.1)
       tslib: 2.8.1
@@ -10071,15 +10085,15 @@ snapshots:
 
   abab@2.0.6: {}
 
-  abitype@1.2.3(typescript@5.9.3)(zod@3.25.76):
+  abitype@1.2.3(typescript@5.9.3)(zod@4.6.1):
     optionalDependencies:
       typescript: 5.9.3
-      zod: 3.25.76
+      zod: 4.6.1
 
-  abitype@1.3.0(typescript@5.9.3)(zod@3.25.76):
+  abitype@1.3.0(typescript@5.9.3)(zod@4.6.1):
     optionalDependencies:
       typescript: 5.9.3
-      zod: 3.25.76
+      zod: 4.6.1
 
   abort-controller@3.0.0:
     dependencies:
@@ -11247,10 +11261,10 @@ snapshots:
       hasown: 2.0.4
       mime-types: 2.1.35
 
-  framer-motion@12.43.0(react-dom@19.2.3(react@19.2.3))(react@19.2.3):
+  framer-motion@13.2.0(react-dom@19.2.3(react@19.2.3))(react@19.2.3):
     dependencies:
-      motion-dom: 12.43.0
-      motion-utils: 12.39.0
+      motion-dom: 13.2.0
+      motion-utils: 13.0.0
       tslib: 2.8.1
     optionalDependencies:
       react: 19.2.3
@@ -12494,11 +12508,11 @@ snapshots:
 
   modern-screenshot@4.7.0: {}
 
-  motion-dom@12.43.0:
+  motion-dom@13.2.0:
     dependencies:
-      motion-utils: 12.39.0
+      motion-utils: 13.0.0
 
-  motion-utils@12.39.0: {}
+  motion-utils@13.0.0: {}
 
   ms@2.0.0: {}
 
@@ -12612,6 +12626,7 @@ snapshots:
       strip-ansi: 5.2.0
       wcwidth: 1.0.1
 
+  ox@0.14.34(typescript@5.9.3)(zod@4.6.1):
   ox@0.14.44(typescript@5.9.3)(zod@3.25.76):
     dependencies:
       '@adraffy/ens-normalize': 1.11.1
@@ -12620,21 +12635,21 @@ snapshots:
       '@noble/hashes': 1.8.0
       '@scure/bip32': 1.7.0
       '@scure/bip39': 1.6.0
-      abitype: 1.3.0(typescript@5.9.3)(zod@3.25.76)
+      abitype: 1.3.0(typescript@5.9.3)(zod@4.6.1)
       eventemitter3: 5.0.1
     optionalDependencies:
       typescript: 5.9.3
     transitivePeerDependencies:
       - zod
 
-  ox@0.6.9(typescript@5.9.3)(zod@3.25.76):
+  ox@0.6.9(typescript@5.9.3)(zod@4.6.1):
     dependencies:
       '@adraffy/ens-normalize': 1.11.1
       '@noble/curves': 1.9.7
       '@noble/hashes': 1.8.0
       '@scure/bip32': 1.7.0
       '@scure/bip39': 1.6.0
-      abitype: 1.3.0(typescript@5.9.3)(zod@3.25.76)
+      abitype: 1.3.0(typescript@5.9.3)(zod@4.6.1)
       eventemitter3: 5.0.1
     optionalDependencies:
       typescript: 5.9.3
@@ -13647,14 +13662,16 @@ snapshots:
       d3-time: 3.1.0
       d3-timer: 3.0.1
 
+  viem@2.55.19(typescript@5.9.3)(zod@4.6.1):
   viem@2.56.3(typescript@5.9.3)(zod@3.25.76):
     dependencies:
       '@noble/curves': 1.9.1
       '@noble/hashes': 1.8.0
       '@scure/bip32': 1.7.0
       '@scure/bip39': 1.6.0
-      abitype: 1.2.3(typescript@5.9.3)(zod@3.25.76)
+      abitype: 1.2.3(typescript@5.9.3)(zod@4.6.1)
       isows: 1.0.7(ws@8.21.0)
+      ox: 0.14.34(typescript@5.9.3)(zod@4.6.1)
       ox: 0.14.44(typescript@5.9.3)(zod@3.25.76)
       ws: 8.21.0
     optionalDependencies:
@@ -13829,11 +13846,11 @@ snapshots:
 
   yocto-queue@0.1.0: {}
 
-  zod-validation-error@3.5.4(zod@3.25.76):
+  zod-validation-error@5.0.0(zod@4.6.1):
     dependencies:
-      zod: 3.25.76
+      zod: 4.6.1
 
-  zod@3.25.76: {}
+  zod@4.6.1: {}
 
   zustand@5.0.3(@types/react@19.1.17)(react@19.2.3)(use-sync-external-store@1.7.0(react@19.2.3)):
     optionalDependencies:

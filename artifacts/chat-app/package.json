@@ -70,7 +70,7 @@
     "react-native-worklets": "0.5.1",
     "typescript": "~5.9.3",
     "zod": "catalog:",
-    "zod-validation-error": "^3.5.4"
+    "zod-validation-error": "^5.0.0"
   },
   "dependencies": {
     "@sentry/react-native": "~7.2.0",
