@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -251,6 +251,38 @@ describe("key-reset recovery Playwright diagnostics", () => {
       );
     } finally {
       rmSync(emptyBrowserDirectory, { recursive: true, force: true });
+    }
+  });
+
+  it("reports the browser setup error when a required runtime package is removed", () => {
+    const runtimeDirectory = mkdtempSync(
+      join(tmpdir(), "incomplete-playwright-runtime-"),
+    );
+    const runtimeConfigPath = join(runtimeDirectory, ".replit");
+    try {
+      writeFileSync(runtimeConfigPath, '[nix]\npackages = ["glib"]\n');
+      const result = spawnSync(
+        "node",
+        ["e2e/check-playwright-runtime.mjs"],
+        {
+          cwd: apiServerDirectory,
+          encoding: "utf8",
+          env: {
+            ...process.env,
+            PLAYWRIGHT_RUNTIME_CONFIG_PATH: runtimeConfigPath,
+          },
+          timeout: 10_000,
+        },
+      );
+      const report = `${result.stdout}\n${result.stderr}`;
+
+      expect(result.error).toBeUndefined();
+      expect(result.status).toBe(1);
+      expect(report).toContain("[api-server browser setup]");
+      expect(report).toContain("Chromium is not ready for API tests");
+      expect(report).toContain('Required Chromium runtime package "nss"');
+    } finally {
+      rmSync(runtimeDirectory, { recursive: true, force: true });
     }
   });
 

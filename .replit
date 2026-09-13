@@ -108,6 +108,10 @@ args = "idle-profile-registration-e2e"
 task = "workflow.run"
 args = "reconnect-delivery-e2e"
 
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "playwright-clean-runtime"
+
 [[workflows.workflow]]
 name = "typecheck"
 author = "agent"
@@ -203,6 +207,17 @@ author = "agent"
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "E2E_CHAT_URL=https://$REPLIT_EXPO_DEV_DOMAIN E2E_API_URL=https://$REPLIT_DEV_DOMAIN flock -w 900 /tmp/replit-heavy-validation.lock pnpm --filter @workspace/api-server run test:e2e:reconnect-delivery"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow]]
+name = "playwright-clean-runtime"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "flock -w 900 /tmp/replit-heavy-validation.lock pnpm --filter @workspace/api-server run test:browser:clean-runtime"
 
 [workflows.workflow.metadata]
 isValidation = true
