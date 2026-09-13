@@ -978,10 +978,22 @@ function setupConnectedSocket(
       socket.join(roomId);
       socket.data.roomId = roomId;
 
+      const replayAfterMessageId = getText(data?.["lastSeenMessageId"], 120);
+      const replayCursorIndex = replayAfterMessageId
+        ? room.messages.findIndex((message) => message.id === replayAfterMessageId)
+        : -1;
+      const replayGap = !!replayAfterMessageId && replayCursorIndex === -1;
+      const replayMessages =
+        replayAfterMessageId && replayCursorIndex >= 0
+          ? room.messages.slice(replayCursorIndex + 1)
+          : room.messages.slice(-80);
+
       socket.emit("room-joined", {
         roomId,
         roomName: room.name,
-        messages: room.messages.slice(-80),
+        messages: replayMessages,
+        replayAfterMessageId,
+        replayGap,
         users: getRoomMembers(io, room, authenticatedUser.purpose).map((member) => ({
           userId: member.userId,
           username: member.username,

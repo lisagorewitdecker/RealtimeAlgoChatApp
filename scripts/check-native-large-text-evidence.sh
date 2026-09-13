@@ -65,6 +65,52 @@ review_notes_declaration_count() {
   ' "$record_path"
 }
 
+review_field_declaration_count() {
+  local record_path="$1"
+  local key="$2"
+
+  awk -v key="$key" '
+    {
+      sub(/\r$/, "")
+      if (in_notes) {
+        if ($0 == delimiter) in_notes = 0
+        next
+      }
+      if ($0 ~ /^notes<</) {
+        delimiter = substr($0, length("notes<<") + 1)
+        if (delimiter != "") in_notes = 1
+        next
+      }
+      if (index($0, key "=") == 1) count++
+    }
+    END { print count + 0 }
+  ' "$record_path"
+}
+
+review_field_value() {
+  local record_path="$1"
+  local key="$2"
+
+  awk -v key="$key" '
+    {
+      sub(/\r$/, "")
+      if (in_notes) {
+        if ($0 == delimiter) in_notes = 0
+        next
+      }
+      if ($0 ~ /^notes<</) {
+        delimiter = substr($0, length("notes<<") + 1)
+        if (delimiter != "") in_notes = 1
+        next
+      }
+      if (index($0, key "=") == 1) {
+        print substr($0, length(key) + 2)
+        exit
+      }
+    }
+  ' "$record_path" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//'
+}
+
 review_notes() {
   local record_path="$1"
   local block_declaration
@@ -361,15 +407,28 @@ validate_review_record() {
     return
   fi
 
-  local reviewer reviewed_at decision record_build_id record_platform approval_scope notes notes_declaration_count
-  reviewer="$(trimmed_value "$record_path" reviewer)"
-  reviewed_at="$(trimmed_value "$record_path" reviewed_at_utc)"
-  decision="$(trimmed_value "$record_path" decision)"
-  record_build_id="$(trimmed_value "$record_path" candidate_build_id)"
-  record_platform="$(trimmed_value "$record_path" platform)"
-  approval_scope="$(trimmed_value "$record_path" approval_scope)"
+  local reviewer="" reviewed_at="" decision="" record_build_id="" record_platform="" approval_scope=""
+  local notes notes_declaration_count declaration_count
+  local single_value_key
   notes_declaration_count="$(review_notes_declaration_count "$record_path")"
   notes=""
+
+  for single_value_key in platform reviewer reviewed_at_utc candidate_build_id decision approval_scope; do
+    declaration_count="$(review_field_declaration_count "$record_path" "$single_value_key")"
+    if ((declaration_count > 1)); then
+      issue "$platform" "Review record has ${declaration_count} ${single_value_key} declarations in ${record_path}. Declare ${single_value_key}=... at most once so the review record is unambiguous."
+      record_valid=0
+    elif ((declaration_count == 1)); then
+      case "$single_value_key" in
+        platform) record_platform="$(review_field_value "$record_path" "$single_value_key")" ;;
+        reviewer) reviewer="$(review_field_value "$record_path" "$single_value_key")" ;;
+        reviewed_at_utc) reviewed_at="$(review_field_value "$record_path" "$single_value_key")" ;;
+        candidate_build_id) record_build_id="$(review_field_value "$record_path" "$single_value_key")" ;;
+        decision) decision="$(review_field_value "$record_path" "$single_value_key")" ;;
+        approval_scope) approval_scope="$(review_field_value "$record_path" "$single_value_key")" ;;
+      esac
+    fi
+  done
 
   if ((notes_declaration_count > 1)); then
     issue "$platform" "Review record has ${notes_declaration_count} notes declarations in ${record_path}. Use exactly one notes=... line or one notes<<... block so the review finding is unambiguous."
@@ -384,7 +443,9 @@ validate_review_record() {
   fi
 
   for required_key in reviewer reviewed_at_utc candidate_build_id decision; do
-    value="$(trimmed_value "$record_path" "$required_key")"
+    declaration_count="$(review_field_declaration_count "$record_path" "$required_key")"
+    ((declaration_count > 1)) && continue
+    value="$(review_field_value "$record_path" "$required_key")"
     if [[ -z "$value" ]]; then
       issue "$platform" "Review record is missing ${required_key}=... in ${record_path}. Record who reviewed the evidence, when, which candidate build, and the decision."
       record_valid=0

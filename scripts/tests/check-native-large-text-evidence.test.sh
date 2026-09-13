@@ -315,7 +315,8 @@ printf '%s\r\n' \
   'notes<<END_NOTES' \
   '# Layout finding' \
   '- The `Send` button overlaps the final line.' \
-  '- See [capture](screenshots/screen-11.png).' \
+  '' \
+  '  - See [capture](screenshots/screen-11.png).' \
   'END_NOTES' \
   > "$multiline_rejected_root/android/20260909T120000Z/review-record.txt"
 if multiline_rejected_output="$(bash "$CHECKER" "$multiline_rejected_root" 2>&1)"; then
@@ -323,9 +324,7 @@ if multiline_rejected_output="$(bash "$CHECKER" "$multiline_rejected_root" 2>&1)
   exit 1
 fi
 assert_contains "$multiline_rejected_output" "[android] Review notes (literal evidence):"
-assert_contains "$multiline_rejected_output" '[android]   | # Layout finding'
-assert_contains "$multiline_rejected_output" '[android]   | - The `Send` button overlaps the final line.'
-assert_contains "$multiline_rejected_output" '[android]   | - See [capture](screenshots/screen-11.png).'
+assert_contains "$multiline_rejected_output" $'[android]   | # Layout finding\n[android]   | - The `Send` button overlaps the final line.\n[android]   | \n[android]   |   - See [capture](screenshots/screen-11.png).'
 assert_contains "$multiline_rejected_output" "completeness check FAILED with 1 issue(s)"
 assert_not_contains "$multiline_rejected_output" $'\r'
 assert_not_contains "$multiline_rejected_output" "unterminated notes block"
@@ -373,6 +372,79 @@ if duplicate_notes_blocks_output="$(bash "$CHECKER" "$duplicate_notes_blocks_roo
 fi
 assert_contains "$duplicate_notes_blocks_output" "[android] Review record has 2 notes declarations"
 assert_contains "$duplicate_notes_blocks_output" "completeness check FAILED with 1 issue(s)"
+
+duplicate_single_values_root="$TEST_ROOT/duplicate-single-values"
+write_valid_run "$duplicate_single_values_root" ios
+write_valid_run "$duplicate_single_values_root" android
+write_review_record "$duplicate_single_values_root" ios APPROVED
+write_review_record "$duplicate_single_values_root" android APPROVED
+cat >> "$duplicate_single_values_root/android/20260909T120000Z/review-record.txt" <<'EOF'
+platform=ios
+reviewer=Conflicting Reviewer
+reviewed_at_utc=not-a-timestamp
+candidate_build_id=another-build
+decision=REJECTED
+approval_scope=candidate
+approval_scope=unsupported
+EOF
+if duplicate_single_values_output="$(bash "$CHECKER" "$duplicate_single_values_root" 2>&1)"; then
+  echo "duplicate single-value review fields case unexpectedly passed" >&2
+  exit 1
+fi
+for duplicated_field in platform reviewer reviewed_at_utc candidate_build_id decision approval_scope; do
+  assert_contains "$duplicate_single_values_output" "[android] Review record has 2 ${duplicated_field} declarations"
+  assert_contains "$duplicate_single_values_output" "Declare ${duplicated_field}=... at most once so the review record is unambiguous."
+done
+assert_contains "$duplicate_single_values_output" "completeness check FAILED with 6 issue(s)"
+assert_not_contains "$duplicate_single_values_output" "Conflicting Reviewer"
+assert_not_contains "$duplicate_single_values_output" "not-a-timestamp"
+assert_not_contains "$duplicate_single_values_output" "another-build"
+assert_not_contains "$duplicate_single_values_output" "decision=REJECTED by"
+assert_not_contains "$duplicate_single_values_output" "approval_scope '"
+assert_not_contains "$duplicate_single_values_output" "identifies platform"
+
+field_text_in_notes_root="$TEST_ROOT/field-text-in-notes"
+write_valid_run "$field_text_in_notes_root" ios
+write_valid_run "$field_text_in_notes_root" android
+write_review_record "$field_text_in_notes_root" ios APPROVED
+cat > "$field_text_in_notes_root/android/20260909T120000Z/review-record.txt" <<'EOF'
+platform=android
+reviewer=Ada Reviewer
+reviewed_at_utc=2026-09-09T13:00:00Z
+candidate_build_id=build-android
+decision=APPROVED
+notes<<FINDINGS
+decision=REJECTED
+reviewer=This is literal note text, not a declaration.
+FINDINGS
+EOF
+field_text_in_notes_output="$(bash "$CHECKER" "$field_text_in_notes_root" 2>&1)"
+assert_contains "$field_text_in_notes_output" "[android] Review record: APPROVED by Ada Reviewer"
+assert_contains "$field_text_in_notes_output" "passed for iOS and Android"
+
+notes_before_fields_root="$TEST_ROOT/notes-before-fields"
+write_valid_run "$notes_before_fields_root" ios
+write_valid_run "$notes_before_fields_root" android
+write_review_record "$notes_before_fields_root" ios APPROVED
+cat > "$notes_before_fields_root/android/20260909T120000Z/review-record.txt" <<'EOF'
+notes<<FINDINGS
+decision=APPROVED
+FINDINGS
+platform=android
+reviewer=Ada Reviewer
+reviewed_at_utc=2026-09-09T13:00:00Z
+candidate_build_id=build-android
+decision=REJECTED
+EOF
+if notes_before_fields_output="$(bash "$CHECKER" "$notes_before_fields_root" 2>&1)"; then
+  echo "notes-before-fields rejected review case unexpectedly passed" >&2
+  exit 1
+fi
+assert_contains "$notes_before_fields_output" "[android] The review record at"
+assert_contains "$notes_before_fields_output" "records decision=REJECTED by Ada Reviewer at 2026-09-09T13:00:00Z."
+assert_contains "$notes_before_fields_output" "[android]   | decision=APPROVED"
+assert_contains "$notes_before_fields_output" "completeness check FAILED with 1 issue(s)"
+assert_not_contains "$notes_before_fields_output" "[android] Review record: APPROVED"
 
 unterminated_notes_root="$TEST_ROOT/unterminated-notes"
 write_valid_run "$unterminated_notes_root" ios
