@@ -350,14 +350,24 @@ validate_platform() {
     done
   fi
 
-  if [[ -s "$run_dir/sentry-source-map-evidence.json" ]]; then
+  local sentry_trigger_path="$run_dir/sentry-trigger.txt"
+  local sentry_trigger_has_duplicates=0
+  if [[ -s "$sentry_trigger_path" ]]; then
+    if [[ -n "$(duplicate_metadata_keys "$sentry_trigger_path")" ]]; then
+      sentry_trigger_has_duplicates=1
+      report_duplicate_metadata_keys "$platform" "$sentry_trigger_path" "Sentry trigger metadata" "Sentry trigger metadata"
+    fi
+  fi
+
+  if [[ -s "$run_dir/sentry-source-map-evidence.json" ]] &&
+    ((sentry_trigger_has_duplicates == 0)); then
     local candidate_build_id
     local sentry_validation_output
     candidate_build_id="$(tr -d '\r\n' < "$run_dir/candidate-build-id.txt")"
     if ! sentry_validation_output="$(
       node --input-type=module - \
         "$run_dir/sentry-source-map-evidence.json" \
-        "$run_dir/sentry-trigger.txt" \
+        "$sentry_trigger_path" \
         "$platform" \
         "$candidate_build_id" <<'NODE'
 import { readFileSync } from "node:fs";

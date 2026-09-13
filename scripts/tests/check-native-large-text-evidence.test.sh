@@ -476,6 +476,34 @@ assert_not_contains "$duplicate_machine_metadata_output" "is not PASS"
 assert_not_contains "$duplicate_machine_metadata_output" "does not declare run_mode=release-gate"
 assert_not_contains "$duplicate_machine_metadata_output" "is from a diagnostic-only run"
 
+# Conflicting Sentry trigger fields must be rejected without selecting,
+# comparing, or printing either declaration.
+duplicate_sentry_trigger_root="$TEST_ROOT/duplicate-sentry-trigger"
+write_valid_run "$duplicate_sentry_trigger_root" ios
+write_valid_run "$duplicate_sentry_trigger_root" android
+expected_sentry_trigger_issues=0
+for platform in ios android; do
+  sentry_trigger_path="$duplicate_sentry_trigger_root/$platform/20260909T120000Z/sentry-trigger.txt"
+  expected_sentry_trigger_issues=$((expected_sentry_trigger_issues + $(metadata_keys_of "$sentry_trigger_path" | wc -l)))
+  append_conflicting_duplicates "$sentry_trigger_path"
+done
+if duplicate_sentry_trigger_output="$(bash "$CHECKER" "$duplicate_sentry_trigger_root" 2>&1)"; then
+  echo "duplicate Sentry trigger metadata case unexpectedly passed" >&2
+  exit 1
+fi
+for platform in ios android; do
+  sentry_trigger_path="$duplicate_sentry_trigger_root/$platform/20260909T120000Z/sentry-trigger.txt"
+  for duplicated_field in $(metadata_keys_of "$sentry_trigger_path" | sort -u); do
+    assert_contains "$duplicate_sentry_trigger_output" "[$platform] Sentry trigger metadata has 2 ${duplicated_field} declarations in ${sentry_trigger_path}."
+    assert_contains "$duplicate_sentry_trigger_output" "Declare ${duplicated_field}=... at most once so the Sentry trigger metadata is unambiguous"
+  done
+done
+assert_contains "$duplicate_sentry_trigger_output" "completeness check FAILED with ${expected_sentry_trigger_issues} issue(s)"
+assert_not_contains "$duplicate_sentry_trigger_output" "must-not-be-printed"
+assert_not_contains "$duplicate_sentry_trigger_output" "trigger platform does not match"
+assert_not_contains "$duplicate_sentry_trigger_output" "trigger candidate build ID does not match"
+assert_not_contains "$duplicate_sentry_trigger_output" "trigger marker does not match"
+
 # A duplicate only silences the checks for that field; the remaining
 # single-declaration fields are still validated by value.
 partial_duplicate_root="$TEST_ROOT/partial-duplicate"
