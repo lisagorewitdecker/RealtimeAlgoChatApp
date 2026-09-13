@@ -43,9 +43,13 @@ try {
     throw new Error(`Clean Chromium installation failed:\n${install.report}`);
   }
 
-  const launch = run("node", ["e2e/check-playwright-runtime.mjs"]);
-  if (launch.status !== 0) {
-    throw new Error(`Clean Chromium launch failed:\n${launch.report}`);
+  const contract = run("node", [
+    "e2e/check-playwright-runtime-contract.mjs",
+  ]);
+  if (contract.status !== 0) {
+    throw new Error(
+      `Chromium shared-library contract check failed:\n${contract.report}`,
+    );
   }
 
   const runtimeConfig = readFileSync(
@@ -85,8 +89,13 @@ try {
     }
   }
 
+  const launch = run("node", ["e2e/check-playwright-runtime.mjs"]);
+  if (launch.status !== 0) {
+    throw new Error(`Clean Chromium launch failed:\n${launch.report}`);
+  }
+
   console.log(
-    `Playwright installed and launched Chromium from a clean browser cache, and rejected removal of all ${requiredChromiumRuntimePackages.length} contracted native runtime packages.`,
+    `Playwright checked Chromium's actual shared-library requirements, rejected removal of all ${requiredChromiumRuntimePackages.length} contracted native runtime packages, and launched it from a clean browser cache.`,
   );
 } finally {
   rmSync(cleanDirectory, { recursive: true, force: true });

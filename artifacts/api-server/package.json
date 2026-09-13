@@ -9,6 +9,7 @@
     "start": "node --enable-source-maps --import ./dist/instrument.mjs ./dist/index.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test:browser:setup": "playwright install chromium && node e2e/check-playwright-runtime.mjs",
+    "test:browser:runtime-contract": "playwright install chromium && node e2e/check-playwright-runtime-contract.mjs",
     "test:browser:clean-runtime": "node e2e/check-playwright-clean-runtime.mjs",
     "test": "pnpm run test:browser:setup && vitest run src e2e/clerk-retry.test.ts --maxWorkers=1",
     "test:e2e:banned-room": "pnpm run test:browser:setup && playwright test e2e/banned-room.spec.ts --config e2e/playwright.config.ts",
