@@ -186,6 +186,7 @@ describe("throwTestAndCleanupFailures", () => {
 });
 
 describe("key-reset recovery Playwright diagnostics", () => {
+  const apiServerDirectory = fileURLToPath(new URL("..", import.meta.url));
   const recoveryPhases = [
     {
       phase: "sign in creator and create encrypted room",
@@ -224,7 +225,6 @@ describe("key-reset recovery Playwright diagnostics", () => {
   it(
     "reports every recovery phase and its underlying action without external services",
     () => {
-      const apiServerDirectory = fileURLToPath(new URL("..", import.meta.url));
       const outputDirectory = mkdtempSync(
         join(tmpdir(), "recovery-diagnostic-"),
       );
@@ -279,5 +279,66 @@ describe("key-reset recovery Playwright diagnostics", () => {
       }
     },
     45_000,
+  );
+
+  it.each([
+    {
+      cleanup: "clerk-user",
+      timeout:
+        "Clerk user cleanup for diagnostic-user timed out after 250ms",
+    },
+    {
+      cleanup: "pool",
+      timeout: "Recovery database pool shutdown timed out after 250ms",
+    },
+  ])(
+    "reports a stalled $cleanup cleanup without external services",
+    ({ cleanup, timeout }) => {
+      const outputDirectory = mkdtempSync(
+        join(tmpdir(), `recovery-${cleanup}-diagnostic-`),
+      );
+      const phase = recoveryPhases[0]!;
+      try {
+        const result = spawnSync(
+          "pnpm",
+          [
+            "exec",
+            "playwright",
+            "test",
+            "e2e/key-reset-recovery.spec.ts",
+            "--config",
+            "e2e/playwright.config.ts",
+            "--grep",
+            "reports a stalled recovery phase",
+            "--output",
+            outputDirectory,
+          ],
+          {
+            cwd: apiServerDirectory,
+            encoding: "utf8",
+            env: {
+              ...process.env,
+              E2E_RECOVERY_DIAGNOSTIC_CONTRACT: "1",
+              E2E_RECOVERY_DIAGNOSTIC_PHASES: phase.phase,
+              E2E_RECOVERY_DIAGNOSTIC_CLEANUP: cleanup,
+            },
+            timeout: 15_000,
+          },
+        );
+        const report = `${result.stdout}\n${result.stderr}`;
+
+        expect(result.error).toBeUndefined();
+        expect(result.status).toBe(1);
+        expect(report).toContain(phase.phase);
+        expect(report).toContain(phase.action);
+        expect(report).toContain(
+          "Key-reset recovery verification and cleanup both failed",
+        );
+        expect(report).toContain(timeout);
+      } finally {
+        rmSync(outputDirectory, { recursive: true, force: true });
+      }
+    },
+    20_000,
   );
 });

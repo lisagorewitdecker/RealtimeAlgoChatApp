@@ -599,6 +599,30 @@ for (const diagnosticPhaseName of diagnosticPhaseNames) {
           cleanupErrors.push(result[0].reason);
         }
       }
+      if (diagnosticCleanupOperation === "clerk-user") {
+        const result = await Promise.allSettled([
+          withCleanupTimeout(
+            "Clerk user cleanup for diagnostic-user",
+            new Promise<void>(() => {}),
+            EXTERNAL_CLEANUP_TIMEOUT_MS,
+          ),
+        ]);
+        if (result[0]?.status === "rejected") {
+          cleanupErrors.push(result[0].reason);
+        }
+      }
+      if (diagnosticCleanupOperation === "pool") {
+        const result = await Promise.allSettled([
+          withCleanupTimeout(
+            "Recovery database pool shutdown",
+            new Promise<void>(() => {}),
+            EXTERNAL_CLEANUP_TIMEOUT_MS,
+          ),
+        ]);
+        if (result[0]?.status === "rejected") {
+          cleanupErrors.push(result[0].reason);
+        }
+      }
       throwTestAndCleanupFailures(
         testFailure,
         cleanupErrors,
