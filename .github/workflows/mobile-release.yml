@@ -588,6 +588,36 @@ jobs:
       - name: Install workspace dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Verify idle-profile browser targets
+        env:
+          E2E_CHAT_URL: ${{ secrets.E2E_CHAT_URL }}
+          E2E_API_URL: ${{ secrets.E2E_API_URL }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          check_target() {
+            local label="$1"
+            local url="$2"
+            if ! curl \
+              --fail \
+              --silent \
+              --connect-timeout 5 \
+              --max-time 10 \
+              --output /dev/null \
+              "$url"; then
+              echo "${label} target is unavailable or unhealthy." >&2
+              exit 2
+            fi
+            echo "${label} target is ready."
+          }
+
+          if [[ -z "${E2E_CHAT_URL:-}" || -z "${E2E_API_URL:-}" ]]; then
+            echo "Idle-profile browser target configuration is incomplete." >&2
+            exit 2
+          fi
+          check_target "Chat App" "$E2E_CHAT_URL"
+          check_target "API" "${E2E_API_URL%/}/api/healthz"
+
       - name: Run idle-profile registration release check
         id: idle-profile-check
         env:

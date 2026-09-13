@@ -492,10 +492,43 @@ test("idle-profile registration check blocks release and reports its result", ()
   const idleJob = workflow.jobs["idle-profile-registration"];
   assert.ok(idleJob, "release workflow must define the idle-profile job");
 
+  const preflightStep = idleJob.steps.find(
+    (step) => step.name === "Verify idle-profile browser targets",
+  );
+  assert.ok(preflightStep, "idle-profile job must preflight its browser targets");
+  assert.equal(preflightStep.env.E2E_CHAT_URL, "${{ secrets.E2E_CHAT_URL }}");
+  assert.equal(preflightStep.env.E2E_API_URL, "${{ secrets.E2E_API_URL }}");
+  assert.match(
+    preflightStep.run,
+    /check_target "Chat App" "\$E2E_CHAT_URL"/,
+    "preflight must identify and check the configured Chat App target",
+  );
+  assert.match(
+    preflightStep.run,
+    /check_target "API" "\$\{E2E_API_URL%\/\}\/api\/healthz"/,
+    "preflight must check the API public health route",
+  );
+  assert.match(preflightStep.run, /--connect-timeout 5/);
+  assert.match(preflightStep.run, /--max-time 10/);
+  assert.match(
+    preflightStep.run,
+    /\$\{label\} target is unavailable or unhealthy\./,
+    "preflight failures must clearly identify the unavailable target",
+  );
+  assert.doesNotMatch(
+    preflightStep.run,
+    /echo[^\n]*(?:E2E_CHAT_URL|E2E_API_URL|"\$url")/,
+    "preflight diagnostics must not print configured target URLs",
+  );
+
   const runStep = idleJob.steps.find(
     (step) => step.name === "Run idle-profile registration release check",
   );
   assert.ok(runStep, "idle-profile job must run the browser check");
+  assert.ok(
+    idleJob.steps.indexOf(preflightStep) < idleJob.steps.indexOf(runStep),
+    "both browser targets must be verified before Playwright starts",
+  );
   assert.match(
     runStep.run,
     /test:e2e:idle-profile-registration/,
