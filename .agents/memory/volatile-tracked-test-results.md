@@ -1,12 +1,10 @@
 ---
 name: Volatile tracked test results
-description: A tracked Playwright run marker under artifacts/api-server can change or vanish during unrelated work; check git status before completing a task.
+description: Playwright/vitest output under artifacts/api-server/test-results used to be tracked and churned during unrelated work; it is now gitignored — keep it that way and check git status before completing a task.
 ---
 
-`artifacts/api-server/test-results/.last-run.json` is committed to Git but is a Playwright run artifact, so it can show up as deleted or modified in `git status` even when the task never touched the API server (observed 2026-09-10 while only editing `lib/api-spec` scripts).
+`artifacts/api-server/test-results/` is Playwright's output directory for the API browser specs and also receives vitest screenshots (`native-large-text-call/`). Until 2026-09-13 a root `.gitignore` re-include pattern made it tracked, so `git status` showed deleted evidence files and untracked trace trees even when a task never touched the API server (observed 2026-09-10 while only editing `lib/api-spec` scripts, and again 2026-09-13 while editing the Clerk retry policy). The re-include is now anchored to the repository root, so artifact-level `test-results/` directories are ignored and main tracks nothing there.
 
-**Why:** run markers are rewritten or removed by test tooling, so an unrelated diff can otherwise ride along into a task's merge commit.
+**Why:** Playwright clears the configured output directory when a run starts, so any run — background E2E validation workflows for other tasks, or a spec spawned from the API vitest suite — deletes whatever is tracked there, while interrupted runs leave `.playwright-artifacts-N/` trees with hundreds of trace files and automatic checkpoints can commit them mid-run. Either kind of churn rode along into unrelated tasks' merge commits.
 
-**How to apply:** before marking a task complete, review `git status` and restore any unrelated change to this file with `git checkout -- <path>` instead of committing it.
-
-Automatic checkpoints can commit whole Playwright trace trees (`test-results/.playwright-artifacts-*/`) while an E2E run is in flight, and other tasks' checkpoints change which files main tracks. So after a rebase, align the directory to the *current* main (`git rm -r --cached` the dir, delete it, `git checkout main-repl/main -- <dir>`) rather than to the task's original base; the goal is zero test-results churn in the task's merge, not a specific historical snapshot.
+**How to apply:** never re-include an artifact-level `test-results/` directory or store durable evidence inside Playwright's `outputDir`; if evidence must be committed, put it outside that directory. Before marking a task complete, still review `git status` for generated output (restoring too early is pointless while a Playwright run is in flight — check `ps` for `playwright test` or `flock -n /tmp/replit-heavy-validation.lock true` first). After a rebase, align any test-results paths to the *current* main (`git rm -r --cached` the dir, delete it, `git checkout main-repl/main -- <dir>`) rather than to the task's original base; the goal is zero test-results churn in the task's merge, not a specific historical snapshot.

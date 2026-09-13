@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
+import { MAX_CLERK_RETRY_DELAY_MS } from "../src/lib/clerkRetry.js";
 import { requiredChromiumRuntimePackages } from "./playwright-runtime-packages.mjs";
 import {
   throwTestAndCleanupFailures,
@@ -62,6 +63,46 @@ describe("withClerkRetry", () => {
       }),
     ).resolves.toBe("session");
     expect(sleep).toHaveBeenCalledWith(3_000);
+  });
+
+  it.each([30, 31, 3_600, Number.MAX_SAFE_INTEGER])(
+    "caps numeric Clerk retry guidance of %s seconds at the shared ceiling",
+    async (retryAfter) => {
+      const operation = vi
+        .fn<() => Promise<string>>()
+        .mockRejectedValueOnce({ status: 429, retryAfter })
+        .mockResolvedValue("session");
+      const sleep = vi.fn<() => Promise<void>>().mockResolvedValue();
+
+      await expect(
+        withClerkRetry("create session", operation, {
+          attempts: 2,
+          baseDelayMs: 10,
+          sleep,
+        }),
+      ).resolves.toBe("session");
+      expect(operation).toHaveBeenCalledTimes(2);
+      expect(sleep.mock.calls).toEqual([[MAX_CLERK_RETRY_DELAY_MS]]);
+    },
+  );
+
+  it("keeps the attempt count when every retry hint exceeds the ceiling", async () => {
+    const failure = { status: 429, retryAfter: 3_600 };
+    const operation = vi.fn<() => Promise<string>>().mockRejectedValue(failure);
+    const sleep = vi.fn<() => Promise<void>>().mockResolvedValue();
+
+    await expect(
+      withClerkRetry("create session", operation, {
+        attempts: 3,
+        baseDelayMs: 10,
+        sleep,
+      }),
+    ).rejects.toBe(failure);
+    expect(operation).toHaveBeenCalledTimes(3);
+    expect(sleep.mock.calls).toEqual([
+      [MAX_CLERK_RETRY_DELAY_MS],
+      [MAX_CLERK_RETRY_DELAY_MS],
+    ]);
   });
 
   it.each(["later", Number.NaN, Number.POSITIVE_INFINITY, -1])(

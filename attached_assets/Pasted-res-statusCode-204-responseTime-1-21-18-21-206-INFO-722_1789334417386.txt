@@ -1,0 +1,350 @@
+res: {
+      "statusCode": 204
+    }
+    responseTime: 1
+[21:18:21.206] INFO (722): request completed
+    req: {
+      "id": 159,
+      "method": "GET",
+      "url": "/api/rooms"
+    }
+    res: {
+      "statusCode": 304
+    }
+    responseTime: 127
+[21:18:25.241] INFO (722): socket disconnected
+    sid: "0etcEYBNIiVZJMGNAAAf"
+    reason: "transport close"
+[21:18:29.758] INFO (722): request completed
+    req: {
+      "id": 160,
+      "method": "OPTIONS",
+      "url": "/api/profile"
+    }
+    res: {
+      "statusCode": 204
+    }
+    responseTime: 1
+[21:18:29.760] INFO (722): request completed
+    req: {
+      "id": 161,
+      "method": "OPTIONS",
+      "url": "/api/profile"
+    }
+    res: {
+      "statusCode": 204
+    }
+    responseTime: 1
+[21:18:29.986] INFO (722): request completed
+    req: {
+      "id": 163,
+      "method": "PUT",
+      "url": "/api/profile"
+    }
+    res: {
+      "statusCode": 409
+    }
+    responseTime: 145
+[21:18:30.045] INFO (722): request completed
+    req: {
+      "id": 162,
+      "method": "GET",
+      "url": "/api/profile"
+    }
+    res: {
+      "statusCode": 200
+    }
+    responseTime: 205
+[21:18:30.141] INFO (722): request completed
+    req: {
+      "id": 164,
+      "method": "OPTIONS",
+      "url": "/api/rooms"
+    }
+    res: {
+      "statusCode": 204
+    }
+    responseTime: 1
+[21:18:30.301] INFO (722): request completed
+    req: {
+      "id": 165,
+      "method": "GET",
+      "url": "/api/rooms"
+    }
+    res: {
+      "statusCode": 304
+    }
+    responseTime: 88
+[21:18:30.677] INFO (722): socket connected
+    sid: "DdSswe5l2UIIzRavAAAh"
+    userId: "user_3IBmhzjBKOihcaFnAeGxk3iyAdF"
+[21:18:38.160] INFO (722): request completed
+    req: {
+      "id": 166,
+      "method": "OPTIONS",
+      "url": "/api/rooms"
+    }
+    res: {
+      "statusCode": 204
+    }
+    responseTime: 2
+[21:18:38.419] INFO (722): request completed
+    req: {
+      "id": 167,
+      "method": "GET",
+      "url": "/api/rooms"
+    }
+    res: {
+      "statusCode": 304
+    }
+    responseTime: 138
+[21:18:46.134] INFO (722): request completed
+    req: {
+      "id": 168,
+      "method": "OPTIONS",
+      "url": "/api/rooms"
+    }
+    res: {
+      "statusCode": 204
+    }
+    responseTime: 1
+[21:18:46.360] INFO (722): request completed
+    req: {
+      "id": 169,
+      "method": "GET",
+      "url": "/api/rooms"
+    }
+    res: {
+      "statusCode": 304
+    }
+    responseTime: 124
+[21:18:54.136] INFO (722): request completed
+    req: {
+      "id": 170,
+      "method": "OPTIONS",
+      "url": "/api/rooms"
+    }
+    res: {
+      "statusCode": 204
+    }
+    responseTime: 2
+[21:18:54.340] INFO (722): request completed
+    req: {
+      "id": 171,
+      "method": "GET",
+      "url": "/api/rooms"
+    }
+    res: {
+      "statusCode": 304
+    }
+    responseTime: 124
+[21:19:02.194] INFO (722): request completed
+    req: {
+      "id": 172,
+      "method": "OPTIONS",
+      "url": "/api/rooms"
+    }
+    res: {
+      "statusCode": 204
+    }
+    responseTime: 2
+[21:19:02.391] INFO (722): request completed
+    req: {
+      "id": 173,
+      "method": "GET",
+      "url": "/api/rooms"
+    }
+    res: {
+      "statusCode": 304
+    }
+    responseTime: 116
+[21:19:10.133] INFO (722): request completed
+    req: {
+      "id": 174,
+      "method": "OPTIONS",
+      "url": "/api/rooms"
+    }
+    res: {
+      "statusCode": 204
+    }
+    responseTime: 1
+[21:19:10.317] INFO (722): request completed
+    req: {
+      "id": 175,
+      "method": "GET",
+      "url": "/api/rooms"
+    }
+    res: {
+      "statusCode": 304
+    }
+    responseTime: 118
+[21:19:18.136] INFO (722): request completed
+    req: {
+      "id": 176,
+      "method": "OPTIONS",
+      "url": "/api/rooms"
+    }
+    res: {
+      "statusCode": 204
+    }
+    responseTime: 1
+[21:19:18.344] INFO (722): request completed
+    req: {
+      "id": 177,
+      "method": "GET",
+      "url": "/api/rooms"
+    }
+    res: {
+      "statusCode": 304
+    }
+    responseTime: 144
+[21:19:26.138] INFO (722): request completed
+    req: {
+      "id": 178,
+      "method": "OPTIONS",
+      "url": "/api/rooms"
+    }
+    res: {
+      "statusCode": 204
+    }
+    responseTime: 4
+[21:19:26.329] INFO (722): request completed
+    req: {
+      "id": 179,
+      "method": "GET",
+      "url": "/api/rooms"
+    }
+    res: {
+      "statusCode": 304
+    }
+    responseTime: 126
+[21:19:34.146] INFO (722): request completed
+    req: {
+      "id": 180,
+      "method": "OPTIONS",
+      "url": "/api/rooms"
+    }
+    res: {
+      "statusCode": 204
+    }
+    responseTime: 1
+[21:19:34.338] INFO (722): request completed
+    req: {
+      "id": 181,
+      "method": "GET",
+      "url": "/api/rooms"
+    }
+    res: {
+      "statusCode": 304
+    }
+    responseTime: 124
+[21:19:42.152] INFO (722): request completed
+    req: {
+      "id": 182,
+      "method": "OPTIONS",
+      "url": "/api/rooms"
+    }
+    res: {
+      "statusCode": 204
+    }
+    responseTime: 1
+[21:19:42.342] INFO (722): request completed
+    req: {
+      "id": 183,
+      "method": "GET",
+      "url": "/api/rooms"
+    }
+    res: {
+      "statusCode": 304
+    }
+    responseTime: 125
+[21:19:50.149] INFO (722): request completed
+    req: {
+      "id": 184,
+      "method": "OPTIONS",
+      "url": "/api/rooms"
+    }
+    res: {
+      "statusCode": 204
+    }
+    responseTime: 2
+[21:19:50.347] INFO (722): request completed
+    req: {
+      "id": 185,
+      "method": "GET",
+      "url": "/api/rooms"
+    }
+    res: {
+      "statusCode": 304
+    }
+    responseTime: 127
+[21:19:54.319] INFO (722): request completed
+    req: {
+      "id": 186,
+      "method": "GET",
+      "url": "/"
+    }
+    res: {
+      "statusCode": 200
+    }
+    responseTime: 1
+[21:19:58.138] INFO (722): request completed
+    req: {
+      "id": 187,
+      "method": "OPTIONS",
+      "url": "/api/rooms"
+    }
+    res: {
+      "statusCode": 204
+    }
+    responseTime: 1
+[21:19:58.336] INFO (722): request completed
+    req: {
+      "id": 188,
+      "method": "GET",
+      "url": "/api/rooms"
+    }
+    res: {
+      "statusCode": 304
+    }
+    responseTime: 131
+[21:19:58.446] INFO (722): request completed
+    req: {
+      "id": 189,
+      "method": "GET",
+      "url": "/"
+    }
+    res: {
+      "statusCode": 200
+    }
+    responseTime: 1
+[21:20:00.731] INFO (722): request completed
+    req: {
+      "id": 190,
+      "method": "GET",
+      "url": "/"
+    }
+    res: {
+      "statusCode": 200
+    }
+    responseTime: 1
+[21:20:06.133] INFO (722): request completed
+    req: {
+      "id": 191,
+      "method": "OPTIONS",
+      "url": "/api/rooms"
+    }
+    res: {
+      "statusCode": 204
+    }
+    responseTime: 1
+[21:20:06.328] INFO (722): request completed
+    req: {
+      "id": 192,
+      "method": "GET",
+      "url": "/api/rooms"
+    }
+    res: {
+      "statusCode": 304
+    }
+    responseTime: 128

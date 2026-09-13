@@ -13,6 +13,7 @@ vi.mock("@clerk/express", () => ({
 }));
 
 import { getAccountAccess, setAccountBan } from "./accountAccess.js";
+import { MAX_CLERK_RETRY_DELAY_MS } from "./clerkRetry.js";
 
 function clerkUser({
   verified = true,
@@ -93,6 +94,44 @@ describe("account access", () => {
 
     await expect(access).resolves.toEqual({ allowed: true });
     expect(mockGetUser).toHaveBeenCalledTimes(2);
+    vi.useRealTimers();
+  });
+
+  it.each([30, 31, 3_600, Number.MAX_SAFE_INTEGER])(
+    "caps Clerk retry guidance of %s seconds at the shared ceiling",
+    async (retryAfter) => {
+      vi.useFakeTimers();
+      mockGetUser
+        .mockRejectedValueOnce({ status: 429, retryAfter })
+        .mockResolvedValueOnce(clerkUser());
+
+      const access = getAccountAccess(`user-capped-${String(retryAfter)}`);
+      await vi.advanceTimersByTimeAsync(MAX_CLERK_RETRY_DELAY_MS - 1);
+      expect(mockGetUser).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(1);
+
+      await expect(access).resolves.toEqual({ allowed: true });
+      expect(mockGetUser).toHaveBeenCalledTimes(2);
+      vi.useRealTimers();
+    },
+  );
+
+  it("keeps the attempt count when every retry hint exceeds the ceiling", async () => {
+    vi.useFakeTimers();
+    const throttled = Object.assign(new Error("Too Many Requests"), {
+      status: 429,
+      retryAfter: 3_600,
+    });
+    mockGetUser.mockRejectedValue(throttled);
+
+    const access = getAccountAccess("user-capped-exhausted");
+    access.catch(() => undefined);
+    await vi.advanceTimersByTimeAsync(3 * MAX_CLERK_RETRY_DELAY_MS - 1);
+    expect(mockGetUser).toHaveBeenCalledTimes(3);
+    await vi.advanceTimersByTimeAsync(1);
+
+    await expect(access).rejects.toBe(throttled);
+    expect(mockGetUser).toHaveBeenCalledTimes(4);
     vi.useRealTimers();
   });
 
