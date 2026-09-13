@@ -10,6 +10,7 @@ module.exports = {
   ignorePatterns: [
     "**/node_modules/**",
     "artifacts/chat-app/static-build/**",
+    "artifacts/mockup-sandbox/dist/**",
     "artifacts/mockup-sandbox/src/.generated/**",
   ],
   overrides: [
