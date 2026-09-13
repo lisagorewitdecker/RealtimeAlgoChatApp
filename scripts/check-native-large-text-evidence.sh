@@ -89,6 +89,55 @@ report_duplicate_metadata_keys() {
   done < <(duplicate_metadata_keys "$metadata_path")
 }
 
+# sentry-trigger.txt is produced by the controlled probe and must contain only
+# the three declarations consumed by the source-map evidence check. Report
+# structure and line numbers, but never include the line contents or values.
+sentry_trigger_metadata_errors() {
+  local metadata_path="$1"
+  awk '
+    {
+      line = $0
+      sub(/\r$/, "", line)
+      separator_count = gsub(/=/, "=", line)
+      if (line == "") {
+        printf "%d\tempty line\n", NR
+        next
+      }
+      if (separator_count != 1) {
+        printf "%d\texpected exactly one key=value declaration\n", NR
+        next
+      }
+
+      separator = index(line, "=")
+      key = substr(line, 1, separator - 1)
+      value = substr(line, separator + 1)
+      if (key == "" || value ~ /^[[:space:]]*$/) {
+        printf "%d\tkey and value must both be non-empty\n", NR
+        next
+      }
+      if (key ~ /[[:space:]]/) {
+        printf "%d\tkey must not contain whitespace\n", NR
+        next
+      }
+      if (key != "platform" && key != "candidate_build_id" && key != "marker") {
+        printf "%d\tunknown key/value declaration\n", NR
+      }
+    }
+  ' "$metadata_path"
+}
+
+report_sentry_trigger_metadata_errors() {
+  local platform="$1"
+  local metadata_path="$2"
+  local line_number
+  local reason
+
+  while IFS=$'\t' read -r line_number reason; do
+    [[ -n "$line_number" ]] || continue
+    issue "$platform" "Sentry trigger metadata line ${line_number} in ${metadata_path} is malformed: ${reason}. Regenerate it from a completed controlled Sentry probe without editing the metadata."
+  done < <(sentry_trigger_metadata_errors "$metadata_path")
+}
+
 # Hand-written review records may carry Windows line endings or stray spaces.
 trimmed_value() {
   local metadata_path="$1"
@@ -351,16 +400,20 @@ validate_platform() {
   fi
 
   local sentry_trigger_path="$run_dir/sentry-trigger.txt"
-  local sentry_trigger_has_duplicates=0
+  local sentry_trigger_has_errors=0
   if [[ -s "$sentry_trigger_path" ]]; then
+    if [[ -n "$(sentry_trigger_metadata_errors "$sentry_trigger_path")" ]]; then
+      sentry_trigger_has_errors=1
+      report_sentry_trigger_metadata_errors "$platform" "$sentry_trigger_path"
+    fi
     if [[ -n "$(duplicate_metadata_keys "$sentry_trigger_path")" ]]; then
-      sentry_trigger_has_duplicates=1
+      sentry_trigger_has_errors=1
       report_duplicate_metadata_keys "$platform" "$sentry_trigger_path" "Sentry trigger metadata" "Sentry trigger metadata"
     fi
   fi
 
   if [[ -s "$run_dir/sentry-source-map-evidence.json" ]] &&
-    ((sentry_trigger_has_duplicates == 0)); then
+    ((sentry_trigger_has_errors == 0)); then
     local candidate_build_id
     local sentry_validation_output
     candidate_build_id="$(tr -d '\r\n' < "$run_dir/candidate-build-id.txt")"
