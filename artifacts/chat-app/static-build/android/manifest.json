@@ -1,0 +1,125 @@
+{
+  "id": "446d4c06-3c81-4507-b9f0-5221ce10bcfe",
+  "createdAt": "2026-09-10T21:35:33.340Z",
+  "runtimeVersion": "exposdk:57.0.0",
+  "launchAsset": {
+    "key": "bundle-1789076133340-2385",
+    "contentType": "application/javascript",
+    "url": "https://9ef9cc57-ae03-4505-bda2-eb1e49ac0af4-00-ag9lllazkfvs.worf.replit.dev/1789076133340-2385/_expo/static/js/android/bundle.js"
+  },
+  "assets": [],
+  "metadata": {},
+  "extra": {
+    "eas": {},
+    "expoClient": {
+      "name": "RealtimeAlgoChatApp Studio",
+      "slug": "chat-app",
+      "version": "1.0.0",
+      "orientation": "portrait",
+      "icon": "./assets/images/icon.png",
+      "scheme": "chat-app",
+      "userInterfaceStyle": "automatic",
+      "ios": {
+        "supportsTablet": false,
+        "infoPlist": {
+          "NSCameraUsageDescription": "RealtimeAlgoChatApp Studio uses your camera for video calls.",
+          "NSMicrophoneUsageDescription": "RealtimeAlgoChatApp Studio uses your microphone for voice and video calls."
+        }
+      },
+      "android": {
+        "permissions": [
+          "android.permission.CAMERA",
+          "android.permission.RECORD_AUDIO",
+          "android.permission.MODIFY_AUDIO_SETTINGS"
+        ]
+      },
+      "web": {
+        "favicon": "./assets/images/icon.png"
+      },
+      "plugins": [
+        [
+          "expo-router",
+          {
+            "origin": "https://replit.com/"
+          }
+        ],
+        [
+          "@sentry/react-native/expo",
+          {
+            "organization": "lisagorewitdecker-06",
+            "project": "react-native"
+          }
+        ],
+        "expo-font",
+        [
+          "expo-splash-screen",
+          {
+            "image": "./assets/images/icon.png",
+            "imageWidth": 200,
+            "backgroundColor": "#0D0D1A"
+          }
+        ],
+        "expo-web-browser"
+      ],
+      "experiments": {
+        "typedRoutes": true,
+        "reactCompiler": true
+      },
+      "_internal": {
+        "isDebug": false,
+        "projectRoot": "/home/runner/workspace/artifacts/chat-app",
+        "dynamicConfigPath": {},
+        "staticConfigPath": "/home/runner/workspace/artifacts/chat-app/app.json",
+        "packageJsonPath": "/home/runner/workspace/artifacts/chat-app/package.json",
+        "pluginHistory": {
+          "@sentry/react-native/expo": {
+            "name": "@sentry/react-native/expo",
+            "version": "8.25.0"
+          },
+          "expo-font": {
+            "name": "expo-font",
+            "version": "57.0.3"
+          },
+          "expo-splash-screen": {
+            "name": "expo-splash-screen",
+            "version": "57.0.8"
+          },
+          "expo-web-browser": {
+            "name": "expo-web-browser",
+            "version": "57.0.2"
+          }
+        },
+        "sentryBuildProperties": {
+          "organization": "lisagorewitdecker-06",
+          "project": "react-native",
+          "url": "https://sentry.io/"
+        }
+      },
+      "sdkVersion": "57.0.0",
+      "platforms": [
+        "ios",
+        "android",
+        "web"
+      ],
+      "extra": {
+        "router": {
+          "origin": "https://replit.com/"
+        }
+      },
+      "iconUrl": "http://127.0.0.1:8082/assets/./assets/images/icon.png",
+      "hostUri": "9ef9cc57-ae03-4505-bda2-eb1e49ac0af4-00-ag9lllazkfvs.worf.replit.dev/android"
+    },
+    "expoGo": {
+      "debuggerHost": "9ef9cc57-ae03-4505-bda2-eb1e49ac0af4-00-ag9lllazkfvs.worf.replit.dev/android",
+      "developer": {
+        "tool": "expo-cli",
+        "projectRoot": "/home/runner/workspace/artifacts/chat-app"
+      },
+      "packagerOpts": {
+        "dev": false
+      },
+      "mainModuleName": "artifacts/chat-app/node_modules/expo-router/entry"
+    },
+    "scopeKey": "@anonymous/chat-app-15b47d9f-31f2-4ab0-b21c-905189ac5cbd"
+  }
+}

@@ -1,0 +1,45 @@
+iOS native large-text runner check
+==================================
+Checked (UTC): 2026-09-03
+Result: BLOCKED — this workspace cannot run the iOS physical-device supplement.
+
+Host:
+- OS/kernel: Linux x86_64 (Replit workspace; kernel 6.18.49)
+- xcrun: NOT FOUND
+- xcodebuild: NOT FOUND
+- xctrace/simctl: NOT FOUND
+- maestro: NOT FOUND
+- eas: NOT FOUND
+- ios-deploy: NOT FOUND
+- idevice_id: NOT FOUND
+- pnpm: FOUND (10.26.1)
+- Prepared macOS host: unavailable
+
+Device and release candidate:
+- Connected iOS device: unavailable
+- Booted iPhone SE (3rd generation) simulator: unavailable
+- Prepared iOS release-candidate bundle/build IDs: not available
+- Dedicated verified smoke account: not available to this runner
+- test-results/native-large-text/ios/: no device evidence produced
+
+Project gate attempt:
+- Command: pnpm --filter @workspace/chat-app test:native-large-text ios
+- Exit status: 2
+- Output: Required command not found: maestro
+- The gate stopped before iOS simulator discovery, app launch, sign-in, or screenshot capture.
+- Recheck (2026-09-03): the same command exited with status 2 at the same
+  prerequisite check; no device flow was started.
+
+No iOS device model, iOS version, OEM keyboard/locale, accessibility settings,
+screenshots, permission observations, clipping results, keyboard-obscured-action
+results, or font-rasterization results were produced.
+
+Resume requirements:
+1. Use a prepared macOS runner with xcrun, Maestro, and the iOS platform tooling.
+2. Boot or connect a representative iOS device in portrait mode.
+3. Install the release candidate and provide its bundle/build IDs through the
+   runner's secret store.
+4. Provide the dedicated verified smoke account through the runner's secret store.
+5. Set Profile accessibility to 140% text, High contrast on, Reduced motion on,
+   and run the manual supplement in
+   artifacts/chat-app/docs/native-large-text-device-check.md.

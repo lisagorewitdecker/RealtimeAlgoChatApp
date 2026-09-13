@@ -1,7 +1,6 @@
 # [Project name]
 
 _Replace the heading above with the project's name, and this line with one sentence describing what this app does for users._
-
 ## Run & Operate
 
 - `pnpm --filter @workspace/api-server run dev` — run the API server (port 5000)
@@ -70,3 +69,10 @@ _Populate as you build — explicit user instructions worth remembering across s
 ## Pointers
 
 - See the `pnpm-workspace` skill for workspace structure, TypeScript setup, and package details
+
+# [Project name]
+
+_Replace the heading above with the project's name, and this line with one sentence describing what this app does for users._
+# [Project name]
+
+_Replace the heading above with the project's name, and this line with one sentence describing what this app does for users._

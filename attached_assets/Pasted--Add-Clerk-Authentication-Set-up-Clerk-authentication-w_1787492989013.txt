@@ -40,9 +40,9 @@ npm install -g clerk
 ```
 
 Equivalent install commands are `pnpm install -g clerk`,
-`yarn global add clerk`, `bun add -g clerk`,
-`brew install clerk/stable/clerk`, or
-`curl -fsSL https://clerk.com/install | bash`.
+`yarn global add clerk`, `bun add -g clerk`, or
+`brew install clerk/stable/clerk`. If the user explicitly opts in,
+`curl -fsSL https://clerk.com/install | bash` is also available (it runs a remote script).
 
 ## Step 2: Sign in to Clerk
 

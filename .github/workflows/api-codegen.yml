@@ -7,6 +7,8 @@ on:
     branches: ["development"]
     types: [opened, synchronize, reopened, edited]
 
+permissions:
+  contents: read
 jobs:
   check-generated:
     name: Check generated API clients
@@ -20,7 +22,7 @@ jobs:
 
       - name: Set up pnpm
         id: setup-pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1
         with:
           version: 10.26.1
 
