@@ -36,6 +36,7 @@ npm-debug.log
 yarn-error.log
 testem.log
 /typings
+eslint-results.sarif
 
 # System Files
 .DS_Store
