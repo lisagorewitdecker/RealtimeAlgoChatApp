@@ -8,6 +8,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { requiredChromiumRuntimePackages } from "./playwright-runtime-packages.mjs";
 
 const apiServerDirectory = fileURLToPath(new URL("..", import.meta.url));
 const workspaceDirectory = fileURLToPath(new URL("../../..", import.meta.url));
@@ -51,33 +52,41 @@ try {
     join(workspaceDirectory, ".replit"),
     "utf8",
   );
-  writeFileSync(
-    incompleteRuntimeConfig,
-    runtimeConfig.replace('"nss", ', ""),
-  );
-  const missingLibrary = run(
-    "node",
-    ["e2e/check-playwright-runtime.mjs"],
-    {
-      ...baseEnvironment,
-      PLAYWRIGHT_RUNTIME_CONFIG_PATH: incompleteRuntimeConfig,
-    },
-  );
-  if (
-    missingLibrary.status !== 1 ||
-    !missingLibrary.report.includes("[api-server browser setup]") ||
-    !missingLibrary.report.includes("Chromium is not ready for API tests") ||
-    !missingLibrary.report.includes(
-      'Required Chromium runtime package "nss" is missing',
-    )
-  ) {
-    throw new Error(
-      `Missing-library setup diagnostic did not match its contract:\n${missingLibrary.report}`,
+  for (const packageName of requiredChromiumRuntimePackages) {
+    const packageEntry = `"${packageName}"`;
+    if (!runtimeConfig.includes(packageEntry)) {
+      throw new Error(
+        `Chromium runtime contract package ${packageEntry} is not declared in .replit.`,
+      );
+    }
+    writeFileSync(
+      incompleteRuntimeConfig,
+      runtimeConfig.replace(packageEntry, `"fixture-removed-${packageName}"`),
     );
+    const missingLibrary = run(
+      "node",
+      ["e2e/check-playwright-runtime.mjs"],
+      {
+        ...baseEnvironment,
+        PLAYWRIGHT_RUNTIME_CONFIG_PATH: incompleteRuntimeConfig,
+      },
+    );
+    if (
+      missingLibrary.status !== 1 ||
+      !missingLibrary.report.includes("[api-server browser setup]") ||
+      !missingLibrary.report.includes("Chromium is not ready for API tests") ||
+      !missingLibrary.report.includes(
+        `Required Chromium runtime package "${packageName}" is missing`,
+      )
+    ) {
+      throw new Error(
+        `Missing-library setup diagnostic for ${packageEntry} did not match its contract:\n${missingLibrary.report}`,
+      );
+    }
   }
 
   console.log(
-    "Playwright installed and launched Chromium from a clean browser cache, and rejected an incomplete native runtime declaration.",
+    `Playwright installed and launched Chromium from a clean browser cache, and rejected removal of all ${requiredChromiumRuntimePackages.length} contracted native runtime packages.`,
   );
 } finally {
   rmSync(cleanDirectory, { recursive: true, force: true });

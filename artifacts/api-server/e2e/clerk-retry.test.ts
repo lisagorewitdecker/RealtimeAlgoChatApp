@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
+import { requiredChromiumRuntimePackages } from "./playwright-runtime-packages.mjs";
 import {
   throwTestAndCleanupFailures,
   withClerkRetry,
@@ -254,37 +255,48 @@ describe("key-reset recovery Playwright diagnostics", () => {
     }
   });
 
-  it("reports the browser setup error when a required runtime package is removed", () => {
-    const runtimeDirectory = mkdtempSync(
-      join(tmpdir(), "incomplete-playwright-runtime-"),
-    );
-    const runtimeConfigPath = join(runtimeDirectory, ".replit");
-    try {
-      writeFileSync(runtimeConfigPath, '[nix]\npackages = ["glib"]\n');
-      const result = spawnSync(
-        "node",
-        ["e2e/check-playwright-runtime.mjs"],
-        {
-          cwd: apiServerDirectory,
-          encoding: "utf8",
-          env: {
-            ...process.env,
-            PLAYWRIGHT_RUNTIME_CONFIG_PATH: runtimeConfigPath,
-          },
-          timeout: 10_000,
-        },
+  it.each(requiredChromiumRuntimePackages)(
+    "reports the browser setup error when required runtime package %s is removed",
+    (removedPackage) => {
+      const runtimeDirectory = mkdtempSync(
+        join(tmpdir(), "incomplete-playwright-runtime-"),
       );
-      const report = `${result.stdout}\n${result.stderr}`;
+      const runtimeConfigPath = join(runtimeDirectory, ".replit");
+      try {
+        const remainingPackages = requiredChromiumRuntimePackages.filter(
+          (packageName) => packageName !== removedPackage,
+        );
+        writeFileSync(
+          runtimeConfigPath,
+          `[nix]\npackages = [${remainingPackages.map((name) => `"${name}"`).join(", ")}]\n`,
+        );
+        const result = spawnSync(
+          "node",
+          ["e2e/check-playwright-runtime.mjs"],
+          {
+            cwd: apiServerDirectory,
+            encoding: "utf8",
+            env: {
+              ...process.env,
+              PLAYWRIGHT_RUNTIME_CONFIG_PATH: runtimeConfigPath,
+            },
+            timeout: 10_000,
+          },
+        );
+        const report = `${result.stdout}\n${result.stderr}`;
 
-      expect(result.error).toBeUndefined();
-      expect(result.status).toBe(1);
-      expect(report).toContain("[api-server browser setup]");
-      expect(report).toContain("Chromium is not ready for API tests");
-      expect(report).toContain('Required Chromium runtime package "nss"');
-    } finally {
-      rmSync(runtimeDirectory, { recursive: true, force: true });
-    }
-  });
+        expect(result.error).toBeUndefined();
+        expect(result.status).toBe(1);
+        expect(report).toContain("[api-server browser setup]");
+        expect(report).toContain("Chromium is not ready for API tests");
+        expect(report).toContain(
+          `Required Chromium runtime package "${removedPackage}"`,
+        );
+      } finally {
+        rmSync(runtimeDirectory, { recursive: true, force: true });
+      }
+    },
+  );
 
   it(
     "reports every recovery phase and its underlying action without external services",
