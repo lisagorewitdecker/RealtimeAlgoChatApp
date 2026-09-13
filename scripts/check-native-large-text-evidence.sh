@@ -431,6 +431,93 @@ if (/(?:auth(?:orization)?[_-]?token|sentry_auth_token|bearer\s+[A-Za-z0-9._-]+)
   throw new Error("evidence contains credential-like content");
 }
 const evidence = JSON.parse(rawEvidence);
+function duplicateJsonFields(raw) {
+  let index = 0;
+  const duplicates = [];
+
+  function skipWhitespace() {
+    while (/\s/.test(raw[index] ?? "")) index += 1;
+  }
+
+  function readString() {
+    const start = index;
+    index += 1;
+    while (index < raw.length) {
+      if (raw[index] === "\\") {
+        index += 2;
+      } else if (raw[index] === '"') {
+        index += 1;
+        return JSON.parse(raw.slice(start, index));
+      } else {
+        index += 1;
+      }
+    }
+    throw new Error("unterminated JSON string");
+  }
+
+  function scanValue() {
+    skipWhitespace();
+    if (raw[index] === "{") {
+      scanObject();
+    } else if (raw[index] === "[") {
+      scanArray();
+    } else if (raw[index] === '"') {
+      readString();
+    } else {
+      while (index < raw.length && !/[,\]}]/.test(raw[index])) index += 1;
+    }
+  }
+
+  function scanObject() {
+    const keys = new Set();
+    index += 1;
+    skipWhitespace();
+    if (raw[index] === "}") {
+      index += 1;
+      return;
+    }
+    while (index < raw.length) {
+      skipWhitespace();
+      const key = readString();
+      if (keys.has(key)) duplicates.push(key);
+      keys.add(key);
+      skipWhitespace();
+      index += 1;
+      scanValue();
+      skipWhitespace();
+      if (raw[index] === "}") {
+        index += 1;
+        return;
+      }
+      index += 1;
+    }
+  }
+
+  function scanArray() {
+    index += 1;
+    skipWhitespace();
+    if (raw[index] === "]") {
+      index += 1;
+      return;
+    }
+    while (index < raw.length) {
+      scanValue();
+      skipWhitespace();
+      if (raw[index] === "]") {
+        index += 1;
+        return;
+      }
+      index += 1;
+    }
+  }
+
+  scanValue();
+  return [...new Set(duplicates)];
+}
+const duplicateFields = duplicateJsonFields(rawEvidence);
+if (duplicateFields.length > 0) {
+  throw new Error(`duplicate JSON field(s): ${duplicateFields.join(", ")}`);
+}
 const trigger = Object.fromEntries(
   readFileSync(triggerPath, "utf8")
     .trim()

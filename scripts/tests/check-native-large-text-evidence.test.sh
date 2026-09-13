@@ -504,6 +504,39 @@ assert_not_contains "$duplicate_sentry_trigger_output" "trigger platform does no
 assert_not_contains "$duplicate_sentry_trigger_output" "trigger candidate build ID does not match"
 assert_not_contains "$duplicate_sentry_trigger_output" "trigger marker does not match"
 
+# Conflicting Sentry evidence fields must be rejected before JSON.parse can
+# select the later declaration, without exposing either field value.
+duplicate_sentry_evidence_root="$TEST_ROOT/duplicate-sentry-evidence"
+write_valid_run "$duplicate_sentry_evidence_root" ios
+write_valid_run "$duplicate_sentry_evidence_root" android
+for platform in ios android; do
+  sentry_evidence_path="$duplicate_sentry_evidence_root/$platform/20260909T120000Z/sentry-source-map-evidence.json"
+  node --input-type=module - "$sentry_evidence_path" <<'NODE'
+import { readFileSync, writeFileSync } from "node:fs";
+
+const path = process.argv[2];
+let evidence = readFileSync(path, "utf8");
+for (const field of ["status", "platform", "candidateBuildId", "marker"]) {
+  const fieldPattern = new RegExp(`(\\n  "${field}": "[^"]+",)`);
+  evidence = evidence.replace(
+    fieldPattern,
+    `$1\n  "${field}": "must-not-be-printed-${field}",`,
+  );
+}
+writeFileSync(path, evidence);
+NODE
+done
+if duplicate_sentry_evidence_output="$(bash "$CHECKER" "$duplicate_sentry_evidence_root" 2>&1)"; then
+  echo "duplicate Sentry source-map evidence case unexpectedly passed" >&2
+  exit 1
+fi
+for platform in ios android; do
+  assert_contains "$duplicate_sentry_evidence_output" "[$platform] Invalid Sentry source-map evidence"
+  assert_contains "$duplicate_sentry_evidence_output" "duplicate JSON field(s): status, platform, candidateBuildId, marker"
+done
+assert_contains "$duplicate_sentry_evidence_output" "completeness check FAILED with 2 issue(s)"
+assert_not_contains "$duplicate_sentry_evidence_output" "must-not-be-printed"
+
 # Malformed and unknown Sentry trigger lines must not be ignored alongside
 # otherwise valid metadata, and diagnostics must not expose their values.
 malformed_sentry_trigger_root="$TEST_ROOT/malformed-sentry-trigger"
