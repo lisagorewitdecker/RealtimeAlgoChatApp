@@ -303,7 +303,7 @@ describe("key-reset recovery Playwright diagnostics", () => {
             "--config",
             "e2e/playwright.config.ts",
             "--grep",
-            "reports a stalled recovery phase",
+            "reports stalled recovery phases",
             "--output",
             outputDirectory,
           ],
@@ -318,13 +318,14 @@ describe("key-reset recovery Playwright diagnostics", () => {
                  .join(","),
               E2E_RECOVERY_DIAGNOSTIC_CLEANUP: "database",
             },
-            timeout: 40_000,
+            timeout: 15_000,
           },
         );
         const report = `${result.stdout}\n${result.stderr}`;
 
         expect(result.error).toBeUndefined();
         expect(result.status).toBe(1);
+        expect(result.signal).toBeNull();
         for (const { phase, action } of recoveryPhases) {
           expect(report).toContain(phase);
           expect(report).toContain(action);
@@ -342,7 +343,7 @@ describe("key-reset recovery Playwright diagnostics", () => {
         rmSync(outputDirectory, { recursive: true, force: true });
       }
     },
-    45_000,
+    20_000,
   );
 
   it.each([
@@ -373,7 +374,7 @@ describe("key-reset recovery Playwright diagnostics", () => {
             "--config",
             "e2e/playwright.config.ts",
             "--grep",
-            "reports a stalled recovery phase",
+            "reports stalled recovery phases",
             "--output",
             outputDirectory,
           ],

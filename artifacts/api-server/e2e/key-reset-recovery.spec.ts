@@ -28,13 +28,6 @@ const diagnosticContract =
   process.env["E2E_RECOVERY_DIAGNOSTIC_CONTRACT"] === "1";
 const diagnosticCleanupOperation =
   process.env["E2E_RECOVERY_DIAGNOSTIC_CLEANUP"];
-const diagnosticPhaseNames = (
-  process.env["E2E_RECOVERY_DIAGNOSTIC_PHASES"] ??
-  "sign in creator and create encrypted room"
-)
-  .split(",")
-  .map((phase) => phase.trim())
-  .filter(Boolean);
 const CONTEXT_CLEANUP_TIMEOUT_MS = diagnosticContract ? 250 : 5_000;
 const EXTERNAL_CLEANUP_TIMEOUT_MS = diagnosticContract ? 250 : 10_000;
 
@@ -73,6 +66,15 @@ const RECOVERY_PHASE_NAMES = {
   confirmReloadPersistence: "reload room and reuse recovered key",
   confirmRoomReentry: "leave and reopen room with recovered key",
 } as const;
+type RecoveryPhaseName =
+  (typeof RECOVERY_PHASE_NAMES)[keyof typeof RECOVERY_PHASE_NAMES];
+const diagnosticPhaseNames = (
+  process.env["E2E_RECOVERY_DIAGNOSTIC_PHASES"] ??
+  Object.values(RECOVERY_PHASE_NAMES).join(",")
+)
+  .split(",")
+  .map((phase) => phase.trim())
+  .filter(Boolean);
 
 async function withCleanupTimeout<T>(
   label: string,
@@ -505,7 +507,10 @@ test("a member recovers a live encrypted room after resetting their device key",
   }
 });
 
-const diagnosticActions: Record<string, (page: Page) => Promise<void>> = {
+const diagnosticActions: Record<
+  RecoveryPhaseName,
+  (page: Page) => Promise<void>
+> = {
   [RECOVERY_PHASE_NAMES.signInAndCreateRoom]: async (page: Page) => {
     await page.route("**/*", () => new Promise<void>(() => {}));
     await page.goto("http://recovery-diagnostic.invalid/");
@@ -520,6 +525,7 @@ const diagnosticActions: Record<string, (page: Page) => Promise<void>> = {
     await page.getByTestId("reset-device-key-button").click();
   },
   [RECOVERY_PHASE_NAMES.recoverFreshEnvelope]: async (page: Page) => {
+    await page.route("**/*", () => new Promise<void>(() => {}));
     await page.goto("http://recovery-diagnostic.invalid/");
   },
   [RECOVERY_PHASE_NAMES.confirmDecryption]: async (page: Page) => {
@@ -543,92 +549,106 @@ const diagnosticActions: Record<string, (page: Page) => Promise<void>> = {
   },
 };
 
-for (const diagnosticPhaseName of diagnosticPhaseNames) {
-  test(`reports a stalled recovery phase: ${diagnosticPhaseName}`, async ({
-    browser,
-  }) => {
-    test.skip(!diagnosticContract, "Only run by the diagnostic contract test");
-    test.setTimeout(10_000);
+test("reports stalled recovery phases", async ({ browser }) => {
+  test.skip(!diagnosticContract, "Only run by the diagnostic contract test");
+  test.setTimeout(10_000);
 
-    const diagnosticAction = diagnosticActions[diagnosticPhaseName];
-    expect(
-      diagnosticAction,
-      `Unknown recovery diagnostic phase: ${diagnosticPhaseName}`,
-    ).toBeDefined();
+  let context: BrowserContext | undefined;
+  const phaseFailures: unknown[] = [];
+  try {
+    context = await browser.newContext();
+    for (const diagnosticPhaseName of diagnosticPhaseNames) {
+      const diagnosticAction =
+        diagnosticActions[diagnosticPhaseName as RecoveryPhaseName];
+      expect(
+        diagnosticAction,
+        `Unknown recovery diagnostic phase: ${diagnosticPhaseName}`,
+      ).toBeDefined();
 
-    let context: BrowserContext | undefined;
-    let testFailure: unknown;
-    try {
-      await test.step(
-        diagnosticPhaseName,
-        async () => {
-          context = await browser.newContext();
-          const page = await context.newPage();
-          await diagnosticAction!(page);
-        },
-        { timeout: 250 },
-      );
-    } catch (error) {
-      testFailure = error;
-    } finally {
-      console.info("[key-reset-recovery-e2e] diagnostic cleanup executed");
-      const cleanupErrors: unknown[] = [];
-      if (context) {
-        if (diagnosticCleanupOperation === "browser") {
-          const realClose = context.close.bind(context);
-          context.close = () => new Promise<void>(() => {});
-          const result = await Promise.allSettled([
-            closeContextWithTimeout(context),
-          ]);
-          if (result[0]?.status === "rejected") {
-            cleanupErrors.push(result[0].reason);
-          }
-          context.close = realClose;
-        }
-        await context.close();
-      }
-      if (diagnosticCleanupOperation === "database") {
-        const result = await Promise.allSettled([
-          withCleanupTimeout(
-            "Recovery room database cleanup",
-            new Promise<void>(() => {}),
-            EXTERNAL_CLEANUP_TIMEOUT_MS,
+      let page: Page | undefined;
+      try {
+        page = await context.newPage();
+        await test.step(
+          diagnosticPhaseName,
+          () => diagnosticAction!(page!),
+          { timeout: 250 },
+        );
+      } catch (error) {
+        phaseFailures.push(
+          new AggregateError(
+            [error],
+            `Recovery diagnostic phase failed: ${diagnosticPhaseName}`,
           ),
-        ]);
-        if (result[0]?.status === "rejected") {
-          cleanupErrors.push(result[0].reason);
-        }
+        );
+      } finally {
+        await page?.close();
       }
-      if (diagnosticCleanupOperation === "clerk-user") {
-        const result = await Promise.allSettled([
-          withCleanupTimeout(
-            "Clerk user cleanup for diagnostic-user",
-            new Promise<void>(() => {}),
-            EXTERNAL_CLEANUP_TIMEOUT_MS,
-          ),
-        ]);
-        if (result[0]?.status === "rejected") {
-          cleanupErrors.push(result[0].reason);
-        }
-      }
-      if (diagnosticCleanupOperation === "pool") {
-        const result = await Promise.allSettled([
-          withCleanupTimeout(
-            "Recovery database pool shutdown",
-            new Promise<void>(() => {}),
-            EXTERNAL_CLEANUP_TIMEOUT_MS,
-          ),
-        ]);
-        if (result[0]?.status === "rejected") {
-          cleanupErrors.push(result[0].reason);
-        }
-      }
-      throwTestAndCleanupFailures(
-        testFailure,
-        cleanupErrors,
-        "Key-reset recovery E2E cleanup failed",
-        "Key-reset recovery verification and cleanup both failed",
-      );
     }
-  });
-}
+  } finally {
+    console.info("[key-reset-recovery-e2e] diagnostic cleanup executed");
+    const cleanupErrors: unknown[] = [];
+    if (context) {
+      if (diagnosticCleanupOperation === "browser") {
+        const realClose = context.close.bind(context);
+        context.close = () => new Promise<void>(() => {});
+        const result = await Promise.allSettled([
+          closeContextWithTimeout(context),
+        ]);
+        if (result[0]?.status === "rejected") {
+          cleanupErrors.push(result[0].reason);
+        }
+        context.close = realClose;
+      }
+      await context.close();
+    }
+    if (diagnosticCleanupOperation === "database") {
+      const result = await Promise.allSettled([
+        withCleanupTimeout(
+          "Recovery room database cleanup",
+          new Promise<void>(() => {}),
+          EXTERNAL_CLEANUP_TIMEOUT_MS,
+        ),
+      ]);
+      if (result[0]?.status === "rejected") {
+        cleanupErrors.push(result[0].reason);
+      }
+    }
+    if (diagnosticCleanupOperation === "clerk-user") {
+      const result = await Promise.allSettled([
+        withCleanupTimeout(
+          "Clerk user cleanup for diagnostic-user",
+          new Promise<void>(() => {}),
+          EXTERNAL_CLEANUP_TIMEOUT_MS,
+        ),
+      ]);
+      if (result[0]?.status === "rejected") {
+        cleanupErrors.push(result[0].reason);
+      }
+    }
+    if (diagnosticCleanupOperation === "pool") {
+      const result = await Promise.allSettled([
+        withCleanupTimeout(
+          "Recovery database pool shutdown",
+          new Promise<void>(() => {}),
+          EXTERNAL_CLEANUP_TIMEOUT_MS,
+        ),
+      ]);
+      if (result[0]?.status === "rejected") {
+        cleanupErrors.push(result[0].reason);
+      }
+    }
+    const testFailure =
+      phaseFailures.length > 0
+        ? new AggregateError(
+            phaseFailures,
+            "Recovery diagnostic phases failed",
+          )
+        : undefined;
+    throwTestAndCleanupFailures(
+      testFailure,
+      cleanupErrors,
+      "Key-reset recovery E2E cleanup failed",
+      "Key-reset recovery verification and cleanup both failed",
+    );
+  }
+});
