@@ -29,6 +29,18 @@ stale snapshot and the trunk is overwritten (older manifests, tsconfig,
 committed build output, memory notes), which broke the frozen install and the
 publish build even though the task itself touched two files.
 
+**A merge-join is rebase-hostile until it is pushed.** Joining the GitHub
+history with `merge -s ours --allow-unrelated-histories` gives the platform's
+task merges a merge-base again, but `git pull --quiet --no-edit --rebase origin
+<branch>` (which ran automatically within seconds of the join) linearizes the
+join: it tries to replay every workspace commit from the initial commit onto
+the GitHub tip, stops on the first conflict, and leaves a detached HEAD whose
+tree lacks the artifact manifests and workflows. Abort it (`git rebase
+--abort`) and keep an untracked `.githooks/pre-rebase` guard (listed in
+`.git/info/exclude`) that refuses rebases replaying more than ~25 commits until
+the join has been pushed; a linear "import" commit instead of a merge would
+break the task merge-bases, so it is not an alternative.
+
 **How to apply:**
 - After any merge from a task that started during a wrong checkout, diff the
   merge against its parent, keep only the files the task's own agent commits
