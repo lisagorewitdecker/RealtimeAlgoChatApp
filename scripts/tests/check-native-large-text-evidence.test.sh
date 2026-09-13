@@ -243,6 +243,27 @@ assert_contains "$strict_reviewed_output" "[ios] Review record: APPROVED"
 assert_contains "$strict_reviewed_output" "[android] Review record: APPROVED"
 assert_contains "$strict_reviewed_output" "passed for iOS and Android"
 
+crlf_approved_root="$TEST_ROOT/crlf-approved"
+write_valid_run "$crlf_approved_root" ios
+write_valid_run "$crlf_approved_root" android
+write_review_record "$crlf_approved_root" ios APPROVED
+printf '%s\r\n' \
+  'platform=android' \
+  'reviewer=Ada Reviewer' \
+  'reviewed_at_utc=2026-09-09T13:00:00Z' \
+  'candidate_build_id=build-android' \
+  'decision=APPROVED' \
+  'notes<<END_NOTES' \
+  '# Layout verified' \
+  '- The `Send` button remains visible.' \
+  '- See [capture](screenshots/screen-11.png).' \
+  'END_NOTES' \
+  > "$crlf_approved_root/android/20260909T120000Z/review-record.txt"
+crlf_approved_output="$(bash "$CHECKER" "$crlf_approved_root" 2>&1)"
+assert_contains "$crlf_approved_output" "[android] Review record: APPROVED by Ada Reviewer at 2026-09-09T13:00:00Z for candidate build-android."
+assert_contains "$crlf_approved_output" "passed for iOS and Android"
+assert_not_contains "$crlf_approved_output" "unterminated notes block"
+
 candidate_scoped_root="$TEST_ROOT/candidate-scoped-rerun"
 write_valid_run "$candidate_scoped_root" ios
 write_valid_run "$candidate_scoped_root" android
@@ -285,18 +306,18 @@ multiline_rejected_root="$TEST_ROOT/multiline-rejected"
 write_valid_run "$multiline_rejected_root" ios
 write_valid_run "$multiline_rejected_root" android
 write_review_record "$multiline_rejected_root" ios APPROVED
-cat > "$multiline_rejected_root/android/20260909T120000Z/review-record.txt" <<'EOF'
-platform=android
-reviewer=Ada Reviewer
-reviewed_at_utc=2026-09-09T13:00:00Z
-candidate_build_id=build-android
-decision=REJECTED
-notes<<END_NOTES
-# Layout finding
-- The `Send` button overlaps the final line.
-- See [capture](screenshots/screen-11.png).
-END_NOTES
-EOF
+printf '%s\r\n' \
+  'platform=android' \
+  'reviewer=Ada Reviewer' \
+  'reviewed_at_utc=2026-09-09T13:00:00Z' \
+  'candidate_build_id=build-android' \
+  'decision=REJECTED' \
+  'notes<<END_NOTES' \
+  '# Layout finding' \
+  '- The `Send` button overlaps the final line.' \
+  '- See [capture](screenshots/screen-11.png).' \
+  'END_NOTES' \
+  > "$multiline_rejected_root/android/20260909T120000Z/review-record.txt"
 if multiline_rejected_output="$(bash "$CHECKER" "$multiline_rejected_root" 2>&1)"; then
   echo "multi-line rejected review case unexpectedly passed" >&2
   exit 1
@@ -306,6 +327,8 @@ assert_contains "$multiline_rejected_output" '[android]   | # Layout finding'
 assert_contains "$multiline_rejected_output" '[android]   | - The `Send` button overlaps the final line.'
 assert_contains "$multiline_rejected_output" '[android]   | - See [capture](screenshots/screen-11.png).'
 assert_contains "$multiline_rejected_output" "completeness check FAILED with 1 issue(s)"
+assert_not_contains "$multiline_rejected_output" $'\r'
+assert_not_contains "$multiline_rejected_output" "unterminated notes block"
 
 unterminated_notes_root="$TEST_ROOT/unterminated-notes"
 write_valid_run "$unterminated_notes_root" ios
