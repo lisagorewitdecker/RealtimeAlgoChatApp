@@ -3,6 +3,10 @@
   "version": "0.0.0",
   "license": "MIT",
   "scripts": {
+    "prepare": "node lib/api-spec/scripts/install-repository-git-hooks.mjs",
+    "hooks:dispatcher:install": "node lib/api-spec/scripts/install-repository-git-hooks.mjs --install-dispatcher",
+    "hooks:dispatcher:uninstall": "node lib/api-spec/scripts/install-repository-git-hooks.mjs --uninstall-dispatcher",
+    "validate:staged-codegen-backups": "node lib/api-spec/scripts/check-staged-codegen-backups.mjs",
     "preinstall": "sh -c 'rm -f package-lock.json yarn.lock; case \"$npm_config_user_agent\" in pnpm/*) ;; *) echo \"Use pnpm instead\" >&2; exit 1 ;; esac'",
     "build": "pnpm run typecheck && pnpm -r --if-present run build",
     "typecheck:libs": "tsc --build",
