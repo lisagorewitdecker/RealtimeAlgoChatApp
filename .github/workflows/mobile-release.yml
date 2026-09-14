@@ -75,6 +75,8 @@ env:
 jobs:
   native-ios:
     name: Native large-text smoke (iOS)
+    outputs:
+      native_evidence_artifact_url: ${{ steps.upload-ios-native-smoke.outputs.artifact-url }}
     runs-on:
       - self-hosted
       - macos
@@ -366,6 +368,8 @@ jobs:
 
   native-android:
     name: Native large-text smoke (Android)
+    outputs:
+      native_evidence_artifact_url: ${{ steps.upload-android-native-smoke.outputs.artifact-url }}
     needs:
       - android-prerequisite-preflight
     runs-on:
@@ -673,6 +677,9 @@ jobs:
   mobile-release-gate:
     name: Mobile release gate
     if: ${{ always() }}
+    outputs:
+      ios_native_evidence_artifact_url: ${{ needs.native-ios.outputs.native_evidence_artifact_url }}
+      android_native_evidence_artifact_url: ${{ needs.native-android.outputs.native_evidence_artifact_url }}
     needs:
       - native-ios
       - native-android
@@ -702,6 +709,9 @@ jobs:
         id: evidence-completeness
         if: ${{ always() }}
         continue-on-error: true
+        env:
+          NATIVE_IOS_EVIDENCE_ARTIFACT_URL: ${{ needs.native-ios.outputs.native_evidence_artifact_url }}
+          NATIVE_ANDROID_EVIDENCE_ARTIFACT_URL: ${{ needs.native-android.outputs.native_evidence_artifact_url }}
         run: bash scripts/check-native-large-text-evidence.sh
 
       - name: Block release unless both native checks pass
@@ -856,6 +866,8 @@ jobs:
       - name: Require approved iOS and Android evidence
         env:
           NATIVE_EVIDENCE_REQUIRE_APPROVAL: "1"
+          NATIVE_IOS_EVIDENCE_ARTIFACT_URL: ${{ needs.mobile-release-gate.outputs.ios_native_evidence_artifact_url }}
+          NATIVE_ANDROID_EVIDENCE_ARTIFACT_URL: ${{ needs.mobile-release-gate.outputs.android_native_evidence_artifact_url }}
         run: bash scripts/check-native-large-text-evidence.sh
 
       - name: Verify publishing inputs

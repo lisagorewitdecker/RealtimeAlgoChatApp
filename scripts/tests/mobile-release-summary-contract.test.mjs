@@ -63,6 +63,8 @@ const bashPath = locateExecutable("bash");
 
 const iosGateScript = "artifacts/chat-app/e2e/native-large-text/run.sh";
 const androidPreflightScript = "scripts/check-android-release-prerequisites.sh";
+const nativeEvidenceCheckerScript =
+  "scripts/check-native-large-text-evidence.sh";
 
 /**
  * Inventory of every script invoked by the release workflow that writes
@@ -658,6 +660,11 @@ test("publish requires candidate-bound approvals from the current run attempt", 
       true,
       `${jobId} must replace its own prior-attempt artifact after a rerun`,
     );
+    assert.equal(
+      workflow.jobs[jobId].outputs?.native_evidence_artifact_url,
+      `\${{ steps.upload-${platform}-native-smoke.outputs.artifact-url }}`,
+      `${jobId} must expose the uploaded evidence artifact URL`,
+    );
     assert.ok(
       workflow.jobs[jobId].steps.some(
         (step) =>
@@ -666,6 +673,32 @@ test("publish requires candidate-bound approvals from the current run attempt", 
       `${jobId} must clear stale self-hosted-runner evidence before collection`,
     );
   }
+
+  assert.equal(
+    workflow.jobs["mobile-release-gate"].outputs
+      ?.ios_native_evidence_artifact_url,
+    "${{ needs.native-ios.outputs.native_evidence_artifact_url }}",
+    "the final release gate must carry the iOS evidence artifact URL forward",
+  );
+  assert.equal(
+    workflow.jobs["mobile-release-gate"].outputs
+      ?.android_native_evidence_artifact_url,
+    "${{ needs.native-android.outputs.native_evidence_artifact_url }}",
+    "the final release gate must carry the Android evidence artifact URL forward",
+  );
+  const evidenceStep = workflow.jobs["mobile-release-gate"].steps.find(
+    (step) => step.name === "Validate native evidence completeness",
+  );
+  assert.equal(
+    evidenceStep?.env?.NATIVE_IOS_EVIDENCE_ARTIFACT_URL,
+    "${{ needs.native-ios.outputs.native_evidence_artifact_url }}",
+    "the evidence checker must receive the uploaded iOS artifact URL",
+  );
+  assert.equal(
+    evidenceStep?.env?.NATIVE_ANDROID_EVIDENCE_ARTIFACT_URL,
+    "${{ needs.native-android.outputs.native_evidence_artifact_url }}",
+    "the evidence checker must receive the uploaded Android artifact URL",
+  );
 
   for (const jobId of ["mobile-release-gate", "mobile-publish"]) {
     const downloads = workflow.jobs[jobId].steps.filter(
@@ -716,6 +749,16 @@ test("publish requires candidate-bound approvals from the current run attempt", 
     publishSteps[strictIndex].env.NATIVE_EVIDENCE_REQUIRE_APPROVAL,
     "1",
     "publish evidence validation must enable strict approval mode",
+  );
+  assert.equal(
+    publishSteps[strictIndex].env.NATIVE_IOS_EVIDENCE_ARTIFACT_URL,
+    "${{ needs.mobile-release-gate.outputs.ios_native_evidence_artifact_url }}",
+    "publish evidence validation must retain the iOS artifact link",
+  );
+  assert.equal(
+    publishSteps[strictIndex].env.NATIVE_ANDROID_EVIDENCE_ARTIFACT_URL,
+    "${{ needs.mobile-release-gate.outputs.android_native_evidence_artifact_url }}",
+    "publish evidence validation must retain the Android artifact link",
   );
   assert.ok(
     publishSteps[approvalIndex].run.includes(
@@ -780,6 +823,7 @@ function summaryEnvExpressionProblem(expression, { jobId, job }) {
   if (
     /^steps\.[\w-]+\.(outcome|conclusion)$/.test(trimmed) ||
     /^needs\.[\w-]+\.result$/.test(trimmed) ||
+    /^needs\.[\w-]+\.outputs\.[\w-]+$/.test(trimmed) ||
     trimmed === "job.status" ||
     /^(?:github\.(?!token\b)[\w.-]+|runner\.\w+|inputs\.[\w-]+)$/.test(trimmed) ||
     /^inputs\.[\w-]+\s*\|\|\s*vars\.[\w-]+$/.test(trimmed)
@@ -1799,4 +1843,64 @@ test("workflow summaries show candidate build IDs without exposing private value
       );
     }
   }
+});
+
+test("native evidence summaries link only the fixed uploaded report", () => {
+  const evidenceRoot = path.join(testRoot, "evidence-link-safety");
+  mkdirSync(evidenceRoot, { recursive: true });
+  mkdirSync(path.join(evidenceRoot, "ios", "20260909T120000Z"), {
+    recursive: true,
+  });
+  mkdirSync(path.join(evidenceRoot, "android", "20260909T120000Z"), {
+    recursive: true,
+  });
+  writeFileSync(
+    path.join(evidenceRoot, "arbitrary-evidence.txt"),
+    "private-evidence-marker [attacker](https://attacker.example/report)\n",
+  );
+  const summaryPath = path.join(testRoot, "evidence-link-safety-summary.md");
+  const iosArtifactUrl =
+    "https://github.example/example/chat-app/actions/runs/123/artifacts/456";
+  const result = spawnSync(
+    bashPath,
+    [path.join(workspaceRoot, nativeEvidenceCheckerScript), evidenceRoot],
+    {
+      cwd: workspaceRoot,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        GITHUB_STEP_SUMMARY: summaryPath,
+        NATIVE_IOS_EVIDENCE_ARTIFACT_URL: iosArtifactUrl,
+        NATIVE_ANDROID_EVIDENCE_ARTIFACT_URL:
+          "https://attacker.example/report.md)](https://attacker.example/second",
+      },
+    },
+  );
+  assert.notEqual(
+    result.status,
+    0,
+    "the intentionally incomplete evidence root should remain blocked",
+  );
+
+  const summary = readFileSync(summaryPath, "utf8");
+  assert.match(
+    summary,
+    new RegExp(
+      String.raw`\[native-branding-check\.md\]\(${iosArtifactUrl.replaceAll(
+        ".",
+        "\\.",
+      )}\)`,
+    ),
+    "the iOS section should link the uploaded artifact page using the fixed report name",
+  );
+  assert.match(
+    summary,
+    /## Android native large-text evidence[\s\S]*Detailed evidence report: \*\*Unavailable\*\*/,
+    "an unsafe artifact URL must not become an Android Markdown link",
+  );
+  assert.doesNotMatch(
+    summary,
+    /private-evidence-marker|attacker\.example|arbitrary-evidence/,
+    "evidence contents and identifiers must not become summary link targets",
+  );
 });

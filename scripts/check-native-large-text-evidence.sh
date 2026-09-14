@@ -17,6 +17,7 @@ REQUIRE_APPROVAL="${NATIVE_EVIDENCE_REQUIRE_APPROVAL:-0}"
 NODE_BINARY="${NATIVE_EVIDENCE_NODE_BINARY:-node}"
 UTC_TIMESTAMP_PATTERN='^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$'
 TEMPLATE_PLACEHOLDER_PATTERN='^<.*>$'
+NATIVE_EVIDENCE_REPORT_NAME="native-branding-check.md"
 
 if [[ "$REQUIRE_APPROVAL" != "0" && "$REQUIRE_APPROVAL" != "1" ]]; then
   echo "NATIVE_EVIDENCE_REQUIRE_APPROVAL must be 0 or 1." >&2
@@ -39,6 +40,24 @@ summary_safe_text() {
   local value="$1"
   value="$(printf '%s' "$value" | LC_ALL=C tr '\000-\011\013-\037\177' ' ' | tr '\140' "'")"
   printf '%s' "$value"
+}
+
+summary_artifact_url() {
+  local platform="$1"
+  local artifact_url=""
+
+  if [[ "$platform" == "ios" ]]; then
+    artifact_url="${NATIVE_IOS_EVIDENCE_ARTIFACT_URL:-}"
+  else
+    artifact_url="${NATIVE_ANDROID_EVIDENCE_ARTIFACT_URL:-}"
+  fi
+
+  # The URL comes from actions/upload-artifact. Keep the link target limited
+  # to the GitHub artifact page shape so evidence or other runtime text cannot
+  # become Markdown link destinations.
+  if [[ "$artifact_url" =~ ^https://[A-Za-z0-9.-]+/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/actions/runs/[0-9]+/artifacts/[0-9]+$ ]]; then
+    printf '%s' "$artifact_url"
+  fi
 }
 
 issue() {
@@ -780,6 +799,7 @@ write_evidence_summary() {
   local finding
   local safe_run_dir
   local safe_finding
+  local evidence_artifact_url
 
   for platform in ios android; do
     if [[ "$platform" == "ios" ]]; then
@@ -800,6 +820,7 @@ write_evidence_summary() {
     call_screenshot_count="${SUMMARY_CALL_SCREENSHOT_COUNT[$platform]}"
     call_empty_count="${SUMMARY_CALL_EMPTY_COUNT[$platform]}"
     safe_run_dir="$(summary_safe_text "$run_dir")"
+    evidence_artifact_url="$(summary_artifact_url "$platform")"
 
     {
       echo "## ${label} native large-text evidence"
@@ -807,10 +828,16 @@ write_evidence_summary() {
       echo "- Status: **${status}**"
       if [[ -n "$run_dir" ]]; then
         echo "- Validated run directory: \`${safe_run_dir}\`"
+        if [[ -n "$evidence_artifact_url" ]]; then
+          echo "- Detailed evidence report: [${NATIVE_EVIDENCE_REPORT_NAME}](${evidence_artifact_url})"
+        else
+          echo "- Detailed evidence report: **Unavailable**"
+        fi
         echo "- Native screenshots: **${native_screenshot_count}** (minimum 11; empty: ${native_empty_count})"
         echo "- Call-surface screenshots: **${call_screenshot_count}** (required 2; empty: ${call_empty_count})"
       else
         echo "- Validated run directory: **Unavailable**"
+        echo "- Detailed evidence report: **Unavailable**"
       fi
       if [[ -n "${SUMMARY_ISSUES[$platform]}" ]]; then
         echo
