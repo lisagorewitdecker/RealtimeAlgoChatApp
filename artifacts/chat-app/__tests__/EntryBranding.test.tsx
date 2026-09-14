@@ -167,4 +167,54 @@ describe("entry-screen branding", () => {
     ).toBeTruthy();
     expect(view.queryByText(/DevAlgoChat|DevStudio|ChatSphere/)).toBeNull();
   });
+
+  it("renders an actionable state when Clerk configuration is missing", async () => {
+    const previousKey = process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY;
+    const previousManagedKey = process.env.VITE_CLERK_PUBLISHABLE_KEY;
+    delete process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY;
+    delete process.env.VITE_CLERK_PUBLISHABLE_KEY;
+
+    try {
+      const view = render(<RootLayout />);
+      await act(async () => {});
+
+      expect(view.getByText("Authentication setup needed")).toBeTruthy();
+      expect(
+        view.getByText(
+          "Authentication setup is incomplete. Ask the project owner to provide the managed Clerk publishable key, then reload the app.",
+        ),
+      ).toBeTruthy();
+    } finally {
+      if (previousKey === undefined) {
+        delete process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY;
+      } else {
+        process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY = previousKey;
+      }
+      if (previousManagedKey === undefined) {
+        delete process.env.VITE_CLERK_PUBLISHABLE_KEY;
+      } else {
+        process.env.VITE_CLERK_PUBLISHABLE_KEY = previousManagedKey;
+      }
+    }
+  });
+
+  it("renders an actionable state when Clerk configuration is malformed", async () => {
+    const previousKey = process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY;
+    process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY = "malformed-key";
+
+    try {
+      const view = render(<RootLayout />);
+      await act(async () => {});
+
+      expect(view.getByText("Authentication setup needed")).toBeTruthy();
+      expect(view.getByText(/Clerk publishable key is not valid/)).toBeTruthy();
+      expect(view.queryByText("malformed-key")).toBeNull();
+    } finally {
+      if (previousKey === undefined) {
+        delete process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY;
+      } else {
+        process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY = previousKey;
+      }
+    }
+  });
 });

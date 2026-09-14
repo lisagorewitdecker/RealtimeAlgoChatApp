@@ -228,6 +228,17 @@ export function useAccessibility(): AccessibilityContextValue {
   return ctx;
 }
 
+export function useAccessibilityOptional(): AccessibilityContextValue {
+  return useContext(AccessibilityContext) ?? {
+    ...defaults,
+    setHighContrast: () => undefined,
+    setFontScale: () => undefined,
+    setReduceMotion: () => undefined,
+    persistenceError: null,
+    retryPersistence: async () => true,
+  };
+}
+
 /**
  * Text primitives use this optional form so they can safely render in
  * standalone previews and tests while still following the provider in the

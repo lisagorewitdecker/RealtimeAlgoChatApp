@@ -21,6 +21,7 @@ import { AppFooter } from "@/components/AppFooter";
 import { ScaledText as Text } from "@/components/ScaledText";
 import { PRODUCT_NAME } from "@/constants/branding";
 import { AppProvider, useApp } from "@/contexts/AppContext";
+import { getClerkConfiguration } from "@/lib/clerkConfig";
 import { CryptoProvider } from "@/contexts/CryptoContext";
 import { SocketProvider } from "@/contexts/SocketContext";
 import { clerkTokenCache } from "@/lib/clerkTokenCache";
@@ -242,6 +243,39 @@ function RootLayoutNav() {
   );
 }
 
+function ClerkConfigurationScreen({ message }: { message: string }) {
+  useEffect(() => {
+    void SplashScreen.hideAsync();
+  }, []);
+
+  return (
+    <View
+      style={{
+        flex: 1,
+        alignItems: "center",
+        justifyContent: "center",
+        gap: 14,
+        padding: 28,
+        backgroundColor: "#0d0d1a",
+      }}
+    >
+      <Text
+        accessibilityRole="header"
+        {...{ role: "heading", "aria-level": 1 }}
+        style={{ color: "#f8fafc", fontSize: 24, fontWeight: "700", textAlign: "center" }}
+      >
+        Authentication setup needed
+      </Text>
+      <Text
+        accessibilityRole="alert"
+        style={{ color: "#c7d2fe", fontSize: 15, lineHeight: 22, textAlign: "center" }}
+      >
+        {message}
+      </Text>
+    </View>
+  );
+}
+
 function AuthTokenBridge({ children }: { children: React.ReactNode }) {
   const { getToken } = useAuth();
 
@@ -254,7 +288,7 @@ function AuthTokenBridge({ children }: { children: React.ReactNode }) {
 }
 
 function RootLayout() {
-  const publishableKey = process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY;
+  const clerkConfiguration = getClerkConfiguration();
   const [fontsLoaded, fontError] = useFonts({
     Inter_400Regular,
     Inter_500Medium,
@@ -268,12 +302,15 @@ function RootLayout() {
     }
   }, [fontsLoaded, fontError]);
 
-  if (!publishableKey) {
-    throw new Error("EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY is required.");
+  if (clerkConfiguration.status !== "ready") {
+    return <ClerkConfigurationScreen message={clerkConfiguration.message} />;
   }
 
   return (
-    <ClerkProvider publishableKey={publishableKey} tokenCache={clerkTokenCache}>
+    <ClerkProvider
+      publishableKey={clerkConfiguration.publishableKey}
+      tokenCache={clerkTokenCache}
+    >
       <ClerkLoaded>
         <SafeAreaProvider>
           <AccessibilityProvider>
