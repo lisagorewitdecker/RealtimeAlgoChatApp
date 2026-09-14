@@ -103,6 +103,39 @@ describe("static file path resolution", () => {
     }
   });
 
+  it("describes the landing page without claiming Expo Go is the product download", async () => {
+    const server = createStaticServer();
+
+    await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+
+    try {
+      const address = server.address();
+      const response = await getHttpResponse(
+        `http://127.0.0.1:${address.port}/`,
+      );
+      const jsonLdMatch = response.body.match(
+        /<script type="application\/ld\+json">\s*([\s\S]*?)\s*<\/script>/,
+      );
+
+      expect(response.status).toBe(200);
+      expect(jsonLdMatch).not.toBeNull();
+
+      const structuredData = JSON.parse(jsonLdMatch[1]);
+
+      expect(structuredData).toEqual({
+        "@context": "https://schema.org",
+        "@type": "WebPage",
+        name: "RealtimeAlgoChatApp Studio mobile preview",
+        description:
+          "Get RealtimeAlgoChatApp Studio on your phone: real-time code collaboration, calls, and chat for developers.",
+        url: `https://127.0.0.1:${address.port}/`,
+      });
+      expect(structuredData).not.toHaveProperty("downloadUrl");
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+    }
+  });
+
   it("keeps the owner copyright footer dynamic", () => {
     const template = fs.readFileSync(
       path.join(__dirname, "templates", "landing-page.html"),
