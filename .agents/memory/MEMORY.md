@@ -59,3 +59,4 @@
 - [Evidence metadata duplicate detection](evidence-duplicate-detection.md) — detect duplicate keys generically (no allowlists) and mirror the producer's full field set in fixtures.
 - [Task merge against an unrelated main](task-merge-unrelated-main.md) — a rebase replaying from "Initial commit" with no merge base means main-repl HEAD was transiently swapped; abandon and retry, never resolve.
 - [Account-access lookup deadline](account-access-retry-budget.md) — one hard deadline for waits and in-flight Clerk requests, under Socket.IO’s 45 s connect timeout; pass capped hints to clients.
+- [Relocatable Pino bundles](relocatable-pino-bundles.md) — esbuild-plugin-pino can bake the build machine’s absolute output path into workers; rewrite and validate bundle-relative paths.

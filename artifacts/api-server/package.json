@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "export NODE_ENV=development && pnpm run build && pnpm run start",
     "build": "node ./build.mjs",
-    "start": "node --enable-source-maps --import ./dist/instrument.mjs ./dist/index.mjs",
+    "check:logging-assets": "node ./check-logging-assets.mjs",
+    "start": "pnpm run check:logging-assets && node --enable-source-maps --import ./dist/instrument.mjs ./dist/index.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test:browser:setup": "playwright install chromium && node e2e/check-playwright-runtime.mjs",
     "test:browser:runtime-contract": "playwright install chromium && node e2e/check-playwright-runtime-contract.mjs",
