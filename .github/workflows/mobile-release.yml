@@ -759,6 +759,9 @@ jobs:
           name: native-large-text-android
           path: test-results/native-large-text/android
 
+      - name: Run native large-text evidence privacy regression
+        run: pnpm run test:native-large-text-evidence
+
       - name: Attach candidate-bound human approvals
         env:
           IOS_REVIEW_BUILD_ID: ${{ inputs.ios_review_candidate_build_id }}
