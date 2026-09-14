@@ -636,6 +636,60 @@ done
 assert_contains "$duplicate_sentry_evidence_output" "completeness check FAILED with 2 issue(s)"
 assert_not_contains "$duplicate_sentry_evidence_output" "must-not-be-printed"
 
+# Duplicate JSON keys with an attacker-controlled field name must report only
+# the fixed structural failure category.
+malicious_duplicate_sentry_evidence_root="$TEST_ROOT/malicious-duplicate-sentry-evidence"
+write_valid_run "$malicious_duplicate_sentry_evidence_root" ios
+write_valid_run "$malicious_duplicate_sentry_evidence_root" android
+malicious_json_field='sentry-duplicate-secret-sentinel'
+for platform in ios android; do
+  sentry_evidence_path="$malicious_duplicate_sentry_evidence_root/$platform/20260909T120000Z/sentry-source-map-evidence.json"
+  node --input-type=module - "$sentry_evidence_path" "$malicious_json_field" <<'NODE'
+import { readFileSync, writeFileSync } from "node:fs";
+
+const path = process.argv[2];
+const field = process.argv[3];
+let evidence = readFileSync(path, "utf8");
+evidence = evidence.replace(
+  /\n  "dist": "42",/,
+  `\n  "${field}": "first",\n  "${field}": "second",\n  "dist": "42",`,
+);
+writeFileSync(path, evidence);
+NODE
+done
+if malicious_duplicate_sentry_evidence_output="$(
+  bash "$CHECKER" "$malicious_duplicate_sentry_evidence_root" 2>&1
+)"; then
+  echo "malicious duplicate Sentry evidence case unexpectedly passed" >&2
+  exit 1
+fi
+assert_contains "$malicious_duplicate_sentry_evidence_output" "duplicate JSON field(s)"
+assert_contains "$malicious_duplicate_sentry_evidence_output" "completeness check FAILED with 2 issue(s)"
+assert_not_contains "$malicious_duplicate_sentry_evidence_output" "$malicious_json_field"
+
+# Unsafe downloaded run-directory names must be rejected before their names
+# can reach logs or the step summary.
+unsafe_run_root="$TEST_ROOT/unsafe-run-directory"
+mkdir -p "$unsafe_run_root/ios" "$unsafe_run_root/android"
+unsafe_run_name=$'20260909T120000Z`forged-heading\nforged-summary-line'
+mkdir -p "$unsafe_run_root/ios/$unsafe_run_name"
+printf 'Result: BLOCKED\n' > "$unsafe_run_root/ios/$unsafe_run_name/runner-check.txt"
+write_valid_run "$unsafe_run_root" android
+unsafe_summary_path="$TEST_ROOT/unsafe-run-directory.md"
+if unsafe_run_output="$(
+  GITHUB_STEP_SUMMARY="$unsafe_summary_path" bash "$CHECKER" "$unsafe_run_root" 2>&1
+)"; then
+  echo "unsafe run-directory case unexpectedly passed" >&2
+  exit 1
+fi
+unsafe_summary="$(cat "$unsafe_summary_path")"
+assert_contains "$unsafe_run_output" "Evidence run directory name"
+assert_contains "$unsafe_run_output" "is unsafe"
+assert_contains "$unsafe_summary" "## iOS native large-text evidence"
+assert_not_contains "$unsafe_run_output" "$unsafe_run_name"
+assert_not_contains "$unsafe_summary" "$unsafe_run_name"
+assert_not_contains "$unsafe_summary" "forged-summary-line"
+
 # Malformed and unknown Sentry trigger lines must not be ignored alongside
 # otherwise valid metadata, and diagnostics must not expose their values.
 malformed_sentry_trigger_root="$TEST_ROOT/malformed-sentry-trigger"
