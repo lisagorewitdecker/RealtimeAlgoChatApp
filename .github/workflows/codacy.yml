@@ -96,6 +96,13 @@ jobs:
             ).hexdigest()[:12]
             return f"tool-{digest}"
 
+
+          def normalized_automation_id(automation_details):
+            automation_id = automation_details.get("id")
+            if isinstance(automation_id, str) and automation_id:
+              return automation_id
+            return None
+
           with open("results.sarif", "r", encoding="utf-8") as sarif_file:
             sarif_data = json.load(sarif_file)
 
@@ -105,9 +112,9 @@ jobs:
               run["automationDetails"] = {}
 
           existing_ids = [
-            run["automationDetails"].get("id")
+            normalized_automation_id(run["automationDetails"])
             for run in runs
-            if run["automationDetails"].get("id")
+            if normalized_automation_id(run["automationDetails"])
           ]
           duplicate_existing_ids = {
             automation_id for automation_id, count in Counter(existing_ids).items() if count > 1
@@ -116,7 +123,7 @@ jobs:
 
           for run in runs:
             automation_details = run["automationDetails"]
-            automation_id = automation_details.get("id")
+            automation_id = normalized_automation_id(automation_details)
             if automation_id and automation_id not in duplicate_existing_ids and automation_id not in assigned_ids:
               assigned_ids.add(automation_id)
               continue
