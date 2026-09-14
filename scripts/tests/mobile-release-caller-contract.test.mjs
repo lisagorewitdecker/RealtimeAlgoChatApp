@@ -134,6 +134,7 @@ function documentedCallerJob() {
 
 function assertMobileReleaseNodeVersions(releaseWorkflow, nodeRange) {
   const configuredJobs = [];
+  const mismatches = [];
   for (const [jobId, job] of Object.entries(releaseWorkflow.jobs ?? {})) {
     for (const step of job.steps ?? []) {
       if (String(step.uses ?? "").startsWith("actions/setup-node@")) {
@@ -154,11 +155,13 @@ function assertMobileReleaseNodeVersions(releaseWorkflow, nodeRange) {
       configuredVersion !== undefined,
       `mobile-release job "${jobId}" must configure node-version`,
     );
-    assert.ok(
-      nodeVersionSatisfiesRange(configuredVersion, nodeRange),
-      `mobile-release job "${jobId}" configures Node ${JSON.stringify(configuredVersion)}, outside package.json engines.node range ${JSON.stringify(nodeRange)}`,
-    );
+    if (!nodeVersionSatisfiesRange(configuredVersion, nodeRange)) {
+      mismatches.push(
+        `mobile-release job "${jobId}" configures Node ${JSON.stringify(configuredVersion)}, outside package.json engines.node range ${JSON.stringify(nodeRange)}`,
+      );
+    }
   }
+  assert.equal(mismatches.length, 0, mismatches.join("\n"));
 }
 
 test("documented caller passes every required build ID through with", () => {
@@ -244,31 +247,37 @@ test("every mobile release setup-node value stays inside the declared Node range
   assertMobileReleaseNodeVersions(workflow, nodeRange);
 });
 
-test("out-of-range mobile release Node diagnostics identify the job, version, and package range", () => {
+test("out-of-range mobile release Node diagnostics identify every job and version", () => {
   const fixture = structuredClone(workflow);
   const nodeRange = rootPackage.engines.node;
-  const jobId = "native-ios";
-  const configuredVersion = "23";
-  const setupNodeStep = fixture.jobs[jobId].steps.find((step) =>
-    String(step.uses ?? "").startsWith("actions/setup-node@"),
-  );
-  assert.ok(
-    setupNodeStep,
-    `${jobId} fixture must configure Node with actions/setup-node`,
-  );
-  setupNodeStep.with["node-version"] = configuredVersion;
+  const mismatches = [
+    ["native-ios", "23"],
+    ["native-android", "22"],
+  ];
+  for (const [jobId, configuredVersion] of mismatches) {
+    const setupNodeStep = fixture.jobs[jobId].steps.find((step) =>
+      String(step.uses ?? "").startsWith("actions/setup-node@"),
+    );
+    assert.ok(
+      setupNodeStep,
+      `${jobId} fixture must configure Node with actions/setup-node`,
+    );
+    setupNodeStep.with["node-version"] = configuredVersion;
+  }
 
   assert.throws(
     () => assertMobileReleaseNodeVersions(fixture, nodeRange),
     (error) => {
-      assert.ok(
-        error.message.includes(`mobile-release job "${jobId}"`),
-        "the failure must identify the mobile release job",
-      );
-      assert.ok(
-        error.message.includes(`Node ${JSON.stringify(configuredVersion)}`),
-        "the failure must identify the configured Node version",
-      );
+      for (const [jobId, configuredVersion] of mismatches) {
+        assert.ok(
+          error.message.includes(`mobile-release job "${jobId}"`),
+          `the failure must identify the mobile release job ${jobId}`,
+        );
+        assert.ok(
+          error.message.includes(`Node ${JSON.stringify(configuredVersion)}`),
+          `the failure must identify the configured Node version for ${jobId}`,
+        );
+      }
       assert.ok(
         error.message.includes(
           `package.json engines.node range ${JSON.stringify(nodeRange)}`,
