@@ -44,3 +44,15 @@ export function clerkRetryDelayMs(
     Math.max(clerkRetryAfterMs(error), exponentialDelayMs),
   );
 }
+
+/**
+ * Expresses a retry delay from `clerkRetryDelayMs` as the whole number of
+ * seconds a client should wait before trying again, the unit used by the HTTP
+ * `Retry-After` header and the equivalent Socket.IO hint. Sub-second delays
+ * round up so the hint is never zero, and because the input is already capped
+ * at `MAX_CLERK_RETRY_DELAY_MS` a client is never told to wait longer than
+ * the shared ceiling.
+ */
+export function clerkRetryAfterSeconds(delayMs: number): number {
+  return Math.max(1, Math.ceil(delayMs / 1_000));
+}

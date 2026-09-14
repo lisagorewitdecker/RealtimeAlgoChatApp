@@ -4,9 +4,15 @@ import {
   Server,
   Socket,
   type DefaultEventsMap,
+  type ExtendedError,
 } from "socket.io";
 import { logger } from "./lib/logger";
 import { getAccountProfile } from "./lib/accountProfile";
+import {
+  ACCOUNT_ACCESS_UNAVAILABLE_CODE,
+  ACCOUNT_ACCESS_UNAVAILABLE_MESSAGE,
+  AccountAccessUnavailableError,
+} from "./lib/accountAccessUnavailable";
 import { isAllowedOrigin } from "./lib/origins";
 import {
   verifyRoomAccessCapability,
@@ -273,15 +279,20 @@ function releaseConnection(
 }
 
 function rejectHandshake(
-  next: (error?: Error) => void,
+  next: (error?: ExtendedError) => void,
   registry: ConnectionRegistry,
   lease: ConnectionLease,
   message: string,
   reason: string,
+  data?: Record<string, unknown>,
 ): void {
   releaseConnection(registry, lease);
   recordSocketAuthFailure(reason);
-  next(new Error(message));
+  const error: ExtendedError = new Error(message);
+  // Socket.IO forwards `data` to the client alongside the message, so the
+  // `connect_error` handler can read structured hints such as a retry delay.
+  if (data) error.data = data;
+  next(error);
 }
 
 function getEventBudget(
@@ -626,10 +637,11 @@ export function setupSocketIO(httpServer: HttpServer) {
   activeServer = io;
 
   io.use(async (socket: AppSocket, next) => {
-    // Wraps the whole handshake, not just the Clerk-token branch: an
-    // unexpected failure anywhere here (e.g. getAccountAccess/getAccountProfile
-    // hitting a down database) must still resolve `next()` and be reported,
-    // rather than leaving the middleware's promise to reject silently.
+    // Wraps the whole handshake, not just the Clerk-token branch: a failure
+    // anywhere here (getAccountAccess giving up on a throttled Clerk,
+    // getAccountProfile hitting a down database) must still resolve `next()`
+    // and be reported, rather than leaving the middleware's promise to
+    // reject silently.
     const lease = reserveConnection(
       connectionRegistry,
       getSocketIp(socket),
@@ -761,10 +773,35 @@ export function setupSocketIO(httpServer: HttpServer) {
       };
       next();
     } catch (error) {
+      if (error instanceof AccountAccessUnavailableError) {
+        // Clerk could not answer within the lookup's retry budget, on either
+        // the room-capability or the Clerk-token branch above. That is an
+        // upstream condition rather than a handler bug, so it is logged and
+        // counted toward the auth-failure rate alert instead of filed as a
+        // Sentry exception per handshake. The client gets the same retry
+        // hint the HTTP 503 carries in Retry-After, so it can reconnect
+        // deliberately instead of guessing.
+        logger.warn(
+          { err: error, retryAfterSeconds: error.retryAfterSeconds },
+          "Account access check failed during socket handshake",
+        );
+        rejectHandshake(
+          next,
+          connectionRegistry,
+          lease,
+          ACCOUNT_ACCESS_UNAVAILABLE_MESSAGE,
+          "account_access_unavailable",
+          {
+            code: ACCOUNT_ACCESS_UNAVAILABLE_CODE,
+            retryAfterSeconds: error.retryAfterSeconds,
+          },
+        );
+        return;
+      }
       // Reaching here means something other than an expected auth
-      // rejection broke (capability parsing, getAccountAccess/getAccountProfile
-      // throwing, etc.) -- a real bug or infra failure, so it gets a Sentry
-      // exception in addition to counting toward the auth-failure rate.
+      // rejection broke (capability parsing, getAccountProfile throwing,
+      // etc.) -- a real bug or infra failure, so it gets a Sentry exception
+      // in addition to counting toward the auth-failure rate.
       reportSocketHandlerError("connection-auth", error);
       releaseConnection(connectionRegistry, lease);
       recordSocketAuthFailure("unexpected_error");
