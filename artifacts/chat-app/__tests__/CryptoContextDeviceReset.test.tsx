@@ -28,10 +28,19 @@ jest.mock("expo-secure-store", () => {
   const { toSecureStoreKey: encodeKey } = jest.requireActual(
     "../lib/secureStorageKey",
   ) as typeof import("../lib/secureStorageKey");
+  // Same key-name rule as the real module on phones, so an invalid storage
+  // key fails this suite instead of only failing on a device.
+  const { ensureValidSecureStoreKey: ensureValidKey } = jest.requireActual(
+    "../test-utils/secureStoreKeyRule",
+  ) as typeof import("../test-utils/secureStoreKeyRule");
   const devicePrefix = encodeKey("devstudio_device_keypair_v1:");
   return {
-    getItemAsync: jest.fn(async (key: string) => mockSecureStore.get(key) ?? null),
+    getItemAsync: jest.fn(async (key: string) => {
+      ensureValidKey(key);
+      return mockSecureStore.get(key) ?? null;
+    }),
     setItemAsync: jest.fn(async (key: string, value: string) => {
+      ensureValidKey(key);
       const isDeviceKey = key.startsWith(devicePrefix);
       if (isDeviceKey && mockDeviceKeyWriteRelease) {
         await new Promise<void>((resolve) => {
@@ -626,12 +635,20 @@ describe("device encryption identity reset", () => {
     const previousPublicKey = cryptoValue!.publicKeyB64;
     const previousStored = mockSecureStore.get(deviceKeyStorageKey("crypto-test-user"));
     mockDeviceKeyWriteFailure = true;
+    const warnMock = jest.spyOn(console, "warn").mockImplementation();
 
     await act(async () => {
       await expect(cryptoValue!.resetDeviceIdentity()).resolves.toEqual({
         status: "storage_unavailable",
       });
     });
+
+    // The caller sees the same retryable status; the log carries the cause.
+    expect(warnMock).toHaveBeenCalledWith(
+      "Replacement device encryption identity could not be saved to secure storage",
+      "Secure storage unavailable",
+    );
+    warnMock.mockRestore();
 
     expect(cryptoValue?.publicKeyB64).toBe(previousPublicKey);
     expect(cryptoValue?.isReady).toBe(true);
