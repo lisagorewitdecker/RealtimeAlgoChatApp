@@ -1904,3 +1904,53 @@ test("native evidence summaries link only the fixed uploaded report", () => {
     "evidence contents and identifiers must not become summary link targets",
   );
 });
+
+test("native evidence checker output is isolated from workflow commands", () => {
+  const evidenceSteps = [
+    workflow.jobs["mobile-release-gate"].steps.find(
+      (step) => step.name === "Validate native evidence completeness",
+    ),
+    workflow.jobs["mobile-publish"].steps.find(
+      (step) => step.name === "Require approved iOS and Android evidence",
+    ),
+  ];
+
+  for (const step of evidenceSteps) {
+    assert.ok(step, "expected both native evidence workflow steps");
+    assert.match(
+      step.run,
+      /echo "::stop-commands::\$\{stop_token\}"/,
+      `${step.name} must disable workflow-command parsing before checker output`,
+    );
+    assert.match(
+      step.run,
+      /stop_token="\$\(node -e 'process\.stdout\.write\(require\("node:crypto"\)\.randomUUID\(\)\)'\\?\)"/,
+      `${step.name} must generate an unpredictable stop token with cryptographic randomness`,
+    );
+    assert.doesNotMatch(
+      step.run,
+      /stop_token=.*GITHUB_RUN_(?:ID|ATTEMPT)/,
+      `${step.name} must not derive its stop token from predictable run metadata`,
+    );
+    assert.match(
+      step.run,
+      /bash scripts\/check-native-large-text-evidence\.sh/,
+      `${step.name} must preserve the checker as the diagnostic source`,
+    );
+    assert.match(
+      step.run,
+      /checker_status=\$\?/,
+      `${step.name} must capture the checker status without a transforming pipeline`,
+    );
+    assert.match(
+      step.run,
+      /echo "::\$\{stop_token\}::"/,
+      `${step.name} must restore workflow-command parsing after checker output`,
+    );
+    assert.match(
+      step.run,
+      /exit "\$checker_status"/,
+      `${step.name} must preserve the checker result`,
+    );
+  }
+});

@@ -9,4 +9,10 @@ Native evidence release diagnostics should name the failing condition and artifa
 
 **How to apply:** When adding a native evidence validation branch, use a fixed reason for parser failures, reject unsafe artifact path components, render summary paths and findings as sanitized code text, avoid interpolating parsed values or keys into issue/notice messages, and add a release-level assertion that useful failure context remains while fixture sentinel values and control-input names are absent.
 
+Native evidence checker output must be bracketed by GitHub's stop-commands guard at the workflow boundary. Keep the checker output visible and preserve its exit status, but do not let evidence-derived text be parsed as a workflow command or annotation.
+
+**Why:** The checker may receive uploaded evidence that is not trustworthy. A future diagnostic branch could reintroduce control sequences even if the current duplicate-field paths are generic and the job summary is sanitized.
+
+**How to apply:** Around every direct workflow invocation of the checker, generate a cryptographically random unique stop token independently of run metadata, run the checker without a transforming pipeline, restore command parsing afterward, and exit with the captured checker status. Test both the log output and `GITHUB_STEP_SUMMARY`.
+
 **JSON parsing in Node release checks (learned 2026-09-14):** V8's `JSON.parse` messages quote the input (`Unexpected token 'o', "…content…" is not valid JSON`), and when a `SyntaxError` escapes uncaught, Node prints the offending *source line* — the raw file content — before the stack trace. A release check that rethrows a raw parse error therefore copies candidate metadata (which carries bundle/package IDs) into the workflow log even when the summary is clean. Catch the parse, throw a fixed-reason error, and keep the summary's "not inspected" state distinct from "fields mismatched" so unparsed metadata is never reported as field drift. The public native label and permission copy are shown in the branding summary by design; only identifiers and parser output are excluded.

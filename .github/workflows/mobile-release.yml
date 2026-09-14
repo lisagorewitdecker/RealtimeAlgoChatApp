@@ -712,7 +712,19 @@ jobs:
         env:
           NATIVE_IOS_EVIDENCE_ARTIFACT_URL: ${{ needs.native-ios.outputs.native_evidence_artifact_url }}
           NATIVE_ANDROID_EVIDENCE_ARTIFACT_URL: ${{ needs.native-android.outputs.native_evidence_artifact_url }}
-        run: bash scripts/check-native-large-text-evidence.sh
+        run: |
+          set -euo pipefail
+          # Keep checker output visible for reviewers, but prevent any future
+          # evidence-derived text from being interpreted as a workflow command
+          # or annotation. The checker writes its own sanitized job summary.
+          stop_token="$(node -e 'process.stdout.write(require("node:crypto").randomUUID())')"
+          echo "::stop-commands::${stop_token}"
+          set +e
+          bash scripts/check-native-large-text-evidence.sh
+          checker_status=$?
+          set -e
+          echo "::${stop_token}::"
+          exit "$checker_status"
 
       - name: Block release unless both native checks pass
         if: ${{ always() }}
@@ -868,7 +880,18 @@ jobs:
           NATIVE_EVIDENCE_REQUIRE_APPROVAL: "1"
           NATIVE_IOS_EVIDENCE_ARTIFACT_URL: ${{ needs.mobile-release-gate.outputs.ios_native_evidence_artifact_url }}
           NATIVE_ANDROID_EVIDENCE_ARTIFACT_URL: ${{ needs.mobile-release-gate.outputs.android_native_evidence_artifact_url }}
-        run: bash scripts/check-native-large-text-evidence.sh
+        run: |
+          set -euo pipefail
+          # Keep checker diagnostics readable without allowing evidence text
+          # to become a GitHub workflow command or annotation.
+          stop_token="$(node -e 'process.stdout.write(require("node:crypto").randomUUID())')"
+          echo "::stop-commands::${stop_token}"
+          set +e
+          bash scripts/check-native-large-text-evidence.sh
+          checker_status=$?
+          set -e
+          echo "::${stop_token}::"
+          exit "$checker_status"
 
       - name: Verify publishing inputs
         env:

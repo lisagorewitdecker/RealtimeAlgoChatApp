@@ -852,24 +852,36 @@ write_valid_run "$malicious_duplicate_field_root" android
 write_review_record "$malicious_duplicate_field_root" ios APPROVED
 write_review_record "$malicious_duplicate_field_root" android APPROVED
 malicious_duplicate_metadata_path="$malicious_duplicate_field_root/android/20260909T120000Z/pass-fail-record.txt"
+malicious_duplicate_field_summary_path="$TEST_ROOT/malicious-duplicate-field-summary.md"
 newline_field_name=$'native-newline-field\nforged-log-line'
 tab_field_name=$'native-tab-field\tforged-log-column'
 terminal_control_field_name=$'native-terminal-field\033[31m'
 printf '%s=first\n%s=second\n' "$newline_field_name" "$newline_field_name" >> "$malicious_duplicate_metadata_path"
 printf '%s=first\n%s=second\n' "$tab_field_name" "$tab_field_name" >> "$malicious_duplicate_metadata_path"
 printf '%s=first\n%s=second\n' "$terminal_control_field_name" "$terminal_control_field_name" >> "$malicious_duplicate_metadata_path"
-if malicious_duplicate_field_output="$(bash "$CHECKER" "$malicious_duplicate_field_root" 2>&1)"; then
+if malicious_duplicate_field_output="$(
+  GITHUB_STEP_SUMMARY="$malicious_duplicate_field_summary_path" \
+    bash "$CHECKER" "$malicious_duplicate_field_root" 2>&1
+)"; then
   echo "malicious duplicate field name case unexpectedly passed" >&2
   exit 1
 fi
+malicious_duplicate_field_summary="$(cat "$malicious_duplicate_field_summary_path")"
 assert_contains "$malicious_duplicate_field_output" "[android] Pass/fail record contains a duplicate field (2 declarations)"
 assert_contains "$malicious_duplicate_field_output" "completeness check FAILED with 3 issue(s)"
+assert_contains "$malicious_duplicate_field_summary" "Pass/fail record contains a duplicate field (2 declarations)"
 assert_not_contains "$malicious_duplicate_field_output" "$newline_field_name"
 assert_not_contains "$malicious_duplicate_field_output" "$tab_field_name"
 assert_not_contains "$malicious_duplicate_field_output" "$terminal_control_field_name"
 assert_not_contains "$malicious_duplicate_field_output" "native-newline-field"
 assert_not_contains "$malicious_duplicate_field_output" "native-tab-field"
 assert_not_contains "$malicious_duplicate_field_output" "native-terminal-field"
+assert_not_contains "$malicious_duplicate_field_summary" "$newline_field_name"
+assert_not_contains "$malicious_duplicate_field_summary" "$tab_field_name"
+assert_not_contains "$malicious_duplicate_field_summary" "$terminal_control_field_name"
+assert_not_contains "$malicious_duplicate_field_summary" "native-newline-field"
+assert_not_contains "$malicious_duplicate_field_summary" "native-tab-field"
+assert_not_contains "$malicious_duplicate_field_summary" "native-terminal-field"
 
 field_text_in_notes_root="$TEST_ROOT/field-text-in-notes"
 write_valid_run "$field_text_in_notes_root" ios
