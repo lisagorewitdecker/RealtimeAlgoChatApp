@@ -316,6 +316,35 @@ test("out-of-range mobile release Node diagnostics identify every job and versio
   );
 });
 
+test("missing mobile release Node versions identify the affected job and required configuration", () => {
+  const fixture = structuredClone(workflow);
+  const nodeRange = rootPackage.engines.node;
+  const jobId = "native-ios";
+  const setupNodeStep = fixture.jobs[jobId].steps.find((step) =>
+    String(step.uses ?? "").startsWith("actions/setup-node@"),
+  );
+  assert.ok(
+    setupNodeStep,
+    `${jobId} fixture must configure Node with actions/setup-node`,
+  );
+  delete setupNodeStep.with["node-version"];
+
+  assert.throws(
+    () => assertMobileReleaseNodeVersions(fixture, nodeRange),
+    (error) => {
+      assert.ok(
+        error.message.includes(`mobile-release job "${jobId}"`),
+        "the failure must identify the mobile release job",
+      );
+      assert.ok(
+        error.message.includes("must configure node-version"),
+        "the failure must explain that node-version is required",
+      );
+      return true;
+    },
+  );
+});
+
 test("publish job runs the privacy regression before approval validation and submission", () => {
   const publishSteps = workflow.jobs?.["mobile-publish"]?.steps ?? [];
   const privacyIndex = publishSteps.findIndex(
