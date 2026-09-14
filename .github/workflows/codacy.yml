@@ -100,10 +100,14 @@ jobs:
             sarif_data = json.load(sarif_file)
 
           runs = sarif_data.get("runs", [])
+          for run in runs:
+            if not isinstance(run.get("automationDetails"), dict):
+              run["automationDetails"] = {}
+
           existing_ids = [
-            run.get("automationDetails", {}).get("id")
+            run["automationDetails"].get("id")
             for run in runs
-            if isinstance(run.get("automationDetails"), dict) and run.get("automationDetails", {}).get("id")
+            if run["automationDetails"].get("id")
           ]
           duplicate_existing_ids = {
             automation_id for automation_id, count in Counter(existing_ids).items() if count > 1
@@ -111,7 +115,7 @@ jobs:
           assigned_ids = set()
 
           for run in runs:
-            automation_details = run.setdefault("automationDetails", {})
+            automation_details = run["automationDetails"]
             automation_id = automation_details.get("id")
             if automation_id and automation_id not in duplicate_existing_ids and automation_id not in assigned_ids:
               assigned_ids.add(automation_id)
