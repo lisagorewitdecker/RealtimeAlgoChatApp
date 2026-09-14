@@ -7,7 +7,7 @@ RealtimeAlgoChatApp Studio is a real-time collaboration platform for developers 
 - `pnpm --filter @workspace/api-server run dev` — run the API server (port 5000)
 - `pnpm run typecheck` — full typecheck across all packages
 - `pnpm run build` — typecheck + build all packages
-- `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from the OpenAPI spec
+- `pnpm validate:api-codegen` — validate generated API hooks and schemas when the optional `artifacts/api-spec` workspace is present
 - `pnpm validate:api-compatibility` — fail on breaking OpenAPI changes vs. the target branch; CI rejects an intentional breaking-change override unless the pull request description follows the canonical instructions below
 - `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
 - Required env: `DATABASE_URL` — Postgres connection string
@@ -34,7 +34,7 @@ End the block with a blank line or the next `API_BREAKING_CHANGE_*` marker.
 
 ## Stack
 
-- pnpm workspaces, Node.js 24, TypeScript 5.9
+- pnpm workspaces, Node.js 20, TypeScript 5.9
 - API: Express 5
 - DB: PostgreSQL + Drizzle ORM
 - Validation: Zod (`zod/v4`), `drizzle-zod`
