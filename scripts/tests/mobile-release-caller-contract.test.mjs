@@ -113,6 +113,33 @@ test("Node engine range validation accepts standard range forms", () => {
   }
 });
 
+test("Node engine range validation rejects malformed and unsupported syntax", () => {
+  const invalidRanges = [
+    ">= 24 <",
+    "24.0.0.0",
+    "latest",
+  ];
+
+  for (const range of invalidRanges) {
+    assert.throws(
+      () => nodeVersionSatisfiesRange("24.0.0", range),
+      (error) => {
+        assert.match(
+          error.message,
+          /package\.json engines\.node contains an unsupported range:/,
+          "the failure must identify package.json engines.node",
+        );
+        assert.ok(
+          error.message.includes(JSON.stringify(range)),
+          `the failure must identify the offending range ${JSON.stringify(range)}`,
+        );
+        return true;
+      },
+      `the invalid range ${JSON.stringify(range)} must be rejected`,
+    );
+  }
+});
+
 function documentedCallerJob() {
   const section = callerDocumentation.match(
     /### Updating reusable-workflow callers[\s\S]*?```yaml\n([\s\S]*?)\n```/,
