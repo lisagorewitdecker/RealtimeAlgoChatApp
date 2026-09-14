@@ -172,7 +172,7 @@ overrides:
   uuid: 11.1.1
   image-size: link:./vendor/image-size-secure
 
-packageExtensionsChecksum: sha256-Ma9cYwas7PdjZkW6X2fPnhlhbC6+uWu/LcWMQ7mJuNI=
+packageExtensionsChecksum: sha256-3GeEG323PVFPf7Iburd6bag2OZnF7bc3VTnS0ZUWIPM=
 
 importers:
 
@@ -14978,6 +14978,7 @@ snapshots:
   react-native-worklets@0.10.1(@babel/core@7.29.7)(@react-native/metro-config@0.86.3(@babel/core@7.29.7))(react-native@0.86.3(@babel/core@7.29.7)(@react-native/jest-preset@0.86.3(@babel/core@7.29.7)(react@19.2.3))(@react-native/metro-config@0.86.3(@babel/core@7.29.7))(@types/react@19.2.18)(react@19.2.3))(react@19.2.3):
     dependencies:
       '@babel/core': 7.29.7
+      '@babel/generator': 7.29.7
       '@babel/plugin-transform-arrow-functions': 7.29.7(@babel/core@7.29.7)
       '@babel/plugin-transform-class-properties': 7.29.7(@babel/core@7.29.7)
       '@babel/plugin-transform-classes': 7.29.7(@babel/core@7.29.7)
