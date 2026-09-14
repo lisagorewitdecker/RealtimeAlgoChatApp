@@ -139,6 +139,45 @@ test("release credentials remain in the reusable workflow secrets contract", () 
   }
 });
 
+test("publish job runs the privacy regression before approval validation and submission", () => {
+  const publishSteps = workflow.jobs?.["mobile-publish"]?.steps ?? [];
+  const privacyIndex = publishSteps.findIndex(
+    (step) => step.name === "Run native large-text evidence privacy regression",
+  );
+  const approvalValidationIndex = publishSteps.findIndex(
+    (step) => step.name === "Require approved iOS and Android evidence",
+  );
+  const submissionIndex = publishSteps.findIndex(
+    (step) => step.name === "Submit the tested iOS and Android candidates",
+  );
+
+  assert.ok(
+    privacyIndex >= 0,
+    "mobile-publish must run the native evidence privacy regression",
+  );
+  assert.equal(
+    publishSteps[privacyIndex].run,
+    "pnpm run test:native-large-text-evidence",
+    "mobile-publish must use the focused native evidence privacy regression command",
+  );
+  assert.ok(
+    approvalValidationIndex >= 0,
+    "mobile-publish must validate candidate approvals",
+  );
+  assert.ok(
+    submissionIndex >= 0,
+    "mobile-publish must submit the tested candidates",
+  );
+  assert.ok(
+    privacyIndex < approvalValidationIndex,
+    "privacy regression must run before candidate approval validation",
+  );
+  assert.ok(
+    privacyIndex < submissionIndex,
+    "privacy regression must run before store submission",
+  );
+});
+
 test("routine unit validation runs the caller contract check", () => {
   const command =
     "node --test scripts/tests/mobile-release-caller-contract.test.mjs";
