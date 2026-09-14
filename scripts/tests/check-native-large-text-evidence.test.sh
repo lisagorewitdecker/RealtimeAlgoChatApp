@@ -471,8 +471,8 @@ assert_not_contains "$duplicate_single_values_output" "approval_scope '"
 assert_not_contains "$duplicate_single_values_output" "identifies platform"
 
 # Every generated field in runner-metadata.txt and pass-fail-record.txt is
-# duplicated with a conflicting value on both platforms. Each duplicate must be
-# named without selecting, comparing, or printing either value.
+# duplicated with a conflicting value on both platforms. Each duplicate must
+# be reported without selecting, comparing, or printing either value.
 duplicate_machine_metadata_root="$TEST_ROOT/duplicate-machine-metadata"
 write_valid_run "$duplicate_machine_metadata_root" ios
 write_valid_run "$duplicate_machine_metadata_root" android
@@ -490,27 +490,17 @@ if duplicate_machine_metadata_output="$(bash "$CHECKER" "$duplicate_machine_meta
 fi
 for platform in ios android; do
   runner_metadata_path="$duplicate_machine_metadata_root/$platform/20260909T120000Z/runner-metadata.txt"
-  for duplicated_field in $(metadata_keys_of "$runner_metadata_path" | sort -u); do
-    assert_contains "$duplicate_machine_metadata_output" "[$platform] Runner metadata has 2 ${duplicated_field} declarations in ${runner_metadata_path}."
-    assert_contains "$duplicate_machine_metadata_output" "Declare ${duplicated_field}=... at most once so the runner metadata is unambiguous"
+  runner_duplicate_count="$(metadata_keys_of "$runner_metadata_path" | sort -u | wc -l)"
+  for _ in $(seq 1 "$runner_duplicate_count"); do
+    assert_contains "$duplicate_machine_metadata_output" "[$platform] Runner metadata contains a duplicate field (2 declarations) in ${runner_metadata_path}."
+    assert_contains "$duplicate_machine_metadata_output" "Keep each runner metadata field to one declaration"
   done
   pass_fail_path="$duplicate_machine_metadata_root/$platform/20260909T120000Z/pass-fail-record.txt"
-  for duplicated_field in $(metadata_keys_of "$pass_fail_path" | sort -u); do
-    assert_contains "$duplicate_machine_metadata_output" "[$platform] Pass/fail record has 2 ${duplicated_field} declarations in ${pass_fail_path}."
-    assert_contains "$duplicate_machine_metadata_output" "Declare ${duplicated_field}=... at most once so the pass/fail record is unambiguous"
+  pass_fail_duplicate_count="$(metadata_keys_of "$pass_fail_path" | sort -u | wc -l)"
+  for _ in $(seq 1 "$pass_fail_duplicate_count"); do
+    assert_contains "$duplicate_machine_metadata_output" "[$platform] Pass/fail record contains a duplicate field (2 declarations) in ${pass_fail_path}."
+    assert_contains "$duplicate_machine_metadata_output" "Keep each pass/fail record field to one declaration"
   done
-done
-# Fields the producer writes but the checker never validates by value must be
-# covered too, not just the fields that feed a comparison.
-for duplicated_field in run_mode app_id device_udid; do
-  assert_contains "$duplicate_machine_metadata_output" "[ios] Runner metadata has 2 ${duplicated_field} declarations"
-done
-for duplicated_field in run_mode app_id screen_px device_model android_release android_api screen_dp density_dpi user_rotation; do
-  assert_contains "$duplicate_machine_metadata_output" "[android] Runner metadata has 2 ${duplicated_field} declarations"
-done
-for duplicated_field in candidate_build_id native_screenshot_count call_surface_screenshot_count; do
-  assert_contains "$duplicate_machine_metadata_output" "[ios] Pass/fail record has 2 ${duplicated_field} declarations"
-  assert_contains "$duplicate_machine_metadata_output" "[android] Pass/fail record has 2 ${duplicated_field} declarations"
 done
 assert_contains "$duplicate_machine_metadata_output" "completeness check FAILED with ${expected_duplicate_issues} issue(s)"
 assert_not_contains "$duplicate_machine_metadata_output" "must-not-be-printed"
@@ -537,9 +527,10 @@ if duplicate_sentry_trigger_output="$(bash "$CHECKER" "$duplicate_sentry_trigger
 fi
 for platform in ios android; do
   sentry_trigger_path="$duplicate_sentry_trigger_root/$platform/20260909T120000Z/sentry-trigger.txt"
-  for duplicated_field in $(metadata_keys_of "$sentry_trigger_path" | sort -u); do
-    assert_contains "$duplicate_sentry_trigger_output" "[$platform] Sentry trigger metadata has 2 ${duplicated_field} declarations in ${sentry_trigger_path}."
-    assert_contains "$duplicate_sentry_trigger_output" "Declare ${duplicated_field}=... at most once so the Sentry trigger metadata is unambiguous"
+  sentry_duplicate_count="$(metadata_keys_of "$sentry_trigger_path" | sort -u | wc -l)"
+  for _ in $(seq 1 "$sentry_duplicate_count"); do
+    assert_contains "$duplicate_sentry_trigger_output" "[$platform] Sentry trigger metadata contains a duplicate field (2 declarations) in ${sentry_trigger_path}."
+    assert_contains "$duplicate_sentry_trigger_output" "Keep each Sentry trigger metadata field to one declaration"
   done
 done
 assert_contains "$duplicate_sentry_trigger_output" "completeness check FAILED with ${expected_sentry_trigger_issues} issue(s)"
@@ -706,9 +697,9 @@ if partial_duplicate_output="$(bash "$CHECKER" "$partial_duplicate_root" 2>&1)";
   echo "partial duplicate metadata case unexpectedly passed" >&2
   exit 1
 fi
-assert_contains "$partial_duplicate_output" "[android] Pass/fail record has 2 status declarations"
+assert_contains "$partial_duplicate_output" "[android] Pass/fail record contains a duplicate field (2 declarations)"
 assert_contains "$partial_duplicate_output" "[android] The pass/fail record at $partial_duplicate_root/android/20260909T120000Z/pass-fail-record.txt is from a diagnostic-only run"
-assert_contains "$partial_duplicate_output" "[ios] Runner metadata has 2 platform declarations"
+assert_contains "$partial_duplicate_output" "[ios] Runner metadata contains a duplicate field (2 declarations)"
 assert_contains "$partial_duplicate_output" "completeness check FAILED with 3 issue(s)"
 assert_not_contains "$partial_duplicate_output" "is not PASS"
 assert_not_contains "$partial_duplicate_output" "status=FAIL"
@@ -728,11 +719,39 @@ if duplicate_recorded_at_output="$(bash "$CHECKER" "$duplicate_recorded_at_root"
   echo "duplicate recorded_at_utc case unexpectedly passed" >&2
   exit 1
 fi
-assert_contains "$duplicate_recorded_at_output" "[android] Pass/fail record has 2 recorded_at_utc declarations"
-assert_contains "$duplicate_recorded_at_output" "[android] Runner metadata has 2 recorded_at_utc declarations"
+assert_contains "$duplicate_recorded_at_output" "[android] Pass/fail record contains a duplicate field (2 declarations)"
+assert_contains "$duplicate_recorded_at_output" "[android] Runner metadata contains a duplicate field (2 declarations)"
 assert_contains "$duplicate_recorded_at_output" "completeness check FAILED with 2 issue(s)"
 assert_not_contains "$duplicate_recorded_at_output" "predates the evidence"
 assert_not_contains "$duplicate_recorded_at_output" "23:59:00Z"
+
+# Duplicate metadata field names are untrusted input. Newline, tab, and
+# terminal-control bytes must not be able to inject lines, columns, or terminal
+# effects into the release diagnostic.
+malicious_duplicate_field_root="$TEST_ROOT/malicious-duplicate-field"
+write_valid_run "$malicious_duplicate_field_root" ios
+write_valid_run "$malicious_duplicate_field_root" android
+write_review_record "$malicious_duplicate_field_root" ios APPROVED
+write_review_record "$malicious_duplicate_field_root" android APPROVED
+malicious_duplicate_metadata_path="$malicious_duplicate_field_root/android/20260909T120000Z/pass-fail-record.txt"
+newline_field_name=$'native-newline-field\nforged-log-line'
+tab_field_name=$'native-tab-field\tforged-log-column'
+terminal_control_field_name=$'native-terminal-field\033[31m'
+printf '%s=first\n%s=second\n' "$newline_field_name" "$newline_field_name" >> "$malicious_duplicate_metadata_path"
+printf '%s=first\n%s=second\n' "$tab_field_name" "$tab_field_name" >> "$malicious_duplicate_metadata_path"
+printf '%s=first\n%s=second\n' "$terminal_control_field_name" "$terminal_control_field_name" >> "$malicious_duplicate_metadata_path"
+if malicious_duplicate_field_output="$(bash "$CHECKER" "$malicious_duplicate_field_root" 2>&1)"; then
+  echo "malicious duplicate field name case unexpectedly passed" >&2
+  exit 1
+fi
+assert_contains "$malicious_duplicate_field_output" "[android] Pass/fail record contains a duplicate field (2 declarations)"
+assert_contains "$malicious_duplicate_field_output" "completeness check FAILED with 3 issue(s)"
+assert_not_contains "$malicious_duplicate_field_output" "$newline_field_name"
+assert_not_contains "$malicious_duplicate_field_output" "$tab_field_name"
+assert_not_contains "$malicious_duplicate_field_output" "$terminal_control_field_name"
+assert_not_contains "$malicious_duplicate_field_output" "native-newline-field"
+assert_not_contains "$malicious_duplicate_field_output" "native-tab-field"
+assert_not_contains "$malicious_duplicate_field_output" "native-terminal-field"
 
 field_text_in_notes_root="$TEST_ROOT/field-text-in-notes"
 write_valid_run "$field_text_in_notes_root" ios

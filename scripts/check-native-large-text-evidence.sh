@@ -56,8 +56,9 @@ metadata_key_is_unambiguous() {
   (($(metadata_declaration_count "$metadata_path" "$key") <= 1))
 }
 
-# Prints "<count>\t<key>" for every key declared more than once, in first-seen
-# order, so no field can hide a conflicting value behind first-match parsing.
+# Prints the declaration count for every duplicated key, in first-seen order.
+# Do not pass the key through the diagnostic boundary: metadata is untrusted
+# input, and control characters in a field name could reshape the release log.
 duplicate_metadata_keys() {
   local metadata_path="$1"
   awk '
@@ -66,12 +67,11 @@ duplicate_metadata_keys() {
       separator = index($0, "=")
       if (separator < 2) next
       key = substr($0, 1, separator - 1)
-      if (key ~ /[[:space:]]/) next
       count[key]++
       if (count[key] == 2) order[++duplicates] = key
     }
     END {
-      for (i = 1; i <= duplicates; i++) printf "%d\t%s\n", count[order[i]], order[i]
+      for (i = 1; i <= duplicates; i++) print count[order[i]]
     }
   ' "$metadata_path"
 }
@@ -82,11 +82,10 @@ report_duplicate_metadata_keys() {
   local file_label="$3"
   local file_noun="$4"
   local count
-  local key
 
-  while IFS=$'\t' read -r count key; do
-    [[ -n "$key" ]] || continue
-    issue "$platform" "${file_label} has ${count} ${key} declarations in ${metadata_path}. Declare ${key}=... at most once so the ${file_noun} is unambiguous; regenerate it from a single completed run instead of merging or editing results."
+  while IFS= read -r count; do
+    [[ -n "$count" ]] || continue
+    issue "$platform" "${file_label} contains a duplicate field (${count} declarations) in ${metadata_path}. Keep each ${file_noun} field to one declaration; regenerate it from a single completed run instead of merging or editing results."
   done < <(duplicate_metadata_keys "$metadata_path")
 }
 
