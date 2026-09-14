@@ -2,10 +2,11 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "composite": true,
-    "incremental": true,
-    "tsBuildInfoFile": ".tsbuildinfo",
+    "declarationMap": true,
+    "emitDeclarationOnly": true,
     "outDir": "dist",
-    "rootDir": "src"
+    "rootDir": "src",
+    "lib": ["dom", "dom.iterable", "es2022"]
   },
   "include": ["src"]
 }
