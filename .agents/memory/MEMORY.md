@@ -38,6 +38,7 @@
 - [Native gate diagnostic runs](native-gate-diagnostic-runs.md) — any device override marks the whole run diagnostic-only; CI refuses it loudly; evidence requires run_mode=release-gate.
 - [Volatile tracked test results](volatile-tracked-test-results.md) — artifact-level test-results/ is Playwright output and now gitignored; never re-include it or keep durable evidence inside outputDir.
 - [Native evidence review record](native-evidence-review-record.md) — a missing human review is reported, not fatal (the CI gate runs before anyone can review); rejected or mismatched records fail.
+- [Native evidence diagnostic privacy](native-evidence-diagnostic-privacy.md) — release failures name fields and artifact paths without echoing parsed fixture values or parser snippets.
 - [Candidate-bound release evidence](candidate-bound-release-evidence.md) — checks for prebuilt mobile candidates must verify evidence inside each binary, not current release-time secrets.
 - [Expo Go native modules & preview 502s](expo-go-native-modules.md) — gate native SDK init outside Expo Go; orphan `expo start` blocks the port prompt; Go home screen = dropped launch.
 - [Expo Go secure-store keys](expo-go-native-modules.md) — expo-secure-store rejects `:` in key names on phones only; encode keys and keep the Jest mock enforcing the real pattern.

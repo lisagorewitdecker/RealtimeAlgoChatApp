@@ -269,15 +269,6 @@ review_notes_block_is_closed() {
   ' "$record_path"
 }
 
-print_literal_evidence() {
-  local platform="$1"
-  local text="$2"
-
-  while IFS= read -r line || [[ -n "$line" ]]; do
-    printf '[%s]   | %s\n' "$platform" "$line" >&2
-  done <<<"$text"
-}
-
 first_line_trimmed() {
   head -n 1 "$1" | tr -d '\r' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//'
 }
@@ -377,7 +368,7 @@ validate_platform() {
     if metadata_key_is_unambiguous "$runner_metadata_path" platform; then
       actual_platform="$(metadata_value "$runner_metadata_path" platform)"
       if [[ "$actual_platform" != "$platform" ]]; then
-        issue "$platform" "Runner metadata identifies platform '${actual_platform:-missing}', not '${platform}'. Upload metadata from the matching platform run."
+        issue "$platform" "Runner metadata identifies the wrong platform in ${runner_metadata_path}. Upload metadata from the matching platform run."
       fi
     fi
     for required_key in "${required_keys[@]}"; do
@@ -430,7 +421,12 @@ const rawEvidence = readFileSync(evidencePath, "utf8");
 if (/(?:auth(?:orization)?[_-]?token|sentry_auth_token|bearer\s+[A-Za-z0-9._-]+)/i.test(rawEvidence)) {
   throw new Error("evidence contains credential-like content");
 }
-const evidence = JSON.parse(rawEvidence);
+let evidence;
+try {
+  evidence = JSON.parse(rawEvidence);
+} catch {
+  throw new Error("evidence is not valid JSON");
+}
 function duplicateJsonFields(raw) {
   let index = 0;
   const duplicates = [];
@@ -672,17 +668,17 @@ validate_review_record() {
   done
 
   if [[ -n "$record_platform" && "$record_platform" != "$platform" ]]; then
-    issue "$platform" "Review record identifies platform '${record_platform}', not '${platform}', in ${record_path}. Each platform run needs its own review record."
+    issue "$platform" "Review record identifies the wrong platform in ${record_path}. Each platform run needs its own review record."
     record_valid=0
   fi
 
   if [[ -n "$approval_scope" && "$approval_scope" != "candidate" ]]; then
-    issue "$platform" "Review record approval_scope '${approval_scope}' in ${record_path} is not supported. Omit approval_scope for a per-run review or use approval_scope=candidate for a publish approval keyed to the candidate build ID."
+    issue "$platform" "Review record contains an unsupported approval_scope in ${record_path}. Omit approval_scope for a per-run review or use approval_scope=candidate for a publish approval keyed to the candidate build ID."
     record_valid=0
   fi
 
   if [[ -n "$reviewed_at" && ! "$reviewed_at" =~ $UTC_TIMESTAMP_PATTERN ]]; then
-    issue "$platform" "Review record reviewed_at_utc '${reviewed_at}' in ${record_path} is not a UTC timestamp such as 2026-09-10T14:05:00Z. Record the review time with: date -u +%Y-%m-%dT%H:%M:%SZ"
+    issue "$platform" "Review record reviewed_at_utc in ${record_path} is not a UTC timestamp such as 2026-09-10T14:05:00Z. Record the review time with: date -u +%Y-%m-%dT%H:%M:%SZ"
     record_valid=0
   fi
 
@@ -691,7 +687,7 @@ validate_review_record() {
     tested_build_id="$(first_line_trimmed "$run_dir/candidate-build-id.txt")"
   fi
   if [[ -n "$record_build_id" && -n "$tested_build_id" && "$record_build_id" != "$tested_build_id" ]]; then
-    issue "$platform" "Review record candidate_build_id '${record_build_id}' does not match the tested candidate '${tested_build_id}' in ${run_dir}/candidate-build-id.txt. A review covers one evidence set; do not reuse a review record from another build."
+    issue "$platform" "Review record candidate_build_id does not match the tested candidate in ${run_dir}/candidate-build-id.txt. A review covers one evidence set; do not reuse a review record from another build."
     record_valid=0
   fi
 
@@ -708,7 +704,7 @@ validate_review_record() {
     evidence_recorded_at="$(trimmed_value "$run_dir/runner-metadata.txt" recorded_at_utc)"
   fi
   if [[ "$reviewed_at" =~ $UTC_TIMESTAMP_PATTERN && "$evidence_recorded_at" =~ $UTC_TIMESTAMP_PATTERN && "$reviewed_at" < "$evidence_recorded_at" ]]; then
-    issue "$platform" "Review record reviewed_at_utc ${reviewed_at} predates the evidence recorded at ${evidence_recorded_at} in ${run_dir}. A review must happen after the run it covers; review this run and record a new decision."
+    issue "$platform" "Review record reviewed_at_utc predates the evidence recorded_at_utc in ${run_dir}. A review must happen after the run it covers; review this run and record a new decision."
     record_valid=0
   fi
 
@@ -716,21 +712,20 @@ validate_review_record() {
     APPROVED | "")
       ;;
     REJECTED)
-      issue "$platform" "The review record at ${record_path} records decision=REJECTED by ${reviewer:-an unnamed reviewer} at ${reviewed_at:-an unrecorded time}. A rejected review blocks release; resolve the recorded findings, rerun the native large-text gate, and record a new review."
+      issue "$platform" "The review record at ${record_path} records a rejected decision. A rejected review blocks release; resolve the recorded findings, rerun the native large-text gate, and record a new review."
       if [[ -n "$notes" ]]; then
-        printf '[%s] Review notes (literal evidence):\n' "$platform" >&2
-        print_literal_evidence "$platform" "$notes"
+        notice "$platform" "Review notes were supplied but are omitted from automated release output."
       fi
       record_valid=0
       ;;
     *)
-      issue "$platform" "Review record decision '${decision}' in ${record_path} is not APPROVED or REJECTED. Record an explicit decision."
+      issue "$platform" "Review record contains an unsupported decision in ${record_path}. Record an explicit decision."
       record_valid=0
       ;;
   esac
 
   if ((record_valid)); then
-    REVIEW_DECISIONS+=("[${platform}] Review record: APPROVED by ${reviewer} at ${reviewed_at} for candidate ${record_build_id}.")
+    REVIEW_DECISIONS+=("[${platform}] Review record: APPROVED for the validated candidate.")
   fi
 }
 

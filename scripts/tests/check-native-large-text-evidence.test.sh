@@ -253,8 +253,10 @@ write_review_record "$reviewed_root" ios APPROVED
 write_review_record "$reviewed_root" android APPROVED "2026-09-09T14:45:00Z" build-android "Grace Reviewer"
 reviewed_output="$(bash "$CHECKER" "$reviewed_root" 2>&1)"
 assert_contains "$reviewed_output" "passed for iOS and Android"
-assert_contains "$reviewed_output" "[ios] Review record: APPROVED by Ada Reviewer at 2026-09-09T13:00:00Z for candidate build-ios."
-assert_contains "$reviewed_output" "[android] Review record: APPROVED by Grace Reviewer at 2026-09-09T14:45:00Z for candidate build-android."
+assert_contains "$reviewed_output" "[ios] Review record: APPROVED for the validated candidate."
+assert_contains "$reviewed_output" "[android] Review record: APPROVED for the validated candidate."
+assert_not_contains "$reviewed_output" "Grace Reviewer"
+assert_not_contains "$reviewed_output" "build-android"
 assert_not_contains "$reviewed_output" "Review record missing"
 assert_not_contains "$reviewed_output" "Review pending"
 
@@ -283,7 +285,7 @@ printf '%s\r\n' \
   'END_NOTES' \
   > "$crlf_approved_root/android/20260909T120000Z/review-record.txt"
 crlf_approved_output="$(bash "$CHECKER" "$crlf_approved_root" 2>&1)"
-assert_contains "$crlf_approved_output" "[android] Review record: APPROVED by Ada Reviewer at 2026-09-09T13:00:00Z for candidate build-android."
+assert_contains "$crlf_approved_output" "[android] Review record: APPROVED for the validated candidate."
 assert_contains "$crlf_approved_output" "passed for iOS and Android"
 assert_not_contains "$crlf_approved_output" "unterminated notes block"
 
@@ -318,9 +320,8 @@ if rejected_output="$(bash "$CHECKER" "$rejected_root" 2>&1)"; then
   echo "rejected review case unexpectedly passed" >&2
   exit 1
 fi
-assert_contains "$rejected_output" "[android] The review record at $rejected_root/android/20260909T120000Z/review-record.txt records decision=REJECTED by Ada Reviewer at 2026-09-09T13:00:00Z."
-assert_contains "$rejected_output" "[android] Review notes (literal evidence):"
-assert_contains "$rejected_output" "[android]   | Checked all eleven native screenshots and both call-surface captures."
+assert_contains "$rejected_output" "[android] The review record at $rejected_root/android/20260909T120000Z/review-record.txt records a rejected decision."
+assert_contains "$rejected_output" "[android] Review notes were supplied but are omitted from automated release output."
 assert_contains "$rejected_output" "A rejected review blocks release"
 assert_contains "$rejected_output" "completeness check FAILED with 1 issue(s)"
 assert_not_contains "$rejected_output" "[ios] Review record missing"
@@ -346,11 +347,36 @@ if multiline_rejected_output="$(bash "$CHECKER" "$multiline_rejected_root" 2>&1)
   echo "multi-line rejected review case unexpectedly passed" >&2
   exit 1
 fi
-assert_contains "$multiline_rejected_output" "[android] Review notes (literal evidence):"
-assert_contains "$multiline_rejected_output" $'[android]   | # Layout finding\n[android]   | - The `Send` button overlaps the final line.\n[android]   | \n[android]   |   - See [capture](screenshots/screen-11.png).'
+assert_contains "$multiline_rejected_output" "[android] Review notes were supplied but are omitted from automated release output."
 assert_contains "$multiline_rejected_output" "completeness check FAILED with 1 issue(s)"
 assert_not_contains "$multiline_rejected_output" $'\r'
 assert_not_contains "$multiline_rejected_output" "unterminated notes block"
+assert_not_contains "$multiline_rejected_output" "The \`Send\` button overlaps"
+assert_not_contains "$multiline_rejected_output" "screenshots/screen-11.png"
+
+privacy_rejected_root="$TEST_ROOT/privacy-rejected"
+write_valid_run "$privacy_rejected_root" ios
+write_valid_run "$privacy_rejected_root" android
+write_review_record "$privacy_rejected_root" ios APPROVED
+review_note_credential='Bearer native-review-token-credential'
+review_note_marker='native-review-fixture-marker-20260909'
+cat > "$privacy_rejected_root/android/20260909T120000Z/review-record.txt" <<EOF
+platform=android
+reviewer=Ada Reviewer
+reviewed_at_utc=2026-09-09T13:00:00Z
+candidate_build_id=build-android
+decision=REJECTED
+notes=The failing fixture included ${review_note_credential} and ${review_note_marker}.
+EOF
+if privacy_rejected_output="$(bash "$CHECKER" "$privacy_rejected_root" 2>&1)"; then
+  echo "private rejected review case unexpectedly passed" >&2
+  exit 1
+fi
+assert_contains "$privacy_rejected_output" "[android] The review record at $privacy_rejected_root/android/20260909T120000Z/review-record.txt records a rejected decision."
+assert_contains "$privacy_rejected_output" "[android] Review notes were supplied but are omitted from automated release output."
+assert_contains "$privacy_rejected_output" "completeness check FAILED with 1 issue(s)"
+assert_not_contains "$privacy_rejected_output" "$review_note_credential"
+assert_not_contains "$privacy_rejected_output" "$review_note_marker"
 
 conflicting_notes_root="$TEST_ROOT/conflicting-notes"
 write_valid_run "$conflicting_notes_root" ios
@@ -682,7 +708,7 @@ reviewer=This is literal note text, not a declaration.
 FINDINGS
 EOF
 field_text_in_notes_output="$(bash "$CHECKER" "$field_text_in_notes_root" 2>&1)"
-assert_contains "$field_text_in_notes_output" "[android] Review record: APPROVED by Ada Reviewer"
+assert_contains "$field_text_in_notes_output" "[android] Review record: APPROVED for the validated candidate."
 assert_contains "$field_text_in_notes_output" "passed for iOS and Android"
 
 notes_before_fields_root="$TEST_ROOT/notes-before-fields"
@@ -704,8 +730,8 @@ if notes_before_fields_output="$(bash "$CHECKER" "$notes_before_fields_root" 2>&
   exit 1
 fi
 assert_contains "$notes_before_fields_output" "[android] The review record at"
-assert_contains "$notes_before_fields_output" "records decision=REJECTED by Ada Reviewer at 2026-09-09T13:00:00Z."
-assert_contains "$notes_before_fields_output" "[android]   | decision=APPROVED"
+assert_contains "$notes_before_fields_output" "records a rejected decision."
+assert_contains "$notes_before_fields_output" "[android] Review notes were supplied but are omitted from automated release output."
 assert_contains "$notes_before_fields_output" "completeness check FAILED with 1 issue(s)"
 assert_not_contains "$notes_before_fields_output" "[android] Review record: APPROVED"
 
@@ -739,9 +765,11 @@ if mismatched_output="$(bash "$CHECKER" "$mismatched_root" 2>&1)"; then
   echo "mismatched review case unexpectedly passed" >&2
   exit 1
 fi
-assert_contains "$mismatched_output" "[ios] Review record candidate_build_id 'build-previous-candidate' does not match the tested candidate 'build-ios'"
-assert_contains "$mismatched_output" "[android] Review record reviewed_at_utc 2026-09-09T12:10:00Z predates the evidence recorded at 2026-09-09T12:30:00Z"
+assert_contains "$mismatched_output" "[ios] Review record candidate_build_id does not match the tested candidate in $mismatched_root/ios/20260909T120000Z/candidate-build-id.txt."
+assert_contains "$mismatched_output" "[android] Review record reviewed_at_utc predates the evidence recorded_at_utc in $mismatched_root/android/20260909T120000Z."
 assert_contains "$mismatched_output" "completeness check FAILED with 2 issue(s)"
+assert_not_contains "$mismatched_output" "build-previous-candidate"
+assert_not_contains "$mismatched_output" "2026-09-09T12:10:00Z"
 
 malformed_root="$TEST_ROOT/malformed"
 write_valid_run "$malformed_root" ios
@@ -753,10 +781,12 @@ if malformed_output="$(bash "$CHECKER" "$malformed_root" 2>&1)"; then
   exit 1
 fi
 assert_contains "$malformed_output" "[ios] Review record still contains the template placeholder for reviewer"
-assert_contains "$malformed_output" "[ios] Review record reviewed_at_utc 'September 9'"
-assert_contains "$malformed_output" "[ios] Review record decision 'MAYBE'"
+assert_contains "$malformed_output" "[ios] Review record reviewed_at_utc in $malformed_root/ios/20260909T120000Z/review-record.txt is not a UTC timestamp"
+assert_contains "$malformed_output" "[ios] Review record contains an unsupported decision in $malformed_root/ios/20260909T120000Z/review-record.txt."
 assert_contains "$malformed_output" "[android] Empty review record: $malformed_root/android/20260909T120000Z/review-record.txt"
 assert_contains "$malformed_output" "completeness check FAILED with 4 issue(s)"
+assert_not_contains "$malformed_output" "September 9"
+assert_not_contains "$malformed_output" "MAYBE"
 
 wrong_platform_root="$TEST_ROOT/wrong-platform"
 write_valid_run "$wrong_platform_root" ios
@@ -769,6 +799,6 @@ if wrong_platform_output="$(bash "$CHECKER" "$wrong_platform_root" 2>&1)"; then
   echo "wrong-platform review case unexpectedly passed" >&2
   exit 1
 fi
-assert_contains "$wrong_platform_output" "[android] Review record identifies platform 'ios', not 'android'"
+assert_contains "$wrong_platform_output" "[android] Review record identifies the wrong platform in $wrong_platform_root/android/20260909T120000Z/review-record.txt."
 
 echo "Native large-text evidence completeness regression tests passed."
