@@ -77,7 +77,7 @@ res: {
     responseTime: 88
 [21:18:30.677] INFO (722): socket connected
     sid: "DdSswe5l2UIIzRavAAAh"
-    userId: "user_3IBmhzjBKOihcaFnAeGxk3iyAdF"
+    userId: "[REDACTED]"
 [21:18:38.160] INFO (722): request completed
     req: {
       "id": 166,
