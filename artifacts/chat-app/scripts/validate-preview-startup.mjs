@@ -6,13 +6,20 @@ import { setTimeout as delay } from "node:timers/promises";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 const DEFAULT_HANDOFF_TIMEOUT_MS = 60_000;
+const STARTUP_FAILURE_GRACE_MS = 250;
+const MAX_STARTUP_DIAGNOSTIC_LENGTH = 512;
+const MAX_STARTUP_FAILURE_LINE_LENGTH = 320;
 const READY_MARKERS = [/Starting Metro Bundler/i, /› Metro:/i];
 const STARTUP_FAILURES = [
   /error while loading shared libraries:/i,
   /cannot open shared object file/i,
   /(?:error|failed|unable|cannot).{0,80}(?:react native )?devtools/i,
-  /(?:react native )?devtools.{0,80}(?:error|failed|unable|cannot)/i,
+  /(?:react native )?devtools.{0,80}(?:error|failed|unable|cannot|could not|couldn't)/i,
 ];
+const MISSING_LIBRARY = new RegExp(
+  String.raw`error while loading shared libraries:\s*([A-Za-z0-9._+@/-]{1,128})\s*:\s*cannot open shared object file`,
+  "i",
+);
 
 function findStartupFailure(output) {
   const lines = output.split(/\r?\n/);
@@ -20,6 +27,39 @@ function findStartupFailure(output) {
     lines.find((line) => STARTUP_FAILURES.some((pattern) => pattern.test(line))) ??
     null
   );
+}
+
+function sanitizeStartupDiagnostic(value, maxLength) {
+  return value
+    .replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, "")
+    .replace(/[\u0000-\u001f\u007f]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, maxLength);
+}
+
+function findMissingLibrary(output) {
+  return output.match(MISSING_LIBRARY)?.[1] ?? null;
+}
+
+function formatStartupFailure(output) {
+  const failure = findStartupFailure(output);
+  if (!failure) return null;
+
+  const failureDetail = sanitizeStartupDiagnostic(
+    failure,
+    MAX_STARTUP_FAILURE_LINE_LENGTH,
+  );
+  const missingLibrary = findMissingLibrary(output);
+  const libraryDetail =
+    missingLibrary && !failureDetail.includes(missingLibrary)
+      ? ` (missing runtime library: ${missingLibrary})`
+      : "";
+
+  return `Expo preview startup error: ${sanitizeStartupDiagnostic(
+    `${failureDetail}${libraryDetail}`,
+    MAX_STARTUP_DIAGNOSTIC_LENGTH,
+  )}`;
 }
 
 function formatRequestOutcome(stage, response, byteLength) {
@@ -133,9 +173,9 @@ async function requestExpoGoHandoff(port, timeoutMs) {
 }
 
 export function validatePreviewOutput(output) {
-  const failure = findStartupFailure(output);
-  if (failure) {
-    throw new Error(`Expo preview startup error: ${failure.trim()}`);
+  const startupFailure = formatStartupFailure(output);
+  if (startupFailure) {
+    throw new Error(startupFailure);
   }
 
   if (!READY_MARKERS.some((pattern) => pattern.test(output))) {
@@ -200,12 +240,14 @@ async function validateLivePreview(timeoutMs, handoffTimeoutMs) {
   let stopRequested = false;
   let timer;
   let closeTimer;
+  let failureTimer;
 
   const finish = (callback) => {
     if (settled) return;
     settled = true;
     clearTimeout(timer);
     clearTimeout(closeTimer);
+    clearTimeout(failureTimer);
     callback();
   };
 
@@ -238,12 +280,18 @@ async function validateLivePreview(timeoutMs, handoffTimeoutMs) {
   return new Promise((resolveResult, rejectResult) => {
     const checkOutput = () => {
       const combinedOutput = output.join("");
-      const failure = findStartupFailure(combinedOutput);
-      if (failure) {
-        finish(() => {
-          stopChild();
-          rejectResult(new Error(`Expo preview startup error: ${failure.trim()}`));
-        });
+      const startupFailure = formatStartupFailure(combinedOutput);
+      if (startupFailure) {
+        if (failureTimer) return true;
+        failureTimer = setTimeout(() => {
+          failureTimer = undefined;
+          const completeFailure = formatStartupFailure(output.join(""));
+          if (!completeFailure) return;
+          finish(() => {
+            stopChild();
+            rejectResult(new Error(completeFailure));
+          });
+        }, STARTUP_FAILURE_GRACE_MS);
         return true;
       }
       return false;
@@ -266,6 +314,11 @@ async function validateLivePreview(timeoutMs, handoffTimeoutMs) {
       if (settled) return;
       finish(() => {
         const combinedOutput = output.join("");
+        const startupFailure = formatStartupFailure(combinedOutput);
+        if (startupFailure) {
+          rejectResult(new Error(startupFailure));
+          return;
+        }
         if (code !== 0) {
           rejectResult(
             new Error(
