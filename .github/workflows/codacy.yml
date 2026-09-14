@@ -54,6 +54,23 @@ jobs:
           # This will handover control about PR rejection to the GitHub side
           max-allowed-issues: 2147483647
 
+      - name: Ensure unique SARIF run categories
+        run: |
+          python - <<'PY'
+          import json
+
+          with open("results.sarif", "r", encoding="utf-8") as sarif_file:
+            sarif_data = json.load(sarif_file)
+
+          for run_index, run in enumerate(sarif_data.get("runs", []), start=1):
+            automation_details = run.setdefault("automationDetails", {})
+            tool_name = run.get("tool", {}).get("driver", {}).get("name", "tool").replace(" ", "-").lower()
+            automation_details["id"] = f"codacy/{tool_name}/{run_index}"
+
+          with open("results.sarif", "w", encoding="utf-8") as sarif_file:
+            json.dump(sarif_data, sarif_file)
+          PY
+
       # Upload the SARIF file generated in the previous step
       - name: Upload SARIF results file
         uses: github/codeql-action/upload-sarif@6f5948dfacef28e207b48d0905cf90c03365536d
