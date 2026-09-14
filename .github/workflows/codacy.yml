@@ -103,6 +103,12 @@ jobs:
               return automation_id
             return None
 
+
+          def normalized_category_id(value):
+            normalized_value = re.sub(r"[^a-z0-9._/-]+", "-", value.strip().lower())
+            normalized_value = re.sub(r"/+", "/", normalized_value).strip("/-")
+            return normalized_value or None
+
           with open("results.sarif", "r", encoding="utf-8") as sarif_file:
             sarif_data = json.load(sarif_file)
 
@@ -129,7 +135,8 @@ jobs:
               continue
 
             tool_key = stable_tool_key(run)
-            candidate_id = f"{automation_id}/{tool_key}" if automation_id else f"codacy/{tool_key}"
+            normalized_id = normalized_category_id(automation_id) if automation_id else None
+            candidate_id = f"{normalized_id}/{tool_key}" if normalized_id else f"codacy/{tool_key}"
             if candidate_id in assigned_ids:
               run_digest = hashlib.sha256(
                 json.dumps(run, sort_keys=True).encode("utf-8")
