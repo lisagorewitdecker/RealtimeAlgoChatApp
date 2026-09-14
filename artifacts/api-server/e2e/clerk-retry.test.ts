@@ -401,6 +401,10 @@ describe("key-reset recovery Playwright diagnostics", () => {
 
   it.each([
     {
+      cleanup: "browser",
+      timeout: "Browser context cleanup timed out after 250ms",
+    },
+    {
       cleanup: "clerk-user",
       timeout:
         "Clerk user cleanup for diagnostic-user timed out after 250ms",
@@ -447,6 +451,7 @@ describe("key-reset recovery Playwright diagnostics", () => {
 
         expect(result.error).toBeUndefined();
         expect(result.status).toBe(1);
+        expect(result.signal).toBeNull();
         expect(report).toContain(phase.phase);
         expect(report).toContain(phase.action);
         expect(report).toContain(
