@@ -14,6 +14,7 @@
 - [React Native heading semantics](rn-heading-semantics.md) — pair native header semantics with web role and aria-level because RN 0.81 omits accessibilityLevel from Text typings.
 - [Static-server SAST taint](static-server-sast-taint.md) — request-time filesystem reads remain flagged despite boundary checks; serve only startup-indexed assets.
 - [Publish metadata merge state](publish-metadata-merge-state.md) — valid manifests can still be uncommittable; verify the Git index and frozen lockfile before publishing.
+- [Publish lockfile validity](publish-lockfile-validity.md) — a malformed lockfile makes fresh publish installs resolve a different toolchain than local node_modules.
 - [Expo canvas iframe refresh](expo-canvas-iframe-refresh.md) — after fixing a render crash, restart Expo and remount the canvas artifact frame to clear its retained error state.
 - [Clerk synthetic browser sessions](clerk-synthetic-browser-sessions.md) — backend-created test users may require a client-trust email code before browser sessions activate.
 - [React Native Web confirmations](react-native-web-confirmations.md) — Alert button callbacks are not reliable on web; use the browser confirm result for destructive actions.
