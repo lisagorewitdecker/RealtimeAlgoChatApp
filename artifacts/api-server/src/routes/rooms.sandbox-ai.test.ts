@@ -92,6 +92,7 @@ describe("sandbox page", () => {
       "aiTurnOffBtn",
       "aiPrompt",
       "aiAskBtn",
+      "aiRetryBtn",
       "aiStopBtn",
       "ai-status",
       "aiOutput",
@@ -391,6 +392,7 @@ describe("sandbox AI tab in a browser", () => {
     });
     expect(await status(page)).toContain("ask again in 3 s");
     expect(await page.locator("#aiAskBtn").isDisabled()).toBe(true);
+    expect(await page.locator("#aiRetryBtn").isHidden()).toBe(true);
     await page.click("#aiAskBtn", { force: true });
     expect(await emitsOf(page, "assistant-request")).toHaveLength(2);
     await page.clock.runFor(3_000);
@@ -405,6 +407,32 @@ describe("sandbox AI tab in a browser", () => {
     });
     expect(await status(page)).toContain("did not finish within 45 seconds");
     expect(await page.locator("#aiAskBtn").isDisabled()).toBe(false);
+    expect(await page.locator("#aiRetryBtn").isVisible()).toBe(true);
+
+    await page.click('.tab[data-tab="html"]');
+    await page.fill("#htmlEditor", "<main>latest</main>");
+    await page.click('.tab[data-tab="ai"]');
+    await page.click("#aiRetryBtn");
+    const retryRequest = (await emitsOf(page, "assistant-request"))[3];
+    const retryPayload = retryRequest.payload as {
+      requestId: string;
+      prompt: string;
+      files: { html: string };
+      disclosureAcknowledged: boolean;
+    };
+    expect(retryPayload).toMatchObject({
+      prompt: "One more time.",
+      files: { html: "<main>latest</main>" },
+      disclosureAcknowledged: true,
+    });
+    expect(await page.locator("#aiRetryBtn").isHidden()).toBe(true);
+
+    await fire(page, "assistant-error", {
+      requestId: retryPayload.requestId,
+      code: "SERVICE_ERROR",
+      message: "The AI service is temporarily unavailable. Please try again.",
+    });
+    expect(await page.locator("#aiRetryBtn").isVisible()).toBe(true);
 
     // A server-side gate rejection re-opens the notice instead of looping.
     const fourth = await ask(page, "And again.");
@@ -413,6 +441,7 @@ describe("sandbox AI tab in a browser", () => {
       code: "DISCLOSURE_REQUIRED",
       message: "Confirm the AI privacy notice first.",
     });
+    expect(await page.locator("#aiRetryBtn").isHidden()).toBe(true);
     expect(await page.locator("#ai-notice").isVisible()).toBe(true);
     expect(await page.locator("#ai-composer").isVisible()).toBe(false);
     await page.close();
