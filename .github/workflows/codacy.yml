@@ -57,15 +57,76 @@ jobs:
       - name: Ensure unique SARIF run categories
         run: |
           python - <<'PY'
+          import hashlib
           import json
+          import re
+          from collections import Counter
+
+
+          def slug(value):
+            return re.sub(r"[^a-z0-9._-]+", "-", value.strip().lower()).strip("-") or "tool"
+
+
+          def stable_tool_key(run):
+            tool = run.get("tool", {})
+            driver = tool.get("driver", {})
+            extensions = tool.get("extensions", [])
+
+            parts = [
+              driver.get("name"),
+              driver.get("guid"),
+              driver.get("semanticVersion") or driver.get("version"),
+            ]
+
+            for extension in extensions:
+              parts.extend(
+                [
+                  extension.get("name"),
+                  extension.get("guid"),
+                  extension.get("semanticVersion") or extension.get("version"),
+                ]
+              )
+
+            slugged_parts = [slug(part) for part in parts if isinstance(part, str) and part.strip()]
+            if slugged_parts:
+              return "-".join(slugged_parts)
+
+            digest = hashlib.sha256(
+              json.dumps(tool, sort_keys=True).encode("utf-8")
+            ).hexdigest()[:12]
+            return f"tool-{digest}"
 
           with open("results.sarif", "r", encoding="utf-8") as sarif_file:
             sarif_data = json.load(sarif_file)
 
-          for run_index, run in enumerate(sarif_data.get("runs", []), start=1):
+          runs = sarif_data.get("runs", [])
+          existing_ids = [
+            run.get("automationDetails", {}).get("id")
+            for run in runs
+            if isinstance(run.get("automationDetails"), dict) and run.get("automationDetails", {}).get("id")
+          ]
+          duplicate_existing_ids = {
+            automation_id for automation_id, count in Counter(existing_ids).items() if count > 1
+          }
+          assigned_ids = set()
+
+          for run in runs:
             automation_details = run.setdefault("automationDetails", {})
-            tool_name = run.get("tool", {}).get("driver", {}).get("name", "tool").replace(" ", "-").lower()
-            automation_details["id"] = f"codacy/{tool_name}/{run_index}"
+            automation_id = automation_details.get("id")
+            if automation_id and automation_id not in duplicate_existing_ids and automation_id not in assigned_ids:
+              assigned_ids.add(automation_id)
+              continue
+
+            tool_key = stable_tool_key(run)
+            candidate_id = f"{automation_id}/{tool_key}" if automation_id else f"codacy/{tool_key}"
+            if candidate_id in assigned_ids:
+              run_digest = hashlib.sha256(
+                json.dumps(run, sort_keys=True).encode("utf-8")
+              ).hexdigest()[:12]
+              candidate_id = f"{candidate_id}-{run_digest}"
+
+            automation_details["id"] = candidate_id
+            assigned_ids.add(candidate_id)
 
           with open("results.sarif", "w", encoding="utf-8") as sarif_file:
             json.dump(sarif_data, sarif_file)
