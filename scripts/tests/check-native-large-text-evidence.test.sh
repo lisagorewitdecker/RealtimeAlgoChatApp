@@ -585,6 +585,39 @@ assert_not_contains "$malformed_sentry_trigger_output" "$android_credential_like
 assert_not_contains "$malformed_sentry_trigger_output" "$android_marker_like_trigger_value"
 assert_not_contains "$malformed_sentry_trigger_output" "android-second-secret"
 
+# Malformed Sentry source-map evidence must report the validation failure
+# without exposing credential-like or marker-like values from the JSON.
+malformed_sentry_evidence_root="$TEST_ROOT/malformed-sentry-evidence"
+write_valid_run "$malformed_sentry_evidence_root" ios
+write_valid_run "$malformed_sentry_evidence_root" android
+credential_like_sentry_evidence_value='Bearer sentry-source-map-token-credential'
+marker_like_sentry_evidence_value='sentry-source-map-marker-release-20260909'
+cat > "$malformed_sentry_evidence_root/ios/20260909T120000Z/sentry-source-map-evidence.json" <<EOF
+{
+  "status": "PASS",
+  "eventId": "0123456789abcdef0123456789abcdef",
+  "platform": "ios",
+  "candidateBuildId": "build-ios",
+  "marker": "$marker_like_sentry_evidence_value",
+  "release": "$credential_like_sentry_evidence_value",
+  "dist": "42",
+  "readableFrame": {
+    "filename": "artifacts/chat-app/lib/sentry.ts",
+    "function": "createNativeSourceMapProbeError",
+    "line": 55,
+    "column": 10
+  }
+EOF
+if malformed_sentry_evidence_output="$(bash "$CHECKER" "$malformed_sentry_evidence_root" 2>&1)"; then
+  echo "malformed Sentry source-map evidence case unexpectedly passed" >&2
+  exit 1
+fi
+assert_contains "$malformed_sentry_evidence_output" "[ios] Invalid Sentry source-map evidence"
+assert_contains "$malformed_sentry_evidence_output" "evidence contains credential-like content"
+assert_contains "$malformed_sentry_evidence_output" "completeness check FAILED with 1 issue(s)"
+assert_not_contains "$malformed_sentry_evidence_output" "$credential_like_sentry_evidence_value"
+assert_not_contains "$malformed_sentry_evidence_output" "$marker_like_sentry_evidence_value"
+
 # A duplicate only silences the checks for that field; the remaining
 # single-declaration fields are still validated by value.
 partial_duplicate_root="$TEST_ROOT/partial-duplicate"
