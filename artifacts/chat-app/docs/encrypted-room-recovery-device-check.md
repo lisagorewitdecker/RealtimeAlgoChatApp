@@ -39,6 +39,66 @@ single-phone smoke test.
 5. Safe read access to the environment's database or API for the boundary
    check (ciphertext-only inspection). Do not copy payloads into evidence.
 
+## SDK 57 Android preview handoff
+
+The development-preview launch boundary has a separate, repeatable route. It
+must use a physical Android phone running the stock Expo Go app; a browser,
+Android emulator, simulator, or a published build is not a substitute.
+
+Use either of these supported handoff options:
+
+- **Manual phone pass:** give the operator the current public Expo preview
+  link or QR code from the running Chat App workflow. The operator installs
+  stock Expo Go from Google Play, records the Expo Go version and Android
+  version, then opens that link in Expo Go on a fresh app launch.
+- **Device farm or self-hosted Android runner:** use a farm or runner that
+  provides an interactive physical Android phone and allows the operator to
+  open the same public Expo preview in stock Expo Go. `adb` may collect a
+  redacted screenshot or filtered device log, but an `adb` install of a
+  custom build does not count as the Expo Go preview launch.
+
+For this repository, the existing GitHub Android release jobs are not that
+runner: their `self-hosted, linux, android, smallest-simulator` labels and
+preflight are for a booted emulator and an installed release candidate. Use a
+separate self-hosted runner or device-farm session with an interactive
+physical-device capability. Before the handoff, confirm `adb devices` shows
+the phone and that stock Expo Go is installed; do not report an emulator or
+the release workflow's native smoke result as preview evidence.
+
+For either option:
+
+1. Before opening the link, record the phone model, Android version, Expo Go
+   version, UTC time, and the non-secret preview host label. Do not record an
+   account email, token, QR payload, or URL containing credentials.
+2. Set `EXPO_DEV_REQUEST_LOG=1` in the development environment and restart
+   the Expo workflow before the handoff. The operator opens the fresh preview
+   from stock Expo Go, waits for the Chat App landing screen, and captures a
+   screenshot with account identifiers and message content cropped or blurred.
+3. Treat the launch as observed only when both the phone screen and
+   server-side request evidence are available. A native request has no
+   browser `OPTIONS` preflight; record the Android/Expo Go user-agent or
+   client marker from the filtered log without retaining the full host or URL.
+4. If Expo Go cannot launch, record the exact phone error and a redacted
+   screenshot. A workspace `curl`, a browser tab, or a Metro startup line
+   proves public reachability or workflow readiness only; it does not prove
+   an Expo Go session launch.
+5. Append `validation-record.md` under
+   `test-results/encrypted-room-recovery/android/<UTC timestamp>/`. Include
+   the device metadata, the public-edge result, the Expo Go launch result, and
+   the redacted evidence paths. When no physical route is available, write
+   `BLOCKED` rows rather than inventing device values. Because the repository
+   ignores artifact-level `test-results/`, force-add the completed record with
+   `git add -f` so it is retained; do not create a duplicate copy under
+   `docs/`.
+
+The current blocked baseline is
+`test-results/encrypted-room-recovery/android/20260914T144407Z/validation-record.md`.
+Append a new UTC directory after a real handoff; do not overwrite the baseline.
+This preview handoff is separate from the release-candidate procedure below.
+Expo Go can verify the preview launch boundary, but only the same published
+build installed on two phones can verify secure-storage persistence and
+force-close recovery.
+
 ## How the app behaves (what "expected" means below)
 
 - Each account/device pair owns a device keypair in secure storage. The public
