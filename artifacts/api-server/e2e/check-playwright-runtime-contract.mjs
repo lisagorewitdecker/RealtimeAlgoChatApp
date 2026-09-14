@@ -75,6 +75,9 @@ const libraries = new Set(
     [...filesBelow(browserRoot)].flatMap((path) => neededLibraries(path)),
   ),
 );
+// Synthetic SONAME fixture for the clean-runtime check. It requires the
+// explicit test-mode capability: an inherited injection variable alone must
+// never change what a normal contract check reports.
 if (
   process.env.PLAYWRIGHT_RUNTIME_CONTRACT_TEST_MODE === "1" &&
   process.env.PLAYWRIGHT_RUNTIME_CONTRACT_INJECT_LIBRARY

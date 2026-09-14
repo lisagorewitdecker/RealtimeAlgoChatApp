@@ -17,8 +17,20 @@ const cleanDirectory = mkdtempSync(
 );
 const browserDirectory = join(cleanDirectory, "browsers");
 const incompleteRuntimeConfig = join(cleanDirectory, ".replit");
+// Test-only controls of the runtime contract check. Ordinary subprocesses must
+// never inherit them from this process, so each fixture below adds exactly the
+// capability it exercises.
+const contractTestModeVariable = "PLAYWRIGHT_RUNTIME_CONTRACT_TEST_MODE";
+const contractInjectLibraryVariable =
+  "PLAYWRIGHT_RUNTIME_CONTRACT_INJECT_LIBRARY";
 const baseEnvironment = {
-  ...process.env,
+  ...Object.fromEntries(
+    Object.entries(process.env).filter(
+      ([name]) =>
+        name !== contractTestModeVariable &&
+        name !== contractInjectLibraryVariable,
+    ),
+  ),
   PLAYWRIGHT_BROWSERS_PATH: browserDirectory,
 };
 
@@ -37,6 +49,15 @@ function run(command, args, environment = baseEnvironment) {
   return { ...result, report };
 }
 
+// The contract check reports how many ELF shared-library requirements it
+// covered. A fixture that leaks into a normal run would change this count.
+function coveredLibraryCount(report) {
+  const count = report.match(
+    /'s (\d+) direct ELF shared-library requirements across desktop Chromium and Headless Shell are covered by the Replit Nix contract\./,
+  )?.[1];
+  return count === undefined ? undefined : Number(count);
+}
+
 try {
   const install = run("pnpm", ["exec", "playwright", "install", "chromium"]);
   if (install.status !== 0) {
@@ -46,20 +67,41 @@ try {
   const contract = run("node", [
     "e2e/check-playwright-runtime-contract.mjs",
   ]);
-  if (contract.status !== 0) {
+  const contractLibraryCount = coveredLibraryCount(contract.report);
+  if (contract.status !== 0 || contractLibraryCount === undefined) {
     throw new Error(
       `Chromium shared-library contract check failed:\n${contract.report}`,
     );
   }
 
+  // The injection variable alone must stay inert: an inherited value without
+  // the explicit test-mode capability cannot add a library to a normal check.
   const syntheticUnknownLibrary = "libsynthetic-playwright-upgrade.so.99";
+  const inheritedInjection = run(
+    "node",
+    ["e2e/check-playwright-runtime-contract.mjs"],
+    {
+      ...baseEnvironment,
+      [contractInjectLibraryVariable]: syntheticUnknownLibrary,
+    },
+  );
+  if (
+    inheritedInjection.status !== 0 ||
+    inheritedInjection.report.includes(syntheticUnknownLibrary) ||
+    coveredLibraryCount(inheritedInjection.report) !== contractLibraryCount
+  ) {
+    throw new Error(
+      `${contractInjectLibraryVariable} without ${contractTestModeVariable} was not inert (expected the normal contract check to pass and cover exactly ${contractLibraryCount} libraries):\n${inheritedInjection.report}`,
+    );
+  }
+
   const unknownLibrary = run(
     "node",
     ["e2e/check-playwright-runtime-contract.mjs"],
     {
       ...baseEnvironment,
-      PLAYWRIGHT_RUNTIME_CONTRACT_TEST_MODE: "1",
-      PLAYWRIGHT_RUNTIME_CONTRACT_INJECT_LIBRARY: syntheticUnknownLibrary,
+      [contractTestModeVariable]: "1",
+      [contractInjectLibraryVariable]: syntheticUnknownLibrary,
     },
   );
   if (
@@ -122,7 +164,7 @@ try {
   }
 
   console.log(
-    `Playwright checked Chromium's actual shared-library requirements, rejected an unknown synthetic SONAME and removal of all ${requiredChromiumRuntimePackages.length} contracted native runtime packages, and launched it from a clean browser cache.`,
+    `Playwright checked Chromium's actual shared-library requirements, ignored an inherited synthetic SONAME injection without test mode, rejected that unknown SONAME under test mode and removal of all ${requiredChromiumRuntimePackages.length} contracted native runtime packages, and launched it from a clean browser cache.`,
   );
 } finally {
   rmSync(cleanDirectory, { recursive: true, force: true });
