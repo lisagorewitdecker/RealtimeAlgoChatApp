@@ -9,6 +9,7 @@ REVIEW_DECISIONS=()
 declare -A SUMMARY_ISSUES=([ios]="" [android]="")
 declare -A SUMMARY_NOTICES=([ios]="" [android]="")
 declare -A SUMMARY_RUN_DIR=([ios]="" [android]="")
+declare -A SUMMARY_DOWNLOAD_STATUS=([ios]="" [android]="")
 declare -A SUMMARY_NATIVE_SCREENSHOT_COUNT=([ios]=0 [android]=0)
 declare -A SUMMARY_NATIVE_EMPTY_COUNT=([ios]=0 [android]=0)
 declare -A SUMMARY_CALL_SCREENSHOT_COUNT=([ios]=0 [android]=0)
@@ -45,11 +46,25 @@ summary_safe_text() {
 summary_artifact_url() {
   local platform="$1"
   local artifact_url=""
+  local download_result=""
+  local download_result_is_set=0
 
   if [[ "$platform" == "ios" ]]; then
     artifact_url="${NATIVE_IOS_EVIDENCE_ARTIFACT_URL:-}"
+    if [[ -v NATIVE_IOS_EVIDENCE_DOWNLOAD_RESULT ]]; then
+      download_result_is_set=1
+      download_result="${NATIVE_IOS_EVIDENCE_DOWNLOAD_RESULT}"
+    fi
   else
     artifact_url="${NATIVE_ANDROID_EVIDENCE_ARTIFACT_URL:-}"
+    if [[ -v NATIVE_ANDROID_EVIDENCE_DOWNLOAD_RESULT ]]; then
+      download_result_is_set=1
+      download_result="${NATIVE_ANDROID_EVIDENCE_DOWNLOAD_RESULT}"
+    fi
+  fi
+
+  if ((download_result_is_set)) && [[ "$download_result" != "success" ]]; then
+    return 0
   fi
 
   # The URL comes from actions/upload-artifact. Keep the link target limited
@@ -58,6 +73,28 @@ summary_artifact_url() {
   if [[ "$artifact_url" =~ ^https://[A-Za-z0-9.-]+/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/actions/runs/[0-9]+/artifacts/[0-9]+$ ]]; then
     printf '%s' "$artifact_url"
   fi
+}
+
+record_download_status() {
+  local platform="$1"
+  local label="$2"
+  local download_result=""
+
+  if [[ "$platform" == "ios" ]]; then
+    [[ -v NATIVE_IOS_EVIDENCE_DOWNLOAD_RESULT ]] || return 0
+    download_result="${NATIVE_IOS_EVIDENCE_DOWNLOAD_RESULT}"
+  else
+    [[ -v NATIVE_ANDROID_EVIDENCE_DOWNLOAD_RESULT ]] || return 0
+    download_result="${NATIVE_ANDROID_EVIDENCE_DOWNLOAD_RESULT}"
+  fi
+
+  if [[ "$download_result" == "success" ]]; then
+    SUMMARY_DOWNLOAD_STATUS["$platform"]="PASS"
+    return 0
+  fi
+
+  SUMMARY_DOWNLOAD_STATUS["$platform"]="FAIL"
+  issue "$platform" "The ${label} native evidence artifact download did not complete. The downloaded ${label} evidence is unavailable; rerun the release gate after the artifact is available."
 }
 
 issue() {
@@ -800,6 +837,7 @@ write_evidence_summary() {
   local safe_run_dir
   local safe_finding
   local evidence_artifact_url
+  local download_status
 
   for platform in ios android; do
     if [[ "$platform" == "ios" ]]; then
@@ -821,11 +859,15 @@ write_evidence_summary() {
     call_empty_count="${SUMMARY_CALL_EMPTY_COUNT[$platform]}"
     safe_run_dir="$(summary_safe_text "$run_dir")"
     evidence_artifact_url="$(summary_artifact_url "$platform")"
+    download_status="${SUMMARY_DOWNLOAD_STATUS[$platform]}"
 
     {
       echo "## ${label} native large-text evidence"
       echo
       echo "- Status: **${status}**"
+      if [[ -n "$download_status" ]]; then
+        echo "- Artifact download: **${download_status}**"
+      fi
       if [[ -n "$run_dir" ]]; then
         echo "- Validated run directory: \`${safe_run_dir}\`"
         if [[ -n "$evidence_artifact_url" ]]; then
@@ -866,6 +908,8 @@ echo "Checking native large-text evidence under ${RESULTS_ROOT}"
 if [[ "$REQUIRE_APPROVAL" == "1" ]]; then
   echo "Strict review mode enabled: both platform evidence sets require an APPROVED review record."
 fi
+record_download_status ios "iOS"
+record_download_status android "Android"
 validate_platform ios
 validate_platform android
 write_evidence_summary

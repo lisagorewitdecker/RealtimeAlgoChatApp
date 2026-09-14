@@ -21,6 +21,8 @@
  *      candidate build IDs may appear in the branding summary.
  *   5. A partial native rerun can replace one platform's artifact without
  *      changing the other platform's fixed report link.
+ *   6. A failed platform artifact download keeps the release blocked without
+ *      hiding the other platform's report link.
  *
  * The static rules catch code paths no scenario exercises; the behavioral runs
  * inject sentinel values for every secret-backed variable and prove the real
@@ -657,6 +659,12 @@ test("idle-profile registration check blocks release and reports its result", ()
 
 test("failed native evidence checks remain reviewable before blocking release", () => {
   const gate = workflow.jobs["mobile-release-gate"];
+  const iosDownload = gate.steps.find(
+    (step) => step.id === "download-ios-native-smoke",
+  );
+  const androidDownload = gate.steps.find(
+    (step) => step.id === "download-android-native-smoke",
+  );
   const evidenceStep = gate.steps.find(
     (step) => step.name === "Validate native evidence completeness",
   );
@@ -680,6 +688,26 @@ test("failed native evidence checks remain reviewable before blocking release", 
     `bash ${untrustedCheckerWrapperScript} bash ${nativeEvidenceCheckerScript}`,
     "native evidence validation must use the untrusted checker boundary",
   );
+  assert.equal(
+    iosDownload?.["continue-on-error"],
+    true,
+    "iOS artifact download must preserve the final diagnostic when it fails",
+  );
+  assert.equal(
+    androidDownload?.["continue-on-error"],
+    true,
+    "Android artifact download must preserve the final diagnostic when it fails",
+  );
+  assert.equal(
+    evidenceStep.env.NATIVE_IOS_EVIDENCE_DOWNLOAD_RESULT,
+    "${{ steps.download-ios-native-smoke.outcome }}",
+    "the evidence checker must receive the iOS artifact download result",
+  );
+  assert.equal(
+    evidenceStep.env.NATIVE_ANDROID_EVIDENCE_DOWNLOAD_RESULT,
+    "${{ steps.download-android-native-smoke.outcome }}",
+    "the evidence checker must receive the Android artifact download result",
+  );
 
   assert.ok(
     blockingStep,
@@ -701,7 +729,8 @@ test("failed native evidence checks remain reviewable before blocking release", 
     "a failed native evidence check must block release",
   );
 
-  const summaryRegressionJob = workflow.jobs["native-evidence-summary-regression"];
+  const summaryRegressionJob =
+    workflow.jobs["native-evidence-summary-regression"];
   assert.ok(
     summaryRegressionJob,
     "the workflow must include a hosted native evidence summary regression job",
@@ -2162,6 +2191,92 @@ test("native evidence summaries link only the fixed uploaded report", () => {
   );
 });
 
+test("failed platform artifact downloads preserve the other platform report", () => {
+  const evidenceRoot = path.join(testRoot, "failed-platform-download");
+  const androidRunDir = path.join(evidenceRoot, "android", "20260909T120000Z");
+  mkdirSync(androidRunDir, { recursive: true });
+  writeFileSync(
+    path.join(androidRunDir, brandingReportFile),
+    "# Native branding validation\n\n- Status: **PASS**\n",
+  );
+
+  const summaryPath = path.join(
+    testRoot,
+    "failed-platform-download-summary.md",
+  );
+  const iosArtifactUrl =
+    "https://github.example/example/chat-app/actions/runs/123/artifacts/456";
+  const androidArtifactUrl =
+    "https://github.example/example/chat-app/actions/runs/123/artifacts/789";
+  const result = spawnSync(
+    bashPath,
+    [
+      path.join(workspaceRoot, untrustedCheckerWrapperScript),
+      bashPath,
+      path.join(workspaceRoot, nativeEvidenceCheckerScript),
+      evidenceRoot,
+    ],
+    {
+      cwd: workspaceRoot,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        GITHUB_STEP_SUMMARY: summaryPath,
+        NATIVE_IOS_EVIDENCE_ARTIFACT_URL: iosArtifactUrl,
+        NATIVE_ANDROID_EVIDENCE_ARTIFACT_URL: androidArtifactUrl,
+        NATIVE_IOS_EVIDENCE_DOWNLOAD_RESULT: "failure",
+        NATIVE_ANDROID_EVIDENCE_DOWNLOAD_RESULT: "success",
+      },
+    },
+  );
+  assert.notEqual(
+    result.status,
+    0,
+    "a failed platform artifact download must keep the release blocked",
+  );
+
+  const summary = readFileSync(summaryPath, "utf8");
+  const iosSection = summary.match(
+    /## iOS native large-text evidence[\s\S]*?(?=## Android native large-text evidence)/,
+  )?.[0];
+  const androidSection = summary.match(
+    /## Android native large-text evidence[\s\S]*/,
+  )?.[0];
+  assert.ok(iosSection, "the summary should include the failed iOS section");
+  assert.ok(
+    androidSection,
+    "the summary should include the available Android section",
+  );
+  assert.match(iosSection, /- Status: \*\*FAIL\*\*/);
+  assert.match(iosSection, /- Artifact download: \*\*FAIL\*\*/);
+  assert.match(
+    iosSection,
+    /native evidence artifact download did not complete/,
+  );
+  assert.match(iosSection, /- Detailed evidence report: \*\*Unavailable\*\*/);
+  assert.doesNotMatch(
+    iosSection,
+    new RegExp(iosArtifactUrl.replaceAll(".", "\\.")),
+    "the failed platform must not link an unavailable download",
+  );
+  assert.match(androidSection, /- Artifact download: \*\*PASS\*\*/);
+  assert.match(
+    androidSection,
+    new RegExp(
+      String.raw`\[native-branding-check\.md\]\(${androidArtifactUrl.replaceAll(
+        ".",
+        "\\.",
+      )}\)`,
+    ),
+    "the available platform report link must survive the other download failure",
+  );
+  assert.doesNotMatch(
+    summary,
+    /::|attacker\.example/,
+    "download diagnostics must not introduce workflow commands or unsafe summary text",
+  );
+});
+
 test("partial native reruns keep each platform linked to its own artifact", () => {
   const artifactNames = {
     ios: "native-large-text-ios",
@@ -2418,10 +2533,7 @@ test("partial native reruns keep each platform linked to its own artifact", () =
     new RegExp(artifactUrl(initialArtifacts.ios).replaceAll(".", "\\.")),
     "the rerun summary must not retain the replaced iOS artifact URL",
   );
-  assert.match(
-    rerunSummary,
-    /\[native-branding-check\.md\]\(/g,
-  );
+  assert.match(rerunSummary, /\[native-branding-check\.md\]\(/g);
   assert.equal(
     [...rerunSummary.matchAll(/\[native-branding-check\.md\]\(/g)].length,
     2,
@@ -2441,7 +2553,7 @@ test("native evidence checker output is isolated from workflow commands", () => 
 
   assert.equal(
     checkerCallers.length,
-    3,
+    4,
     "every native evidence checker caller must be inventoried by this contract",
   );
   assert.equal(
