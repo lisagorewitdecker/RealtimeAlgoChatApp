@@ -5,6 +5,10 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
 import { MAX_CLERK_RETRY_DELAY_MS } from "../src/lib/clerkRetry.js";
+import {
+  runtimeConfigFixtureVariable,
+  runtimeConfigPathVariable,
+} from "./playwright-runtime-config.mjs";
 import { requiredChromiumRuntimePackages } from "./playwright-runtime-packages.mjs";
 import {
   throwTestAndCleanupFailures,
@@ -319,7 +323,10 @@ describe("key-reset recovery Playwright diagnostics", () => {
             encoding: "utf8",
             env: {
               ...process.env,
-              PLAYWRIGHT_RUNTIME_CONFIG_PATH: runtimeConfigPath,
+              // The fixture config path is honored only with its explicit
+              // opt-in; an inherited path alone stays inert.
+              [runtimeConfigFixtureVariable]: "1",
+              [runtimeConfigPathVariable]: runtimeConfigPath,
             },
             timeout: 10_000,
           },

@@ -8,6 +8,10 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  runtimeConfigFixtureVariable,
+  runtimeConfigPathVariable,
+} from "./playwright-runtime-config.mjs";
 import { requiredChromiumRuntimePackages } from "./playwright-runtime-packages.mjs";
 
 const apiServerDirectory = fileURLToPath(new URL("..", import.meta.url));
@@ -17,18 +21,25 @@ const cleanDirectory = mkdtempSync(
 );
 const browserDirectory = join(cleanDirectory, "browsers");
 const incompleteRuntimeConfig = join(cleanDirectory, ".replit");
-// Test-only controls of the runtime contract check. Ordinary subprocesses must
-// never inherit them from this process, so each fixture below adds exactly the
+// A fixture path that never exists, standing in for a temporary runtime config
+// that an earlier harness run deleted after a shell or CI job inherited it.
+const staleRuntimeConfig = join(cleanDirectory, "deleted-fixture", ".replit");
+// Test-only controls of the runtime checks. Ordinary subprocesses must never
+// inherit them from this process, so each fixture below adds exactly the
 // capability it exercises.
 const contractTestModeVariable = "PLAYWRIGHT_RUNTIME_CONTRACT_TEST_MODE";
 const contractInjectLibraryVariable =
   "PLAYWRIGHT_RUNTIME_CONTRACT_INJECT_LIBRARY";
+const testControlVariables = new Set([
+  contractTestModeVariable,
+  contractInjectLibraryVariable,
+  runtimeConfigFixtureVariable,
+  runtimeConfigPathVariable,
+]);
 const baseEnvironment = {
   ...Object.fromEntries(
     Object.entries(process.env).filter(
-      ([name]) =>
-        name !== contractTestModeVariable &&
-        name !== contractInjectLibraryVariable,
+      ([name]) => !testControlVariables.has(name),
     ),
   ),
   PLAYWRIGHT_BROWSERS_PATH: browserDirectory,
@@ -95,6 +106,48 @@ try {
     );
   }
 
+  // The fixture config path alone must stay inert as well: without its
+  // explicit opt-in, an inherited path to a deleted fixture cannot crash a
+  // normal contract check or make it validate anything but the workspace
+  // .replit.
+  const inheritedConfigPathContract = run(
+    "node",
+    ["e2e/check-playwright-runtime-contract.mjs"],
+    {
+      ...baseEnvironment,
+      [runtimeConfigPathVariable]: staleRuntimeConfig,
+    },
+  );
+  if (
+    inheritedConfigPathContract.status !== 0 ||
+    inheritedConfigPathContract.report.includes(staleRuntimeConfig) ||
+    coveredLibraryCount(inheritedConfigPathContract.report) !==
+      contractLibraryCount
+  ) {
+    throw new Error(
+      `${runtimeConfigPathVariable} without ${runtimeConfigFixtureVariable} was not inert for the contract check (expected the normal contract check to pass and cover exactly ${contractLibraryCount} libraries):\n${inheritedConfigPathContract.report}`,
+    );
+  }
+
+  // The same inherited path must not fail the browser setup preflight either.
+  const inheritedConfigPathSetup = run(
+    "node",
+    ["e2e/check-playwright-runtime.mjs"],
+    {
+      ...baseEnvironment,
+      [runtimeConfigPathVariable]: staleRuntimeConfig,
+    },
+  );
+  if (
+    inheritedConfigPathSetup.status !== 0 ||
+    inheritedConfigPathSetup.report.includes(staleRuntimeConfig) ||
+    inheritedConfigPathSetup.report.includes("[api-server browser setup]")
+  ) {
+    throw new Error(
+      `${runtimeConfigPathVariable} without ${runtimeConfigFixtureVariable} was not inert for the browser setup preflight (expected it to pass against the workspace .replit):\n${inheritedConfigPathSetup.report}`,
+    );
+  }
+
   const unknownLibrary = run(
     "node",
     ["e2e/check-playwright-runtime-contract.mjs"],
@@ -141,7 +194,8 @@ try {
       ["e2e/check-playwright-runtime.mjs"],
       {
         ...baseEnvironment,
-        PLAYWRIGHT_RUNTIME_CONFIG_PATH: incompleteRuntimeConfig,
+        [runtimeConfigFixtureVariable]: "1",
+        [runtimeConfigPathVariable]: incompleteRuntimeConfig,
       },
     );
     if (
@@ -164,7 +218,7 @@ try {
   }
 
   console.log(
-    `Playwright checked Chromium's actual shared-library requirements, ignored an inherited synthetic SONAME injection without test mode, rejected that unknown SONAME under test mode and removal of all ${requiredChromiumRuntimePackages.length} contracted native runtime packages, and launched it from a clean browser cache.`,
+    `Playwright checked Chromium's actual shared-library requirements, ignored an inherited synthetic SONAME injection and an inherited deleted-fixture config path without their opt-ins, rejected that unknown SONAME under test mode and removal of all ${requiredChromiumRuntimePackages.length} contracted native runtime packages, and launched it from a clean browser cache.`,
   );
 } finally {
   rmSync(cleanDirectory, { recursive: true, force: true });

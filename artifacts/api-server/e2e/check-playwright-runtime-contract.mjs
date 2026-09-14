@@ -2,14 +2,17 @@ import { spawnSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { chromium } from "@playwright/test";
+import { resolveRuntimeConfigPath } from "./playwright-runtime-config.mjs";
 import {
   chromiumLibraryNixPackages,
   chromiumSystemLibraries,
 } from "./playwright-runtime-packages.mjs";
 
-const runtimeConfigPath =
-  process.env.PLAYWRIGHT_RUNTIME_CONFIG_PATH ??
-  new URL("../../../.replit", import.meta.url);
+// A fixture config path is honored only with its explicit opt-in, which is
+// separate from the test-mode capability below; an inherited
+// PLAYWRIGHT_RUNTIME_CONFIG_PATH alone must not change what a normal contract
+// check reads or fail it when the fixture was deleted.
+const runtimeConfigPath = resolveRuntimeConfigPath();
 const chromiumRoot = dirname(dirname(chromium.executablePath()));
 const chromiumRevision = basename(chromiumRoot).match(/^chromium-(.+)$/)?.[1];
 if (!chromiumRevision) {

@@ -1,13 +1,14 @@
 import { chromium } from "@playwright/test";
 import { readFile } from "node:fs/promises";
-import { fileURLToPath } from "node:url";
+import { resolveRuntimeConfigPath } from "./playwright-runtime-config.mjs";
 import { requiredChromiumRuntimePackages } from "./playwright-runtime-packages.mjs";
 
 const setupMessage =
   "Chromium is not ready for API tests. Run the test command from a Replit environment with the Chromium runtime packages declared in .replit, then retry.";
-const runtimeConfigPath =
-  process.env.PLAYWRIGHT_RUNTIME_CONFIG_PATH ??
-  fileURLToPath(new URL("../../../.replit", import.meta.url));
+// A fixture config path is honored only with its explicit opt-in; an inherited
+// PLAYWRIGHT_RUNTIME_CONFIG_PATH alone must not change what a normal preflight
+// reads or fail it when the fixture was deleted.
+const runtimeConfigPath = resolveRuntimeConfigPath();
 
 function readDeclaredNixPackages(runtimeConfig) {
   const nixSection = runtimeConfig.match(
