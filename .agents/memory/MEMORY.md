@@ -66,3 +66,4 @@
 - [Relocatable Pino bundles](relocatable-pino-bundles.md) — esbuild-plugin-pino can bake the build machine’s absolute output path into workers; rewrite and validate bundle-relative paths.
 - [Browser E2E phase budgets](e2e-phase-budgets.md) — bound and label external setup, navigation, assertions, and teardown separately so stalls identify their real phase.
 - [Chat App script tests need explicit wiring](chat-app-script-tests.md) — Jest ignores `scripts/` and `.mjs`; a node:test file there runs only via its own package script chained into `test`.
+- [.replit merge regressions](replit-config-merge-regressions.md) — task merges can drop validation workflows and the post-merge timeout; diff against the pre-merge revision, restore via platform tooling.
