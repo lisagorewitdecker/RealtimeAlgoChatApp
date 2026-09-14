@@ -751,6 +751,69 @@ test("failed native evidence checks remain reviewable before blocking release", 
   }
 });
 
+test("failed native evidence checks remain reviewable before blocking release", () => {
+  const gate = workflow.jobs["mobile-release-gate"];
+  const evidenceStep = gate.steps.find(
+    (step) => step.name === "Validate native evidence completeness",
+  );
+  const blockingStep = gate.steps.find(
+    (step) => step.name === "Block release unless both native checks pass",
+  );
+
+  assert.ok(evidenceStep, "the release gate must validate native evidence");
+  assert.equal(
+    evidenceStep.if,
+    "${{ always() }}",
+    "native evidence validation must run so its failure can be summarized",
+  );
+  assert.equal(
+    evidenceStep["continue-on-error"],
+    true,
+    "native evidence validation must preserve its summary before the blocker runs",
+  );
+  assert.equal(
+    evidenceStep.run,
+    `bash ${untrustedCheckerWrapperScript} bash ${nativeEvidenceCheckerScript}`,
+    "native evidence validation must use the untrusted checker boundary",
+  );
+
+  assert.ok(
+    blockingStep,
+    "the release gate must have a separate native evidence blocking step",
+  );
+  assert.equal(
+    blockingStep.if,
+    "${{ always() }}",
+    "the native evidence blocker must run after a failed validation",
+  );
+  assert.equal(
+    blockingStep.env.EVIDENCE_RESULT,
+    "${{ steps.evidence-completeness.outcome }}",
+    "the blocker must use the native evidence check outcome",
+  );
+  assert.match(
+    blockingStep.run,
+    /\$EVIDENCE_RESULT" != "success"/,
+    "a failed native evidence check must block release",
+  );
+
+  for (const platform of ["ios", "android"]) {
+    const upload = workflow.jobs[`native-${platform}`].steps.find(
+      (step) => step.id === `upload-${platform}-native-smoke`,
+    );
+    assert.equal(
+      upload?.if,
+      "always()",
+      `${platform}: evidence upload must survive a failed native check`,
+    );
+    assert.equal(
+      upload?.with?.["if-no-files-found"],
+      "warn",
+      `${platform}: missing evidence must remain visible without hiding the check failure`,
+    );
+  }
+});
+
 test("publish requires candidate-bound approvals from the current run attempt", () => {
   const attemptSuffix = "${{ github.run_id }}-${{ github.run_attempt }}";
   for (const [jobId, platform] of [

@@ -29,3 +29,8 @@ both looked healthy from in-container probes.
 
 **How to apply:** any time a user reports an Expo Go loading error or a
 phone-only bug, capture the request log and compare manifest dates first.
+
+The local Expo Go handoff check must request the platform manifest first and
+follow its `launchAsset.url` pathname for the bundle; a guessed `/index.bundle`
+route is not equivalent. This validates Metro's native-client routing locally,
+but does not replace a real-device check through the public edge.
