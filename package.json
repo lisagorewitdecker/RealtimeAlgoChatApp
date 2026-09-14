@@ -9,7 +9,7 @@
     "preinstall": "sh -c 'rm -f package-lock.json yarn.lock; case \"$npm_config_user_agent\" in pnpm/*) ;; *) echo \"Use pnpm instead\" >&2; exit 1 ;; esac'",
     "build": "pnpm run typecheck && pnpm -r --if-present run build",
     "typecheck:libs": "tsc --build",
-    "typecheck": "pnpm run typecheck:libs && pnpm -r --filter \"./artifacts/**\" --filter \"./scripts\" --if-present run typecheck",
+    "typecheck": "pnpm run typecheck:libs && pnpm -r --filter \"./artifacts/**\" --filter \"./scripts\" --if-present run typecheck && pnpm --filter @workspace/api-server --if-present run typecheck:e2e",
     "prepare": "bash -c 'if [ -f lib/api-spec/scripts/install-repository-git-hooks.mjs ]; then node lib/api-spec/scripts/install-repository-git-hooks.mjs; else echo \"No git-hooks installer present; skipping prepare hook.\"; fi'",
     "hooks:dispatcher:install": "bash -c 'if [ -f lib/api-spec/scripts/install-repository-git-hooks.mjs ]; then node lib/api-spec/scripts/install-repository-git-hooks.mjs --install-dispatcher; else echo \"No git-hooks installer present; skipping dispatcher install.\"; fi'",
     "hooks:dispatcher:uninstall": "bash -c 'if [ -f lib/api-spec/scripts/install-repository-git-hooks.mjs ]; then node lib/api-spec/scripts/install-repository-git-hooks.mjs --uninstall-dispatcher; else echo \"No git-hooks installer present; skipping dispatcher uninstall.\"; fi'",
