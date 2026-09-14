@@ -542,9 +542,11 @@ assert_not_contains "$duplicate_sentry_evidence_output" "must-not-be-printed"
 malformed_sentry_trigger_root="$TEST_ROOT/malformed-sentry-trigger"
 write_valid_run "$malformed_sentry_trigger_root" ios
 write_valid_run "$malformed_sentry_trigger_root" android
-cat >> "$malformed_sentry_trigger_root/ios/20260909T120000Z/sentry-trigger.txt" <<'EOF'
-not-a-declaration-with-secret-trigger-value
-unknown=secret-trigger-value
+credential_like_trigger_value='Bearer sentry-release-token-credential'
+marker_like_trigger_value='sentry-trigger-marker-release-20260909'
+cat >> "$malformed_sentry_trigger_root/ios/20260909T120000Z/sentry-trigger.txt" <<EOF
+not-a-declaration-with-${credential_like_trigger_value}
+unknown=${marker_like_trigger_value}
 too_many_separators=secret=second-secret
 =missing-key-secret-value
 empty-value=
@@ -560,7 +562,8 @@ assert_contains "$malformed_sentry_trigger_output" "[ios] Sentry trigger metadat
 assert_contains "$malformed_sentry_trigger_output" "[ios] Sentry trigger metadata line 7 in ${malformed_sentry_trigger_path} is malformed: key and value must both be non-empty."
 assert_contains "$malformed_sentry_trigger_output" "[ios] Sentry trigger metadata line 8 in ${malformed_sentry_trigger_path} is malformed: key and value must both be non-empty."
 assert_contains "$malformed_sentry_trigger_output" "completeness check FAILED with 5 issue(s)"
-assert_not_contains "$malformed_sentry_trigger_output" "secret-trigger-value"
+assert_not_contains "$malformed_sentry_trigger_output" "$credential_like_trigger_value"
+assert_not_contains "$malformed_sentry_trigger_output" "$marker_like_trigger_value"
 assert_not_contains "$malformed_sentry_trigger_output" "second-secret"
 
 # A duplicate only silences the checks for that field; the remaining
