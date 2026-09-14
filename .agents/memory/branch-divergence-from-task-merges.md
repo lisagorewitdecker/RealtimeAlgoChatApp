@@ -66,13 +66,12 @@ break the task merge-bases, so it is not an alternative.
   restarts under memory pressure and wipes `/tmp`, so a chained command whose
   `cd` fails falls through into the workspace checkout.
 
-**Git-pane Pull against a diverged GitHub branch (2026-09-14):** it stops on
-conflicts and leaves the workspace half-merged — `pnpm-lock.yaml` full of
-conflict markers (every install and validation then fails with "duplicated
-mapping key") and files deleted on GitHub staged for deletion. `git merge
---abort` restores the tree. Then merge the GitHub head deliberately: keep the
-workspace lockfile (GitHub-regenerated copies follow GitHub's catalog, not the
-workspace's) and keep `replit.md` (the contract-guidance sync tests read it).
-GitHub's development/main/production carry one tree, so merging the superset
-branch and pointing the other two local branches at the result makes all three
-pushes fast-forwards.
+**Git-pane Pull against a diverged GitHub branch:** it stops on conflicts and
+leaves the workspace half-merged (conflict markers in `pnpm-lock.yaml`, files
+deleted on GitHub staged for deletion), and every install or validation then
+fails with "duplicated mapping key". `git merge --abort` first. Then merge the
+GitHub head deliberately: keep the workspace lockfile (a GitHub-regenerated
+lockfile follows GitHub's catalog) and keep `replit.md` (contract-guidance
+tests read it). GitHub's branches share one tree, so merging the superset
+branch and pointing the other local branches at the result makes every push a
+fast-forward.

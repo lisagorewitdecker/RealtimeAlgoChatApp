@@ -31,8 +31,8 @@ diagnostics and test coverage listed below.
 | App | Chat App |
 | SDK/runtime | Expo SDK 57 (`expo` `~57.0.22`), `expo-secure-store` `57.0.4` |
 | Revision | working tree of 2026-09-14 on top of `61a854d` |
-| Client for the phone rows | Stock Expo Go (iOS), dev server `exp://<REPLIT_EXPO_DEV_DOMAIN>` |
-| Device model / iOS version / Expo Go version | PENDING — no phone reachable from the workspace |
+| Client for the phone rows | Stock Expo Go (iOS, Android), dev server `exp://<REPLIT_EXPO_DEV_DOMAIN>` |
+| Device model / OS version / Expo Go version | PENDING — no phone reachable from the workspace |
 
 ## Acceptance result
 
@@ -47,13 +47,14 @@ diagnostics and test coverage listed below.
 | Chat App tests, typecheck, release preflight | PASS | 22 suites / 179 tests, `tsc --noEmit` clean, `preflight:release` passed on 2026-09-14. |
 | Creating a room in stock Expo Go on an iPhone opens the room without the secure-storage warning | PENDING | Requires a physical iPhone; procedure below. |
 | Force-quit and relaunch keeps the device identity and the room key | PENDING | Requires a physical iPhone; procedure below. |
+| The same two checks in stock Expo Go on a physical Android phone | PENDING | Same procedure; the keystore applies the same key-name rule. |
 
 ## Procedure for the phone rows
 
 1. Keep the `artifacts/chat-app: expo` workflow running; it prints the
    `exp://…expo.worf.replit.dev` link and QR code.
-2. On the iPhone, install Expo Go from the App Store, then open the link (or
-   scan the QR code with the Camera app) and sign in.
+2. On the phone, install Expo Go (App Store or Play Store), then open the link
+   (or scan the QR code with the Camera app) and sign in.
 3. Create a room whose name contains an apostrophe and a slash (for example
    `Ana's team / design`). Expected: the room opens, no "Room key could not be
    saved" message, and a sent message appears.

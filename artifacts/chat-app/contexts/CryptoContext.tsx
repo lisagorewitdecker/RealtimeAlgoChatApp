@@ -277,20 +277,21 @@ export function CryptoProvider({ children }: { children: React.ReactNode }) {
           });
         }
       } catch (error) {
-        // Keep the real cause visible: a deterministic failure here (for
-        // example a storage key name the keychain rejects) would otherwise
-        // look like "secure storage unavailable" while the device silently
-        // runs on a fresh in-memory identity after every launch.
-        console.warn(
-          "Device encryption identity could not be loaded from or saved to secure storage",
-          error instanceof Error ? error.message : error,
-        );
         const pair = nacl.box.keyPair();
         if (
           !cancelled &&
           identityRef.current.userId === userId &&
           identityRef.current.generation === generation
         ) {
+          // Keep the real cause visible: a deterministic failure here (for
+          // example a storage key name the keychain rejects) would otherwise
+          // look like "secure storage unavailable" while the device silently
+          // runs on a fresh in-memory identity after every launch. Stale
+          // generations (sign-out or account switch mid-load) stay quiet.
+          console.warn(
+            "Device encryption identity could not be loaded from or saved to secure storage",
+            error instanceof Error ? error.message : error,
+          );
           setKeypair({
             userId,
             ...pair,

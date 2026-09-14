@@ -287,7 +287,7 @@ describe("CryptoProvider", () => {
     // directly, so apostrophes, slashes, spaces, colons, and non-ASCII text
     // all reach storage. Every key the mock receives must still satisfy the
     // native rule (the mock throws otherwise) and round-trip after a remount.
-    const oddUserId = "user_2abc:o'brien/déjà vu";
+    const oddUserId = "user_2abc:o'brien/déjà vu 🔐";
     const oddRoomId = "ana's/design:team 🚀";
     mockAuthUserId = oddUserId;
 
@@ -578,24 +578,26 @@ describe("CryptoProvider", () => {
   });
 
   it("keeps a failed room key in memory and surfaces a retryable persistence failure", async () => {
-    const warnMock = jest.spyOn(console, "warn").mockImplementation();
     await renderCryptoProvider();
     mockRoomKeyWriteFailure = true;
 
-    await act(async () => {
-      await expect(cryptoValue?.generateRoomKey("room-42")).rejects.toMatchObject({
-        name: "RoomKeyPersistenceError",
-        roomId: "room-42",
+    const warnMock = jest.spyOn(console, "warn").mockImplementation();
+    try {
+      await act(async () => {
+        await expect(cryptoValue?.generateRoomKey("room-42")).rejects.toMatchObject({
+          name: "RoomKeyPersistenceError",
+          roomId: "room-42",
+        });
       });
-    });
-
-    // The retry UX is unchanged, and the underlying storage error is logged so
-    // a deterministic failure cannot hide behind the generic message again.
-    expect(warnMock).toHaveBeenCalledWith(
-      "Room encryption key could not be saved to secure storage",
-      "Secure storage unavailable",
-    );
-    warnMock.mockRestore();
+      // The retry UX is unchanged, and the underlying storage error is logged
+      // so a deterministic failure cannot hide behind the generic message.
+      expect(warnMock).toHaveBeenCalledWith(
+        "Room encryption key could not be saved to secure storage",
+        "Secure storage unavailable",
+      );
+    } finally {
+      warnMock.mockRestore();
+    }
 
     const inMemoryKey = cryptoValue?.getRoomKey("room-42");
     expect(inMemoryKey).toHaveLength(nacl.secretbox.keyLength);

@@ -636,19 +636,20 @@ describe("device encryption identity reset", () => {
     const previousStored = mockSecureStore.get(deviceKeyStorageKey("crypto-test-user"));
     mockDeviceKeyWriteFailure = true;
     const warnMock = jest.spyOn(console, "warn").mockImplementation();
-
-    await act(async () => {
-      await expect(cryptoValue!.resetDeviceIdentity()).resolves.toEqual({
-        status: "storage_unavailable",
+    try {
+      await act(async () => {
+        await expect(cryptoValue!.resetDeviceIdentity()).resolves.toEqual({
+          status: "storage_unavailable",
+        });
       });
-    });
-
-    // The caller sees the same retryable status; the log carries the cause.
-    expect(warnMock).toHaveBeenCalledWith(
-      "Replacement device encryption identity could not be saved to secure storage",
-      "Secure storage unavailable",
-    );
-    warnMock.mockRestore();
+      // The caller sees the same retryable status; the log carries the cause.
+      expect(warnMock).toHaveBeenCalledWith(
+        "Replacement device encryption identity could not be saved to secure storage",
+        "Secure storage unavailable",
+      );
+    } finally {
+      warnMock.mockRestore();
+    }
 
     expect(cryptoValue?.publicKeyB64).toBe(previousPublicKey);
     expect(cryptoValue?.isReady).toBe(true);
