@@ -644,6 +644,23 @@ assert_contains "$malformed_sentry_evidence_output" "completeness check FAILED w
 assert_not_contains "$malformed_sentry_evidence_output" "$credential_like_sentry_evidence_value"
 assert_not_contains "$malformed_sentry_evidence_output" "$marker_like_sentry_evidence_value"
 
+# Malformed Sentry source-map evidence that does not match credential-like
+# preflight must report a parser failure without echoing the invalid value.
+parser_error_sentry_evidence_root="$TEST_ROOT/parser-error-sentry-evidence"
+write_valid_run "$parser_error_sentry_evidence_root" ios
+write_valid_run "$parser_error_sentry_evidence_root" android
+parser_error_marker_value='sentry-parser-marker'
+printf '%s\n' "$parser_error_marker_value" \
+  > "$parser_error_sentry_evidence_root/ios/20260909T120000Z/sentry-source-map-evidence.json"
+if parser_error_sentry_evidence_output="$(bash "$CHECKER" "$parser_error_sentry_evidence_root" 2>&1)"; then
+  echo "parser-error Sentry source-map evidence case unexpectedly passed" >&2
+  exit 1
+fi
+assert_contains "$parser_error_sentry_evidence_output" "[ios] Invalid Sentry source-map evidence"
+assert_contains "$parser_error_sentry_evidence_output" "evidence is not valid JSON"
+assert_contains "$parser_error_sentry_evidence_output" "completeness check FAILED with 1 issue(s)"
+assert_not_contains "$parser_error_sentry_evidence_output" "$parser_error_marker_value"
+
 # A duplicate only silences the checks for that field; the remaining
 # single-declaration fields are still validated by value.
 partial_duplicate_root="$TEST_ROOT/partial-duplicate"
