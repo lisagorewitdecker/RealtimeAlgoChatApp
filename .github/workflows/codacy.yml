@@ -109,6 +109,19 @@ jobs:
             normalized_value = re.sub(r"/+", "/", normalized_value).strip("/-")
             return normalized_value or None
 
+
+          def stable_run_signature(run, automation_id):
+            return json.dumps(
+              {
+                "automation_id": automation_id,
+                "conversion": run.get("conversion", {}),
+                "invocations": run.get("invocations", []),
+                "originalUriBaseIds": run.get("originalUriBaseIds", {}),
+                "tool": run.get("tool", {}),
+              },
+              sort_keys=True,
+            )
+
           with open("results.sarif", "r", encoding="utf-8") as sarif_file:
             sarif_data = json.load(sarif_file)
 
@@ -126,7 +139,7 @@ jobs:
             automation_id for automation_id, count in Counter(existing_ids).items() if count > 1
           }
           assigned_ids = set()
-          candidate_occurrences = Counter()
+          replacement_candidates = []
 
           for run in runs:
             automation_details = run["automationDetails"]
@@ -137,10 +150,21 @@ jobs:
 
             tool_key = stable_tool_key(run)
             normalized_id = normalized_category_id(automation_id) if automation_id else None
-            candidate_id = f"{normalized_id}/{tool_key}" if normalized_id else f"codacy/{tool_key}"
-            candidate_occurrences[candidate_id] += 1
-            if candidate_occurrences[candidate_id] > 1:
-              candidate_id = f"{candidate_id}-{candidate_occurrences[candidate_id]}"
+            replacement_candidates.append(
+              (
+                f"{normalized_id}/{tool_key}" if normalized_id else f"codacy/{tool_key}",
+                stable_run_signature(run, normalized_id),
+                automation_details,
+              )
+            )
+
+          replacement_candidates.sort(key=lambda candidate: (candidate[0], candidate[1]))
+          for base_candidate_id, _, automation_details in replacement_candidates:
+            candidate_id = base_candidate_id
+            suffix = 1
+            while candidate_id in assigned_ids:
+              suffix += 1
+              candidate_id = f"{base_candidate_id}-{suffix}"
 
             automation_details["id"] = candidate_id
             assigned_ids.add(candidate_id)
