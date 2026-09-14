@@ -551,6 +551,15 @@ too_many_separators=secret=second-secret
 =missing-key-secret-value
 empty-value=
 EOF
+android_credential_like_trigger_value='Bearer android-sentry-release-token-credential'
+android_marker_like_trigger_value='android-sentry-trigger-marker-release-20260909'
+cat >> "$malformed_sentry_trigger_root/android/20260909T120000Z/sentry-trigger.txt" <<EOF
+not-an-android-declaration-with-${android_credential_like_trigger_value}
+unknown=${android_marker_like_trigger_value}
+android-too_many_separators=secret=android-second-secret
+=android-missing-key-secret
+android-empty-value=
+EOF
 if malformed_sentry_trigger_output="$(bash "$CHECKER" "$malformed_sentry_trigger_root" 2>&1)"; then
   echo "malformed Sentry trigger metadata case unexpectedly passed" >&2
   exit 1
@@ -561,10 +570,20 @@ assert_contains "$malformed_sentry_trigger_output" "[ios] Sentry trigger metadat
 assert_contains "$malformed_sentry_trigger_output" "[ios] Sentry trigger metadata line 6 in ${malformed_sentry_trigger_path} is malformed: expected exactly one key=value declaration."
 assert_contains "$malformed_sentry_trigger_output" "[ios] Sentry trigger metadata line 7 in ${malformed_sentry_trigger_path} is malformed: key and value must both be non-empty."
 assert_contains "$malformed_sentry_trigger_output" "[ios] Sentry trigger metadata line 8 in ${malformed_sentry_trigger_path} is malformed: key and value must both be non-empty."
-assert_contains "$malformed_sentry_trigger_output" "completeness check FAILED with 5 issue(s)"
+assert_contains "$malformed_sentry_trigger_output" "completeness check FAILED with 10 issue(s)"
 assert_not_contains "$malformed_sentry_trigger_output" "$credential_like_trigger_value"
 assert_not_contains "$malformed_sentry_trigger_output" "$marker_like_trigger_value"
 assert_not_contains "$malformed_sentry_trigger_output" "second-secret"
+malformed_android_sentry_trigger_path="$malformed_sentry_trigger_root/android/20260909T120000Z/sentry-trigger.txt"
+assert_contains "$malformed_sentry_trigger_output" "[android] Sentry trigger metadata line 4 in ${malformed_android_sentry_trigger_path} is malformed: expected exactly one key=value declaration."
+assert_contains "$malformed_sentry_trigger_output" "[android] Sentry trigger metadata line 5 in ${malformed_android_sentry_trigger_path} is malformed: unknown key/value declaration."
+assert_contains "$malformed_sentry_trigger_output" "[android] Sentry trigger metadata line 6 in ${malformed_android_sentry_trigger_path} is malformed: expected exactly one key=value declaration."
+assert_contains "$malformed_sentry_trigger_output" "[android] Sentry trigger metadata line 7 in ${malformed_android_sentry_trigger_path} is malformed: key and value must both be non-empty."
+assert_contains "$malformed_sentry_trigger_output" "[android] Sentry trigger metadata line 8 in ${malformed_android_sentry_trigger_path} is malformed: key and value must both be non-empty."
+assert_contains "$malformed_sentry_trigger_output" "completeness check FAILED with 10 issue(s)"
+assert_not_contains "$malformed_sentry_trigger_output" "$android_credential_like_trigger_value"
+assert_not_contains "$malformed_sentry_trigger_output" "$android_marker_like_trigger_value"
+assert_not_contains "$malformed_sentry_trigger_output" "android-second-secret"
 
 # A duplicate only silences the checks for that field; the remaining
 # single-declaration fields are still validated by value.
