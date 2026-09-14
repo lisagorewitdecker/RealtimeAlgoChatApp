@@ -75,6 +75,12 @@ const libraries = new Set(
     [...filesBelow(browserRoot)].flatMap((path) => neededLibraries(path)),
   ),
 );
+if (
+  process.env.PLAYWRIGHT_RUNTIME_CONTRACT_TEST_MODE === "1" &&
+  process.env.PLAYWRIGHT_RUNTIME_CONTRACT_INJECT_LIBRARY
+) {
+  libraries.add(process.env.PLAYWRIGHT_RUNTIME_CONTRACT_INJECT_LIBRARY);
+}
 if (libraries.size === 0) {
   throw new Error(
     `No ELF shared-library requirements were found below ${browserRoots.join(", ")}; Chromium may not be installed or readelf may be incompatible.`,

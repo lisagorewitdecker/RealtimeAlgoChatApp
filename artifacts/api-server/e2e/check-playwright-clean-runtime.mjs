@@ -52,6 +52,33 @@ try {
     );
   }
 
+  const syntheticUnknownLibrary = "libsynthetic-playwright-upgrade.so.99";
+  const unknownLibrary = run(
+    "node",
+    ["e2e/check-playwright-runtime-contract.mjs"],
+    {
+      ...baseEnvironment,
+      PLAYWRIGHT_RUNTIME_CONTRACT_TEST_MODE: "1",
+      PLAYWRIGHT_RUNTIME_CONTRACT_INJECT_LIBRARY: syntheticUnknownLibrary,
+    },
+  );
+  if (
+    unknownLibrary.status !== 1 ||
+    !unknownLibrary.report.includes(
+      `Unknown Chromium libraries: ${syntheticUnknownLibrary}.`,
+    ) ||
+    !unknownLibrary.report.includes(
+      "Find the Replit-compatible nixpkgs attribute that provides each library",
+    ) ||
+    !unknownLibrary.report.includes(
+      "add its SONAME mapping to e2e/playwright-runtime-packages.mjs",
+    )
+  ) {
+    throw new Error(
+      `Unknown-library upgrade diagnostic did not match its contract:\n${unknownLibrary.report}`,
+    );
+  }
+
   const runtimeConfig = readFileSync(
     join(workspaceDirectory, ".replit"),
     "utf8",
@@ -95,7 +122,7 @@ try {
   }
 
   console.log(
-    `Playwright checked Chromium's actual shared-library requirements, rejected removal of all ${requiredChromiumRuntimePackages.length} contracted native runtime packages, and launched it from a clean browser cache.`,
+    `Playwright checked Chromium's actual shared-library requirements, rejected an unknown synthetic SONAME and removal of all ${requiredChromiumRuntimePackages.length} contracted native runtime packages, and launched it from a clean browser cache.`,
   );
 } finally {
   rmSync(cleanDirectory, { recursive: true, force: true });
