@@ -59,6 +59,7 @@ jobs:
           python - <<'PY'
           import hashlib
           import json
+          import os
           import re
           from collections import Counter
 
@@ -167,8 +168,10 @@ jobs:
             automation_details["id"] = candidate_id
             assigned_ids.add(candidate_id)
 
-          with open("results.sarif", "w", encoding="utf-8") as sarif_file:
+          temp_output_path = "results.sarif.tmp"
+          with open(temp_output_path, "w", encoding="utf-8") as sarif_file:
             json.dump(sarif_data, sarif_file)
+          os.replace(temp_output_path, "results.sarif")
           PY
 
       # Upload the SARIF file generated in the previous step
