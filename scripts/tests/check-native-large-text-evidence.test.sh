@@ -24,6 +24,24 @@ assert_not_contains() {
   fi
 }
 
+release_node_range="$(node --input-type=module - <<'NODE'
+import { readFileSync } from "node:fs";
+console.log(JSON.parse(readFileSync("package.json", "utf8")).engines?.node ?? "");
+NODE
+)"
+expected_release_node_range='>=24.0.0 <25.0.0'
+if [[ "$release_node_range" != "$expected_release_node_range" ]]; then
+  printf 'Expected package.json to define the release Node range as %s; got %s\n' \
+    "$expected_release_node_range" "$release_node_range" >&2
+  exit 1
+fi
+release_node_major="$(node -e 'console.log(process.versions.node.split(".")[0])')"
+if [[ "$release_node_major" != "24" ]]; then
+  printf 'Native evidence privacy regression must run on a supported Node 24 runtime; got %s\n' \
+    "$(node --version)" >&2
+  exit 1
+fi
+
 write_review_record() {
   local root="$1"
   local platform="$2"
@@ -645,21 +663,28 @@ assert_not_contains "$malformed_sentry_evidence_output" "$credential_like_sentry
 assert_not_contains "$malformed_sentry_evidence_output" "$marker_like_sentry_evidence_value"
 
 # Malformed Sentry source-map evidence that does not match credential-like
-# preflight must report a parser failure without echoing the invalid value.
+# preflight must report the stable parser-failure category without echoing the
+# invalid value. The native parser's wording is intentionally not asserted:
+# it can vary between supported Node releases.
 parser_error_sentry_evidence_root="$TEST_ROOT/parser-error-sentry-evidence"
 write_valid_run "$parser_error_sentry_evidence_root" ios
 write_valid_run "$parser_error_sentry_evidence_root" android
-parser_error_marker_value='sentry-parser-marker'
-printf '%s\n' "$parser_error_marker_value" \
+parser_error_ios_marker='sentry-parser-marker-ios'
+printf '%s\n' "$parser_error_ios_marker" \
   > "$parser_error_sentry_evidence_root/ios/20260909T120000Z/sentry-source-map-evidence.json"
+parser_error_android_marker='sentry-parser-marker-android'
+printf '%s\n' "$parser_error_android_marker" \
+  > "$parser_error_sentry_evidence_root/android/20260909T120000Z/sentry-source-map-evidence.json"
 if parser_error_sentry_evidence_output="$(bash "$CHECKER" "$parser_error_sentry_evidence_root" 2>&1)"; then
   echo "parser-error Sentry source-map evidence case unexpectedly passed" >&2
   exit 1
 fi
 assert_contains "$parser_error_sentry_evidence_output" "[ios] Invalid Sentry source-map evidence"
 assert_contains "$parser_error_sentry_evidence_output" "evidence is not valid JSON"
-assert_contains "$parser_error_sentry_evidence_output" "completeness check FAILED with 1 issue(s)"
-assert_not_contains "$parser_error_sentry_evidence_output" "$parser_error_marker_value"
+assert_contains "$parser_error_sentry_evidence_output" "[android] Invalid Sentry source-map evidence"
+assert_contains "$parser_error_sentry_evidence_output" "completeness check FAILED with 2 issue(s)"
+assert_not_contains "$parser_error_sentry_evidence_output" "$parser_error_ios_marker"
+assert_not_contains "$parser_error_sentry_evidence_output" "$parser_error_android_marker"
 
 # A duplicate only silences the checks for that field; the remaining
 # single-declaration fields are still validated by value.

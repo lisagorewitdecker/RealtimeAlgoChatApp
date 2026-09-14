@@ -7,6 +7,7 @@ FAILURE_COUNT=0
 REVIEW_PENDING_PLATFORMS=()
 REVIEW_DECISIONS=()
 REQUIRE_APPROVAL="${NATIVE_EVIDENCE_REQUIRE_APPROVAL:-0}"
+NODE_BINARY="${NATIVE_EVIDENCE_NODE_BINARY:-node}"
 UTC_TIMESTAMP_PATTERN='^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$'
 TEMPLATE_PLACEHOLDER_PATTERN='^<.*>$'
 
@@ -409,7 +410,7 @@ validate_platform() {
     local sentry_validation_output
     candidate_build_id="$(tr -d '\r\n' < "$run_dir/candidate-build-id.txt")"
     if ! sentry_validation_output="$(
-      node --input-type=module - \
+      "$NODE_BINARY" --input-type=module - \
         "$run_dir/sentry-source-map-evidence.json" \
         "$sentry_trigger_path" \
         "$platform" \
