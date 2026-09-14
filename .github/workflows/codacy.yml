@@ -75,7 +75,6 @@ jobs:
             parts = [
               driver.get("name"),
               driver.get("guid"),
-              driver.get("semanticVersion") or driver.get("version"),
             ]
 
             for extension in extensions:
@@ -83,7 +82,6 @@ jobs:
                 [
                   extension.get("name"),
                   extension.get("guid"),
-                  extension.get("semanticVersion") or extension.get("version"),
                 ]
               )
 
