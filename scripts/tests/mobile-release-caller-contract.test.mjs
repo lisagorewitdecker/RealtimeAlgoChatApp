@@ -50,6 +50,68 @@ const releaseCredentialSecrets = [
   "SENTRY_AUTH_TOKEN",
 ];
 
+function compareVersions(left, right) {
+  for (const key of ["major", "minor", "patch"]) {
+    if (left[key] !== right[key]) {
+      return left[key] - right[key];
+    }
+  }
+  return 0;
+}
+
+function parseNodeVersion(value, description) {
+  const match = String(value)
+    .trim()
+    .match(/^v?(\d+)(?:\.(\d+|x|\*))?(?:\.(\d+|x|\*))?$/i);
+  assert.ok(
+    match,
+    `${description} must be a concrete Node major/minor/patch version, got ${JSON.stringify(value)}`,
+  );
+  return {
+    major: Number(match[1]),
+    minor: match[2] && !/^[x*]$/i.test(match[2]) ? Number(match[2]) : 0,
+    patch: match[3] && !/^[x*]$/i.test(match[3]) ? Number(match[3]) : 0,
+  };
+}
+
+function nodeVersionSatisfiesRange(version, range) {
+  const candidate = parseNodeVersion(version, "configured Node version");
+  return String(range)
+    .split("||")
+    .some((alternative) =>
+      alternative
+        .trim()
+        .split(/\s+/)
+        .filter(Boolean)
+        .every((comparator) => {
+          const match = comparator.match(/^(>=|<=|>|<|=)?v?(\d+(?:\.\d+){0,2})$/);
+          assert.ok(
+            match,
+            `package.json engines.node contains an unsupported comparator: ${JSON.stringify(comparator)}`,
+          );
+          const expected = parseNodeVersion(
+            match[2],
+            "package.json engines.node comparator",
+          );
+          const comparison = compareVersions(candidate, expected);
+          switch (match[1] ?? "=") {
+            case ">=":
+              return comparison >= 0;
+            case "<=":
+              return comparison <= 0;
+            case ">":
+              return comparison > 0;
+            case "<":
+              return comparison < 0;
+            case "=":
+              return comparison === 0;
+            default:
+              return false;
+          }
+        }),
+    );
+}
+
 function documentedCallerJob() {
   const section = callerDocumentation.match(
     /### Updating reusable-workflow callers[\s\S]*?```yaml\n([\s\S]*?)\n```/,
@@ -135,6 +197,42 @@ test("release credentials remain in the reusable workflow secrets contract", () 
       contract.required,
       secret !== "NATIVE_SMOKE_DISPLAY_NAME",
       `${secret} has an unexpected workflow_call required setting`,
+    );
+  }
+});
+
+test("every mobile release setup-node value stays inside the declared Node range", () => {
+  const nodeRange = rootPackage.engines?.node;
+  assert.equal(
+    typeof nodeRange,
+    "string",
+    "package.json must declare engines.node for mobile release validation",
+  );
+
+  const configuredJobs = [];
+  for (const [jobId, job] of Object.entries(workflow.jobs ?? {})) {
+    for (const step of job.steps ?? []) {
+      if (String(step.uses ?? "").startsWith("actions/setup-node@")) {
+        configuredJobs.push({
+          jobId,
+          configuredVersion: step.with?.["node-version"],
+        });
+      }
+    }
+  }
+
+  assert.ok(
+    configuredJobs.length > 0,
+    "mobile-release.yml must configure Node with actions/setup-node",
+  );
+  for (const { jobId, configuredVersion } of configuredJobs) {
+    assert.ok(
+      configuredVersion !== undefined,
+      `mobile-release job "${jobId}" must configure node-version`,
+    );
+    assert.ok(
+      nodeVersionSatisfiesRange(configuredVersion, nodeRange),
+      `mobile-release job "${jobId}" configures Node ${JSON.stringify(configuredVersion)}, outside package.json engines.node range ${JSON.stringify(nodeRange)}`,
     );
   }
 });
