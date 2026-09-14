@@ -479,13 +479,12 @@ jobs:
           const permissions = [...badging.matchAll(
             /^uses-permission: name='([^']+)'/gm,
           )].map((match) => match[1]);
-          if (!label) {
-            throw new Error("aapt2 did not report an Android application label.");
-          }
-          writeFileSync(
-            metadataPath,
-            `${JSON.stringify({ applicationLabel: label, permissions }, null, 2)}\n`,
-          );
+          // A label aapt2 did not report is left out so the branding validator
+          // fails on the missing field and its summary names it, instead of
+          // this step failing before any report exists.
+          const metadata =
+            label === undefined ? { permissions } : { applicationLabel: label, permissions };
+          writeFileSync(metadataPath, `${JSON.stringify(metadata, null, 2)}\n`);
           NODE
           pnpm --filter @workspace/chat-app run validate:branding:native -- \
             --platform android \
