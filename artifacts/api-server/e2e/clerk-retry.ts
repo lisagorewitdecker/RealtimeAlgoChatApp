@@ -12,6 +12,26 @@ export type ClerkRetryOptions = {
   sleep?: (delayMs: number) => Promise<void>;
 };
 
+export async function withTimeout<T>(
+  phase: string,
+  operation: Promise<T>,
+  timeoutMs: number,
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      operation,
+      new Promise<T>((_, reject) => {
+        timer = setTimeout(() => {
+          reject(new Error(`${phase} timed out after ${timeoutMs}ms`));
+        }, timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
+
 export function withClerkSetupRetry<T>(
   operation: () => Promise<T>,
   options: ClerkRetryOptions = {},
