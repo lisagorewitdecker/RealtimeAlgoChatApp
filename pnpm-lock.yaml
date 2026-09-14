@@ -187,6 +187,9 @@ importers:
       image-size:
         specifier: link:vendor/image-size-secure
         version: link:vendor/image-size-secure
+      semver:
+        specifier: 7.8.5
+        version: 7.8.5
       yaml:
         specifier: ^2.9.0
         version: 2.9.0

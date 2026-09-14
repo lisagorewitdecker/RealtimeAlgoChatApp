@@ -10,6 +10,7 @@
     "preflight:release": "node scripts/build.js --preflight-only",
     "serve": "node server/serve.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "validate:preview-startup": "node scripts/validate-preview-startup.mjs",
     "test": "jest --passWithNoTests --runInBand && pnpm run test:build-preflight && pnpm run test:branding",
     "test:build-preflight": "node --test scripts/build.test.js",
     "test:branding": "node --test scripts/validate-branding.test.mjs",

@@ -73,6 +73,72 @@ env:
   NATIVE_SMOKE_ANDROID_BUILD_ID: ${{ inputs.native_smoke_android_build_id || vars.NATIVE_SMOKE_ANDROID_BUILD_ID }}
 
 jobs:
+  native-evidence-summary-regression:
+    name: Native evidence summary regression
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out release candidate
+        uses: actions/checkout@v4
+
+      - name: Verify blocked native evidence summary
+        shell: bash
+        run: |
+          set -euo pipefail
+          blocked_root="$(mktemp -d)"
+          summary_path="$(mktemp)"
+          trap 'rm -rf "$blocked_root" "$summary_path"' EXIT
+
+          if GITHUB_STEP_SUMMARY="$summary_path" bash scripts/run-untrusted-checker.sh bash scripts/check-native-large-text-evidence.sh "$blocked_root"; then
+            echo "The blocked native evidence scenario unexpectedly passed." >&2
+            exit 1
+          fi
+
+          ios_section="$(
+            awk '
+              /^## iOS native large-text evidence$/ { collecting=1 }
+              /^## Android native large-text evidence$/ { collecting=0 }
+              collecting { print }
+            ' "$summary_path"
+          )"
+          android_section="$(
+            awk '
+              /^## Android native large-text evidence$/ { collecting=1 }
+              collecting { print }
+            ' "$summary_path"
+          )"
+
+          require_contains() {
+            local section="$1"
+            local expected="$2"
+            if ! grep -Fq -- "$expected" <<< "$section"; then
+              echo "Expected blocked native evidence summary to contain: $expected" >&2
+              exit 1
+            fi
+          }
+
+          require_not_contains() {
+            local section="$1"
+            local unexpected="$2"
+            if grep -Fq -- "$unexpected" <<< "$section"; then
+              echo "Blocked native evidence summary contained cross-platform detail: $unexpected" >&2
+              exit 1
+            fi
+          }
+
+          require_contains "$ios_section" "- Status: **FAIL**"
+          require_contains "$ios_section" "- Validated run directory: **Unavailable**"
+          require_contains "$ios_section" "- Detailed evidence report: **Unavailable**"
+          require_contains "$ios_section" "Missing result directory: $blocked_root/ios"
+          require_not_contains "$ios_section" "$blocked_root/android"
+
+          require_contains "$android_section" "- Status: **FAIL**"
+          require_contains "$android_section" "- Validated run directory: **Unavailable**"
+          require_contains "$android_section" "- Detailed evidence report: **Unavailable**"
+          require_contains "$android_section" "Missing result directory: $blocked_root/android"
+          require_not_contains "$android_section" "$blocked_root/ios"
+
+          cat "$summary_path" >> "$GITHUB_STEP_SUMMARY"
+
   native-ios:
     name: Native large-text smoke (iOS)
     outputs:
@@ -684,6 +750,7 @@ jobs:
       - native-ios
       - native-android
       - idle-profile-registration
+      - native-evidence-summary-regression
     runs-on: ubuntu-latest
     steps:
       - name: Check out release candidate
@@ -712,19 +779,7 @@ jobs:
         env:
           NATIVE_IOS_EVIDENCE_ARTIFACT_URL: ${{ needs.native-ios.outputs.native_evidence_artifact_url }}
           NATIVE_ANDROID_EVIDENCE_ARTIFACT_URL: ${{ needs.native-android.outputs.native_evidence_artifact_url }}
-        run: |
-          set -euo pipefail
-          # Keep checker output visible for reviewers, but prevent any future
-          # evidence-derived text from being interpreted as a workflow command
-          # or annotation. The checker writes its own sanitized job summary.
-          stop_token="$(node -e 'process.stdout.write(require("node:crypto").randomUUID())')"
-          echo "::stop-commands::${stop_token}"
-          set +e
-          bash scripts/check-native-large-text-evidence.sh
-          checker_status=$?
-          set -e
-          echo "::${stop_token}::"
-          exit "$checker_status"
+        run: bash scripts/run-untrusted-checker.sh bash scripts/check-native-large-text-evidence.sh
 
       - name: Block release unless both native checks pass
         if: ${{ always() }}
@@ -732,11 +787,12 @@ jobs:
           IOS_RESULT: ${{ needs.native-ios.result }}
           ANDROID_RESULT: ${{ needs.native-android.result }}
           IDLE_PROFILE_RESULT: ${{ needs.idle-profile-registration.result }}
+          SUMMARY_REGRESSION_RESULT: ${{ needs.native-evidence-summary-regression.result }}
           EVIDENCE_RESULT: ${{ steps.evidence-completeness.outcome }}
         run: |
           set -euo pipefail
-          if [[ "$EVIDENCE_RESULT" != "success" || "$IOS_RESULT" != "success" || "$ANDROID_RESULT" != "success" || "$IDLE_PROFILE_RESULT" != "success" ]]; then
-            echo "Mobile release blocked: evidence=$EVIDENCE_RESULT iOS=$IOS_RESULT Android=$ANDROID_RESULT idle-profile=$IDLE_PROFILE_RESULT." >&2
+          if [[ "$EVIDENCE_RESULT" != "success" || "$IOS_RESULT" != "success" || "$ANDROID_RESULT" != "success" || "$IDLE_PROFILE_RESULT" != "success" || "$SUMMARY_REGRESSION_RESULT" != "success" ]]; then
+            echo "Mobile release blocked: evidence=$EVIDENCE_RESULT iOS=$IOS_RESULT Android=$ANDROID_RESULT idle-profile=$IDLE_PROFILE_RESULT summary-regression=$SUMMARY_REGRESSION_RESULT." >&2
             exit 1
           fi
           echo "Mobile release gate passed native accessibility and idle-profile registration checks."
@@ -880,18 +936,7 @@ jobs:
           NATIVE_EVIDENCE_REQUIRE_APPROVAL: "1"
           NATIVE_IOS_EVIDENCE_ARTIFACT_URL: ${{ needs.mobile-release-gate.outputs.ios_native_evidence_artifact_url }}
           NATIVE_ANDROID_EVIDENCE_ARTIFACT_URL: ${{ needs.mobile-release-gate.outputs.android_native_evidence_artifact_url }}
-        run: |
-          set -euo pipefail
-          # Keep checker diagnostics readable without allowing evidence text
-          # to become a GitHub workflow command or annotation.
-          stop_token="$(node -e 'process.stdout.write(require("node:crypto").randomUUID())')"
-          echo "::stop-commands::${stop_token}"
-          set +e
-          bash scripts/check-native-large-text-evidence.sh
-          checker_status=$?
-          set -e
-          echo "::${stop_token}::"
-          exit "$checker_status"
+        run: bash scripts/run-untrusted-checker.sh bash scripts/check-native-large-text-evidence.sh
 
       - name: Verify publishing inputs
         env:

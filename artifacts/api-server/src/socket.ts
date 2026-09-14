@@ -27,8 +27,18 @@ import {
 import { and, eq, gt, isNull, or } from "drizzle-orm";
 import {
   getAnthropicRetryAfterSeconds,
+  getAssistantRateLimitCountdown,
   isAnthropicRateLimitError,
 } from "./lib/assistantErrors";
+import {
+  ASSISTANT_DISCLOSURE_FIELD,
+  ASSISTANT_DISCLOSURE_REQUIRED_MESSAGE,
+  ASSISTANT_REQUEST_COOLDOWN_MS,
+  ASSISTANT_TIMEOUT_MS,
+  MAX_ASSISTANT_CONTEXT_LENGTH,
+  MAX_ASSISTANT_FILE_LENGTH,
+  MAX_ASSISTANT_PROMPT_LENGTH,
+} from "./lib/assistantLimits";
 import { getAccountAccess, isConfiguredAdmin } from "./lib/accountAccess";
 import { streamSandboxAssistant } from "./lib/sandboxAssistant";
 import {
@@ -82,11 +92,7 @@ interface Room {
 const rooms = new Map<string, Room>();
 const DEFAULT_AVATAR_EMOJI = "🧑‍💻";
 const DEFAULT_USERNAME = "Member";
-const MAX_ASSISTANT_PROMPT_LENGTH = 2_000;
-const MAX_ASSISTANT_FILE_LENGTH = 12_000;
-const MAX_ASSISTANT_CONTEXT_LENGTH = 24_000;
-const ASSISTANT_TIMEOUT_MS = 45_000;
-const ASSISTANT_REQUEST_COOLDOWN_MS = 1_000;
+const ASSISTANT_REQUEST_ID_PATTERN = /^[a-zA-Z0-9_-]{8,80}$/;
 
 type SessionPurpose = "chat" | RoomAccessPurpose;
 
@@ -119,6 +125,21 @@ interface ActiveAssistantRequest {
   requestId: string;
   controller: AbortController;
   timeout: NodeJS.Timeout;
+}
+
+interface AssistantErrorPayload {
+  code:
+    | "DISCLOSURE_REQUIRED"
+    | "NOT_IN_ROOM"
+    | "INVALID_REQUEST"
+    | "REQUEST_IN_PROGRESS"
+    | "COOLDOWN";
+  message: string;
+  retryAfterSeconds?: number;
+}
+
+function formatCount(value: number): string {
+  return value.toLocaleString("en-US");
 }
 
 type AppSocket = Socket<
@@ -516,13 +537,15 @@ function getEncryptedPayload(value: unknown, maxLength: number): EncryptedPayloa
   return { ciphertext, nonce };
 }
 
+function getAssistantRequestId(value: unknown): string | null {
+  return typeof value === "string" && ASSISTANT_REQUEST_ID_PATTERN.test(value)
+    ? value
+    : null;
+}
+
 function getAssistantRequest(value: unknown): AssistantRequest | null {
   const data = getRecord(value);
-  const requestId =
-    typeof data?.["requestId"] === "string" &&
-    /^[a-zA-Z0-9_-]{8,80}$/.test(data["requestId"])
-      ? data["requestId"]
-      : null;
+  const requestId = getAssistantRequestId(data?.["requestId"]);
   const prompt = getText(data?.["prompt"], MAX_ASSISTANT_PROMPT_LENGTH);
   const files = getRecord(data?.["files"]);
   const html = getSandboxFile(files?.["html"], MAX_ASSISTANT_FILE_LENGTH);
@@ -871,6 +894,71 @@ function setupConnectedSocket(
     }
   };
 
+  // Streams one already-validated, disclosure-acknowledged request. Only the
+  // prompt and the current sandbox files reach the model: never chat
+  // messages, the room key, or the capability token (none of which the
+  // handler even receives). Every exit path settles the client exactly once:
+  // "assistant-done" for completion or cancellation, "assistant-error" for a
+  // timeout, rate limit, or service failure.
+  const startAssistantRequest = (roomId: string, request: AssistantRequest) => {
+    const { requestId } = request;
+    const controller = new AbortController();
+    const isCurrent = () =>
+      activeAssistantRequests.get(socket.id)?.requestId === requestId;
+    const timeout = setTimeout(() => {
+      if (!isCurrent()) return;
+      activeAssistantRequests.delete(socket.id);
+      controller.abort();
+      socket.emit("assistant-error", {
+        requestId,
+        code: "TIMEOUT",
+        message: `The assistant did not finish within ${ASSISTANT_TIMEOUT_MS / 1000} seconds. Any partial answer is kept; please try again.`,
+      });
+    }, ASSISTANT_TIMEOUT_MS);
+    activeAssistantRequests.set(socket.id, { requestId, controller, timeout });
+
+    streamSandboxAssistant({
+      prompt: request.prompt,
+      files: request.files,
+      signal: controller.signal,
+      onText: (text) => {
+        if (!isCurrent()) return;
+        socket.emit("assistant-chunk", { requestId, text });
+      },
+    })
+      .then(() => finishAssistantRequest(requestId))
+      .catch((error: unknown) => {
+        // A cancelled, timed-out, left, or disconnected request was already
+        // settled by whoever aborted it.
+        if (!isCurrent()) return;
+        clearTimeout(timeout);
+        activeAssistantRequests.delete(socket.id);
+        if (isAnthropicRateLimitError(error)) {
+          const retryAfterSeconds = getAssistantRateLimitCountdown(
+            getAnthropicRetryAfterSeconds(error),
+          );
+          socket.emit("assistant-error", {
+            requestId,
+            code: "RATE_LIMITED",
+            retryAfterSeconds,
+            message: `The AI service is rate limited right now. You can ask again in ${retryAfterSeconds} seconds.`,
+          });
+          return;
+        }
+        reportSocketHandlerError("assistant-request", error, {
+          roomId,
+          userId: authenticatedUser.userId,
+          requestId,
+        });
+        socket.emit("assistant-error", {
+          requestId,
+          code: "SERVICE_ERROR",
+          message:
+            "The AI service could not answer right now. Please try again in a moment.",
+        });
+      });
+  };
+
   let roomJoinInFlight = false;
   socket.on("join-room", async (payload: unknown) => {
     if (!consumeEventBudget(socket, eventBudgetRegistry, payload)) return;
@@ -1176,11 +1264,69 @@ function setupConnectedSocket(
         });
         return;
       }
-       const requestId = getRecord(payload)?.["requestId"];
-       socket.emit("assistant-error", {
-         requestId: typeof requestId === "string" ? requestId : undefined,
-         message: "The coding assistant is disabled for encrypted rooms.",
-       });
+      const data = getRecord(payload);
+      const requestId = getAssistantRequestId(data?.["requestId"]) ?? undefined;
+      const rejectAssistantRequest = (error: AssistantErrorPayload) => {
+        socket.emit("assistant-error", { requestId, ...error });
+      };
+
+      // Privacy gate first. The room is end-to-end encrypted and the model can
+      // only answer readable code, so a request is refused before anything
+      // else in it is inspected unless the user confirmed the disclosure
+      // notice on the client. Nothing below runs without it.
+      if (data?.[ASSISTANT_DISCLOSURE_FIELD] !== true) {
+        rejectAssistantRequest({
+          code: "DISCLOSURE_REQUIRED",
+          message: ASSISTANT_DISCLOSURE_REQUIRED_MESSAGE,
+        });
+        return;
+      }
+
+      const roomId = getRoomId(data?.["roomId"]);
+      const room = roomId ? getJoinedRoom(socket, roomId) : null;
+      if (!room) {
+        rejectAssistantRequest({
+          code: "NOT_IN_ROOM",
+          message: "Join the sandbox room before asking the assistant.",
+        });
+        return;
+      }
+
+      const request = getAssistantRequest(payload);
+      if (!request) {
+        rejectAssistantRequest({
+          code: "INVALID_REQUEST",
+          message: `Ask a question of up to ${formatCount(MAX_ASSISTANT_PROMPT_LENGTH)} characters, with each sandbox file under ${formatCount(MAX_ASSISTANT_FILE_LENGTH)} characters and ${formatCount(MAX_ASSISTANT_CONTEXT_LENGTH)} characters in total.`,
+        });
+        return;
+      }
+
+      if (activeAssistantRequests.has(socket.id)) {
+        rejectAssistantRequest({
+          code: "REQUEST_IN_PROGRESS",
+          message: "Wait for the current reply to finish, or stop it first.",
+        });
+        return;
+      }
+
+      const now = Date.now();
+      const lastRequestAt = lastAssistantRequestAt.get(socket.id);
+      const sinceLastRequest =
+        lastRequestAt === undefined ? Number.POSITIVE_INFINITY : now - lastRequestAt;
+      if (sinceLastRequest < ASSISTANT_REQUEST_COOLDOWN_MS) {
+        const retryAfterSeconds = Math.max(
+          1,
+          Math.ceil((ASSISTANT_REQUEST_COOLDOWN_MS - sinceLastRequest) / 1000),
+        );
+        rejectAssistantRequest({
+          code: "COOLDOWN",
+          retryAfterSeconds,
+          message: `Please wait ${retryAfterSeconds} second${retryAfterSeconds === 1 ? "" : "s"} before asking again.`,
+        });
+        return;
+      }
+      lastAssistantRequestAt.set(socket.id, now);
+      startAssistantRequest(room.id, request);
     });
 
     socket.on("assistant-cancel", (payload: unknown) => {
@@ -1396,6 +1542,7 @@ function setupConnectedSocket(
       eventBudgetRegistry.byUser.delete(userId);
     }
     abortAssistantRequest();
+    lastAssistantRequestAt.delete(socket.id);
     if (socket.data.roomId) leaveRoom(socket, io, socket.data.roomId);
     logger.info({ sid: socket.id, reason }, "socket disconnected");
   });

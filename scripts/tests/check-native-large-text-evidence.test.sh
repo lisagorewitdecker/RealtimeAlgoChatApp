@@ -176,6 +176,115 @@ assert_contains "$blocked_summary" "## Android native large-text evidence"
 assert_contains "$blocked_summary" "Only runner-check.txt is present in $blocked_root/ios"
 assert_contains "$blocked_summary" "Only runner-check.txt is present in $blocked_root/android"
 
+missing_ios_root="$TEST_ROOT/missing-ios"
+write_valid_run "$missing_ios_root" android
+missing_ios_summary_path="$TEST_ROOT/missing-ios-summary.md"
+if missing_ios_output="$(
+  GITHUB_STEP_SUMMARY="$missing_ios_summary_path" bash "$CHECKER" "$missing_ios_root" 2>&1
+)"; then
+  echo "missing iOS evidence case unexpectedly passed" >&2
+  exit 1
+fi
+missing_ios_summary="$(cat "$missing_ios_summary_path")"
+missing_ios_section="$(
+  awk '
+    /^## iOS native large-text evidence$/ { collecting=1 }
+    /^## Android native large-text evidence$/ { collecting=0 }
+    collecting { print }
+  ' "$missing_ios_summary_path"
+)"
+missing_ios_android_section="$(
+  awk '
+    /^## Android native large-text evidence$/ { collecting=1 }
+    collecting { print }
+  ' "$missing_ios_summary_path"
+)"
+assert_contains "$missing_ios_output" "[ios] Missing result directory: $missing_ios_root/ios"
+assert_contains "$missing_ios_output" "completeness check FAILED with 1 issue(s)"
+assert_contains "$missing_ios_summary" "## iOS native large-text evidence"
+assert_contains "$missing_ios_summary" "## Android native large-text evidence"
+assert_contains "$missing_ios_section" "- Status: **FAIL**"
+assert_contains "$missing_ios_section" "- Validated run directory: **Unavailable**"
+assert_contains "$missing_ios_section" "- Detailed evidence report: **Unavailable**"
+assert_contains "$missing_ios_section" "Missing result directory: $missing_ios_root/ios"
+assert_not_contains "$missing_ios_section" "$missing_ios_root/android"
+assert_contains "$missing_ios_android_section" "- Status: **PASS**"
+assert_contains "$missing_ios_android_section" "- Validated run directory: \`$missing_ios_root/android/20260909T120000Z\`"
+assert_not_contains "$missing_ios_android_section" "$missing_ios_root/ios"
+
+missing_android_root="$TEST_ROOT/missing-android"
+write_valid_run "$missing_android_root" ios
+missing_android_summary_path="$TEST_ROOT/missing-android-summary.md"
+if missing_android_output="$(
+  GITHUB_STEP_SUMMARY="$missing_android_summary_path" bash "$CHECKER" "$missing_android_root" 2>&1
+)"; then
+  echo "missing Android evidence case unexpectedly passed" >&2
+  exit 1
+fi
+missing_android_summary="$(cat "$missing_android_summary_path")"
+missing_android_section="$(
+  awk '
+    /^## Android native large-text evidence$/ { collecting=1 }
+    collecting { print }
+  ' "$missing_android_summary_path"
+)"
+missing_android_ios_section="$(
+  awk '
+    /^## iOS native large-text evidence$/ { collecting=1 }
+    /^## Android native large-text evidence$/ { collecting=0 }
+    collecting { print }
+  ' "$missing_android_summary_path"
+)"
+assert_contains "$missing_android_output" "[android] Missing result directory: $missing_android_root/android"
+assert_contains "$missing_android_output" "completeness check FAILED with 1 issue(s)"
+assert_contains "$missing_android_section" "- Status: **FAIL**"
+assert_contains "$missing_android_section" "- Validated run directory: **Unavailable**"
+assert_contains "$missing_android_section" "- Detailed evidence report: **Unavailable**"
+assert_contains "$missing_android_section" "Missing result directory: $missing_android_root/android"
+assert_not_contains "$missing_android_section" "$missing_android_root/ios"
+assert_contains "$missing_android_ios_section" "- Status: **PASS**"
+assert_contains "$missing_android_ios_section" "- Validated run directory: \`$missing_android_root/ios/20260909T120000Z\`"
+assert_not_contains "$missing_android_ios_section" "$missing_android_root/android"
+
+missing_both_root="$TEST_ROOT/missing-both"
+mkdir -p "$missing_both_root"
+missing_both_summary_path="$TEST_ROOT/missing-both-summary.md"
+if missing_both_output="$(
+  GITHUB_STEP_SUMMARY="$missing_both_summary_path" bash "$CHECKER" "$missing_both_root" 2>&1
+)"; then
+  echo "missing both platforms evidence case unexpectedly passed" >&2
+  exit 1
+fi
+missing_both_summary="$(cat "$missing_both_summary_path")"
+missing_both_ios_section="$(
+  awk '
+    /^## iOS native large-text evidence$/ { collecting=1 }
+    /^## Android native large-text evidence$/ { collecting=0 }
+    collecting { print }
+  ' "$missing_both_summary_path"
+)"
+missing_both_android_section="$(
+  awk '
+    /^## Android native large-text evidence$/ { collecting=1 }
+    collecting { print }
+  ' "$missing_both_summary_path"
+)"
+assert_contains "$missing_both_output" "[ios] Missing result directory: $missing_both_root/ios"
+assert_contains "$missing_both_output" "[android] Missing result directory: $missing_both_root/android"
+assert_contains "$missing_both_output" "completeness check FAILED with 2 issue(s)"
+assert_contains "$missing_both_summary" "## iOS native large-text evidence"
+assert_contains "$missing_both_summary" "## Android native large-text evidence"
+assert_contains "$missing_both_ios_section" "- Status: **FAIL**"
+assert_contains "$missing_both_ios_section" "- Validated run directory: **Unavailable**"
+assert_contains "$missing_both_ios_section" "- Detailed evidence report: **Unavailable**"
+assert_contains "$missing_both_ios_section" "Missing result directory: $missing_both_root/ios"
+assert_not_contains "$missing_both_ios_section" "$missing_both_root/android"
+assert_contains "$missing_both_android_section" "- Status: **FAIL**"
+assert_contains "$missing_both_android_section" "- Validated run directory: **Unavailable**"
+assert_contains "$missing_both_android_section" "- Detailed evidence report: **Unavailable**"
+assert_contains "$missing_both_android_section" "Missing result directory: $missing_both_root/android"
+assert_not_contains "$missing_both_android_section" "$missing_both_root/ios"
+
 incomplete_root="$TEST_ROOT/incomplete"
 write_valid_run "$incomplete_root" ios
 write_valid_run "$incomplete_root" android

@@ -1,6 +1,11 @@
 import { Router, type Request, type Response } from "express";
 import { getAccountProfile } from "../lib/accountProfile";
-import { getAssistantRateLimitCountdown } from "../lib/assistantErrors";
+import {
+  ASSISTANT_DISCLOSURE_FIELD,
+  MAX_ASSISTANT_CONTEXT_LENGTH,
+  MAX_ASSISTANT_FILE_LENGTH,
+  MAX_ASSISTANT_PROMPT_LENGTH,
+} from "../lib/assistantLimits";
 import { createRoomAccessCapability, type RoomAccessPurpose } from "../lib/roomAccess";
 import { requireAuthorizedUser } from "../lib/requireAccountAccess";
 import { getRooms } from "../socket";
@@ -212,6 +217,106 @@ document.getElementById('endBtn').onclick=()=>{socket.emit('leave-room',{roomId:
 init();</script></body></html>`;
 }
 
+/**
+ * The AI helper lives inside the generated sandbox document (the surface both
+ * the web iframe and the native WebView already render). It is an explicit
+ * opt-in that is visibly separate from the encrypted collaboration around it:
+ * the room is end-to-end encrypted, the helper is not, so nothing is sent
+ * until the user confirms the disclosure notice. The choice is remembered per
+ * device in page storage (the web iframe inherits the app origin; the WebView
+ * has DOM storage enabled) and a reminder stays visible afterwards.
+ *
+ * Model output is only ever inserted as text nodes, never as HTML.
+ */
+const AI_DISCLOSURE_STORAGE_KEY = "devstudio.sandbox-ai-disclosure.v1";
+
+function formatCount(value: number): string {
+  return value.toLocaleString("en-US");
+}
+
+const sandboxAiStyles = [
+  "[hidden]{display:none!important}",
+  '.tab[data-tab="ai"].active{color:#fbbf24;border-bottom-color:#fbbf24}',
+  "#ai-pane{padding:12px;gap:10px;min-height:0;overflow:hidden}",
+  "#ai-pane>section{display:flex;flex-direction:column;gap:10px;min-height:0}",
+  "#ai-notice{border:1px solid #f59e0b;background:rgba(245,158,11,.08);border-radius:12px;padding:16px;overflow:auto;gap:8px}",
+  "#ai-notice h2{font-size:15px;color:#fbbf24}",
+  "#ai-notice p,#ai-notice li,#ai-declined p{font-size:13px;line-height:1.55;color:#f1f0ff}",
+  "#ai-notice ul{padding-left:18px}",
+  "#ai-notice strong{color:#fbbf24}",
+  ".ai-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:6px}",
+  ".ai-btn{border:none;border-radius:8px;padding:9px 14px;min-height:40px;font-family:inherit;font-size:12px;font-weight:700;cursor:pointer}",
+  ".ai-btn.primary{background:#f59e0b;color:#1a1200}",
+  ".ai-btn.secondary{background:#2d2d4a;color:#f1f0ff}",
+  ".ai-btn.danger{background:#ef4444;color:#fff}",
+  ".ai-btn:disabled{opacity:.5;cursor:default}",
+  "#ai-reminder{display:flex;align-items:center;gap:8px;font-size:11px;line-height:1.4;color:#fbbf24;background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.4);border-radius:8px;padding:6px 10px}",
+  "#aiTurnOffBtn{margin-left:auto;flex:none;background:none;border:1px solid rgba(245,158,11,.5);color:#fbbf24;border-radius:6px;padding:4px 8px;font-family:inherit;font-size:11px;cursor:pointer;white-space:nowrap}",
+  "#aiPrompt{flex:none;min-height:72px;max-height:140px;background:#161628;border:1px solid #2d2d4a;border-radius:10px;padding:10px 12px;font-size:13px;line-height:1.5;caret-color:#fbbf24}",
+  "#aiPrompt:focus{border-color:#f59e0b}",
+  "#ai-controls{display:flex;align-items:center;flex-wrap:wrap;gap:8px}",
+  "#ai-count{margin-left:auto;font-size:11px;color:#7c8db0}",
+  "#ai-status{min-height:17px;font-size:12px;line-height:1.4;color:#7c8db0}",
+  '#ai-status[data-kind="busy"]{color:#fbbf24}',
+  '#ai-status[data-kind="error"]{color:#fca5a5}',
+  "#aiOutput{flex:1;min-height:80px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;background:#161628;border:1px solid #2d2d4a;border-radius:10px;padding:12px;font-family:inherit;font-size:13px;line-height:1.6;color:#f1f0ff}",
+  "#aiOutput:empty::before{content:attr(data-placeholder);color:#7c8db0}",
+  "@media(max-width:360px){.tab{padding:10px 12px}#ai-pane{padding:10px}}",
+].join("");
+
+const sandboxAiPaneMarkup = [
+  '<div class="editor-pane" id="ai-pane">',
+  '<section id="ai-notice" role="region" aria-labelledby="ai-notice-title" hidden>',
+  '<h2 id="ai-notice-title">Before you use the AI helper</h2>',
+  "<p>This room is end-to-end encrypted. The AI helper is <strong>not</strong>: to answer, it has to read your code.</p>",
+  "<p><strong>Each time you ask</strong>, your current HTML, CSS and JS files and the question you type are sent readable to the AI service (Anthropic Claude), outside this room's end-to-end encryption.</p>",
+  "<ul><li>Not sent: chat messages, the room's encryption key, or your sign-in token.</li><li>Answers are shown only to you; this server does not store your question or the answer.</li><li>Nothing is sent until you confirm below. You can decline and keep using the shared editor and preview as usual.</li></ul>",
+  '<div class="ai-actions"><button type="button" id="aiAcceptBtn" class="ai-btn primary">I understand — send my sandbox files to the AI</button><button type="button" id="aiDeclineBtn" class="ai-btn secondary">Not now</button></div>',
+  "</section>",
+  '<section id="ai-declined" hidden>',
+  "<p>The AI helper is off on this device. The shared editor and preview keep working as usual.</p>",
+  '<div class="ai-actions"><button type="button" id="aiReviewBtn" class="ai-btn secondary">Review the notice</button></div>',
+  "</section>",
+  '<section id="ai-composer" hidden>',
+  '<div id="ai-reminder" role="note"><span>⚠ Each question sends your current HTML, CSS, JS and prompt readable to the AI service — outside this room\'s end-to-end encryption.</span><button type="button" id="aiTurnOffBtn">Turn off</button></div>',
+  `<textarea id="aiPrompt" rows="3" maxlength="${MAX_ASSISTANT_PROMPT_LENGTH}" placeholder="Ask about the current HTML, CSS or JS…" aria-label="Question for the AI helper"></textarea>`,
+  `<div id="ai-controls"><button type="button" id="aiAskBtn" class="ai-btn primary">Ask AI</button><button type="button" id="aiStopBtn" class="ai-btn danger" hidden>Stop</button><span id="ai-count">0 / ${formatCount(MAX_ASSISTANT_PROMPT_LENGTH)}</span></div>`,
+  '<div id="ai-status" role="status" aria-live="polite"></div>',
+  '<pre id="aiOutput" aria-label="AI answer" data-placeholder="Answers appear here. The helper reads your current files each time you ask; it never edits them."></pre>',
+  "</section>",
+  "</div>",
+].join("");
+
+// Client-side logic for the AI tab. Kept free of backticks and template
+// interpolation so it can be embedded verbatim; the limits below are injected
+// from the same module the server enforces them with.
+const sandboxAiScript = `
+const AI_LIMITS={prompt:${MAX_ASSISTANT_PROMPT_LENGTH},file:${MAX_ASSISTANT_FILE_LENGTH},context:${MAX_ASSISTANT_CONTEXT_LENGTH}},AI_CHOICE_KEY=${JSON.stringify(AI_DISCLOSURE_STORAGE_KEY)};
+const aiNotice=document.getElementById('ai-notice'),aiDeclined=document.getElementById('ai-declined'),aiComposer=document.getElementById('ai-composer'),aiPrompt=document.getElementById('aiPrompt'),aiAskBtn=document.getElementById('aiAskBtn'),aiStopBtn=document.getElementById('aiStopBtn'),aiStatus=document.getElementById('ai-status'),aiOutput=document.getElementById('aiOutput'),aiCount=document.getElementById('ai-count');
+let aiChoice=null,aiSessionChoice=null,aiActive=null,aiCountdown=null;
+function readAiChoice(){try{const v=localStorage.getItem(AI_CHOICE_KEY);if(v==='accepted'||v==='declined')return v}catch{}return aiSessionChoice}
+function saveAiChoice(v){aiSessionChoice=v;try{localStorage.setItem(AI_CHOICE_KEY,v)}catch{}}
+function renderAiGate(){aiNotice.hidden=aiChoice!==null;aiDeclined.hidden=aiChoice!=='declined';aiComposer.hidden=aiChoice!=='accepted'}
+function setAiChoice(v){aiChoice=v;if(v)saveAiChoice(v);renderAiGate()}
+function setAiStatus(text,kind){aiStatus.textContent=text;aiStatus.dataset.kind=kind||''}
+function setAiBusy(busy){aiAskBtn.disabled=busy;aiStopBtn.hidden=!busy}
+function fmtCount(n){return n.toLocaleString('en-US')}
+function askAi(){if(aiChoice!=='accepted'||aiActive||aiCountdown)return;const prompt=aiPrompt.value.trim();if(!prompt){setAiStatus('Type a question first.','error');aiPrompt.focus();return}if(prompt.length>AI_LIMITS.prompt){setAiStatus('Keep your question under '+fmtCount(AI_LIMITS.prompt)+' characters.','error');return}const files={html:htmlEd.value,css:cssEd.value,js:jsEd.value};if(files.html.length>AI_LIMITS.file||files.css.length>AI_LIMITS.file||files.js.length>AI_LIMITS.file||files.html.length+files.css.length+files.js.length>AI_LIMITS.context){setAiStatus('Your sandbox files are too large to send: keep each file under '+fmtCount(AI_LIMITS.file)+' characters and '+fmtCount(AI_LIMITS.context)+' characters in total.','error');return}if(!socket.connected){setAiStatus('Not connected to the room. Reload the sandbox and try again.','error');return}const requestId='ai-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,10);aiActive={requestId,received:false};aiOutput.textContent='';setAiBusy(true);setAiStatus('Sending your files and question to the AI service…','busy');socket.emit('assistant-request',{requestId,roomId:ROOM_ID,prompt,files,${ASSISTANT_DISCLOSURE_FIELD}:true})}
+function stopAi(){if(!aiActive)return;socket.emit('assistant-cancel',{requestId:aiActive.requestId,roomId:ROOM_ID});setAiStatus('Stopping…','busy')}
+function startAiCountdown(seconds,label){clearInterval(aiCountdown);let left=Math.max(1,Math.ceil(seconds));aiAskBtn.disabled=true;const tick=()=>{if(left<=0){clearInterval(aiCountdown);aiCountdown=null;aiAskBtn.disabled=false;setAiStatus('You can ask again now.','');return}setAiStatus(label+' You can ask again in '+left+' s.','error');left-=1};tick();aiCountdown=setInterval(tick,1000)}
+document.getElementById('aiAcceptBtn').addEventListener('click',()=>{setAiChoice('accepted');aiPrompt.focus()});
+document.getElementById('aiDeclineBtn').addEventListener('click',()=>setAiChoice('declined'));
+document.getElementById('aiReviewBtn').addEventListener('click',()=>setAiChoice(null));
+document.getElementById('aiTurnOffBtn').addEventListener('click',()=>{if(aiActive)stopAi();setAiChoice('declined')});
+aiAskBtn.addEventListener('click',askAi);aiStopBtn.addEventListener('click',stopAi);
+aiPrompt.addEventListener('input',()=>{aiCount.textContent=fmtCount(aiPrompt.value.length)+' / '+fmtCount(AI_LIMITS.prompt)});
+aiPrompt.addEventListener('keydown',e=>{if((e.ctrlKey||e.metaKey)&&e.key==='Enter'){e.preventDefault();askAi()}});
+socket.on('assistant-chunk',payload=>{const p=payload||{};if(!aiActive||p.requestId!==aiActive.requestId||typeof p.text!=='string')return;if(!aiActive.received){aiActive.received=true;setAiStatus('Answering…','busy')}aiOutput.appendChild(document.createTextNode(p.text));aiOutput.scrollTop=aiOutput.scrollHeight});
+socket.on('assistant-done',payload=>{const p=payload||{};if(!aiActive||p.requestId!==aiActive.requestId)return;const partial=aiActive.received;aiActive=null;setAiBusy(false);setAiStatus(p.cancelled?(partial?'Stopped. The partial answer is kept above.':'Stopped.'):'Done.','')});
+socket.on('assistant-error',payload=>{const p=payload||{};if(aiActive&&typeof p.requestId==='string'&&p.requestId!==aiActive.requestId)return;aiActive=null;setAiBusy(false);const message=typeof p.message==='string'&&p.message?p.message:'The assistant could not answer. Please try again.';const wait=Number(p.retryAfterSeconds);if((p.code==='RATE_LIMITED'||p.code==='COOLDOWN')&&wait>0){startAiCountdown(wait,p.code==='RATE_LIMITED'?'The AI service is rate limited.':'Too soon after your last question.')}else{setAiStatus(message,'error')}if(p.code==='DISCLOSURE_REQUIRED')setAiChoice(null)});
+socket.on('disconnect',()=>{if(!aiActive)return;aiActive=null;setAiBusy(false);setAiStatus('Connection lost — the reply was interrupted. Reload the sandbox to try again.','error')});
+aiChoice=readAiChoice();renderAiGate();`;
+
 export function buildSandboxHtml({
   roomId,
   username,
@@ -223,8 +328,8 @@ export function buildSandboxHtml({
 }): string {
   return `<!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Sandbox</title>
-<style>*{margin:0;padding:0;box-sizing:border-box}body{background:#0d0d1a;color:#f1f0ff;font-family:'Courier New',monospace;height:100vh;display:flex;flex-direction:column;overflow:hidden}#topbar{display:flex;align-items:center;justify-content:space-between;padding:8px 14px;background:#161628;border-bottom:1px solid #2d2d4a;min-height:38px}#room-info,#sync-badge{font-size:11px;color:#7c8db0}#sync-badge{color:#22d3ee;background:rgba(34,211,238,.1);padding:2px 8px;border-radius:10px}#tabs{display:flex;background:#161628;border-bottom:1px solid #2d2d4a}.tab{padding:10px 18px;cursor:pointer;font-size:12px;font-weight:600;letter-spacing:.04em;color:#7c8db0;border-bottom:2px solid transparent}.tab.active{color:#6366f1;border-bottom-color:#6366f1}.tab[data-tab="preview"].active{color:#22d3ee;border-bottom-color:#22d3ee}#main{flex:1;display:flex;flex-direction:column;min-height:0}.editor-pane{flex:1;display:none;flex-direction:column}.editor-pane.active{display:flex}textarea{flex:1;width:100%;background:#0d0d1a;color:#f1f0ff;border:none;outline:none;padding:16px;font-family:'Courier New',monospace;font-size:13px;line-height:1.7;resize:none;caret-color:#6366f1}#preview-pane{flex:1;display:none;flex-direction:column}#preview-pane.active{display:flex}#preview-bar{display:flex;justify-content:flex-end;padding:6px 12px;background:#161628;border-bottom:1px solid #2d2d4a}#runBtn{background:#6366f1;color:#fff;border:none;padding:6px 16px;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer}#previewFrame{flex:1;border:none;background:#fff}</style></head>
-<body><div id="topbar"><span id="room-info">#${escapeHtml(roomId)} · ${escapeHtml(username)}</span><span id="sync-badge">Connecting…</span></div><div id="tabs"><div class="tab active" data-tab="html">HTML</div><div class="tab" data-tab="css">CSS</div><div class="tab" data-tab="js">JS</div><div class="tab" data-tab="preview">▶ Preview</div></div><div id="main"><div class="editor-pane active" id="html-pane"><textarea id="htmlEditor" spellcheck="false"></textarea></div><div class="editor-pane" id="css-pane"><textarea id="cssEditor" spellcheck="false"></textarea></div><div class="editor-pane" id="js-pane"><textarea id="jsEditor" spellcheck="false"></textarea></div><div id="preview-pane"><div id="preview-bar"><button id="runBtn" onclick="runPreview()">▶ Run</button></div><iframe id="previewFrame" sandbox="allow-scripts"></iframe></div></div>
+<style>*{margin:0;padding:0;box-sizing:border-box}body{background:#0d0d1a;color:#f1f0ff;font-family:'Courier New',monospace;height:100vh;height:100dvh;display:flex;flex-direction:column;overflow:hidden}#topbar{display:flex;align-items:center;justify-content:space-between;padding:8px 14px;background:#161628;border-bottom:1px solid #2d2d4a;min-height:38px}#room-info,#sync-badge{font-size:11px;color:#7c8db0}#sync-badge{color:#22d3ee;background:rgba(34,211,238,.1);padding:2px 8px;border-radius:10px}#tabs{display:flex;background:#161628;border-bottom:1px solid #2d2d4a;overflow-x:auto}.tab{flex:none;white-space:nowrap;padding:10px 18px;cursor:pointer;font-size:12px;font-weight:600;letter-spacing:.04em;color:#7c8db0;border-bottom:2px solid transparent}.tab.active{color:#6366f1;border-bottom-color:#6366f1}.tab[data-tab="preview"].active{color:#22d3ee;border-bottom-color:#22d3ee}#main{flex:1;display:flex;flex-direction:column;min-height:0}.editor-pane{flex:1;display:none;flex-direction:column}.editor-pane.active{display:flex}textarea{flex:1;width:100%;background:#0d0d1a;color:#f1f0ff;border:none;outline:none;padding:16px;font-family:'Courier New',monospace;font-size:13px;line-height:1.7;resize:none;caret-color:#6366f1}#preview-pane{flex:1;display:none;flex-direction:column}#preview-pane.active{display:flex}#preview-bar{display:flex;justify-content:flex-end;padding:6px 12px;background:#161628;border-bottom:1px solid #2d2d4a}#runBtn{background:#6366f1;color:#fff;border:none;padding:6px 16px;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer}#previewFrame{flex:1;border:none;background:#fff}${sandboxAiStyles}</style></head>
+<body><div id="topbar"><span id="room-info">#${escapeHtml(roomId)} · ${escapeHtml(username)}</span><span id="sync-badge">Connecting…</span></div><div id="tabs"><div class="tab active" data-tab="html">HTML</div><div class="tab" data-tab="css">CSS</div><div class="tab" data-tab="js">JS</div><div class="tab" data-tab="preview">▶ Preview</div><div class="tab" data-tab="ai">✦ AI</div></div><div id="main"><div class="editor-pane active" id="html-pane"><textarea id="htmlEditor" spellcheck="false"></textarea></div><div class="editor-pane" id="css-pane"><textarea id="cssEditor" spellcheck="false"></textarea></div><div class="editor-pane" id="js-pane"><textarea id="jsEditor" spellcheck="false"></textarea></div>${sandboxAiPaneMarkup}<div id="preview-pane"><div id="preview-bar"><button id="runBtn" onclick="runPreview()">▶ Run</button></div><iframe id="previewFrame" sandbox="allow-scripts"></iframe></div></div>
  <script src="/api/crypto-client.js"></script><script src="/api/socket-client.js"></script><script>
  const ROOM_ID=${JSON.stringify(roomId)},CAPABILITY=${JSON.stringify(capability)},ROOM_KEY=globalThis.__DEVSTUDIO_ROOM_KEY__||'',socket=io({path:'/api/socket.io',auth:{token:CAPABILITY},reconnection:false}),badge=document.getElementById('sync-badge'),htmlEd=document.getElementById('htmlEditor'),cssEd=document.getElementById('cssEditor'),jsEd=document.getElementById('jsEditor');let timer=null,ignoreNext=false;
  const decryptState=payload=>{if(!payload||!ROOM_KEY||!globalThis.DevStudioCrypto)return null;const text=DevStudioCrypto.decryptText(payload.ciphertext,payload.nonce,ROOM_KEY);if(!text)return null;try{return JSON.parse(text)}catch{return null}};
@@ -232,7 +337,7 @@ export function buildSandboxHtml({
  socket.on('connect',()=>{badge.textContent='Connected';socket.emit('join-room',{roomId:ROOM_ID,createIfMissing:true})});socket.on('disconnect',()=>badge.textContent='Disconnected');socket.on('connect_error',()=>badge.textContent='Secure connection failed');
  socket.on('room-joined',({sandboxState})=>{const state=decryptState(sandboxState);if(state){htmlEd.value=state.html||'';cssEd.value=state.css||'';jsEd.value=state.js||''}badge.textContent=state||!sandboxState?'Synced':'Unable to decrypt'});
  socket.on('sandbox-update',payload=>{const state=decryptState(payload);if(!state)return;ignoreNext=true;htmlEd.value=state.html||'';cssEd.value=state.css||'';jsEd.value=state.js||'';badge.textContent='Updated';setTimeout(()=>badge.textContent='Synced',1200)});
- function broadcast(){if(ignoreNext){ignoreNext=false;return}clearTimeout(timer);timer=setTimeout(()=>{const encrypted=encryptState();if(!encrypted){badge.textContent='Encryption unavailable';return}socket.emit('sandbox-update',{roomId:ROOM_ID,ciphertext:encrypted.ciphertextB64,nonce:encrypted.nonceB64});badge.textContent='Syncing…';setTimeout(()=>badge.textContent='Synced',600)},350)}[htmlEd,cssEd,jsEd].forEach(el=>el.addEventListener('input',broadcast));document.querySelectorAll('.tab').forEach(tab=>tab.addEventListener('click',()=>{document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));tab.classList.add('active');const name=tab.dataset.tab;document.querySelectorAll('.editor-pane').forEach(p=>p.classList.remove('active'));document.getElementById('preview-pane').classList.remove('active');if(name==='preview'){document.getElementById('preview-pane').classList.add('active');runPreview()}else document.getElementById(name+'-pane').classList.add('active')}));function runPreview(){const content='<!DOCTYPE html><html><head><style>'+cssEd.value+'<\\/style><\\/head><body>'+htmlEd.value+'<script>'+jsEd.value+'<\\/script><\\/body><\\/html>';document.getElementById('previewFrame').srcdoc=content}</script></body></html>`;
+ function broadcast(){if(ignoreNext){ignoreNext=false;return}clearTimeout(timer);timer=setTimeout(()=>{const encrypted=encryptState();if(!encrypted){badge.textContent='Encryption unavailable';return}socket.emit('sandbox-update',{roomId:ROOM_ID,ciphertext:encrypted.ciphertextB64,nonce:encrypted.nonceB64});badge.textContent='Syncing…';setTimeout(()=>badge.textContent='Synced',600)},350)}[htmlEd,cssEd,jsEd].forEach(el=>el.addEventListener('input',broadcast));document.querySelectorAll('.tab').forEach(tab=>tab.addEventListener('click',()=>{document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));tab.classList.add('active');const name=tab.dataset.tab;document.querySelectorAll('.editor-pane').forEach(p=>p.classList.remove('active'));document.getElementById('preview-pane').classList.remove('active');if(name==='preview'){document.getElementById('preview-pane').classList.add('active');runPreview()}else{document.getElementById(name+'-pane').classList.add('active');if(name==='ai'){aiChoice=readAiChoice();renderAiGate()}}}));function runPreview(){const content='<!DOCTYPE html><html><head><style>'+cssEd.value+'<\\/style><\\/head><body>'+htmlEd.value+'<script>'+jsEd.value+'<\\/script><\\/body><\\/html>';document.getElementById('previewFrame').srcdoc=content}${sandboxAiScript}</script></body></html>`;
 }
 
 export function buildSandboxHtmlWithAssistant(args: {

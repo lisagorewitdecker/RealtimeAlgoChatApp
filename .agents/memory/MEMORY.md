@@ -2,6 +2,7 @@
 - [Clerk Expo startup](clerk-expo-startup.md) — map the managed publishable key into Expo’s public environment and never block the root UI on font loading.
 - [Expo SDK maturity exceptions](expo-sdk-maturity-exceptions.md) — keep the package-age policy enabled and allowlist only same-day official Expo dependency-chain packages.
 - [Expo preview CORS](expo-preview-cors.md) — API browser allowlists must include the Expo preview origin, not only the main development domain.
+- [Expo preview DevTools GTK runtime](expo-preview-devtools-gtk.md) — SDK 57’s optional DevTools binary needs Nix `gtk3` so Metro startup stays free of a misleading loader error.
 - [Sandbox release validation](sandbox-release-validation.md) — test the generated editor and the mobile WebView host independently at their delivery boundaries.
 - [Post-merge setup timing](post-merge-setup-timing.md) — dependency reconciliation can exceed the default setup timeout; keep the configured allowance realistic.
 - [Account access policy](account-access-policy.md) — Clerk-owned bans and verified email checks apply at every server entry point, including room capabilities.
@@ -44,6 +45,7 @@
 - [Expo Go native modules & preview 502s](expo-go-native-modules.md) — gate native SDK init outside Expo Go; orphan `expo start` blocks the port prompt; Go home screen = dropped launch.
 - [Expo Go secure-store keys](expo-go-native-modules.md) — expo-secure-store rejects `:` in key names on phones only; encode keys and keep the Jest mock enforcing the real pattern.
 - [Physical-device evidence tasks](physical-device-evidence.md) — no phones are reachable here; probe once, file a BLOCKED record per the docs procedure, then ask the user for device access.
+- [Release-run preconditions live on GitHub](physical-device-evidence.md) — audit environment/secrets/vars/runners/runs by name via the GitHub connection and diff `origin/development`; as of 2026-09-14 none existed and there is no EAS project.
 - [Stale node_modules after merge](physical-device-evidence.md) — Jest "Cannot find module '@babel/generator'" means node_modules lags the lockfile; reinstall frozen and offline.
 - [Preview device debugging](preview-device-debugging.md) — in-container probes bypass the public edge; use the opt-in Metro request log and check the live manifest date first.
 - [Room key hydration](room-key-hydration.md) — key-load promises must always settle; storage read failures become retryable load failures, never a hang or key replacement.

@@ -4,6 +4,7 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
+import semver from "semver";
 import YAML from "yaml";
 
 const workspaceRoot = path.resolve(
@@ -50,67 +51,67 @@ const releaseCredentialSecrets = [
   "SENTRY_AUTH_TOKEN",
 ];
 
-function compareVersions(left, right) {
-  for (const key of ["major", "minor", "patch"]) {
-    if (left[key] !== right[key]) {
-      return left[key] - right[key];
-    }
-  }
-  return 0;
-}
-
 function parseNodeVersion(value, description) {
-  const match = String(value)
+  const text = String(value).trim();
+  const concrete = semver.valid(text);
+  if (concrete) {
+    return concrete;
+  }
+
+  const match = text
     .trim()
     .match(/^v?(\d+)(?:\.(\d+|x|\*))?(?:\.(\d+|x|\*))?$/i);
   assert.ok(
     match,
     `${description} must be a concrete Node major/minor/patch version, got ${JSON.stringify(value)}`,
   );
-  return {
-    major: Number(match[1]),
-    minor: match[2] && !/^[x*]$/i.test(match[2]) ? Number(match[2]) : 0,
-    patch: match[3] && !/^[x*]$/i.test(match[3]) ? Number(match[3]) : 0,
-  };
+  assert.ok(
+    !(match[2] === undefined && match[3] !== undefined),
+    `${description} must be a concrete Node major/minor/patch version, got ${JSON.stringify(value)}`,
+  );
+  return `${match[1]}.${match[2] && !/^[x*]$/i.test(match[2]) ? match[2] : 0}.${match[3] && !/^[x*]$/i.test(match[3]) ? match[3] : 0}`;
 }
 
 function nodeVersionSatisfiesRange(version, range) {
   const candidate = parseNodeVersion(version, "configured Node version");
-  return String(range)
-    .split("||")
-    .some((alternative) =>
-      alternative
-        .trim()
-        .split(/\s+/)
-        .filter(Boolean)
-        .every((comparator) => {
-          const match = comparator.match(/^(>=|<=|>|<|=)?v?(\d+(?:\.\d+){0,2})$/);
-          assert.ok(
-            match,
-            `package.json engines.node contains an unsupported comparator: ${JSON.stringify(comparator)}`,
-          );
-          const expected = parseNodeVersion(
-            match[2],
-            "package.json engines.node comparator",
-          );
-          const comparison = compareVersions(candidate, expected);
-          switch (match[1] ?? "=") {
-            case ">=":
-              return comparison >= 0;
-            case "<=":
-              return comparison <= 0;
-            case ">":
-              return comparison > 0;
-            case "<":
-              return comparison < 0;
-            case "=":
-              return comparison === 0;
-            default:
-              return false;
-          }
-        }),
-    );
+  assert.ok(
+    semver.validRange(String(range)),
+    `package.json engines.node contains an unsupported range: ${JSON.stringify(range)}`,
+  );
+  return semver.satisfies(candidate, String(range));
 }
+
+test("Node engine range validation accepts standard range forms", () => {
+  const cases = [
+    ["^24.0.0", "24.99.0", true],
+    ["^24.0.0", "25.0.0", false],
+    ["~24.2.0", "24.2.9", true],
+    ["~24.2.0", "24.3.0", false],
+    ["24.x", "24.99.0", true],
+    ["24.x", "25.0.0", false],
+    ["24.2.*", "24.2.9", true],
+    ["24.2.*", "24.3.0", false],
+    ["24.2 - 24.4", "24.4.99", true],
+    ["24.2 - 24.4", "24.5.0", false],
+    ["^0.2.3", "0.2.99", true],
+    ["^0.2.3", "0.3.0", false],
+    [">= 24 < 25", "24.5.0", true],
+    [">= 24 < 25", "25.0.0", false],
+    ["* >=24", "24.0.0", true],
+    ["* >=24", "23.99.0", false],
+    [">=1.2.3-beta.1 <1.2.3", "1.2.3-beta.2", true],
+    [">=1.2.3-beta.1 <1.2.3", "1.2.3", false],
+    ["1.2.3+build.7", "1.2.3+other-build", true],
+  ];
+
+  for (const [range, version, expected] of cases) {
+    assert.equal(
+      nodeVersionSatisfiesRange(version, range),
+      expected,
+      `${version} should ${expected ? "" : "not "}satisfy ${range}`,
+    );
+  }
+});
 
 function documentedCallerJob() {
   const section = callerDocumentation.match(
@@ -129,6 +130,35 @@ function documentedCallerJob() {
     "the documented reusable-workflow example must contain exactly one job",
   );
   return jobs[0];
+}
+
+function assertMobileReleaseNodeVersions(releaseWorkflow, nodeRange) {
+  const configuredJobs = [];
+  for (const [jobId, job] of Object.entries(releaseWorkflow.jobs ?? {})) {
+    for (const step of job.steps ?? []) {
+      if (String(step.uses ?? "").startsWith("actions/setup-node@")) {
+        configuredJobs.push({
+          jobId,
+          configuredVersion: step.with?.["node-version"],
+        });
+      }
+    }
+  }
+
+  assert.ok(
+    configuredJobs.length > 0,
+    "mobile-release.yml must configure Node with actions/setup-node",
+  );
+  for (const { jobId, configuredVersion } of configuredJobs) {
+    assert.ok(
+      configuredVersion !== undefined,
+      `mobile-release job "${jobId}" must configure node-version`,
+    );
+    assert.ok(
+      nodeVersionSatisfiesRange(configuredVersion, nodeRange),
+      `mobile-release job "${jobId}" configures Node ${JSON.stringify(configuredVersion)}, outside package.json engines.node range ${JSON.stringify(nodeRange)}`,
+    );
+  }
 }
 
 test("documented caller passes every required build ID through with", () => {
@@ -184,7 +214,9 @@ test("candidate build IDs do not cross the reusable secrets boundary", () => {
 });
 
 test("release credentials remain in the reusable workflow secrets contract", () => {
-  const actualSecrets = Object.keys(workflow.on.workflow_call.secrets ?? {}).sort();
+  const actualSecrets = Object.keys(
+    workflow.on.workflow_call.secrets ?? {},
+  ).sort();
   assert.deepEqual(
     actualSecrets,
     releaseCredentialSecrets,
@@ -209,32 +241,43 @@ test("every mobile release setup-node value stays inside the declared Node range
     "package.json must declare engines.node for mobile release validation",
   );
 
-  const configuredJobs = [];
-  for (const [jobId, job] of Object.entries(workflow.jobs ?? {})) {
-    for (const step of job.steps ?? []) {
-      if (String(step.uses ?? "").startsWith("actions/setup-node@")) {
-        configuredJobs.push({
-          jobId,
-          configuredVersion: step.with?.["node-version"],
-        });
-      }
-    }
-  }
+  assertMobileReleaseNodeVersions(workflow, nodeRange);
+});
 
-  assert.ok(
-    configuredJobs.length > 0,
-    "mobile-release.yml must configure Node with actions/setup-node",
+test("out-of-range mobile release Node diagnostics identify the job, version, and package range", () => {
+  const fixture = structuredClone(workflow);
+  const nodeRange = rootPackage.engines.node;
+  const jobId = "native-ios";
+  const configuredVersion = "23";
+  const setupNodeStep = fixture.jobs[jobId].steps.find((step) =>
+    String(step.uses ?? "").startsWith("actions/setup-node@"),
   );
-  for (const { jobId, configuredVersion } of configuredJobs) {
-    assert.ok(
-      configuredVersion !== undefined,
-      `mobile-release job "${jobId}" must configure node-version`,
-    );
-    assert.ok(
-      nodeVersionSatisfiesRange(configuredVersion, nodeRange),
-      `mobile-release job "${jobId}" configures Node ${JSON.stringify(configuredVersion)}, outside package.json engines.node range ${JSON.stringify(nodeRange)}`,
-    );
-  }
+  assert.ok(
+    setupNodeStep,
+    `${jobId} fixture must configure Node with actions/setup-node`,
+  );
+  setupNodeStep.with["node-version"] = configuredVersion;
+
+  assert.throws(
+    () => assertMobileReleaseNodeVersions(fixture, nodeRange),
+    (error) => {
+      assert.ok(
+        error.message.includes(`mobile-release job "${jobId}"`),
+        "the failure must identify the mobile release job",
+      );
+      assert.ok(
+        error.message.includes(`Node ${JSON.stringify(configuredVersion)}`),
+        "the failure must identify the configured Node version",
+      );
+      assert.ok(
+        error.message.includes(
+          `package.json engines.node range ${JSON.stringify(nodeRange)}`,
+        ),
+        "the failure must identify the package.json Node range",
+      );
+      return true;
+    },
+  );
 });
 
 test("publish job runs the privacy regression before approval validation and submission", () => {

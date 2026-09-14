@@ -19,6 +19,8 @@
  *      values.
  *   4. Private app IDs stay inside uploaded evidence artifacts. Non-secret
  *      candidate build IDs may appear in the branding summary.
+ *   5. A partial native rerun can replace one platform's artifact without
+ *      changing the other platform's fixed report link.
  *
  * The static rules catch code paths no scenario exercises; the behavioral runs
  * inject sentinel values for every secret-backed variable and prove the real
@@ -65,6 +67,7 @@ const iosGateScript = "artifacts/chat-app/e2e/native-large-text/run.sh";
 const androidPreflightScript = "scripts/check-android-release-prerequisites.sh";
 const nativeEvidenceCheckerScript =
   "scripts/check-native-large-text-evidence.sh";
+const untrustedCheckerWrapperScript = "scripts/run-untrusted-checker.sh";
 
 /**
  * Inventory of every script invoked by the release workflow that writes
@@ -504,7 +507,10 @@ test("idle-profile registration check blocks release and reports its result", ()
   const preflightStep = idleJob.steps.find(
     (step) => step.name === "Verify idle-profile browser targets",
   );
-  assert.ok(preflightStep, "idle-profile job must preflight its browser targets");
+  assert.ok(
+    preflightStep,
+    "idle-profile job must preflight its browser targets",
+  );
   assert.equal(preflightStep.env.E2E_CHAT_URL, "${{ secrets.E2E_CHAT_URL }}");
   assert.equal(preflightStep.env.E2E_API_URL, "${{ secrets.E2E_API_URL }}");
   assert.match(
@@ -621,6 +627,10 @@ test("idle-profile registration check blocks release and reports its result", ()
     gate.needs.includes("idle-profile-registration"),
     "the final release gate must require the idle-profile job",
   );
+  assert.ok(
+    gate.needs.includes("native-evidence-summary-regression"),
+    "the final release gate must require the hosted native evidence summary regression",
+  );
   const blockingStep = gate.steps.find(
     (step) => step.name === "Block release unless both native checks pass",
   );
@@ -628,11 +638,117 @@ test("idle-profile registration check blocks release and reports its result", ()
     blockingStep.env.IDLE_PROFILE_RESULT,
     "${{ needs.idle-profile-registration.result }}",
   );
+  assert.equal(
+    blockingStep.env.SUMMARY_REGRESSION_RESULT,
+    "${{ needs.native-evidence-summary-regression.result }}",
+    "the final gate must receive the hosted summary regression result",
+  );
   assert.match(
     blockingStep.run,
     /\$IDLE_PROFILE_RESULT" != "success"/,
     "the final gate must reject a failed idle-profile job",
   );
+  assert.match(
+    blockingStep.run,
+    /\$SUMMARY_REGRESSION_RESULT" != "success"/,
+    "the final gate must reject a failed hosted summary regression",
+  );
+});
+
+test("failed native evidence checks remain reviewable before blocking release", () => {
+  const gate = workflow.jobs["mobile-release-gate"];
+  const evidenceStep = gate.steps.find(
+    (step) => step.name === "Validate native evidence completeness",
+  );
+  const blockingStep = gate.steps.find(
+    (step) => step.name === "Block release unless both native checks pass",
+  );
+
+  assert.ok(evidenceStep, "the release gate must validate native evidence");
+  assert.equal(
+    evidenceStep.if,
+    "${{ always() }}",
+    "native evidence validation must run so its failure can be summarized",
+  );
+  assert.equal(
+    evidenceStep["continue-on-error"],
+    true,
+    "native evidence validation must preserve its summary before the blocker runs",
+  );
+  assert.equal(
+    evidenceStep.run,
+    `bash ${untrustedCheckerWrapperScript} bash ${nativeEvidenceCheckerScript}`,
+    "native evidence validation must use the untrusted checker boundary",
+  );
+
+  assert.ok(
+    blockingStep,
+    "the release gate must have a separate native evidence blocking step",
+  );
+  assert.equal(
+    blockingStep.if,
+    "${{ always() }}",
+    "the native evidence blocker must run after a failed validation",
+  );
+  assert.equal(
+    blockingStep.env.EVIDENCE_RESULT,
+    "${{ steps.evidence-completeness.outcome }}",
+    "the blocker must use the native evidence check outcome",
+  );
+  assert.match(
+    blockingStep.run,
+    /\$EVIDENCE_RESULT" != "success"/,
+    "a failed native evidence check must block release",
+  );
+
+  const summaryRegressionJob = workflow.jobs["native-evidence-summary-regression"];
+  assert.ok(
+    summaryRegressionJob,
+    "the workflow must include a hosted native evidence summary regression job",
+  );
+  const summaryRegressionStep = summaryRegressionJob.steps.find(
+    (step) => step.name === "Verify blocked native evidence summary",
+  );
+  assert.ok(
+    summaryRegressionStep,
+    "the hosted regression job must verify the blocked native evidence summary",
+  );
+  assert.match(
+    summaryRegressionStep.run,
+    /check-native-large-text-evidence\.sh "\$blocked_root"/,
+    "the hosted regression must run the checker against a controlled empty evidence root",
+  );
+  assert.match(
+    summaryRegressionStep.run,
+    /Missing result directory: \$blocked_root\/ios/,
+    "the hosted regression must assert the iOS blocking finding",
+  );
+  assert.match(
+    summaryRegressionStep.run,
+    /Missing result directory: \$blocked_root\/android/,
+    "the hosted regression must assert the Android blocking finding",
+  );
+  assert.match(
+    summaryRegressionStep.run,
+    /cat "\$summary_path" >> "\$GITHUB_STEP_SUMMARY"/,
+    "the hosted regression must publish the verified summary to GitHub",
+  );
+
+  for (const platform of ["ios", "android"]) {
+    const upload = workflow.jobs[`native-${platform}`].steps.find(
+      (step) => step.id === `upload-${platform}-native-smoke`,
+    );
+    assert.equal(
+      upload?.if,
+      "always()",
+      `${platform}: evidence upload must survive a failed native check`,
+    );
+    assert.equal(
+      upload?.with?.["if-no-files-found"],
+      "warn",
+      `${platform}: missing evidence must remain visible without hiding the check failure`,
+    );
+  }
 });
 
 test("publish requires candidate-bound approvals from the current run attempt", () => {
@@ -825,7 +941,9 @@ function summaryEnvExpressionProblem(expression, { jobId, job }) {
     /^needs\.[\w-]+\.result$/.test(trimmed) ||
     /^needs\.[\w-]+\.outputs\.[\w-]+$/.test(trimmed) ||
     trimmed === "job.status" ||
-    /^(?:github\.(?!token\b)[\w.-]+|runner\.\w+|inputs\.[\w-]+)$/.test(trimmed) ||
+    /^(?:github\.(?!token\b)[\w.-]+|runner\.\w+|inputs\.[\w-]+)$/.test(
+      trimmed,
+    ) ||
     /^inputs\.[\w-]+\s*\|\|\s*vars\.[\w-]+$/.test(trimmed)
   ) {
     return null;
@@ -1858,12 +1976,25 @@ test("native evidence summaries link only the fixed uploaded report", () => {
     path.join(evidenceRoot, "arbitrary-evidence.txt"),
     "private-evidence-marker [attacker](https://attacker.example/report)\n",
   );
+  const rawEvidenceText =
+    "::error::raw-evidence [unsafe](https://attacker.example/raw)";
+  writeFileSync(
+    path.join(evidenceRoot, "ios", "20260909T120000Z", "pass-fail-record.txt"),
+    `status=PASS\n${rawEvidenceText}=first\n${rawEvidenceText}=second\n`,
+  );
   const summaryPath = path.join(testRoot, "evidence-link-safety-summary.md");
   const iosArtifactUrl =
     "https://github.example/example/chat-app/actions/runs/123/artifacts/456";
+  const androidArtifactUrl =
+    "https://github.example/example/chat-app/actions/runs/123/artifacts/789";
   const result = spawnSync(
     bashPath,
-    [path.join(workspaceRoot, nativeEvidenceCheckerScript), evidenceRoot],
+    [
+      path.join(workspaceRoot, untrustedCheckerWrapperScript),
+      bashPath,
+      path.join(workspaceRoot, nativeEvidenceCheckerScript),
+      evidenceRoot,
+    ],
     {
       cwd: workspaceRoot,
       encoding: "utf8",
@@ -1871,18 +2002,34 @@ test("native evidence summaries link only the fixed uploaded report", () => {
         ...process.env,
         GITHUB_STEP_SUMMARY: summaryPath,
         NATIVE_IOS_EVIDENCE_ARTIFACT_URL: iosArtifactUrl,
-        NATIVE_ANDROID_EVIDENCE_ARTIFACT_URL:
-          "https://attacker.example/report.md)](https://attacker.example/second",
+        NATIVE_ANDROID_EVIDENCE_ARTIFACT_URL: androidArtifactUrl,
       },
     },
   );
   assert.notEqual(
     result.status,
     0,
-    "the intentionally incomplete evidence root should remain blocked",
+    "the intentionally incomplete evidence root should remain blocked after the wrapped check",
   );
 
   const summary = readFileSync(summaryPath, "utf8");
+  const commandGuard = result.stdout.match(
+    /^::stop-commands::([0-9a-f-]+)\n[\s\S]*\n::([0-9a-f-]+)::\n?$/,
+  );
+  assert.ok(
+    commandGuard,
+    "a failed native check must leave its output inside the workflow command guard",
+  );
+  assert.equal(
+    commandGuard?.[1],
+    commandGuard?.[2],
+    "the workflow command guard must restore parsing with the same stop token",
+  );
+  assert.doesNotMatch(
+    `${result.stdout}${result.stderr}`,
+    new RegExp(rawEvidenceText.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
+    "raw evidence text must not reach the workflow log or become a workflow command",
+  );
   assert.match(
     summary,
     new RegExp(
@@ -1895,62 +2042,415 @@ test("native evidence summaries link only the fixed uploaded report", () => {
   );
   assert.match(
     summary,
+    new RegExp(
+      String.raw`\[native-branding-check\.md\]\(${androidArtifactUrl.replaceAll(
+        ".",
+        "\\.",
+      )}\)`,
+    ),
+    "the Android section should link the uploaded artifact page using the fixed report name",
+  );
+  assert.match(
+    summary,
+    /## iOS native large-text evidence[\s\S]*- Status: \*\*FAIL\*\*[\s\S]*### Blocking evidence findings/,
+    "a failed native check must preserve a sanitized blocking summary",
+  );
+
+  const unsafeAndroidSummaryPath = path.join(
+    testRoot,
+    "evidence-link-safety-unsafe-android-summary.md",
+  );
+  const unsafeResult = spawnSync(
+    bashPath,
+    [
+      path.join(workspaceRoot, untrustedCheckerWrapperScript),
+      bashPath,
+      path.join(workspaceRoot, nativeEvidenceCheckerScript),
+      evidenceRoot,
+    ],
+    {
+      cwd: workspaceRoot,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        GITHUB_STEP_SUMMARY: unsafeAndroidSummaryPath,
+        NATIVE_IOS_EVIDENCE_ARTIFACT_URL: iosArtifactUrl,
+        NATIVE_ANDROID_EVIDENCE_ARTIFACT_URL:
+          "https://attacker.example/report.md)](https://attacker.example/second",
+      },
+    },
+  );
+  assert.notEqual(
+    unsafeResult.status,
+    0,
+    "the intentionally incomplete evidence root should remain blocked with an unsafe Android URL",
+  );
+
+  const unsafeSummary = readFileSync(unsafeAndroidSummaryPath, "utf8");
+  assert.match(
+    unsafeSummary,
     /## Android native large-text evidence[\s\S]*Detailed evidence report: \*\*Unavailable\*\*/,
     "an unsafe artifact URL must not become an Android Markdown link",
   );
   assert.doesNotMatch(
-    summary,
+    unsafeSummary,
     /private-evidence-marker|attacker\.example|arbitrary-evidence/,
     "evidence contents and identifiers must not become summary link targets",
   );
 });
 
-test("native evidence checker output is isolated from workflow commands", () => {
-  const evidenceSteps = [
-    workflow.jobs["mobile-release-gate"].steps.find(
-      (step) => step.name === "Validate native evidence completeness",
-    ),
-    workflow.jobs["mobile-publish"].steps.find(
-      (step) => step.name === "Require approved iOS and Android evidence",
-    ),
-  ];
-
-  for (const step of evidenceSteps) {
-    assert.ok(step, "expected both native evidence workflow steps");
-    assert.match(
-      step.run,
-      /echo "::stop-commands::\$\{stop_token\}"/,
-      `${step.name} must disable workflow-command parsing before checker output`,
+test("partial native reruns keep each platform linked to its own artifact", () => {
+  const artifactNames = {
+    ios: "native-large-text-ios",
+    android: "native-large-text-android",
+  };
+  const nativeJobs = {
+    ios: workflow.jobs["native-ios"],
+    android: workflow.jobs["native-android"],
+  };
+  for (const [platform, job] of Object.entries(nativeJobs)) {
+    const upload = job.steps.find(
+      (step) => step.id === `upload-${platform}-native-smoke`,
     );
-    assert.match(
-      step.run,
-      /stop_token="\$\(node -e 'process\.stdout\.write\(require\("node:crypto"\)\.randomUUID\(\)\)'\\?\)"/,
-      `${step.name} must generate an unpredictable stop token with cryptographic randomness`,
+    assert.equal(
+      upload?.with?.name,
+      artifactNames[platform],
+      `${platform}: the native job must upload its stable artifact name`,
     );
-    assert.doesNotMatch(
-      step.run,
-      /stop_token=.*GITHUB_RUN_(?:ID|ATTEMPT)/,
-      `${step.name} must not derive its stop token from predictable run metadata`,
-    );
-    assert.match(
-      step.run,
-      /bash scripts\/check-native-large-text-evidence\.sh/,
-      `${step.name} must preserve the checker as the diagnostic source`,
-    );
-    assert.match(
-      step.run,
-      /checker_status=\$\?/,
-      `${step.name} must capture the checker status without a transforming pipeline`,
-    );
-    assert.match(
-      step.run,
-      /echo "::\$\{stop_token\}::"/,
-      `${step.name} must restore workflow-command parsing after checker output`,
-    );
-    assert.match(
-      step.run,
-      /exit "\$checker_status"/,
-      `${step.name} must preserve the checker result`,
+    assert.equal(
+      upload?.with?.overwrite,
+      true,
+      `${platform}: a partial rerun must replace only its stable artifact`,
     );
   }
+
+  const runId = 123;
+  const initialAttempt = 1;
+  const partialRerunAttempt = 2;
+  const initialArtifacts = {
+    ios: {
+      name: artifactNames.ios,
+      runId,
+      runAttempt: initialAttempt,
+      artifactId: 456,
+    },
+    android: {
+      name: artifactNames.android,
+      runId,
+      runAttempt: initialAttempt,
+      artifactId: 789,
+    },
+  };
+  const rerunArtifacts = {
+    ios: {
+      name: artifactNames.ios,
+      runId,
+      runAttempt: partialRerunAttempt,
+      artifactId: 999,
+    },
+    // A partial rerun keeps the successful Android job output and artifact.
+    android: initialArtifacts.android,
+  };
+
+  function artifactUrl(artifact) {
+    return `https://github.example/example/chat-app/actions/runs/${artifact.runId}/artifacts/${artifact.artifactId}`;
+  }
+
+  function materializeDownloadedArtifacts(name, artifacts) {
+    const downloadedRoot = path.join(
+      testRoot,
+      `${name}-downloaded-native-artifacts`,
+    );
+    for (const platform of ["ios", "android"]) {
+      const artifact = artifacts[platform];
+      const runDir = path.join(
+        downloadedRoot,
+        platform,
+        `${artifact.runId}-${artifact.runAttempt}`,
+      );
+      mkdirSync(runDir, { recursive: true });
+      writeFileSync(
+        path.join(runDir, brandingReportFile),
+        [
+          "# Native branding validation",
+          "",
+          "- Status: **PASS**",
+          `- Platform: ${platform}`,
+          `- Artifact name: ${artifact.name}`,
+          `- Run attempt: ${artifact.runAttempt}`,
+          "",
+        ].join("\n"),
+      );
+    }
+    return downloadedRoot;
+  }
+
+  const evidenceStep = workflow.jobs["mobile-release-gate"].steps.find(
+    (step) => step.name === "Validate native evidence completeness",
+  );
+  const nativeJobOutputs = {};
+  for (const [platform, job] of Object.entries(nativeJobs)) {
+    const outputExpression = job.outputs.native_evidence_artifact_url;
+    const outputMatch = String(outputExpression).match(
+      /^\$\{\{\s*steps\.([^\s.]+)\.outputs\.artifact-url\s*\}\}$/,
+    );
+    assert.ok(
+      outputMatch,
+      `${platform}: the native job output must come from its upload step`,
+    );
+    assert.equal(
+      outputMatch[1],
+      `upload-${platform}-native-smoke`,
+      `${platform}: the native job output must use its own upload step`,
+    );
+    nativeJobOutputs[`native-${platform}`] = {
+      native_evidence_artifact_url: artifactUrl(rerunArtifacts[platform]),
+    };
+  }
+  function resolveNeedsOutput(expression) {
+    const match = String(expression).match(
+      /^\$\{\{\s*needs\.([^\s.]+)\.outputs\.([^\s.]+)\s*\}\}$/,
+    );
+    assert.ok(match, `unsupported workflow output expression: ${expression}`);
+    return nativeJobOutputs[match[1]][match[2]];
+  }
+
+  const finalGateArtifactUrls = {
+    ios: resolveNeedsOutput(evidenceStep.env.NATIVE_IOS_EVIDENCE_ARTIFACT_URL),
+    android: resolveNeedsOutput(
+      evidenceStep.env.NATIVE_ANDROID_EVIDENCE_ARTIFACT_URL,
+    ),
+  };
+  assert.equal(
+    finalGateArtifactUrls.ios,
+    artifactUrl(rerunArtifacts.ios),
+    "the final gate must receive the replacement iOS upload output",
+  );
+  assert.equal(
+    finalGateArtifactUrls.android,
+    artifactUrl(rerunArtifacts.android),
+    "the final gate must retain the successful Android upload output",
+  );
+
+  const gateDownloads = workflow.jobs["mobile-release-gate"].steps.filter(
+    (step) => step.uses === "actions/download-artifact@v4",
+  );
+  assert.deepEqual(
+    gateDownloads.map((step) => step.with.name).sort(),
+    [artifactNames.android, artifactNames.ios].sort(),
+    "the final gate must download both stable platform artifact names",
+  );
+
+  function runEvidenceSummary(name, artifacts, urls) {
+    const downloadedRoot = materializeDownloadedArtifacts(name, artifacts);
+    const summaryPath = path.join(testRoot, `${name}-summary.md`);
+    const result = spawnSync(
+      bashPath,
+      [path.join(workspaceRoot, nativeEvidenceCheckerScript), downloadedRoot],
+      {
+        cwd: workspaceRoot,
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          GITHUB_STEP_SUMMARY: summaryPath,
+          NATIVE_IOS_EVIDENCE_ARTIFACT_URL: urls.ios,
+          NATIVE_ANDROID_EVIDENCE_ARTIFACT_URL: urls.android,
+        },
+      },
+    );
+    assert.notEqual(
+      result.status,
+      0,
+      `${name}: incomplete fixture should remain blocked`,
+    );
+    const summary = readFileSync(summaryPath, "utf8");
+    assertNoSentinels(summary, `${name}: step summary`);
+    return summary;
+  }
+
+  const initialSummary = runEvidenceSummary(
+    "partial-rerun-before",
+    initialArtifacts,
+    {
+      ios: artifactUrl(initialArtifacts.ios),
+      android: artifactUrl(initialArtifacts.android),
+    },
+  );
+  assert.match(
+    initialSummary,
+    new RegExp(
+      String.raw`\[native-branding-check\.md\]\(${artifactUrl(
+        initialArtifacts.ios,
+      ).replaceAll(".", "\\.")}\)`,
+    ),
+    "the initial iOS job output should link its uploaded artifact",
+  );
+  assert.match(
+    initialSummary,
+    new RegExp(
+      String.raw`\[native-branding-check\.md\]\(${artifactUrl(
+        initialArtifacts.android,
+      ).replaceAll(".", "\\.")}\)`,
+    ),
+    "the initial Android job output should link its uploaded artifact",
+  );
+  assert.notDeepEqual(
+    rerunArtifacts.ios,
+    initialArtifacts.ios,
+    "the partial rerun must replace the iOS artifact record",
+  );
+  assert.deepEqual(
+    rerunArtifacts.android,
+    initialArtifacts.android,
+    "the partial rerun must retain the Android artifact record",
+  );
+
+  const rerunSummary = runEvidenceSummary(
+    "partial-rerun-after",
+    rerunArtifacts,
+    finalGateArtifactUrls,
+  );
+
+  const iosSection = rerunSummary.match(
+    /## iOS native large-text evidence[\s\S]*?(?=## Android native large-text evidence)/,
+  )?.[0];
+  const androidSection = rerunSummary.match(
+    /## Android native large-text evidence[\s\S]*/,
+  )?.[0];
+  assert.ok(iosSection, "the rerun summary should include the iOS section");
+  assert.ok(
+    androidSection,
+    "the rerun summary should include the Android section",
+  );
+  assert.match(
+    iosSection,
+    new RegExp(
+      String.raw`\[native-branding-check\.md\]\(${artifactUrl(
+        rerunArtifacts.ios,
+      ).replaceAll(".", "\\.")}\)`,
+    ),
+    "the iOS summary link should open the replacement iOS artifact",
+  );
+  assert.doesNotMatch(
+    iosSection,
+    new RegExp(artifactUrl(rerunArtifacts.android).replaceAll(".", "\\.")),
+    "the iOS summary must not link the retained Android artifact",
+  );
+  assert.match(
+    androidSection,
+    new RegExp(
+      String.raw`\[native-branding-check\.md\]\(${artifactUrl(
+        rerunArtifacts.android,
+      ).replaceAll(".", "\\.")}\)`,
+    ),
+    "the Android summary link should remain on the retained Android artifact",
+  );
+  assert.doesNotMatch(
+    androidSection,
+    new RegExp(artifactUrl(rerunArtifacts.ios).replaceAll(".", "\\.")),
+    "the Android summary must not link the replacement iOS artifact",
+  );
+  assert.doesNotMatch(
+    rerunSummary,
+    new RegExp(artifactUrl(initialArtifacts.ios).replaceAll(".", "\\.")),
+    "the rerun summary must not retain the replaced iOS artifact URL",
+  );
+  assert.match(
+    rerunSummary,
+    /\[native-branding-check\.md\]\(/g,
+  );
+  assert.equal(
+    [...rerunSummary.matchAll(/\[native-branding-check\.md\]\(/g)].length,
+    2,
+    "the rerun summary should record exactly one fixed report link per platform",
+  );
+});
+
+test("native evidence checker output is isolated from workflow commands", () => {
+  const wrapperCall = `bash ${untrustedCheckerWrapperScript}`;
+  const checkerCall = `bash ${nativeEvidenceCheckerScript}`;
+  const checkerCallers = listSteps().filter(({ step }) =>
+    String(step.run ?? "").includes(checkerCall),
+  );
+  const wrappedCheckerCallers = checkerCallers.filter(({ step }) =>
+    String(step.run ?? "").includes(wrapperCall),
+  );
+
+  assert.equal(
+    checkerCallers.length,
+    3,
+    "every native evidence checker caller must be inventoried by this contract",
+  );
+  assert.equal(
+    wrappedCheckerCallers.length,
+    checkerCallers.length,
+    "every native evidence checker caller must use the shared untrusted-checker wrapper",
+  );
+  for (const { label, step } of wrappedCheckerCallers) {
+    const normalizedRun = step.run.replace(/\s+/g, " ").trim();
+    assert.match(
+      normalizedRun,
+      new RegExp(
+        `${wrapperCall.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} ${checkerCall.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?: |$)`,
+      ),
+      `${label} must invoke the shared wrapper with the native evidence checker`,
+    );
+  }
+
+  const wrapperSource = readFileSync(
+    path.join(workspaceRoot, untrustedCheckerWrapperScript),
+    "utf8",
+  );
+  assert.match(
+    wrapperSource,
+    /stop_token="\$\(node -e 'process\.stdout\.write\(require\("node:crypto"\)\.randomUUID\(\)\)'\\?\)"/,
+    "the shared wrapper must generate an unpredictable stop token with cryptographic randomness",
+  );
+  assert.doesNotMatch(
+    wrapperSource,
+    /stop_token=.*GITHUB_RUN_(?:ID|ATTEMPT)/,
+    "the shared wrapper must not derive its stop token from predictable run metadata",
+  );
+  assert.match(
+    wrapperSource,
+    /echo "::stop-commands::\$\{stop_token\}"/,
+    "the shared wrapper must disable workflow-command parsing before checker output",
+  );
+  assert.match(
+    wrapperSource,
+    /set \+e[\s\S]*"\$@"[\s\S]*checker_status=\$\?[\s\S]*set -e/,
+    "the shared wrapper must capture the checker status without a transforming pipeline",
+  );
+  assert.match(
+    wrapperSource,
+    /echo "::\$\{stop_token\}::"/,
+    "the shared wrapper must restore workflow-command parsing after checker output",
+  );
+  assert.match(
+    wrapperSource,
+    /exit "\$checker_status"/,
+    "the shared wrapper must preserve the checker result",
+  );
+
+  const probePath = path.join(testRoot, "untrusted-checker-probe.sh");
+  writeFileSync(
+    probePath,
+    '#!/usr/bin/env bash\nprintf "%s\\n" "::warning::untrusted checker output"\nexit 37\n',
+  );
+  chmodSync(probePath, 0o755);
+  const result = spawnSync(
+    bashPath,
+    [path.join(workspaceRoot, untrustedCheckerWrapperScript), probePath],
+    { cwd: workspaceRoot, encoding: "utf8" },
+  );
+  assert.equal(
+    result.status,
+    37,
+    "the wrapper must preserve the checker exit status",
+  );
+  assert.match(
+    result.stdout,
+    /::stop-commands::[0-9a-f-]+\n::warning::untrusted checker output\n::[0-9a-f-]+::/,
+    "the wrapper must keep checker output visible between the command-boundary markers",
+  );
 });
