@@ -163,6 +163,19 @@ assert_contains "$blocked_output" "[ios] Only runner-check.txt is present"
 assert_contains "$blocked_output" "[android] Only runner-check.txt is present"
 assert_contains "$blocked_output" "blocked runner diagnostics, not reviewed device evidence; do not record a review decision for it"
 
+blocked_summary_path="$TEST_ROOT/blocked-summary.md"
+if blocked_summary_output="$(
+  GITHUB_STEP_SUMMARY="$blocked_summary_path" bash "$CHECKER" "$blocked_root" 2>&1
+)"; then
+  echo "blocked summary case unexpectedly passed" >&2
+  exit 1
+fi
+blocked_summary="$(cat "$blocked_summary_path")"
+assert_contains "$blocked_summary" "## iOS native large-text evidence"
+assert_contains "$blocked_summary" "## Android native large-text evidence"
+assert_contains "$blocked_summary" "Only runner-check.txt is present in $blocked_root/ios"
+assert_contains "$blocked_summary" "Only runner-check.txt is present in $blocked_root/android"
+
 incomplete_root="$TEST_ROOT/incomplete"
 write_valid_run "$incomplete_root" ios
 write_valid_run "$incomplete_root" android
@@ -174,6 +187,57 @@ if incomplete_output="$(bash "$CHECKER" "$incomplete_root" 2>&1)"; then
 fi
 assert_contains "$incomplete_output" "[android] Missing runner metadata and device details"
 assert_contains "$incomplete_output" "[ios] Found 1 empty call-surface screenshot file(s)"
+
+summary_root="$TEST_ROOT/summary"
+write_valid_run "$summary_root" ios
+write_valid_run "$summary_root" android
+summary_path="$TEST_ROOT/summary.md"
+summary_output="$(GITHUB_STEP_SUMMARY="$summary_path" bash "$CHECKER" "$summary_root" 2>&1)"
+summary="$(cat "$summary_path")"
+assert_contains "$summary" "## iOS native large-text evidence"
+assert_contains "$summary" "## Android native large-text evidence"
+assert_contains "$summary" "- Status: **PASS**"
+assert_contains "$summary" "- Validated run directory: \`$summary_root/ios/20260909T120000Z\`"
+assert_contains "$summary" "- Validated run directory: \`$summary_root/android/20260909T120000Z\`"
+assert_contains "$summary" "- Native screenshots: **11** (minimum 11; empty: 0)"
+assert_contains "$summary" "- Call-surface screenshots: **2** (required 2; empty: 0)"
+assert_contains "$summary" "### Review notices"
+assert_contains "$summary" "Review record missing: $summary_root/ios/20260909T120000Z/review-record.txt"
+assert_contains "$summary" "Review record missing: $summary_root/android/20260909T120000Z/review-record.txt"
+
+summary_failure_root="$TEST_ROOT/summary-failure"
+write_valid_run "$summary_failure_root" ios
+write_valid_run "$summary_failure_root" android
+rm "$summary_failure_root/android/20260909T120000Z/runner-metadata.txt"
+: > "$summary_failure_root/ios/20260909T120000Z/call-surface/call-1.png"
+rm "$summary_failure_root/ios/20260909T120000Z/screenshots/screen-11.png"
+summary_failure_path="$TEST_ROOT/summary-failure.md"
+if summary_failure_output="$(
+  GITHUB_STEP_SUMMARY="$summary_failure_path" bash "$CHECKER" "$summary_failure_root" 2>&1
+)"; then
+  echo "summary failure case unexpectedly passed" >&2
+  exit 1
+fi
+summary_failure="$(cat "$summary_failure_path")"
+ios_summary="$(
+  awk '
+    /^## iOS native large-text evidence$/ { collecting=1 }
+    /^## Android native large-text evidence$/ { collecting=0 }
+    collecting { print }
+  ' "$summary_failure_path"
+)"
+android_summary="$(
+  awk '
+    /^## Android native large-text evidence$/ { collecting=1 }
+    collecting { print }
+  ' "$summary_failure_path"
+)"
+assert_contains "$ios_summary" "Expected at least 11 native screenshots"
+assert_contains "$ios_summary" "Found 1 empty call-surface screenshot file(s)"
+assert_not_contains "$ios_summary" "Missing runner metadata and device details"
+assert_contains "$android_summary" "Missing runner metadata and device details"
+assert_not_contains "$android_summary" "Expected at least 11 native screenshots"
+assert_not_contains "$android_summary" "Found 1 empty call-surface screenshot file(s)"
 
 diagnostic_root="$TEST_ROOT/diagnostic"
 write_valid_run "$diagnostic_root" ios
@@ -567,7 +631,7 @@ if duplicate_sentry_evidence_output="$(bash "$CHECKER" "$duplicate_sentry_eviden
 fi
 for platform in ios android; do
   assert_contains "$duplicate_sentry_evidence_output" "[$platform] Invalid Sentry source-map evidence"
-  assert_contains "$duplicate_sentry_evidence_output" "duplicate JSON field(s): status, platform, candidateBuildId, marker"
+  assert_contains "$duplicate_sentry_evidence_output" "duplicate JSON field(s)"
 done
 assert_contains "$duplicate_sentry_evidence_output" "completeness check FAILED with 2 issue(s)"
 assert_not_contains "$duplicate_sentry_evidence_output" "must-not-be-printed"

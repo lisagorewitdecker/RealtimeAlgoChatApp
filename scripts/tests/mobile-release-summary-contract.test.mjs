@@ -100,6 +100,13 @@ const scriptContracts = {
     // The preflight uploads no evidence, so identifiers may only feed tools.
     evidenceDirectoryVariable: null,
   },
+  "scripts/check-native-large-text-evidence.sh": {
+    diagnosticFunction: "record_summary_issue",
+    diagnosticVariableAllowlist: ["platform"],
+    summaryFunction: "write_evidence_summary",
+    evidenceDirectoryVariable: null,
+    requiresPrivateValues: false,
+  },
 };
 
 const actionExpressionPattern = /\$\{\{([\s\S]*?)\}\}/g;
@@ -1103,12 +1110,14 @@ for (const relativePath of Object.keys(scriptContracts)) {
   test(`${relativePath} keeps private values out of diagnostics, logs, and its summary`, () => {
     const script = loadScript(relativePath);
     const classes = new Set(script.privateNames.values());
-    assert.ok(
-      classes.has("identifier") && classes.has("credential"),
-      `expected the steps invoking ${relativePath} to pass candidate identifiers and smoke-account credentials, found: ${JSON.stringify(
-        Object.fromEntries(script.privateNames),
-      )}`,
-    );
+    if (script.contract.requiresPrivateValues !== false) {
+      assert.ok(
+        classes.has("identifier") && classes.has("credential"),
+        `expected the steps invoking ${relativePath} to pass candidate identifiers and smoke-account credentials, found: ${JSON.stringify(
+          Object.fromEntries(script.privateNames),
+        )}`,
+      );
+    }
 
     const problems = [
       ...analyzeDiagnostics(script),

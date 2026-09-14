@@ -6,6 +6,13 @@ RESULTS_ROOT="${1:-$ROOT_DIR/test-results/native-large-text}"
 FAILURE_COUNT=0
 REVIEW_PENDING_PLATFORMS=()
 REVIEW_DECISIONS=()
+declare -A SUMMARY_ISSUES=([ios]="" [android]="")
+declare -A SUMMARY_NOTICES=([ios]="" [android]="")
+declare -A SUMMARY_RUN_DIR=([ios]="" [android]="")
+declare -A SUMMARY_NATIVE_SCREENSHOT_COUNT=([ios]=0 [android]=0)
+declare -A SUMMARY_NATIVE_EMPTY_COUNT=([ios]=0 [android]=0)
+declare -A SUMMARY_CALL_SCREENSHOT_COUNT=([ios]=0 [android]=0)
+declare -A SUMMARY_CALL_EMPTY_COUNT=([ios]=0 [android]=0)
 REQUIRE_APPROVAL="${NATIVE_EVIDENCE_REQUIRE_APPROVAL:-0}"
 NODE_BINARY="${NATIVE_EVIDENCE_NODE_BINARY:-node}"
 UTC_TIMESTAMP_PATTERN='^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$'
@@ -16,9 +23,28 @@ if [[ "$REQUIRE_APPROVAL" != "0" && "$REQUIRE_APPROVAL" != "1" ]]; then
   exit 2
 fi
 
+record_summary_issue() {
+  local platform="$1"
+  shift
+  SUMMARY_ISSUES["$platform"]+="$*"$'\n'
+}
+
+record_summary_notice() {
+  local platform="$1"
+  shift
+  SUMMARY_NOTICES["$platform"]+="$*"$'\n'
+}
+
+summary_safe_text() {
+  local value="$1"
+  value="$(printf '%s' "$value" | LC_ALL=C tr '\000-\011\013-\037\177' ' ' | tr '\140' "'")"
+  printf '%s' "$value"
+}
+
 issue() {
   local platform="$1"
   shift
+  record_summary_issue "$platform" "$*"
   printf '[%s] %s\n' "$platform" "$*" >&2
   FAILURE_COUNT=$((FAILURE_COUNT + 1))
 }
@@ -26,6 +52,7 @@ issue() {
 notice() {
   local platform="$1"
   shift
+  record_summary_notice "$platform" "$*"
   printf '[%s] %s\n' "$platform" "$*" >&2
 }
 
@@ -298,7 +325,7 @@ validate_platform() {
     return
   fi
 
-  mapfile -t run_dirs < <(find "$platform_dir" -mindepth 1 -maxdepth 1 -type d -print | sort)
+  mapfile -d '' -t run_dirs < <(find "$platform_dir" -mindepth 1 -maxdepth 1 -type d -print0 | sort -z)
   if ((${#run_dirs[@]} == 0)); then
     if [[ -s "$platform_dir/runner-check.txt" ]]; then
       issue "$platform" "Only runner-check.txt is present in ${platform_dir}. It is blocked runner diagnostics, not reviewed device evidence; do not record a review decision for it. Run on a prepared ${platform} runner and upload the timestamped result directory."
@@ -313,6 +340,12 @@ validate_platform() {
     return
   fi
   run_dir="${run_dirs[0]}"
+  local run_dir_name="${run_dir##*/}"
+  if [[ ! "$run_dir_name" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then
+    issue "$platform" "Evidence run directory name in ${platform_dir} is unsafe. Use the generated release run directory name."
+    return
+  fi
+  SUMMARY_RUN_DIR["$platform"]="$run_dir"
 
   check_required_file "$platform" "$run_dir" "candidate-build-id.txt" "candidate build ID"
   check_required_file "$platform" "$run_dir" "runner-metadata.txt" "runner metadata and device details"
@@ -512,7 +545,7 @@ function duplicateJsonFields(raw) {
 }
 const duplicateFields = duplicateJsonFields(rawEvidence);
 if (duplicateFields.length > 0) {
-  throw new Error(`duplicate JSON field(s): ${duplicateFields.join(", ")}`);
+  throw new Error("duplicate JSON field(s)");
 }
 const trigger = Object.fromEntries(
   readFileSync(triggerPath, "utf8")
@@ -569,6 +602,8 @@ NODE
     native_screenshot_count="$(find "$native_screenshot_dir" -type f -name '*.png' | wc -l | tr -d ' ')"
     native_empty_count="$(find "$native_screenshot_dir" -type f -name '*.png' -size 0c | wc -l | tr -d ' ')"
   fi
+  SUMMARY_NATIVE_SCREENSHOT_COUNT["$platform"]="$native_screenshot_count"
+  SUMMARY_NATIVE_EMPTY_COUNT["$platform"]="$native_empty_count"
   if ((native_screenshot_count < 11)); then
     issue "$platform" "Expected at least 11 native screenshots in ${native_screenshot_dir}, found ${native_screenshot_count}. Re-run the complete flow and upload every screen capture."
   fi
@@ -583,6 +618,8 @@ NODE
     call_screenshot_count="$(find "$call_screenshot_dir" -type f -name '*.png' | wc -l | tr -d ' ')"
     call_empty_count="$(find "$call_screenshot_dir" -type f -name '*.png' -size 0c | wc -l | tr -d ' ')"
   fi
+  SUMMARY_CALL_SCREENSHOT_COUNT["$platform"]="$call_screenshot_count"
+  SUMMARY_CALL_EMPTY_COUNT["$platform"]="$call_empty_count"
   if ((call_screenshot_count != 2)); then
     issue "$platform" "Expected exactly 2 call-surface screenshots in ${call_screenshot_dir}, found ${call_screenshot_count}. Capture both the embedded WebView and independent call layout."
   fi
@@ -729,12 +766,82 @@ validate_review_record() {
   fi
 }
 
+write_evidence_summary() {
+  [[ -n "${GITHUB_STEP_SUMMARY:-}" ]] || return 0
+
+  local platform
+  local label
+  local status
+  local run_dir
+  local native_screenshot_count
+  local native_empty_count
+  local call_screenshot_count
+  local call_empty_count
+  local finding
+  local safe_run_dir
+  local safe_finding
+
+  for platform in ios android; do
+    if [[ "$platform" == "ios" ]]; then
+      label="iOS"
+    else
+      label="Android"
+    fi
+
+    if [[ -n "${SUMMARY_ISSUES[$platform]}" ]]; then
+      status="FAIL"
+    else
+      status="PASS"
+    fi
+
+    run_dir="${SUMMARY_RUN_DIR[$platform]}"
+    native_screenshot_count="${SUMMARY_NATIVE_SCREENSHOT_COUNT[$platform]}"
+    native_empty_count="${SUMMARY_NATIVE_EMPTY_COUNT[$platform]}"
+    call_screenshot_count="${SUMMARY_CALL_SCREENSHOT_COUNT[$platform]}"
+    call_empty_count="${SUMMARY_CALL_EMPTY_COUNT[$platform]}"
+    safe_run_dir="$(summary_safe_text "$run_dir")"
+
+    {
+      echo "## ${label} native large-text evidence"
+      echo
+      echo "- Status: **${status}**"
+      if [[ -n "$run_dir" ]]; then
+        echo "- Validated run directory: \`${safe_run_dir}\`"
+        echo "- Native screenshots: **${native_screenshot_count}** (minimum 11; empty: ${native_empty_count})"
+        echo "- Call-surface screenshots: **${call_screenshot_count}** (required 2; empty: ${call_empty_count})"
+      else
+        echo "- Validated run directory: **Unavailable**"
+      fi
+      if [[ -n "${SUMMARY_ISSUES[$platform]}" ]]; then
+        echo
+        echo "### Blocking evidence findings"
+        while IFS= read -r finding; do
+          [[ -n "$finding" ]] || continue
+          safe_finding="$(summary_safe_text "$finding")"
+          printf -- '- `%s`\n' "$safe_finding"
+        done <<< "${SUMMARY_ISSUES[$platform]}"
+      fi
+      if [[ -n "${SUMMARY_NOTICES[$platform]}" ]]; then
+        echo
+        echo "### Review notices"
+        while IFS= read -r finding; do
+          [[ -n "$finding" ]] || continue
+          safe_finding="$(summary_safe_text "$finding")"
+          printf -- '- `%s`\n' "$safe_finding"
+        done <<< "${SUMMARY_NOTICES[$platform]}"
+      fi
+      echo
+    } >> "$GITHUB_STEP_SUMMARY"
+  done
+}
+
 echo "Checking native large-text evidence under ${RESULTS_ROOT}"
 if [[ "$REQUIRE_APPROVAL" == "1" ]]; then
   echo "Strict review mode enabled: both platform evidence sets require an APPROVED review record."
 fi
 validate_platform ios
 validate_platform android
+write_evidence_summary
 
 if ((FAILURE_COUNT > 0)); then
   echo "Native large-text evidence completeness check FAILED with ${FAILURE_COUNT} issue(s)." >&2
