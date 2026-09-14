@@ -126,6 +126,7 @@ jobs:
             automation_id for automation_id, count in Counter(existing_ids).items() if count > 1
           }
           assigned_ids = set()
+          candidate_occurrences = Counter()
 
           for run in runs:
             automation_details = run["automationDetails"]
@@ -137,11 +138,9 @@ jobs:
             tool_key = stable_tool_key(run)
             normalized_id = normalized_category_id(automation_id) if automation_id else None
             candidate_id = f"{normalized_id}/{tool_key}" if normalized_id else f"codacy/{tool_key}"
-            if candidate_id in assigned_ids:
-              run_digest = hashlib.sha256(
-                json.dumps(run, sort_keys=True).encode("utf-8")
-              ).hexdigest()[:12]
-              candidate_id = f"{candidate_id}-{run_digest}"
+            candidate_occurrences[candidate_id] += 1
+            if candidate_occurrences[candidate_id] > 1:
+              candidate_id = f"{candidate_id}-{candidate_occurrences[candidate_id]}"
 
             automation_details["id"] = candidate_id
             assigned_ids.add(candidate_id)
