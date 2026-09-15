@@ -26,6 +26,8 @@
  *   7. Multiple changed Android preview records are validated independently;
  *      one failure does not hide the valid record or expose either record's
  *      evidence text.
+ *   8. A duplicate Android preflight field fails with the fixed redacted-schema
+ *      message without exposing the duplicate value or raw artifact content.
  *
  * The static rules catch code paths no scenario exercises; the behavioral runs
  * inject sentinel values for every secret-backed variable and prove the real
@@ -1552,6 +1554,50 @@ test("Android preview evidence keeps its pull-request validation and privacy con
     /PRIVATE_MULTI_RECORD_EVIDENCE|Workspace curl returned HTTP 200|No physical phone was available/,
     "a multi-record summary must not expose evidence text from either record",
   );
+
+  const duplicatePreflight = blockedPreflight.replace(
+    '"status":"PASS","evidence":"public manifest HTTP 200 (128 bytes)"',
+    '"status":"PASS","evidence":"DUPLICATE_PREFLIGHT_SENTINEL: raw-duplicate-preflight-content","evidence":"DUPLICATE_PREFLIGHT_SENTINEL: raw-duplicate-preflight-content"',
+  );
+  const duplicatePreflightRun = runAndroidPreviewJob(
+    "duplicate-preflight",
+    blockedRecord,
+    {
+      sidecarOnly: true,
+      changedPreflight: duplicatePreflight,
+    },
+  );
+  const duplicatePreflightFailure = [
+    duplicatePreflightRun.result.stdout,
+    duplicatePreflightRun.result.stderr,
+  ].join("\n");
+  const fixedRedactedSchemaMessage =
+    "The Android preview preflight JSON artifact does not satisfy the redacted schema.";
+  assert.notEqual(
+    duplicatePreflightRun.result.status,
+    0,
+    "a duplicate Android preflight field must fail the release validation job",
+  );
+  assert.match(
+    duplicatePreflightRun.summary,
+    new RegExp(fixedRedactedSchemaMessage.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
+    "the job summary must use the fixed redacted-schema contract message",
+  );
+  assert.match(
+    duplicatePreflightFailure,
+    new RegExp(fixedRedactedSchemaMessage.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
+    "the surfaced checker failure must use the fixed redacted-schema contract message",
+  );
+  for (const [surfaceName, surface] of [
+    ["job summary", duplicatePreflightRun.summary],
+    ["surfaced checker failure", duplicatePreflightFailure],
+  ]) {
+    assert.doesNotMatch(
+      surface,
+      /DUPLICATE_PREFLIGHT_SENTINEL|raw-duplicate-preflight-content|public manifest HTTP 200 \(128 bytes\)/,
+      `${surfaceName} must not expose the duplicate preflight value or raw artifact content`,
+    );
+  }
 
   const sidecarOnly = runAndroidPreviewJob("sidecar-only", blockedRecord, {
     sidecarOnly: true,
