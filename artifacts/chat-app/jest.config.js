@@ -35,6 +35,7 @@ const androidLayoutSuites = [
   "Setup",
   "SignIn",
   "SignUp",
+  "TabLayout",
 ];
 
 const androidTestMatch = androidLayoutSuites.map((name) => {

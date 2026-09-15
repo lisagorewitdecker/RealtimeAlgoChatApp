@@ -137,8 +137,9 @@ describe("home screen tab bar reservation", () => {
 
   it("reserves the measured tab bar height below the last room", async () => {
     // The classic tab navigator publishes its measured bar height (bottom
-    // inset included) through this context; the bar overlays the screen and
-    // is opaque on Android and web, so the end of the list must clear it.
+    // inset included) through this context; the bar overlays the screen (it
+    // is see-through, but still dims and blocks whatever scrolls under it), so
+    // the end of the list must clear it.
     // A bar taller than the default 49pt + inset (scaled labels, for
     // instance) is exactly the case the former flat `insets.bottom + 90`
     // reservation could not follow.

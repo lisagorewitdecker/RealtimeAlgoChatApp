@@ -888,10 +888,11 @@ describe("profile layout under the tab bar and keyboard", () => {
 
   it("reserves the measured tab bar height below the profile content", () => {
     // The classic tab navigator publishes its measured bar height (bottom
-    // inset included) through this context; the bar overlays the screen and
-    // is opaque on Android and web, so the scroll content must clear it. This
-    // suite runs under the iOS and Android Jest projects, so the reservation
-    // is checked on the platform where the bar actually hides content.
+    // inset included) through this context; the bar overlays the screen (it
+    // is see-through, but still dims and blocks whatever scrolls under it), so
+    // the scroll content must clear it. This suite runs under the iOS and
+    // Android Jest projects, so the reservation is checked on both platforms
+    // that draw the classic bar.
     mockInsets.bottom = 34;
     const view = render(
       <BottomTabBarHeightContext.Provider value={83}>

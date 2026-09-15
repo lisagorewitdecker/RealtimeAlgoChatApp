@@ -83,9 +83,10 @@ export default function ChatsScreen() {
 
   const topPad =
     Platform.OS === "web" ? 67 : insets.top;
-  // The tab bar overlays the bottom of this screen (opaque on Android and
-  // web), so the end of the list reserves the bar's measured height instead of
-  // a constant that a taller bar would outgrow. The breathing room beyond the
+  // The tab bar overlays the bottom of this screen (see-through, but whatever
+  // scrolls under it is dimmed and out of reach), so the end of the list
+  // reserves the bar's measured height instead of a constant that a taller
+  // bar would outgrow. The breathing room beyond the
   // bar keeps the spacing the list had while it reserved a flat 90pt over the
   // safe-area inset: 41pt past the 49pt native bar, 6pt past the 84pt web bar.
   const listBottomInset = useTabBarContentInset(Platform.OS === "web" ? 6 : 41);
