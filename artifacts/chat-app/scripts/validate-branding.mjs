@@ -2,6 +2,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import { findDuplicateJsonObjectKeys } from "../../../scripts/find-duplicate-json-object-keys.mjs";
 
 const workspaceRoot = path.resolve(
   fileURLToPath(new URL("../../..", import.meta.url)),
@@ -97,6 +98,12 @@ function requireNativeValue(metadata, key, platform) {
  * file remains available for detailed inspection.
  */
 export function parseNativeMetadata({ platform, source }) {
+  if (findDuplicateJsonObjectKeys(source).length > 0) {
+    throw new Error(
+      `Native ${platformLabel(platform)} metadata contains duplicate fields; inspect the uploaded native metadata file rather than the source app.json.`,
+    );
+  }
+
   let metadata;
   try {
     metadata = JSON.parse(source);

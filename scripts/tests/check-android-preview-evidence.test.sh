@@ -161,6 +161,8 @@ mkdir -p "$discovery_root/scripts" \
   "$discovery_android_root/20260101T000000Z" \
   "$discovery_android_root/20260102T000000Z"
 cp "$CHECKER" "$discovery_root/scripts/"
+cp "$ROOT_DIR/scripts/find-duplicate-json-object-keys.mjs" \
+  "$discovery_root/scripts/"
 cp "$ROOT_DIR/artifacts/chat-app/scripts/validate-preview-startup.mjs" \
   "$discovery_root/artifacts/chat-app/scripts/"
 write_record "$discovery_android_root/20260101T000000Z/validation-record.md" <<'EOF'

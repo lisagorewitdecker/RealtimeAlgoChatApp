@@ -502,106 +502,36 @@ validate_platform() {
         "$run_dir/sentry-source-map-evidence.json" \
         "$sentry_trigger_path" \
         "$platform" \
-        "$candidate_build_id" <<'NODE'
+        "$candidate_build_id" \
+        "$ROOT_DIR/scripts/find-duplicate-json-object-keys.mjs" <<'NODE'
 import { readFileSync } from "node:fs";
+import { pathToFileURL } from "node:url";
 
-const [, , evidencePath, triggerPath, platform, candidateBuildId] = process.argv;
+const [
+  ,
+  ,
+  evidencePath,
+  triggerPath,
+  platform,
+  candidateBuildId,
+  duplicateKeysModulePath,
+] = process.argv;
+const { findDuplicateJsonObjectKeys } = await import(
+  pathToFileURL(duplicateKeysModulePath).href
+);
 const rawEvidence = readFileSync(evidencePath, "utf8");
 if (/(?:auth(?:orization)?[_-]?token|sentry_auth_token|bearer\s+[A-Za-z0-9._-]+)/i.test(rawEvidence)) {
   throw new Error("evidence contains credential-like content");
+}
+const duplicateFields = findDuplicateJsonObjectKeys(rawEvidence);
+if (duplicateFields.length > 0) {
+  throw new Error("duplicate JSON field(s)");
 }
 let evidence;
 try {
   evidence = JSON.parse(rawEvidence);
 } catch {
   throw new Error("evidence is not valid JSON");
-}
-function duplicateJsonFields(raw) {
-  let index = 0;
-  const duplicates = [];
-
-  function skipWhitespace() {
-    while (/\s/.test(raw[index] ?? "")) index += 1;
-  }
-
-  function readString() {
-    const start = index;
-    index += 1;
-    while (index < raw.length) {
-      if (raw[index] === "\\") {
-        index += 2;
-      } else if (raw[index] === '"') {
-        index += 1;
-        return JSON.parse(raw.slice(start, index));
-      } else {
-        index += 1;
-      }
-    }
-    throw new Error("unterminated JSON string");
-  }
-
-  function scanValue() {
-    skipWhitespace();
-    if (raw[index] === "{") {
-      scanObject();
-    } else if (raw[index] === "[") {
-      scanArray();
-    } else if (raw[index] === '"') {
-      readString();
-    } else {
-      while (index < raw.length && !/[,\]}]/.test(raw[index])) index += 1;
-    }
-  }
-
-  function scanObject() {
-    const keys = new Set();
-    index += 1;
-    skipWhitespace();
-    if (raw[index] === "}") {
-      index += 1;
-      return;
-    }
-    while (index < raw.length) {
-      skipWhitespace();
-      const key = readString();
-      if (keys.has(key)) duplicates.push(key);
-      keys.add(key);
-      skipWhitespace();
-      index += 1;
-      scanValue();
-      skipWhitespace();
-      if (raw[index] === "}") {
-        index += 1;
-        return;
-      }
-      index += 1;
-    }
-  }
-
-  function scanArray() {
-    index += 1;
-    skipWhitespace();
-    if (raw[index] === "]") {
-      index += 1;
-      return;
-    }
-    while (index < raw.length) {
-      scanValue();
-      skipWhitespace();
-      if (raw[index] === "]") {
-        index += 1;
-        return;
-      }
-      index += 1;
-    }
-  }
-
-  scanValue();
-  return [...new Set(duplicates)];
-}
-const duplicateFields = duplicateJsonFields(rawEvidence);
-if (duplicateFields.length > 0) {
-  throw new Error("duplicate JSON field(s)");
 }
 const trigger = Object.fromEntries(
   readFileSync(triggerPath, "utf8")

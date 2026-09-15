@@ -712,8 +712,9 @@ assert_not_contains "$duplicate_sentry_trigger_output" "trigger platform does no
 assert_not_contains "$duplicate_sentry_trigger_output" "trigger candidate build ID does not match"
 assert_not_contains "$duplicate_sentry_trigger_output" "trigger marker does not match"
 
-# Conflicting Sentry evidence fields must be rejected before JSON.parse can
-# select the later declaration, without exposing either field value.
+# Conflicting Sentry evidence fields, including fields nested in the readable
+# frame object, must be rejected before JSON.parse can select the later
+# declaration, without exposing either field value.
 duplicate_sentry_evidence_root="$TEST_ROOT/duplicate-sentry-evidence"
 write_valid_run "$duplicate_sentry_evidence_root" ios
 write_valid_run "$duplicate_sentry_evidence_root" android
@@ -731,6 +732,10 @@ for (const field of ["status", "platform", "candidateBuildId", "marker"]) {
     `$1\n  "${field}": "must-not-be-printed-${field}",`,
   );
 }
+evidence = evidence.replace(
+  /(\n    "filename": "[^"]+",)/,
+  `$1\n    "filename": "must-not-be-printed-nested-filename",`,
+);
 writeFileSync(path, evidence);
 NODE
 done
