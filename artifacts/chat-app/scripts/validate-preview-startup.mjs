@@ -66,14 +66,24 @@ const READY_MARKERS = [/Starting Metro Bundler/i, /› Metro:/i];
 const STARTUP_FAILURES = [
   /error while loading shared libraries:/i,
   /cannot open shared object file/i,
+  /library not loaded:/i,
+  /cannot proceed because .{1,160} was not found/i,
   /(?:error|failed|unable|cannot).{0,80}(?:react native )?devtools/i,
   /(?:react native )?devtools.{0,80}(?:error|failed|unable|cannot|could not|couldn't)/i,
 ];
-const STARTUP_TEST_FIXTURE = "missing-runtime-library";
-const MISSING_LIBRARY = new RegExp(
-  String.raw`error while loading shared libraries:\s*([A-Za-z0-9._+@/-]{1,128})\s*:\s*cannot open shared object file`,
-  "i",
-);
+const STARTUP_TEST_FIXTURES = new Set([
+  "missing-runtime-library",
+  "missing-runtime-library-dyld",
+  "missing-runtime-library-windows",
+]);
+const MISSING_LIBRARY_PATTERNS = [
+  new RegExp(
+    String.raw`error while loading shared libraries:\s*([A-Za-z0-9._+@/-]{1,128})\s*:\s*cannot open shared object file`,
+    "i",
+  ),
+  /library not loaded:\s*([A-Za-z0-9._+@/-]{1,128})/i,
+  /cannot proceed because\s+([A-Za-z0-9._+@/-]{1,128})\s+was not found/i,
+];
 
 function findStartupFailure(output) {
   const lines = output.split(/\r?\n/);
@@ -94,7 +104,11 @@ function sanitizeStartupDiagnostic(value, maxLength) {
 }
 
 function findMissingLibrary(output) {
-  return output.match(MISSING_LIBRARY)?.[1] ?? null;
+  for (const pattern of MISSING_LIBRARY_PATTERNS) {
+    const missingLibrary = output.match(pattern)?.[1];
+    if (missingLibrary) return missingLibrary;
+  }
+  return null;
 }
 
 function formatStartupFailure(output) {
@@ -611,7 +625,7 @@ async function validateLivePreview(
   const port = await findFreePort();
   const output = [];
   const startupCommand =
-    process.env.PREVIEW_STARTUP_TEST_FIXTURE === STARTUP_TEST_FIXTURE
+    STARTUP_TEST_FIXTURES.has(process.env.PREVIEW_STARTUP_TEST_FIXTURE)
       ? {
           command: process.execPath,
           args: [

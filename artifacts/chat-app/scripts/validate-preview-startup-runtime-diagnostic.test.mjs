@@ -29,34 +29,64 @@ function findDiagnostic(output) {
     .find((line) => line.startsWith("Expo preview startup error:"));
 }
 
-test("live and captured preview validation report the same runtime-library diagnosis", () => {
+const fixtures = [
+  {
+    name: "Linux shared-library loader",
+    fixture: "missing-runtime-library",
+    detail: /shared libraries: libgtk-3\.so\.0: cannot open shared object file/,
+  },
+  {
+    name: "macOS dyld loader",
+    fixture: "missing-runtime-library-dyld",
+    detail: /Library not loaded: \/opt\/homebrew\/lib\/libgtk-3\.dylib/,
+  },
+  {
+    name: "Windows loader",
+    fixture: "missing-runtime-library-windows",
+    detail: /cannot proceed because libgtk-3-0\.dll was not found/,
+  },
+];
+
+test("live and captured preview validation report the same diagnosis for every loader format", () => {
   const temporaryDirectory = mkdtempSync(
     join(tmpdir(), "chat-preview-runtime-diagnostic-"),
   );
 
   try {
-    const fixture = runNodeScript([fixturePath]);
-    assert.equal(fixture.status, 1);
-    assert.match(fixture.output, /error while loading shared libraries/i);
+    for (const [index, fixtureCase] of fixtures.entries()) {
+      const fixture = runNodeScript([fixturePath], {
+        PREVIEW_STARTUP_TEST_FIXTURE: fixtureCase.fixture,
+      });
+      assert.equal(fixture.status, 1, fixtureCase.name);
 
-    const capturedLogPath = join(temporaryDirectory, "expo-startup.log");
-    writeFileSync(capturedLogPath, fixture.output, "utf8");
+      const capturedLogPath = join(
+        temporaryDirectory,
+        `expo-startup-${index}.log`,
+      );
+      writeFileSync(capturedLogPath, fixture.output, "utf8");
 
-    const captured = runNodeScript([validatorPath, "--log-file", capturedLogPath]);
-    const live = runNodeScript([validatorPath], {
-      PREVIEW_STARTUP_TEST_FIXTURE: "missing-runtime-library",
-    });
+      const captured = runNodeScript([
+        validatorPath,
+        "--log-file",
+        capturedLogPath,
+      ]);
+      const live = runNodeScript([validatorPath], {
+        PREVIEW_STARTUP_TEST_FIXTURE: fixtureCase.fixture,
+      });
 
-    assert.notEqual(captured.status, 0);
-    assert.notEqual(live.status, 0);
+      assert.notEqual(captured.status, 0, fixtureCase.name);
+      assert.notEqual(live.status, 0, fixtureCase.name);
 
-    const capturedDiagnostic = findDiagnostic(captured.output);
-    const liveDiagnostic = findDiagnostic(live.output);
-    assert.equal(liveDiagnostic, capturedDiagnostic);
-    assert.match(
-      capturedDiagnostic,
-      /shared libraries: libgtk-3\.so\.0: cannot open shared object file/,
-    );
+      const capturedDiagnostic = findDiagnostic(captured.output);
+      const liveDiagnostic = findDiagnostic(live.output);
+      assert.ok(capturedDiagnostic, fixtureCase.name);
+      assert.equal(liveDiagnostic, capturedDiagnostic, fixtureCase.name);
+      assert.match(capturedDiagnostic, fixtureCase.detail, fixtureCase.name);
+      assert.ok(
+        capturedDiagnostic.length <= 512,
+        `${fixtureCase.name} diagnostic exceeded the 512-character limit`,
+      );
+    }
   } finally {
     rmSync(temporaryDirectory, { recursive: true, force: true });
   }
