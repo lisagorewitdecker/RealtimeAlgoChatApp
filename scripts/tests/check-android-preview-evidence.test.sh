@@ -103,6 +103,17 @@ fi
 assert_contains "$invalid_json_output" "does not satisfy the redacted schema"
 assert_not_contains "$invalid_json_output" "GARBAGE"
 
+duplicate_json_sentinel="duplicate-preflight-secret"
+cat >"$json_contract_path" <<EOF
+{"schema":"android-preview-handoff-preflight/v1","schema":"$duplicate_json_sentinel","platform":"android","boundaries":{"publicManifestReachability":{"status":"PASS","status":"FAIL","evidence":"public manifest HTTP 200 (128 bytes)"},"localHandoffProbe":{"status":"NOT_RUN","evidence":"Local manifest/bundle probe not run — no successful probe result was recorded"},"expoGoLaunch":{"status":"NOT_ASSESSED","evidence":"Requires a physical Android phone running stock Expo Go."},"serverNativeRequestEvidence":{"status":"NOT_ASSESSED","evidence":"Requires filtered Metro or API evidence from that physical Expo Go session."}}}
+EOF
+if duplicate_json_output="$(bash "$CHECKER" "$json_contract_record" 2>&1)"; then
+  printf 'Android preflight JSON with duplicate fields unexpectedly passed.\n' >&2
+  exit 1
+fi
+assert_contains "$duplicate_json_output" "does not satisfy the redacted schema"
+assert_not_contains "$duplicate_json_output" "$duplicate_json_sentinel"
+
 unsafe_json_sentinel="https://preview-fixture.replit.dev/account=fixture-account/message=fixture-message"
 cat >"$json_contract_path" <<EOF
 {"schema":"android-preview-handoff-preflight/v1","platform":"android","boundaries":{"publicManifestReachability":{"status":"PASS","evidence":"$unsafe_json_sentinel"},"localHandoffProbe":{"status":"NOT_RUN","evidence":"safe"},"expoGoLaunch":{"status":"NOT_ASSESSED","evidence":"safe"},"serverNativeRequestEvidence":{"status":"NOT_ASSESSED","evidence":"safe"}}}

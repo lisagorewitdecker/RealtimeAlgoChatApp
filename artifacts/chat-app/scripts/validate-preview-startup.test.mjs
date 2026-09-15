@@ -1,5 +1,10 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import {
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -10,6 +15,7 @@ import {
   formatHandoffPreflight,
   requestLocalHandoffProbe,
   requestPublicPreviewManifest,
+  readAndValidateHandoffPreflight,
   validateHandoffPreflightRecord,
   writeHandoffPreflight,
 } from "./validate-preview-startup.mjs";
@@ -515,6 +521,51 @@ test("rejects sensitive or non-redacted evidence without echoing it", () => {
         return true;
       },
     );
+  }
+});
+
+test("rejects duplicate top-level, boundary, and status fields before schema validation", async () => {
+  const record = createHandoffPreflightRecord();
+  const publicBoundary = JSON.stringify(
+    record.boundaries.publicManifestReachability,
+  );
+  const duplicateSources = [
+    [
+      "top-level",
+      `{"schema":"${record.schema}","schema":"duplicate-top-level-sentinel","platform":"android","boundaries":${JSON.stringify(record.boundaries)}}`,
+      "duplicate-top-level-sentinel",
+    ],
+    [
+      "boundary",
+      `{"schema":"${record.schema}","platform":"android","boundaries":{"publicManifestReachability":${publicBoundary},"publicManifestReachability":${publicBoundary},"localHandoffProbe":${JSON.stringify(record.boundaries.localHandoffProbe)},"expoGoLaunch":${JSON.stringify(record.boundaries.expoGoLaunch)},"serverNativeRequestEvidence":${JSON.stringify(record.boundaries.serverNativeRequestEvidence)}}}`,
+      "duplicate-boundary-sentinel",
+    ],
+    [
+      "status",
+      `{"schema":"${record.schema}","platform":"android","boundaries":{"publicManifestReachability":{"status":"PASS","status":"FAIL","evidence":"public manifest HTTP 200 (128 bytes)"},"localHandoffProbe":${JSON.stringify(record.boundaries.localHandoffProbe)},"expoGoLaunch":${JSON.stringify(record.boundaries.expoGoLaunch)},"serverNativeRequestEvidence":${JSON.stringify(record.boundaries.serverNativeRequestEvidence)}}}`,
+      "duplicate-status-sentinel",
+    ],
+  ];
+
+  for (const [kind, source, sentinel] of duplicateSources) {
+    const directory = mkdtempSync(join(tmpdir(), `duplicate-${kind}-`));
+    const outputPath = join(directory, "android-preview-preflight.json");
+    writeFileSync(outputPath, source);
+    try {
+      await assert.rejects(
+        () => readAndValidateHandoffPreflight(outputPath),
+        (error) => {
+          assert.equal(
+            error.message,
+            "Preview handoff preflight JSON contains duplicate fields.",
+          );
+          assert.doesNotMatch(error.message, new RegExp(sentinel));
+          return true;
+        },
+      );
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
   }
 });
 

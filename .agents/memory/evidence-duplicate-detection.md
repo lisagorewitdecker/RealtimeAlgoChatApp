@@ -9,6 +9,7 @@ Detect duplicate declarations generically over every `key=value` line of a machi
 
 **How to apply:**
 - Count occurrences per key (CR-stripped, ignore empty/whitespace keys), report `has N <key> declarations`, and never print, compare, or select either value for a duplicated key — guard every value check on "declared at most once".
+- For JSON objects, keep the seen-key set scoped to each object; repeated names in separate nested objects are valid, while repeated decoded names in one object are ambiguous.
 - Test fixtures for evidence files must mirror the producer's full field set (see the native large-text `run.sh` writers), and the "duplicate everything" regression case should derive its expected keys from the fixture so new producer fields are covered automatically.
 - The same rule applies to the remaining first/last-value readers (Sentry trigger details, candidate build files).
 
