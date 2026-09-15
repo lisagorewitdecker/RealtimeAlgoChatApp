@@ -21,7 +21,8 @@
     "validate:native-large-text-evidence": "bash -c 'if [ -f scripts/check-native-large-text-evidence.sh ]; then bash scripts/check-native-large-text-evidence.sh; else echo \"No native large text evidence script present; skipping.\"; fi'",
     "test:native-large-text-evidence": "bash -c 'if [ -f scripts/tests/check-native-large-text-evidence.test.sh ]; then bash scripts/tests/check-native-large-text-evidence.test.sh; else echo \"No native large text evidence test present; skipping.\"; fi'",
     "validate:mockup-clean": "pnpm --filter @workspace/mockup-sandbox run typecheck",
-    "test:unit": "pnpm -r --if-present run test"
+    "test:unit": "pnpm -r --if-present run test",
+    "validate:android-preview-evidence": "bash scripts/check-android-preview-evidence.sh"
   },
   "private": true,
   "devDependencies": {

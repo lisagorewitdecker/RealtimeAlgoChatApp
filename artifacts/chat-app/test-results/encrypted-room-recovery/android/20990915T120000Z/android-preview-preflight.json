@@ -1,0 +1,22 @@
+{
+  "schema": "android-preview-handoff-preflight/v1",
+  "platform": "android",
+  "boundaries": {
+    "publicManifestReachability": {
+      "status": "PASS",
+      "evidence": "public manifest HTTP 200 (controlled verification)"
+    },
+    "localHandoffProbe": {
+      "status": "NOT_RUN",
+      "evidence": "Local manifest/bundle probe was not run for this controlled verification"
+    },
+    "expoGoLaunch": {
+      "status": "NOT_ASSESSED",
+      "evidence": "Requires a physical Android phone running stock Expo Go"
+    },
+    "serverNativeRequestEvidence": {
+      "status": "NOT_ASSESSED",
+      "evidence": "Requires filtered native Android or Expo Go request evidence"
+    }
+  }
+}

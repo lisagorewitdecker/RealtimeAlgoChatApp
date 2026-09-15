@@ -8,16 +8,32 @@ on:
         required: true
         default: false
         type: boolean
+      ios_review_candidate_build_id:
+        description: Approved iOS candidate build ID (must match the tested build)
+        required: false
+        type: string
+      android_review_candidate_build_id:
+        description: Approved Android candidate build ID (must match the tested build)
+        required: false
+        type: string
   push:
     tags:
       - "mobile-v*"
+  pull_request:
   workflow_call:
+    inputs:
+      native_smoke_ios_build_id:
+        description: Non-secret EAS build ID of the iOS candidate
+        required: true
+        type: string
+      native_smoke_android_build_id:
+        description: Non-secret EAS build ID of the Android candidate
+        required: true
+        type: string
     secrets:
       EAS_TOKEN:
         required: true
-      NATIVE_SMOKE_IOS_BUILD_ID:
-        required: true
-      NATIVE_SMOKE_ANDROID_BUILD_ID:
+      SENTRY_AUTH_TOKEN:
         required: true
       NATIVE_SMOKE_IOS_APP_ID:
         required: true
@@ -29,18 +45,515 @@ on:
         required: true
       NATIVE_SMOKE_DISPLAY_NAME:
         required: false
+      NATIVE_SMOKE_IOS_SENTRY_RELEASE:
+        required: true
+      NATIVE_SMOKE_IOS_SENTRY_DIST:
+        required: true
+      NATIVE_SMOKE_ANDROID_SENTRY_RELEASE:
+        required: true
+      NATIVE_SMOKE_ANDROID_SENTRY_DIST:
+        required: true
+      E2E_CHAT_URL:
+        required: true
+      E2E_API_URL:
+        required: true
+      CLERK_PUBLISHABLE_KEY:
+        required: true
+      CLERK_SECRET_KEY:
+        required: true
+      DATABASE_URL:
+        required: true
 
 permissions:
+  actions: read
   contents: read
-  actions: write
 
 env:
   PNPM_VERSION: 10.26.1
-  EAS_CLI_VERSION: 23.2.0
+  NATIVE_SMOKE_IOS_BUILD_ID: ${{ inputs.native_smoke_ios_build_id || vars.NATIVE_SMOKE_IOS_BUILD_ID }}
+  NATIVE_SMOKE_ANDROID_BUILD_ID: ${{ inputs.native_smoke_android_build_id || vars.NATIVE_SMOKE_ANDROID_BUILD_ID }}
 
 jobs:
+  android-preview-evidence:
+    # Keep this display name synchronized with the required check in the repository ruleset.
+    name: Android preview evidence
+    if: ${{ github.event_name == 'pull_request' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out handoff record
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Validate changed Android preview records
+        env:
+          ANDROID_PREVIEW_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          ANDROID_PREVIEW_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          summary_header="## Android preview evidence"
+          diff_output=""
+          if diff_output="$(
+            git diff \
+              --name-only \
+              --diff-filter=ACDMRT \
+              "${ANDROID_PREVIEW_BASE_SHA}...${ANDROID_PREVIEW_HEAD_SHA}" \
+              -- \
+              "artifacts/chat-app/test-results/encrypted-room-recovery/android/**/validation-record.md" \
+              "artifacts/chat-app/test-results/encrypted-room-recovery/android/**/android-preview-preflight.json"
+          )"; then
+            :
+          else
+            {
+              echo "$summary_header"
+              echo
+              echo "- Status: **FAIL**"
+              echo "- Missing-boundary reason: could not locate the pull request's changed Android preview evidence files."
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "Could not locate the pull request's changed Android preview evidence files." >&2
+            exit 1
+          fi
+
+          changed_record_candidates=()
+          changed_preflight_paths=()
+          while IFS= read -r changed_path; do
+            [[ -n "$changed_path" ]] || continue
+            case "$changed_path" in
+              */validation-record.md)
+                changed_record_candidates+=("$changed_path")
+                ;;
+              */android-preview-preflight.json)
+                record_path="${changed_path%/android-preview-preflight.json}/validation-record.md"
+                changed_record_candidates+=("$record_path")
+                changed_preflight_paths+=("$changed_path")
+                ;;
+            esac
+          done < <(printf '%s\n' "$diff_output")
+
+          if ((${#changed_record_candidates[@]} > 0)); then
+            mapfile -t changed_records < <(printf '%s\n' "${changed_record_candidates[@]}" | sort -u)
+          else
+            changed_records=()
+          fi
+
+          if ((${#changed_records[@]} == 0)); then
+            {
+              echo "$summary_header"
+              echo
+              echo "- Status: **SKIP**"
+              echo "- Changed records checked: **0**"
+              echo "- Validation: **Not applicable; this pull request changed no Android preview validation record or preflight artifact.**"
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "No Android preview validation records or preflight artifacts changed; nothing to validate."
+            exit 0
+          fi
+
+          {
+            echo "$summary_header"
+            echo
+            echo "- Changed records checked: **${#changed_records[@]}**"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          overall_status=0
+          for record_path in "${changed_records[@]}"; do
+            record_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/blob/${GITHUB_SHA}/${record_path}"
+            record_result=""
+            validation_output=""
+            validation_status=0
+            reasons=""
+            preflight_path=""
+            for changed_preflight_path in "${changed_preflight_paths[@]}"; do
+              if [[ "$changed_preflight_path" == "${record_path%/validation-record.md}/android-preview-preflight.json" ]]; then
+                preflight_path="$changed_preflight_path"
+                break
+              fi
+            done
+
+            if [[ ! -f "$record_path" ]]; then
+              validation_status=1
+              reasons="- The changed Android preview validation record is missing from the checked-out commit."
+            else
+              record_result="$(
+                sed -nE 's/^\*\*Result:[[:space:]]*(PASS|BLOCKED|FAIL).*/\1/p' "$record_path" |
+                  head -n 1
+              )"
+              checker_args=("$record_path")
+              if [[ -n "$preflight_path" ]]; then
+                checker_args+=("$preflight_path")
+              fi
+              if validation_output="$(pnpm run validate:android-preview-evidence -- "${checker_args[@]}" 2>&1)"; then
+                :
+              else
+                validation_status=$?
+                reasons="$(printf '%s\n' "$validation_output" | sed -n '/^- /p')"
+              fi
+            fi
+
+            if ((validation_status != 0)); then
+              overall_status=1
+              if [[ -z "$reasons" ]]; then
+                reasons="- The Android preview evidence record did not satisfy the validation contract."
+              fi
+            fi
+
+            {
+              echo
+              echo "### [${record_path}](${record_url})"
+              if ((validation_status == 0)); then
+                echo "- Validation: **PASS**"
+                if [[ "$record_result" == "BLOCKED" ]]; then
+                  echo "- Record result: **BLOCKED (valid)**"
+                else
+                  echo "- Record result: **${record_result:-Unavailable}**"
+                fi
+              else
+                echo "- Validation: **FAIL**"
+                echo "- Record result: **${record_result:-Unavailable}**"
+                echo
+                echo "#### Missing-boundary reason"
+                printf '%s\n' "$reasons"
+              fi
+            } >> "$GITHUB_STEP_SUMMARY"
+
+            if ((validation_status != 0)); then
+              printf '%s\n' "$reasons" >&2
+            fi
+          done
+
+          exit "$overall_status"
+
+  ios-preview-evidence:
+    # Keep this display name synchronized with the required check in the repository ruleset.
+    name: iOS preview evidence
+    if: ${{ github.event_name == 'pull_request' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out handoff record
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Validate changed iOS preview records
+        env:
+          IOS_PREVIEW_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          IOS_PREVIEW_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          summary_header="## iOS preview evidence"
+          diff_output=""
+          if diff_output="$(
+            git diff \
+              --name-only \
+              --diff-filter=ACDMRT \
+              "${IOS_PREVIEW_BASE_SHA}...${IOS_PREVIEW_HEAD_SHA}" \
+              -- \
+              "artifacts/chat-app/test-results/encrypted-room-recovery/ios/**/validation-record.md"
+          )"; then
+            :
+          else
+            {
+              echo "$summary_header"
+              echo
+              echo "- Status: **FAIL**"
+              echo "- Missing-boundary reason: could not locate the pull request's changed iOS preview records."
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "Could not locate the pull request's changed iOS preview records." >&2
+            exit 1
+          fi
+
+          mapfile -t changed_records < <(printf '%s\n' "$diff_output" | sed '/^$/d')
+
+          if ((${#changed_records[@]} == 0)); then
+            {
+              echo "$summary_header"
+              echo
+              echo "- Status: **SKIP**"
+              echo "- Changed records checked: **0**"
+              echo "- Validation: **Not applicable; this pull request changed no iOS preview validation record.**"
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "No iOS preview validation records changed; nothing to validate."
+            exit 0
+          fi
+
+          {
+            echo "$summary_header"
+            echo
+            echo "- Changed records checked: **${#changed_records[@]}**"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          overall_status=0
+          for record_path in "${changed_records[@]}"; do
+            record_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/blob/${GITHUB_SHA}/${record_path}"
+            record_result=""
+            validation_output=""
+            validation_status=0
+            reasons=""
+
+            if [[ ! -f "$record_path" ]]; then
+              validation_status=1
+              reasons="- The changed iOS preview validation record is missing from the checked-out commit."
+            else
+              record_result="$(
+                sed -nE 's/^\*\*Result:[[:space:]]*(PASS|BLOCKED|FAIL).*/\1/p' "$record_path" |
+                  head -n 1
+              )"
+              if validation_output="$(pnpm run validate:ios-preview-evidence -- "$record_path" 2>&1)"; then
+                :
+              else
+                validation_status=$?
+                reasons="$(printf '%s\n' "$validation_output" | sed -n '/^- /p')"
+              fi
+            fi
+
+            if ((validation_status != 0)); then
+              overall_status=1
+              if [[ -z "$reasons" ]]; then
+                reasons="- The iOS preview evidence record did not satisfy the validation contract."
+              fi
+            fi
+
+            {
+              echo
+              echo "### [${record_path}](${record_url})"
+              if ((validation_status == 0)); then
+                echo "- Validation: **PASS**"
+                if [[ "$record_result" == "BLOCKED" ]]; then
+                  echo "- Record result: **BLOCKED (valid)**"
+                else
+                  echo "- Record result: **${record_result:-Unavailable}**"
+                fi
+              else
+                echo "- Validation: **FAIL**"
+                echo "- Record result: **${record_result:-Unavailable}**"
+                echo
+                echo "#### Missing-boundary reason"
+                printf '%s\n' "$reasons"
+              fi
+            } >> "$GITHUB_STEP_SUMMARY"
+
+            if ((validation_status != 0)); then
+              printf '%s\n' "$reasons" >&2
+            fi
+          done
+
+          exit "$overall_status"
+
+  native-evidence-summary-regression:
+    name: Native evidence summary regression
+    if: ${{ github.event_name != 'pull_request' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out release candidate
+        uses: actions/checkout@v4
+
+      - name: Verify blocked native evidence summary
+        shell: bash
+        run: |
+          set -euo pipefail
+          blocked_root="$(mktemp -d)"
+          summary_path="$(mktemp)"
+          trap 'rm -rf "$blocked_root" "$summary_path"' EXIT
+
+          if GITHUB_STEP_SUMMARY="$summary_path" bash scripts/run-untrusted-checker.sh bash scripts/check-native-large-text-evidence.sh "$blocked_root"; then
+            echo "The blocked native evidence scenario unexpectedly passed." >&2
+            exit 1
+          fi
+
+          ios_section="$(
+            awk '
+              /^## iOS native large-text evidence$/ { collecting=1 }
+              /^## Android native large-text evidence$/ { collecting=0 }
+              collecting { print }
+            ' "$summary_path"
+          )"
+          android_section="$(
+            awk '
+              /^## Android native large-text evidence$/ { collecting=1 }
+              collecting { print }
+            ' "$summary_path"
+          )"
+
+          require_contains() {
+            local section="$1"
+            local expected="$2"
+            if ! grep -Fq -- "$expected" <<< "$section"; then
+              echo "Expected blocked native evidence summary to contain: $expected" >&2
+              exit 1
+            fi
+          }
+
+          require_not_contains() {
+            local section="$1"
+            local unexpected="$2"
+            if grep -Fq -- "$unexpected" <<< "$section"; then
+              echo "Blocked native evidence summary contained cross-platform detail: $unexpected" >&2
+              exit 1
+            fi
+          }
+
+          require_contains "$ios_section" "- Status: **FAIL**"
+          require_contains "$ios_section" "- Validated run directory: **Unavailable**"
+          require_contains "$ios_section" "- Detailed evidence report: **Unavailable**"
+          require_contains "$ios_section" "Missing result directory: $blocked_root/ios"
+          require_not_contains "$ios_section" "$blocked_root/android"
+
+          require_contains "$android_section" "- Status: **FAIL**"
+          require_contains "$android_section" "- Validated run directory: **Unavailable**"
+          require_contains "$android_section" "- Detailed evidence report: **Unavailable**"
+          require_contains "$android_section" "Missing result directory: $blocked_root/android"
+          require_not_contains "$android_section" "$blocked_root/ios"
+
+          cat "$summary_path" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Verify failed platform artifact download summary
+        shell: bash
+        run: |
+          set -euo pipefail
+          failed_download_root="$(mktemp -d)"
+          summary_path="$(mktemp)"
+          trap 'rm -rf "$failed_download_root" "$summary_path"' EXIT
+
+          if \
+            GITHUB_STEP_SUMMARY="$summary_path" \
+            NATIVE_IOS_EVIDENCE_DOWNLOAD_RESULT=failure \
+            NATIVE_ANDROID_EVIDENCE_DOWNLOAD_RESULT=success \
+            NATIVE_ANDROID_EVIDENCE_ARTIFACT_URL="https://github.example/example/chat-app/actions/runs/123/artifacts/456" \
+            bash scripts/run-untrusted-checker.sh bash scripts/check-native-large-text-evidence.sh "$failed_download_root"; then
+            echo "The failed native evidence download scenario unexpectedly passed." >&2
+            exit 1
+          fi
+
+          ios_section="$(
+            awk '
+              /^## iOS native large-text evidence$/ { collecting=1 }
+              /^## Android native large-text evidence$/ { collecting=0 }
+              collecting { print }
+            ' "$summary_path"
+          )"
+          android_section="$(
+            awk '
+              /^## Android native large-text evidence$/ { collecting=1 }
+              collecting { print }
+            ' "$summary_path"
+          )"
+
+          require_contains() {
+            local section="$1"
+            local expected="$2"
+            if ! grep -Fq -- "$expected" <<< "$section"; then
+              echo "Expected failed-download native evidence summary to contain: $expected" >&2
+              exit 1
+            fi
+          }
+
+          require_not_contains() {
+            local section="$1"
+            local unexpected="$2"
+            if grep -Fq -- "$unexpected" <<< "$section"; then
+              echo "Failed-download native evidence summary contained unsafe detail: $unexpected" >&2
+              exit 1
+            fi
+          }
+
+          require_contains "$ios_section" "- Status: **FAIL**"
+          require_contains "$ios_section" "- Artifact download: **FAIL**"
+          require_contains "$ios_section" "- Validated run directory: **Unavailable**"
+          require_contains "$ios_section" "- Detailed evidence report: **Unavailable**"
+          require_contains "$ios_section" "native evidence artifact download did not complete"
+          require_contains "$ios_section" "- Recovery: **Rerun the iOS native large-text job, or make the existing iOS artifact available, then rerun the mobile release gate.**"
+          require_not_contains "$ios_section" "https://github.example"
+
+          require_contains "$android_section" "- Status: **FAIL**"
+          require_contains "$android_section" "- Artifact download: **PASS**"
+          require_contains "$android_section" "- Validated run directory: **Unavailable**"
+          require_contains "$android_section" "- Detailed evidence report: **Unavailable**"
+          require_contains "$android_section" "Missing result directory:"
+          require_not_contains "$android_section" "$failed_download_root/ios"
+
+          cat "$summary_path" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Verify both platform artifact download failures have recovery guidance
+        shell: bash
+        run: |
+          set -euo pipefail
+          failed_download_root="$(mktemp -d)"
+          summary_path="$(mktemp)"
+          trap 'rm -rf "$failed_download_root" "$summary_path"' EXIT
+
+          if \
+            GITHUB_STEP_SUMMARY="$summary_path" \
+            NATIVE_IOS_EVIDENCE_DOWNLOAD_RESULT=failure \
+            NATIVE_ANDROID_EVIDENCE_DOWNLOAD_RESULT=failure \
+            NATIVE_IOS_EVIDENCE_ARTIFACT_URL="https://github.example/example/chat-app/actions/runs/123/artifacts/456" \
+            NATIVE_ANDROID_EVIDENCE_ARTIFACT_URL="https://github.example/example/chat-app/actions/runs/123/artifacts/789" \
+            bash scripts/run-untrusted-checker.sh bash scripts/check-native-large-text-evidence.sh "$failed_download_root"; then
+            echo "The both-failed native evidence download scenario unexpectedly passed." >&2
+            exit 1
+          fi
+
+          require_contains() {
+            local section="$1"
+            local expected="$2"
+            if ! grep -Fq -- "$expected" <<< "$section"; then
+              echo "Expected both-failed native evidence summary to contain: $expected" >&2
+              exit 1
+            fi
+          }
+
+          require_not_contains() {
+            local section="$1"
+            local unexpected="$2"
+            if grep -Fq -- "$unexpected" <<< "$section"; then
+              echo "Both-failed native evidence summary contained unsafe detail: $unexpected" >&2
+              exit 1
+            fi
+          }
+
+          ios_section="$(
+            awk '
+              /^## iOS native large-text evidence$/ { collecting=1 }
+              /^## Android native large-text evidence$/ { collecting=0 }
+              collecting { print }
+            ' "$summary_path"
+          )"
+          android_section="$(
+            awk '
+              /^## Android native large-text evidence$/ { collecting=1 }
+              collecting { print }
+            ' "$summary_path"
+          )"
+
+          require_contains "$ios_section" "- Status: **FAIL**"
+          require_contains "$ios_section" "- Artifact download: **FAIL**"
+          require_contains "$ios_section" "- Recovery: **Rerun the iOS native large-text job, or make the existing iOS artifact available, then rerun the mobile release gate.**"
+          require_not_contains "$ios_section" "https://github.example"
+
+          require_contains "$android_section" "- Status: **FAIL**"
+          require_contains "$android_section" "- Artifact download: **FAIL**"
+          require_contains "$android_section" "- Recovery: **Rerun the Android native large-text job, or make the existing Android artifact available, then rerun the mobile release gate.**"
+          require_not_contains "$android_section" "https://github.example"
+
+          cat "$summary_path" >> "$GITHUB_STEP_SUMMARY"
+
   native-ios:
     name: Native large-text smoke (iOS)
+    if: ${{ github.event_name != 'pull_request' }}
+    outputs:
+      native_evidence_artifact_url: ${{ steps.upload-ios-native-smoke.outputs.artifact-url }}
     runs-on:
       - self-hosted
       - macos
@@ -49,29 +562,58 @@ jobs:
     environment:
       name: mobile-release
     env:
-      NATIVE_SMOKE_RESULTS_DIR: ${{ github.workspace }}/test-results/native-large-text/ios/${{ github.run_id }}
+      NATIVE_SMOKE_RESULTS_DIR: ${{ github.workspace }}/test-results/native-large-text/ios/${{ github.run_id }}-${{ github.run_attempt }}
     steps:
       - name: Check out release candidate
         uses: actions/checkout@v4
 
+      - name: Clear prior iOS evidence from this runner
+        run: rm -rf test-results/native-large-text/ios
+
       - name: Set up pnpm
-        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1
+        id: setup-pnpm
+        uses: pnpm/action-setup@v4
         with:
           version: ${{ env.PNPM_VERSION }}
 
       - name: Set up Node.js
+        id: setup-node
         uses: actions/setup-node@v4
         with:
           node-version: 24
           cache: pnpm
 
       - name: Install workspace dependencies
+        id: install-dependencies
         run: pnpm install --frozen-lockfile
 
       - name: Verify app branding
+        id: app-branding
         run: pnpm --filter @workspace/chat-app run validate:branding
 
-      - name: Verify prepared iPhone SE simulator
+      - name: Verify iOS release configuration
+        id: ios-release-configuration
+        env:
+          NATIVE_SMOKE_IOS_APP_ID: ${{ secrets.NATIVE_SMOKE_IOS_APP_ID }}
+          NATIVE_SMOKE_IOS_BUILD_ID: ${{ env.NATIVE_SMOKE_IOS_BUILD_ID }}
+          NATIVE_SMOKE_EMAIL: ${{ secrets.NATIVE_SMOKE_EMAIL }}
+          NATIVE_SMOKE_PASSWORD: ${{ secrets.NATIVE_SMOKE_PASSWORD }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for value in \
+            NATIVE_SMOKE_IOS_APP_ID \
+            NATIVE_SMOKE_IOS_BUILD_ID \
+            NATIVE_SMOKE_EMAIL \
+            NATIVE_SMOKE_PASSWORD; do
+            if [[ -z "${!value:-}" ]]; then
+              echo "Required iOS release configuration is incomplete." >&2
+              exit 2
+            fi
+          done
+
+      - name: Verify iOS simulator tooling
+        id: ios-xcrun
         shell: bash
         run: |
           set -euo pipefail
@@ -79,35 +621,50 @@ jobs:
             echo "xcrun is required on the prepared iOS runner." >&2
             exit 2
           fi
+
+      - name: Verify prepared iPhone SE simulator
+        id: ios-simulator
+        shell: bash
+        run: |
+          set -euo pipefail
           booted_devices="$(xcrun simctl list devices booted)"
-          if ! grep -q "iPhone SE (3rd generation)" <<<"$booted_devices"; then
+          device_udid="$(
+            sed -n 's/^[[:space:]]*iPhone SE (3rd generation) (\([0-9A-F-]\{8,\}\)) (Booted)$/\1/p' <<<"$booted_devices" |
+              head -n 1
+          )"
+          if [[ -z "$device_udid" ]]; then
             echo "A booted iPhone SE (3rd generation) is required on the iOS runner." >&2
             xcrun simctl list devices booted >&2
             exit 2
           fi
+          printf 'NATIVE_SMOKE_IOS_DEVICE_UDID=%s\n' "$device_udid" >> "$GITHUB_ENV"
+          echo "Prepared iPhone SE (3rd generation): $device_udid"
 
       - name: Inspect installed iOS native branding
+        id: ios-native-branding
         env:
           NATIVE_SMOKE_APP_ID: ${{ secrets.NATIVE_SMOKE_IOS_APP_ID }}
-          NATIVE_SMOKE_BUILD_ID: ${{ secrets.NATIVE_SMOKE_IOS_BUILD_ID }}
+          NATIVE_SMOKE_BUILD_ID: ${{ env.NATIVE_SMOKE_IOS_BUILD_ID }}
+          NATIVE_SMOKE_IOS_DEVICE_UDID: ${{ env.NATIVE_SMOKE_IOS_DEVICE_UDID }}
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p "$NATIVE_SMOKE_RESULTS_DIR"
-          device_udid="$(
-            xcrun simctl list devices booted |
-              sed -n 's/.* (\([0-9A-F-]\{8,\}\)) (Booted)$/\1/p' |
-              head -n 1
-          )"
+          device_udid="${NATIVE_SMOKE_IOS_DEVICE_UDID:-}"
           if [[ -z "$device_udid" ]]; then
-            echo "Could not determine the booted iOS simulator UDID." >&2
+            echo "The prepared iPhone SE simulator UDID was not carried forward from verification." >&2
             exit 2
           fi
           app_container="$(xcrun simctl get_app_container "$device_udid" "$NATIVE_SMOKE_APP_ID" app)"
           if [[ ! -f "$app_container/Info.plist" ]]; then
-            echo "The release candidate is not installed for application ID $NATIVE_SMOKE_APP_ID." >&2
+            echo "The release candidate is not installed on the prepared iOS simulator." >&2
             exit 2
           fi
+          if ! LC_ALL=C grep -aR -Fq "SENTRY_RELEASE_PREFLIGHT_PASSED_V1" "$app_container"; then
+            echo "The installed iOS candidate does not contain crash-reporting preflight evidence. Rebuild it with SENTRY_DSN or EXPO_PUBLIC_SENTRY_DSN configured." >&2
+            exit 2
+          fi
+          echo "Verified crash-reporting preflight evidence in the installed iOS candidate."
           metadata_path="$NATIVE_SMOKE_RESULTS_DIR/native-info.json"
           plutil -convert json -o "$metadata_path" "$app_container/Info.plist"
           pnpm --filter @workspace/chat-app run validate:branding:native -- \
@@ -117,28 +674,156 @@ jobs:
             --results-dir "$NATIVE_SMOKE_RESULTS_DIR"
 
       - name: Verify Maestro
+        id: ios-maestro
         run: maestro --version
 
       - name: Run iOS native large-text release gate
+        id: ios-native-evidence
         env:
           NATIVE_SMOKE_APP_ID: ${{ secrets.NATIVE_SMOKE_IOS_APP_ID }}
           NATIVE_SMOKE_EMAIL: ${{ secrets.NATIVE_SMOKE_EMAIL }}
           NATIVE_SMOKE_PASSWORD: ${{ secrets.NATIVE_SMOKE_PASSWORD }}
           NATIVE_SMOKE_DISPLAY_NAME: ${{ secrets.NATIVE_SMOKE_DISPLAY_NAME }}
-          NATIVE_SMOKE_BUILD_ID: ${{ secrets.NATIVE_SMOKE_IOS_BUILD_ID }}
+          NATIVE_SMOKE_BUILD_ID: ${{ env.NATIVE_SMOKE_IOS_BUILD_ID }}
+          NATIVE_SMOKE_IOS_DEVICE_UDID: ${{ env.NATIVE_SMOKE_IOS_DEVICE_UDID }}
+          NATIVE_SMOKE_SUMMARY_DEFER: "1"
         run: pnpm --filter @workspace/chat-app test:native-large-text ios
+
+      - name: Send controlled iOS JavaScript error
+        id: ios-sentry-trigger
+        env:
+          NATIVE_SMOKE_APP_ID: ${{ secrets.NATIVE_SMOKE_IOS_APP_ID }}
+          NATIVE_SMOKE_BUILD_ID: ${{ env.NATIVE_SMOKE_IOS_BUILD_ID }}
+          NATIVE_SMOKE_IOS_DEVICE_UDID: ${{ env.NATIVE_SMOKE_IOS_DEVICE_UDID }}
+          NATIVE_SENTRY_MARKER: native-${{ github.run_id }}-${{ github.run_attempt }}-ios
+        run: pnpm --filter @workspace/chat-app test:native-sentry ios
+
+      - name: Verify readable iOS source maps in Sentry
+        id: ios-sentry-verification
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_EXPECTED_PLATFORM: ios
+          SENTRY_EXPECTED_BUILD_ID: ${{ env.NATIVE_SMOKE_IOS_BUILD_ID }}
+          SENTRY_EXPECTED_RELEASE: ${{ secrets.NATIVE_SMOKE_IOS_SENTRY_RELEASE }}
+          SENTRY_EXPECTED_DIST: ${{ secrets.NATIVE_SMOKE_IOS_SENTRY_DIST }}
+          SENTRY_PROBE_MARKER: native-${{ github.run_id }}-${{ github.run_attempt }}-ios
+          SENTRY_EVIDENCE_PATH: ${{ env.NATIVE_SMOKE_RESULTS_DIR }}/sentry-source-map-evidence.json
+        run: node scripts/verify-sentry-native-event.mjs
+
+      - name: Summarize iOS readiness
+        if: always()
+        env:
+          IOS_RESULTS_DIR: ${{ env.NATIVE_SMOKE_RESULTS_DIR }}
+          WORKSPACE_RESULT: ${{ steps.install-dependencies.outcome }}
+          APP_BRANDING_RESULT: ${{ steps.app-branding.outcome }}
+          IOS_RELEASE_CONFIGURATION_RESULT: ${{ steps.ios-release-configuration.outcome }}
+          IOS_XCRUN_RESULT: ${{ steps.ios-xcrun.outcome }}
+          IOS_SIMULATOR_RESULT: ${{ steps.ios-simulator.outcome }}
+          IOS_NATIVE_BRANDING_RESULT: ${{ steps.ios-native-branding.outcome }}
+          IOS_MAESTRO_RESULT: ${{ steps.ios-maestro.outcome }}
+          IOS_NATIVE_EVIDENCE_RESULT: ${{ steps.ios-native-evidence.outcome }}
+          IOS_SENTRY_TRIGGER_RESULT: ${{ steps.ios-sentry-trigger.outcome }}
+          IOS_SENTRY_VERIFICATION_RESULT: ${{ steps.ios-sentry-verification.outcome }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          status="READY"
+          blockers=()
+          checks=()
+
+          add_check() {
+            local label="$1"
+            local result="$2"
+            if [[ "$result" == "success" ]]; then
+              checks+=("- ${label}: **READY**")
+            else
+              status="BLOCKED"
+              checks+=("- ${label}: **BLOCKED**")
+              blockers+=("${label}")
+            fi
+          }
+
+          add_check "Workspace dependencies" "$WORKSPACE_RESULT"
+          add_check "App branding source" "$APP_BRANDING_RESULT"
+          add_check "Release configuration" "$IOS_RELEASE_CONFIGURATION_RESULT"
+          add_check "Xcode simulator tooling" "$IOS_XCRUN_RESULT"
+          add_check "Booted iPhone SE (3rd generation)" "$IOS_SIMULATOR_RESULT"
+          add_check "Installed native candidate" "$IOS_NATIVE_BRANDING_RESULT"
+          add_check "Maestro" "$IOS_MAESTRO_RESULT"
+          add_check "Native large-text evidence" "$IOS_NATIVE_EVIDENCE_RESULT"
+          add_check "Controlled Sentry error" "$IOS_SENTRY_TRIGGER_RESULT"
+          add_check "Readable Sentry source maps" "$IOS_SENTRY_VERIFICATION_RESULT"
+
+          {
+            echo "## iOS native large-text readiness"
+            echo
+            echo "- Status: **${status}**"
+            echo
+            echo "### Prerequisites"
+            printf '%s\n' "${checks[@]}"
+            if [[ -f "$IOS_RESULTS_DIR/ios-readiness.md" ]]; then
+              diagnostics="$(
+                awk '
+                  /^### Blocking prerequisites$/ { collecting=1; next }
+                  collecting && /^- / { print; next }
+                  collecting && !/^- / { exit }
+                ' "$IOS_RESULTS_DIR/ios-readiness.md"
+              )"
+              if [[ -n "$diagnostics" ]]; then
+                echo
+                echo "### Readiness diagnostics"
+                printf '%s\n' "$diagnostics"
+              fi
+            fi
+            if ((${#blockers[@]})); then
+              echo
+              echo "### Blocking prerequisites"
+              printf -- '- %s\n' "${blockers[@]}"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload iOS native smoke artifacts
         if: always()
+        id: upload-ios-native-smoke
         uses: actions/upload-artifact@v4
         with:
           name: native-large-text-ios
           path: test-results/native-large-text/ios/**
           if-no-files-found: warn
           retention-days: 30
+          overwrite: true
+
+      - name: Summarize iOS native branding
+        if: always()
+        env:
+          IOS_RESULTS_DIR: ${{ env.NATIVE_SMOKE_RESULTS_DIR }}
+          IOS_BRANDING_ARTIFACT_URL: ${{ steps.upload-ios-native-smoke.outputs.artifact-url }}
+          IOS_NATIVE_BRANDING_RESULT: ${{ steps.ios-native-branding.outcome }}
+          IOS_BUILD_ID: ${{ env.NATIVE_SMOKE_IOS_BUILD_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          report_url="${IOS_BRANDING_ARTIFACT_URL:-${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}}"
+          summary_path="$IOS_RESULTS_DIR/native-branding-summary.md"
+          if [[ -f "$summary_path" ]]; then
+            sed "s|__NATIVE_BRANDING_REPORT_URL__|${report_url}|g" \
+              "$summary_path" >> "$GITHUB_STEP_SUMMARY"
+          else
+            {
+              echo "## iOS native branding"
+              echo
+              echo "- Status: **FAIL**"
+              echo "- Candidate build ID: \`${IOS_BUILD_ID}\`"
+              echo "- Candidate build fingerprint (SHA-256): \`$(printf '%s' "$IOS_BUILD_ID" | shasum -a 256 | awk '{print $1}')\`"
+              echo "- Native label: \`Unavailable\`"
+              echo "- Permission copy: **UNAVAILABLE** (native metadata was not inspected)"
+              echo "- Detailed report: [native-branding-check.md](${report_url})"
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
 
   android-prerequisite-preflight:
     name: Android release runner preflight
+    if: ${{ github.event_name != 'pull_request' }}
     runs-on:
       - self-hosted
       - linux
@@ -153,7 +838,7 @@ jobs:
       - name: Check Android release prerequisites
         env:
           NATIVE_SMOKE_APP_ID: ${{ secrets.NATIVE_SMOKE_ANDROID_APP_ID }}
-          NATIVE_SMOKE_BUILD_ID: ${{ secrets.NATIVE_SMOKE_ANDROID_BUILD_ID }}
+          NATIVE_SMOKE_BUILD_ID: ${{ env.NATIVE_SMOKE_ANDROID_BUILD_ID }}
           NATIVE_SMOKE_EMAIL: ${{ secrets.NATIVE_SMOKE_EMAIL }}
           NATIVE_SMOKE_PASSWORD: ${{ secrets.NATIVE_SMOKE_PASSWORD }}
           NATIVE_SMOKE_DISPLAY_NAME: ${{ secrets.NATIVE_SMOKE_DISPLAY_NAME }}
@@ -161,6 +846,9 @@ jobs:
 
   native-android:
     name: Native large-text smoke (Android)
+    if: ${{ github.event_name != 'pull_request' }}
+    outputs:
+      native_evidence_artifact_url: ${{ steps.upload-android-native-smoke.outputs.artifact-url }}
     needs:
       - android-prerequisite-preflight
     runs-on:
@@ -171,13 +859,16 @@ jobs:
     environment:
       name: mobile-release
     env:
-      NATIVE_SMOKE_RESULTS_DIR: ${{ github.workspace }}/test-results/native-large-text/android/${{ github.run_id }}
+      NATIVE_SMOKE_RESULTS_DIR: ${{ github.workspace }}/test-results/native-large-text/android/${{ github.run_id }}-${{ github.run_attempt }}
     steps:
       - name: Check out release candidate
         uses: actions/checkout@v4
 
+      - name: Clear prior Android evidence from this runner
+        run: rm -rf test-results/native-large-text/android
+
       - name: Set up pnpm
-        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1
+        uses: pnpm/action-setup@v4
         with:
           version: ${{ env.PNPM_VERSION }}
 
@@ -223,9 +914,10 @@ jobs:
           fi
 
       - name: Inspect installed Android native branding
+        id: android-native-branding
         env:
           NATIVE_SMOKE_APP_ID: ${{ secrets.NATIVE_SMOKE_ANDROID_APP_ID }}
-          NATIVE_SMOKE_BUILD_ID: ${{ secrets.NATIVE_SMOKE_ANDROID_BUILD_ID }}
+          NATIVE_SMOKE_BUILD_ID: ${{ env.NATIVE_SMOKE_ANDROID_BUILD_ID }}
         shell: bash
         run: |
           set -euo pipefail
@@ -245,11 +937,19 @@ jobs:
           fi
           apk_source="$(adb shell pm path "$NATIVE_SMOKE_APP_ID" | tr -d '\r' | sed -n 's/^package://p' | head -n 1)"
           if [[ -z "$apk_source" ]]; then
-            echo "Could not locate the installed APK for $NATIVE_SMOKE_APP_ID." >&2
+            echo "Could not locate the release candidate APK on the prepared Android device." >&2
             exit 2
           fi
           apk_path="$RUNNER_TEMP/realtime-algo-chat-app.apk"
           adb pull "$apk_source" "$apk_path"
+          apk_extract_dir="$RUNNER_TEMP/realtime-algo-chat-app-extracted"
+          rm -rf "$apk_extract_dir"
+          unzip -q "$apk_path" -d "$apk_extract_dir"
+          if ! LC_ALL=C grep -aR -Fq "SENTRY_RELEASE_PREFLIGHT_PASSED_V1" "$apk_extract_dir"; then
+            echo "The installed Android candidate does not contain crash-reporting preflight evidence. Rebuild it with SENTRY_DSN or EXPO_PUBLIC_SENTRY_DSN configured." >&2
+            exit 2
+          fi
+          echo "Verified crash-reporting preflight evidence in the installed Android candidate."
           badging_path="$NATIVE_SMOKE_RESULTS_DIR/android-badging.txt"
           "$aapt2_path" dump badging "$apk_path" > "$badging_path"
           metadata_path="$NATIVE_SMOKE_RESULTS_DIR/native-info.json"
@@ -262,13 +962,12 @@ jobs:
           const permissions = [...badging.matchAll(
             /^uses-permission: name='([^']+)'/gm,
           )].map((match) => match[1]);
-          if (!label) {
-            throw new Error("aapt2 did not report an Android application label.");
-          }
-          writeFileSync(
-            metadataPath,
-            `${JSON.stringify({ applicationLabel: label, permissions }, null, 2)}\n`,
-          );
+          // A label aapt2 did not report is left out so the branding validator
+          // fails on the missing field and its summary names it, instead of
+          // this step failing before any report exists.
+          const metadata =
+            label === undefined ? { permissions } : { applicationLabel: label, permissions };
+          writeFileSync(metadataPath, `${JSON.stringify(metadata, null, 2)}\n`);
           NODE
           pnpm --filter @workspace/chat-app run validate:branding:native -- \
             --platform android \
@@ -280,56 +979,77 @@ jobs:
         run: maestro --version
 
       - name: Run Android native large-text release gate
+        id: android-native-evidence
         env:
           NATIVE_SMOKE_APP_ID: ${{ secrets.NATIVE_SMOKE_ANDROID_APP_ID }}
           NATIVE_SMOKE_EMAIL: ${{ secrets.NATIVE_SMOKE_EMAIL }}
           NATIVE_SMOKE_PASSWORD: ${{ secrets.NATIVE_SMOKE_PASSWORD }}
           NATIVE_SMOKE_DISPLAY_NAME: ${{ secrets.NATIVE_SMOKE_DISPLAY_NAME }}
-          NATIVE_SMOKE_BUILD_ID: ${{ secrets.NATIVE_SMOKE_ANDROID_BUILD_ID }}
+          NATIVE_SMOKE_BUILD_ID: ${{ env.NATIVE_SMOKE_ANDROID_BUILD_ID }}
         run: pnpm --filter @workspace/chat-app test:native-large-text android
+
+      - name: Send controlled Android JavaScript error
+        id: android-sentry-trigger
+        env:
+          NATIVE_SMOKE_APP_ID: ${{ secrets.NATIVE_SMOKE_ANDROID_APP_ID }}
+          NATIVE_SMOKE_BUILD_ID: ${{ env.NATIVE_SMOKE_ANDROID_BUILD_ID }}
+          NATIVE_SENTRY_MARKER: native-${{ github.run_id }}-${{ github.run_attempt }}-android
+        run: pnpm --filter @workspace/chat-app test:native-sentry android
+
+      - name: Verify readable Android source maps in Sentry
+        id: android-sentry-verification
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_EXPECTED_PLATFORM: android
+          SENTRY_EXPECTED_BUILD_ID: ${{ env.NATIVE_SMOKE_ANDROID_BUILD_ID }}
+          SENTRY_EXPECTED_RELEASE: ${{ secrets.NATIVE_SMOKE_ANDROID_SENTRY_RELEASE }}
+          SENTRY_EXPECTED_DIST: ${{ secrets.NATIVE_SMOKE_ANDROID_SENTRY_DIST }}
+          SENTRY_PROBE_MARKER: native-${{ github.run_id }}-${{ github.run_attempt }}-android
+          SENTRY_EVIDENCE_PATH: ${{ env.NATIVE_SMOKE_RESULTS_DIR }}/sentry-source-map-evidence.json
+        run: node scripts/verify-sentry-native-event.mjs
 
       - name: Upload Android native smoke artifacts
         if: always()
+        id: upload-android-native-smoke
         uses: actions/upload-artifact@v4
         with:
           name: native-large-text-android
           path: test-results/native-large-text/android/**
           if-no-files-found: warn
           retention-days: 30
+          overwrite: true
 
-  mobile-release-gate:
-    name: Mobile release gate
-    if: ${{ always() }}
-    needs:
-      - native-ios
-      - native-android
-    runs-on: ubuntu-latest
-    steps:
-      - name: Block release unless both native checks pass
+      - name: Summarize Android native branding
+        if: always()
         env:
-          IOS_RESULT: ${{ needs.native-ios.result }}
-          ANDROID_RESULT: ${{ needs.native-android.result }}
+          ANDROID_RESULTS_DIR: ${{ env.NATIVE_SMOKE_RESULTS_DIR }}
+          ANDROID_BRANDING_ARTIFACT_URL: ${{ steps.upload-android-native-smoke.outputs.artifact-url }}
+          ANDROID_NATIVE_BRANDING_RESULT: ${{ steps.android-native-branding.outcome }}
+          ANDROID_BUILD_ID: ${{ env.NATIVE_SMOKE_ANDROID_BUILD_ID }}
+        shell: bash
         run: |
           set -euo pipefail
-          if [[ "$IOS_RESULT" != "success" || "$ANDROID_RESULT" != "success" ]]; then
-            echo "Mobile release blocked: iOS=$IOS_RESULT Android=$ANDROID_RESULT." >&2
-            exit 1
+          report_url="${ANDROID_BRANDING_ARTIFACT_URL:-${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}}"
+          summary_path="$ANDROID_RESULTS_DIR/native-branding-summary.md"
+          if [[ -f "$summary_path" ]]; then
+            sed "s|__NATIVE_BRANDING_REPORT_URL__|${report_url}|g" \
+              "$summary_path" >> "$GITHUB_STEP_SUMMARY"
+          else
+            {
+              echo "## Android native branding"
+              echo
+              echo "- Status: **FAIL**"
+              echo "- Candidate build ID: \`${ANDROID_BUILD_ID}\`"
+              echo "- Candidate build fingerprint (SHA-256): \`$(printf '%s' "$ANDROID_BUILD_ID" | sha256sum | awk '{print $1}')\`"
+              echo "- Native label: \`Unavailable\`"
+              echo "- Permission declarations: **UNAVAILABLE** (native metadata was not inspected)"
+              echo "- Detailed report: [native-branding-check.md](${report_url})"
+            } >> "$GITHUB_STEP_SUMMARY"
           fi
-          echo "Mobile release accessibility gate passed on iOS and Android."
 
-  mobile-publish:
-    name: Publish tested mobile builds
-    if: >-
-      ${{
-        needs.mobile-release-gate.result == 'success' &&
-        (
-          github.event_name == 'workflow_call' ||
-          (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/mobile-v')) ||
-          (github.event_name == 'workflow_dispatch' && inputs.publish == true)
-        )
-      }}
-    needs:
-      - mobile-release-gate
+  idle-profile-registration:
+    name: Idle profile registration
+    if: ${{ github.event_name != 'pull_request' }}
     runs-on: ubuntu-latest
     environment:
       name: mobile-release
@@ -338,7 +1058,204 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Set up pnpm
-        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1
+        uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install workspace dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Verify idle-profile browser targets
+        env:
+          E2E_CHAT_URL: ${{ secrets.E2E_CHAT_URL }}
+          E2E_API_URL: ${{ secrets.E2E_API_URL }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          check_target() {
+            local label="$1"
+            local url="$2"
+            if ! curl \
+              --fail \
+              --silent \
+              --connect-timeout 5 \
+              --max-time 10 \
+              --output /dev/null \
+              "$url"; then
+              echo "${label} target is unavailable or unhealthy." >&2
+              exit 2
+            fi
+            echo "${label} target is ready."
+          }
+
+          if [[ -z "${E2E_CHAT_URL:-}" || -z "${E2E_API_URL:-}" ]]; then
+            echo "Idle-profile browser target configuration is incomplete." >&2
+            exit 2
+          fi
+          check_target "Chat App" "$E2E_CHAT_URL"
+          check_target "API" "${E2E_API_URL%/}/api/healthz"
+
+      - name: Run idle-profile registration release check
+        id: idle-profile-check
+        env:
+          E2E_CHAT_URL: ${{ secrets.E2E_CHAT_URL }}
+          E2E_API_URL: ${{ secrets.E2E_API_URL }}
+          CLERK_PUBLISHABLE_KEY: ${{ secrets.CLERK_PUBLISHABLE_KEY }}
+          CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for value in \
+            E2E_CHAT_URL \
+            E2E_API_URL \
+            CLERK_PUBLISHABLE_KEY \
+            CLERK_SECRET_KEY \
+            DATABASE_URL; do
+            if [[ -z "${!value:-}" ]]; then
+              echo "Required idle-profile release configuration is incomplete." >&2
+              exit 2
+            fi
+          done
+          pnpm --filter @workspace/api-server run test:e2e:idle-profile-registration
+
+      - name: Upload idle-profile browser failure evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: idle-profile-registration-browser-evidence
+          path: artifacts/api-server/test-results/**
+          if-no-files-found: warn
+          retention-days: 14
+          overwrite: true
+
+      - name: Summarize idle-profile registration check
+        if: ${{ always() }}
+        env:
+          IDLE_PROFILE_RESULT: ${{ steps.idle-profile-check.outcome }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "## Idle profile registration"
+            echo
+            if [[ "$IDLE_PROFILE_RESULT" == "success" ]]; then
+              echo "- Status: **PASS**"
+              echo "- Result: the idle client did not repeat \`PUT /api/profile\` after token refresh."
+            else
+              echo "- Status: **FAIL**"
+              echo "- Result: release is blocked because the idle-profile registration check did not pass."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  mobile-release-gate:
+    name: Mobile release gate
+    if: ${{ always() && github.event_name != 'pull_request' }}
+    outputs:
+      ios_native_evidence_artifact_url: ${{ needs.native-ios.outputs.native_evidence_artifact_url }}
+      android_native_evidence_artifact_url: ${{ needs.native-android.outputs.native_evidence_artifact_url }}
+    needs:
+      - native-ios
+      - native-android
+      - idle-profile-registration
+      - native-evidence-summary-regression
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out release candidate
+        uses: actions/checkout@v4
+
+      - name: Download iOS native smoke artifacts
+        if: ${{ always() }}
+        continue-on-error: true
+        id: download-ios-native-smoke
+        uses: actions/download-artifact@v4
+        with:
+          name: native-large-text-ios
+          path: test-results/native-large-text/ios
+
+      - name: Download Android native smoke artifacts
+        if: ${{ always() }}
+        continue-on-error: true
+        id: download-android-native-smoke
+        uses: actions/download-artifact@v4
+        with:
+          name: native-large-text-android
+          path: test-results/native-large-text/android
+
+      - name: Validate native evidence completeness
+        id: evidence-completeness
+        if: ${{ always() }}
+        continue-on-error: true
+        env:
+          NATIVE_IOS_EVIDENCE_ARTIFACT_URL: ${{ needs.native-ios.outputs.native_evidence_artifact_url }}
+          NATIVE_ANDROID_EVIDENCE_ARTIFACT_URL: ${{ needs.native-android.outputs.native_evidence_artifact_url }}
+          NATIVE_IOS_EVIDENCE_DOWNLOAD_RESULT: ${{ steps.download-ios-native-smoke.outcome }}
+          NATIVE_ANDROID_EVIDENCE_DOWNLOAD_RESULT: ${{ steps.download-android-native-smoke.outcome }}
+        run: bash scripts/run-untrusted-checker.sh bash scripts/check-native-large-text-evidence.sh
+
+      - name: Block release unless both native checks pass
+        if: ${{ always() }}
+        env:
+          IOS_RESULT: ${{ needs.native-ios.result }}
+          ANDROID_RESULT: ${{ needs.native-android.result }}
+          IDLE_PROFILE_RESULT: ${{ needs.idle-profile-registration.result }}
+          SUMMARY_REGRESSION_RESULT: ${{ needs.native-evidence-summary-regression.result }}
+          EVIDENCE_RESULT: ${{ steps.evidence-completeness.outcome }}
+        run: |
+          set -euo pipefail
+          supported_node_range="$(
+            node --input-type=module -e '
+            import { readFileSync } from "node:fs";
+
+            try {
+              const packageJson = JSON.parse(readFileSync("package.json", "utf8"));
+              const configuredRange = packageJson?.engines?.node;
+              if (typeof configuredRange !== "string" || configuredRange.trim() === "") {
+                process.stdout.write(
+                  "missing or non-string value (set package.json engines.node to a valid semver range)",
+                );
+              } else {
+                process.stdout.write(JSON.stringify(configuredRange.trim()));
+              }
+            } catch {
+              process.stdout.write(
+                "unavailable because package.json is not valid JSON (fix package.json before rerunning)",
+              );
+            }
+            '
+          )"
+          if [[ "$EVIDENCE_RESULT" != "success" || "$IOS_RESULT" != "success" || "$ANDROID_RESULT" != "success" || "$IDLE_PROFILE_RESULT" != "success" || "$SUMMARY_REGRESSION_RESULT" != "success" ]]; then
+            echo "Mobile release blocked: evidence=$EVIDENCE_RESULT iOS=$IOS_RESULT Android=$ANDROID_RESULT idle-profile=$IDLE_PROFILE_RESULT summary-regression=$SUMMARY_REGRESSION_RESULT. Supported Node.js range from package.json engines.node: ${supported_node_range} (must be a valid semver range)." >&2
+            exit 1
+          fi
+          echo "Mobile release gate passed native accessibility and idle-profile registration checks."
+
+  mobile-publish:
+    name: Publish tested mobile builds
+    if: >-
+      ${{
+        github.event_name != 'pull_request' &&
+        needs.mobile-release-gate.result == 'success' &&
+        github.event_name == 'workflow_dispatch' &&
+        inputs.publish == true
+      }}
+    needs:
+      - mobile-release-gate
+    runs-on: ubuntu-latest
+    environment:
+      name: mobile-store-submission
+    steps:
+      - name: Check out release candidate
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
         with:
           version: ${{ env.PNPM_VERSION }}
 
@@ -347,29 +1264,143 @@ jobs:
         with:
           node-version: 24
 
+      - name: Download iOS native smoke artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: native-large-text-ios
+          path: test-results/native-large-text/ios
+
+      - name: Download Android native smoke artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: native-large-text-android
+          path: test-results/native-large-text/android
+
+      - name: Run native large-text evidence privacy regression
+        run: pnpm run test:native-large-text-evidence
+
+      - name: Attach candidate-bound human approvals
+        env:
+          IOS_REVIEW_BUILD_ID: ${{ inputs.ios_review_candidate_build_id }}
+          IOS_SUBMIT_BUILD_ID: ${{ env.NATIVE_SMOKE_IOS_BUILD_ID }}
+          ANDROID_REVIEW_BUILD_ID: ${{ inputs.android_review_candidate_build_id }}
+          ANDROID_SUBMIT_BUILD_ID: ${{ env.NATIVE_SMOKE_ANDROID_BUILD_ID }}
+          GH_TOKEN: ${{ github.token }}
+          GH_REPOSITORY: ${{ github.repository }}
+          GH_RUN_ID: ${{ github.run_id }}
+          GH_API_URL: ${{ github.api_url }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          reviewer="$(
+            curl --fail --silent --show-error \
+              --header "Accept: application/vnd.github+json" \
+              --header "Authorization: Bearer $GH_TOKEN" \
+              --header "X-GitHub-Api-Version: 2022-11-28" \
+              "$GH_API_URL/repos/$GH_REPOSITORY/actions/runs/$GH_RUN_ID/approvals" |
+              node -e '
+                let input = "";
+                process.stdin.setEncoding("utf8");
+                process.stdin.on("data", (chunk) => { input += chunk; });
+                process.stdin.on("end", () => {
+                  const reviews = JSON.parse(input);
+                  const approval = [...reviews].reverse().find(
+                    (review) =>
+                      review.state === "approved" &&
+                      review.environments?.some(
+                        (environment) =>
+                          environment.name === "mobile-store-submission",
+                      ),
+                  );
+                  if (!approval?.user?.login) process.exit(1);
+                  process.stdout.write(approval.user.login);
+                });
+              '
+          )"
+          if [[ -z "$reviewer" || "$reviewer" == *$'\n'* || "$reviewer" == *$'\r'* ]]; then
+            echo "Could not verify the reviewer who approved the mobile-store-submission environment." >&2
+            exit 1
+          fi
+
+          attach_approval() {
+            local platform="$1"
+            local approved_build_id="$2"
+            local submit_build_id="$3"
+            local platform_dir="test-results/native-large-text/$platform"
+            local run_dirs=()
+            local run_dir
+            local tested_build_id
+            local reviewed_at
+
+            if [[ -z "$approved_build_id" ]]; then
+              echo "Store submission requires the ${platform} review candidate build ID." >&2
+              exit 1
+            fi
+            if [[ "$approved_build_id" == *$'\n'* || "$approved_build_id" == *$'\r'* ]]; then
+              echo "The ${platform} review candidate build ID must contain exactly one line." >&2
+              exit 1
+            fi
+            mapfile -t run_dirs < <(find "$platform_dir" -mindepth 1 -maxdepth 1 -type d -print | sort)
+            if ((${#run_dirs[@]} != 1)); then
+              echo "Expected exactly one ${platform} evidence run, found ${#run_dirs[@]}." >&2
+              exit 1
+            fi
+            run_dir="${run_dirs[0]}"
+            tested_build_id="$(head -n 1 "$run_dir/candidate-build-id.txt" | tr -d '\r' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
+            if [[ "$approved_build_id" != "$tested_build_id" ]]; then
+              echo "The ${platform} approval is for a different candidate build than the downloaded evidence." >&2
+              exit 1
+            fi
+            if [[ "$submit_build_id" != "$tested_build_id" ]]; then
+              echo "The ${platform} build configured for store submission does not match the downloaded and approved evidence." >&2
+              exit 1
+            fi
+            reviewed_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            {
+              printf 'platform=%s\n' "$platform"
+              printf 'reviewer=%s\n' "$reviewer"
+              printf 'reviewed_at_utc=%s\n' "$reviewed_at"
+              printf 'candidate_build_id=%s\n' "$approved_build_id"
+              printf 'decision=APPROVED\n'
+              printf 'approval_scope=candidate\n'
+              printf 'notes=Approval supplied to the store submission workflow.\n'
+            } > "$run_dir/review-record.txt"
+          }
+
+          attach_approval ios "$IOS_REVIEW_BUILD_ID" "$IOS_SUBMIT_BUILD_ID"
+          attach_approval android "$ANDROID_REVIEW_BUILD_ID" "$ANDROID_SUBMIT_BUILD_ID"
+
+      - name: Require approved iOS and Android evidence
+        env:
+          NATIVE_EVIDENCE_REQUIRE_APPROVAL: "1"
+          NATIVE_IOS_EVIDENCE_ARTIFACT_URL: ${{ needs.mobile-release-gate.outputs.ios_native_evidence_artifact_url }}
+          NATIVE_ANDROID_EVIDENCE_ARTIFACT_URL: ${{ needs.mobile-release-gate.outputs.android_native_evidence_artifact_url }}
+        run: bash scripts/run-untrusted-checker.sh bash scripts/check-native-large-text-evidence.sh
+
       - name: Verify publishing inputs
         env:
           EAS_TOKEN: ${{ secrets.EAS_TOKEN }}
-          IOS_BUILD_ID: ${{ secrets.NATIVE_SMOKE_IOS_BUILD_ID }}
-          ANDROID_BUILD_ID: ${{ secrets.NATIVE_SMOKE_ANDROID_BUILD_ID }}
+          IOS_BUILD_ID: ${{ env.NATIVE_SMOKE_IOS_BUILD_ID }}
+          ANDROID_BUILD_ID: ${{ env.NATIVE_SMOKE_ANDROID_BUILD_ID }}
         run: |
           set -euo pipefail
           : "${EAS_TOKEN:?Set EAS_TOKEN in the mobile-release environment.}"
-          : "${IOS_BUILD_ID:?Set NATIVE_SMOKE_IOS_BUILD_ID in the mobile-release environment.}"
-          : "${ANDROID_BUILD_ID:?Set NATIVE_SMOKE_ANDROID_BUILD_ID in the mobile-release environment.}"
+          : "${IOS_BUILD_ID:?Set the NATIVE_SMOKE_IOS_BUILD_ID repository variable.}"
+          : "${ANDROID_BUILD_ID:?Set the NATIVE_SMOKE_ANDROID_BUILD_ID repository variable.}"
 
       - name: Submit the tested iOS and Android candidates
         env:
           EXPO_TOKEN: ${{ secrets.EAS_TOKEN }}
-          IOS_BUILD_ID: ${{ secrets.NATIVE_SMOKE_IOS_BUILD_ID }}
-          ANDROID_BUILD_ID: ${{ secrets.NATIVE_SMOKE_ANDROID_BUILD_ID }}
+          IOS_BUILD_ID: ${{ env.NATIVE_SMOKE_IOS_BUILD_ID }}
+          ANDROID_BUILD_ID: ${{ env.NATIVE_SMOKE_ANDROID_BUILD_ID }}
         run: |
           set -euo pipefail
-          pnpm dlx eas-cli@${{ env.EAS_CLI_VERSION }} submit \
+          pnpm dlx eas-cli@latest submit \
             --platform ios \
             --id "$IOS_BUILD_ID" \
             --non-interactive
-          pnpm dlx eas-cli@${{ env.EAS_CLI_VERSION }} submit \
+          pnpm dlx eas-cli@latest submit \
             --platform android \
             --id "$ANDROID_BUILD_ID" \
             --non-interactive
