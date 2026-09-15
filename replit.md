@@ -1,6 +1,6 @@
-# [Project name]
+# RealtimeAlgoChatApp Studio
 
-_Replace the heading above with the project's name, and this line with one sentence describing what this app does for users._
+RealtimeAlgoChatApp Studio is a real-time collaboration platform for developers with Build, Call, and Ship modes in a single room.
 
 ## Run & Operate
 

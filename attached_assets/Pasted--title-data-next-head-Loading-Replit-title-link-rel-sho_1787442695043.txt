@@ -256,7 +256,7 @@
                         return;
                     }
 
-                    var request = window.fetch('https://http-intake.logs.us5.datadoghq.com/api/v2/logs?dd-api-key=pub31a5047a3a4692afb84a423db984dc57', {
+                    var request = window.fetch('https://http-intake.logs.us5.datadoghq.com/api/v2/logs?dd-api-key=[REDACTED]', {
                         method: 'POST',
                         headers: {
                             Accept: 'application/json',
@@ -277,7 +277,7 @@
 
             try {
                 var xhr = new XMLHttpRequest();
-                xhr.open('POST', 'https://http-intake.logs.us5.datadoghq.com/api/v2/logs?dd-api-key=pub31a5047a3a4692afb84a423db984dc57', true);
+                xhr.open('POST', 'https://http-intake.logs.us5.datadoghq.com/api/v2/logs?dd-api-key=[REDACTED]', true);
                 xhr.setRequestHeader('Accept', 'application/json');
                 xhr.setRequestHeader('Content-Type', 'application/json');
                 xhr.send(body);
