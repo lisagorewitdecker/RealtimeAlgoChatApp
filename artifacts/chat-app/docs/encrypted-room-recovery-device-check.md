@@ -80,8 +80,11 @@ For either option:
 2. Set `EXPO_DEV_REQUEST_LOG=1` in the development environment and restart the
    managed Chat App/Expo workflow before the handoff. Metro writes a fresh,
    redacted request log to
-   `artifacts/chat-app/.expo/dev-request-evidence.log`. To retain the evidence
-   directly in the timestamped record instead, set
+   `artifacts/chat-app/.expo/dev-request-evidence.log`. Metro retains at most
+   1,000 lines in this file: the first 999 request lines plus a final
+   truncation notice. Console diagnostics continue for every request after the
+   file reaches that limit. To retain the evidence directly in the timestamped
+   record instead, set
    `EXPO_DEV_REQUEST_EVIDENCE_FILE` to
    `test-results/encrypted-room-recovery/android/<UTC timestamp>/logs/metro-request-evidence.txt`
    before restarting. This path is relative to the Chat App package root used
@@ -305,9 +308,11 @@ When a phone cannot load the development preview at all (Expo Go reports
 workflow. Metro then logs one redacted line per device request and refreshes
 the same evidence at
 `artifacts/chat-app/.expo/dev-request-evidence.log` (or the path supplied by
-`EXPO_DEV_REQUEST_EVIDENCE_FILE`). The line includes status, platform, client,
-and resource class, but no host, URL, query string, credentials, account data,
-or message content. The automated local preflight is labeled
+`EXPO_DEV_REQUEST_EVIDENCE_FILE`). Metro retains at most 1,000 lines: the first
+999 request lines and a final truncation notice. Console diagnostics continue
+after that limit. Each request line includes status, platform, client, and
+resource class, but no host, URL, query string, credentials, account data, or
+message content. The automated local preflight is labeled
 `client=preview-validation`, so it cannot satisfy the native filter. Probing
 the preview URL from inside the workspace is not
 conclusive, because those requests bypass the public edge. In the filtered
