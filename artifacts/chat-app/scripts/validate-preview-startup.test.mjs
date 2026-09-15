@@ -102,6 +102,38 @@ test("reports missing public preview configuration before making a request", asy
   }
 });
 
+test("rejects non-HTTPS public preview configuration before making a request", async () => {
+  const fetchMock = mockFetch(new Response("{}"));
+
+  try {
+    await assert.rejects(
+      requestPublicPreviewManifest(1_000, {
+        PREVIEW_PUBLIC_URL: "http://preview.example.test/expo",
+      }),
+      /Public Expo preview manifest URL must use HTTPS/,
+    );
+    assert.equal(fetchMock.request, undefined);
+  } finally {
+    fetchMock.restore();
+  }
+});
+
+test("rejects credential-bearing public preview configuration before making a request", async () => {
+  const fetchMock = mockFetch(new Response("{}"));
+
+  try {
+    await assert.rejects(
+      requestPublicPreviewManifest(1_000, {
+        PREVIEW_PUBLIC_URL: "https://user:password@preview.example.test/expo",
+      }),
+      /Public Expo preview manifest URL must not contain credentials/,
+    );
+    assert.equal(fetchMock.request, undefined);
+  } finally {
+    fetchMock.restore();
+  }
+});
+
 test("rejects malformed public manifests with actionable recovery guidance", async () => {
   const fetchMock = mockFetch(new Response("{not-json", { status: 200 }));
 
