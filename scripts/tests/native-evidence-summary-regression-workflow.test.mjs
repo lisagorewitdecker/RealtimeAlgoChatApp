@@ -45,6 +45,13 @@ test("hosted summary regression checks only the reviewed ref", () => {
   assert.equal(job.steps[0].with["persist-credentials"], false);
 
   const verification = job.steps[1].run;
+  assert.deepEqual(job.steps[1].env, {
+    REVIEWED_REF: "${{ inputs.reviewed_ref }}",
+  });
+  assert.match(verification, /resolved_commit_sha="\$\(git rev-parse --verify HEAD\)"/);
+  assert.match(verification, /Checked ref: `%s`/);
+  assert.match(verification, /Resolved commit SHA: `%s`/);
+  assert.match(verification, /"\$GITHUB_STEP_SUMMARY"/);
   assert.match(
     verification,
     /scripts\/run-untrusted-checker\.sh bash scripts\/check-native-large-text-evidence\.sh/,
@@ -62,6 +69,11 @@ test("hosted summary regression checks only the reviewed ref", () => {
     /Expected exactly one platform-specific blocking finding/,
   );
   assert.match(verification, /\$GITHUB_STEP_SUMMARY/);
+  assert.doesNotMatch(
+    verification,
+    /summary_path.*(?:REVIEWED_REF|resolved_commit_sha)|(?:REVIEWED_REF|resolved_commit_sha).*summary_path/,
+  );
+  assert.doesNotMatch(workflowText, /\$\{\{\s*secrets\./);
 });
 
 test("hosted summary regression cannot publish or start native jobs", () => {
