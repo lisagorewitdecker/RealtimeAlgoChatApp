@@ -78,3 +78,4 @@
 - [Publish failure messages can be stale](publish-failure-card-staleness.md) — repeated "build failed" messages may reference one old build; confirm a newer build exists before re-diagnosing.
 - [expo-router vendored react-navigation](expo-router-vendored-navigation.md) — read tab-bar height from the `expo-router/js-tabs` context (inset fallback); never add `@react-navigation/*`.
 - [Clerk Expo iOS builds](clerk-expo-ios-build.md) — keep the `@clerk/expo` plugin in app.json: it lifts iOS to 17.0 so the ClerkExpo pod links; otherwise pod install dies on a nil SPM target.
+- [GitHub edited-event evidence](github-edited-event-evidence.md) — REST timelines may omit PR body edits; retain the edit timestamp, unchanged head SHA, and subsequent run creation time.
