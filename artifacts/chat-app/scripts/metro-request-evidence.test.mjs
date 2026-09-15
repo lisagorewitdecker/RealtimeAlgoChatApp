@@ -2,7 +2,9 @@ import assert from "node:assert/strict";
 import path from "node:path";
 import test from "node:test";
 import {
+  MAX_REQUEST_EVIDENCE_LINES,
   classifyClient,
+  createEvidenceAppender,
   formatRequestEvidence,
   resolveEvidencePath,
 } from "../metro-request-evidence.js";
@@ -65,4 +67,31 @@ test("resolves relative evidence paths from the Chat App package root", () => {
       "test-results/encrypted-room-recovery/android/run/logs/metro.txt",
     ),
   );
+});
+
+test("caps retained evidence and leaves console diagnostics unbounded", () => {
+  assert.equal(MAX_REQUEST_EVIDENCE_LINES, 1_000);
+  const retainedLines = [];
+  const appendEvidence = createEvidenceAppender(
+    (line) => {
+      retainedLines.push(line);
+      return true;
+    },
+    3,
+  );
+  const consoleLines = [];
+
+  for (const line of ["request 1", "request 2", "request 3", "request 4"]) {
+    consoleLines.push(line);
+    appendEvidence(line);
+  }
+
+  assert.deepEqual(consoleLines, ["request 1", "request 2", "request 3", "request 4"]);
+  assert.deepEqual(retainedLines, [
+    "request 1\n",
+    "request 2\n",
+    "[dev-request] Evidence file truncated after 2 request lines; console output continues.\n",
+  ]);
+  assert.equal(appendEvidence("request 5"), false);
+  assert.equal(retainedLines.length, 3);
 });
