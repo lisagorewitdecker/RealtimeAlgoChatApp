@@ -3233,6 +3233,61 @@ test("unsafe download metadata cannot alter fixed platform recovery actions", ()
     "download metadata must never be evaluated as shell commands",
   );
 
+  const commandGuard = result.stdout.match(
+    /^::stop-commands::([0-9a-f-]+)\n[\s\S]*\n::([0-9a-f-]+)::\n?$/,
+  );
+  assert.ok(
+    commandGuard,
+    "a failed native check must leave its output inside the workflow command guard",
+  );
+  assert.equal(
+    commandGuard?.[1],
+    commandGuard?.[2],
+    "the workflow command guard must restore parsing with the same stop token",
+  );
+  for (const [streamName, stream] of [
+    ["stdout", result.stdout],
+    ["stderr", result.stderr],
+  ]) {
+    for (const unsafeValue of [
+      iosDownloadResult,
+      androidDownloadResult,
+      iosArtifactUrl,
+      androidArtifactUrl,
+    ]) {
+      assert.equal(
+        stream.includes(unsafeValue),
+        false,
+        `unsafe download metadata must not reach checker ${streamName}`,
+      );
+    }
+  }
+  assert.match(
+    result.stdout,
+    /Checking native large-text evidence under /,
+    "the checker must preserve its fixed stdout context",
+  );
+  assert.match(
+    result.stderr,
+    /\[ios\] The iOS native evidence artifact download did not complete\./,
+    "the checker must preserve the fixed iOS download failure context",
+  );
+  assert.match(
+    result.stderr,
+    /\[android\] The Android native evidence artifact download did not complete\./,
+    "the checker must preserve the fixed Android download failure context",
+  );
+  assert.match(
+    result.stderr,
+    /Native large-text evidence completeness check FAILED with \d+ issue\(s\)\./,
+    "the checker must preserve its fixed failure context",
+  );
+  assert.match(
+    result.stderr,
+    /Release review is blocked until both platform evidence sets contain complete, non-empty reviewed device artifacts\./,
+    "the checker must preserve the release-blocking failure context",
+  );
+
   const summary = readFileSync(summaryPath, "utf8");
   const recoveryLines = summary
     .split("\n")
