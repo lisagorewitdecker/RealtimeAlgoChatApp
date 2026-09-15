@@ -492,7 +492,8 @@ validate_platform() {
     fi
   fi
 
-  if [[ -s "$run_dir/sentry-source-map-evidence.json" ]] &&
+if [[ -s "$run_dir/sentry-source-map-evidence.json" &&
+    -s "$run_dir/candidate-build-id.txt" ]] &&
     ((sentry_trigger_has_errors == 0)); then
     local candidate_build_id
     local sentry_validation_output
