@@ -24,7 +24,8 @@ bundle can be days behind HEAD. Check the production manifest `createdAt` and
 diagnosing a "production" bug against current source.
 
 **Why:** a real-iPhone "Opening room…" hang was a stale published bundle
-(pre secure-store fix), and a same-day preview 404 was an edge/restart window;
+(pre secure-store fix), and same-day preview 404/502 responses were
+edge/restart windows;
 both looked healthy from in-container probes.
 
 **How to apply:** any time a user reports an Expo Go loading error or a

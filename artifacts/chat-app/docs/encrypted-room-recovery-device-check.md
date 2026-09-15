@@ -70,26 +70,40 @@ For either option:
 1. Before opening the link, record the phone model, Android version, Expo Go
    version, UTC time, and the non-secret preview host label. Do not record an
    account email, token, QR payload, or URL containing credentials.
-2. Set `EXPO_DEV_REQUEST_LOG=1` in the development environment and restart
-   the Expo workflow before the handoff. The operator opens the fresh preview
-   from stock Expo Go, waits for the Chat App landing screen, and captures a
-   screenshot with account identifiers and message content cropped or blurred.
-3. Treat the launch as observed only when both the phone screen and
+2. Set `EXPO_DEV_REQUEST_LOG=1` in the development environment and restart the
+   managed Chat App/Expo workflow before the handoff. After the workflow
+   reports that Metro is ready, run:
+
+   ```sh
+   pnpm --filter @workspace/chat-app run validate:preview-startup
+   ```
+
+   This preflight checks the public Expo manifest endpoint using the managed
+   `REPLIT_EXPO_DEV_DOMAIN` and then performs the local Expo Go manifest and
+   bundle probe. Do not start the phone session unless the output includes
+   `Public preview reachability: PASS`. A non-200 public manifest response
+   means the public edge is unhealthy: restart or repair the managed workflow
+   and rerun the preflight. The preflight's public-edge result is reachability
+   evidence only, not native-device evidence.
+3. The operator opens the fresh preview from stock Expo Go, waits for the Chat
+   App landing screen, and captures a screenshot with account identifiers and
+   message content cropped or blurred. Treat the launch as observed only when
+   both the phone screen and
    server-side request evidence are available. A native request has no
    browser `OPTIONS` preflight; record the Android/Expo Go user-agent or
    client marker from the filtered log without retaining the full host or URL.
 4. If Expo Go cannot launch, record the exact phone error and a redacted
    screenshot. A workspace `curl`, a browser tab, or a Metro startup line
-   proves public reachability or workflow readiness only; it does not prove
-   an Expo Go session launch.
+   proves public reachability or workflow readiness only; the preview preflight
+   is also not proof of an Expo Go session launch.
 5. Append `validation-record.md` under
    `test-results/encrypted-room-recovery/android/<UTC timestamp>/`. Include
-   the device metadata, the public-edge result, the Expo Go launch result, and
-   the redacted evidence paths. When no physical route is available, write
-   `BLOCKED` rows rather than inventing device values. Because the repository
-   ignores artifact-level `test-results/`, force-add the completed record with
-   `git add -f` so it is retained; do not create a duplicate copy under
-   `docs/`.
+   separate rows for the public-edge reachability result and the Expo Go
+   launch result, along with the device metadata and redacted evidence paths.
+   When no physical route is available, write `BLOCKED` rows rather than
+   inventing device values. Because the repository ignores artifact-level
+   `test-results/`, force-add the completed record with `git add -f` so it is
+   retained; do not create a duplicate copy under `docs/`.
 
 The current blocked baseline is
 `test-results/encrypted-room-recovery/android/20260914T144407Z/validation-record.md`.

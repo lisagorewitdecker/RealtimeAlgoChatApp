@@ -6,6 +6,7 @@ import { setTimeout as delay } from "node:timers/promises";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 const DEFAULT_HANDOFF_TIMEOUT_MS = 60_000;
+const DEFAULT_PUBLIC_PREVIEW_TIMEOUT_MS = 15_000;
 const STARTUP_FAILURE_GRACE_MS = 250;
 const MAX_STARTUP_DIAGNOSTIC_LENGTH = 512;
 const MAX_STARTUP_FAILURE_LINE_LENGTH = 320;
@@ -64,6 +65,102 @@ function formatStartupFailure(output) {
 
 function formatRequestOutcome(stage, response, byteLength) {
   return `${stage} HTTP ${response.status} (${byteLength} bytes)`;
+}
+
+function publicPreviewRecoveryMessage() {
+  return (
+    "Restart or repair the managed Chat App/Expo workflow, then rerun the " +
+    "preview handoff preflight before starting a phone session."
+  );
+}
+
+export function getPublicPreviewManifestUrl(environment = process.env) {
+  const configuredUrl =
+    environment.PREVIEW_PUBLIC_URL ?? environment.REPLIT_EXPO_DEV_DOMAIN;
+  if (!configuredUrl) {
+    throw new Error(
+      "Public Expo preview manifest URL is not configured. Set " +
+        "REPLIT_EXPO_DEV_DOMAIN or PREVIEW_PUBLIC_URL before running the live " +
+        "preview handoff preflight.",
+    );
+  }
+
+  const url = new URL(
+    configuredUrl.includes("://") ? configuredUrl : `https://${configuredUrl}`,
+  );
+  if (url.protocol !== "https:") {
+    throw new Error("Public Expo preview manifest URL must use HTTPS.");
+  }
+  if (url.username || url.password) {
+    throw new Error(
+      "Public Expo preview manifest URL must not contain credentials.",
+    );
+  }
+
+  url.pathname = `${url.pathname.replace(/\/+$/, "")}/`;
+  url.search = "";
+  url.hash = "";
+  return url;
+}
+
+export async function requestPublicPreviewManifest(
+  timeoutMs,
+  environment = process.env,
+) {
+  const url = getPublicPreviewManifestUrl(environment);
+  const deadline = Date.now() + timeoutMs;
+  const headers = {
+    Accept: "application/json",
+    "expo-platform": "android",
+    "user-agent": "Expo/57.0.0 (preview-validation)",
+  };
+
+  let response;
+  let body;
+  try {
+    response = await fetchWithDeadline(url, { headers }, deadline);
+    body = await response.text();
+  } catch (error) {
+    const detail =
+      error instanceof Error ? error.message : String(error);
+    throw new Error(
+      `Public Expo preview manifest check failed before a response: ${detail}. ` +
+        publicPreviewRecoveryMessage(),
+    );
+  }
+
+  const outcome = formatRequestOutcome(
+    "public manifest",
+    response,
+    Buffer.byteLength(body),
+  );
+  if (response.status !== 200) {
+    throw new Error(
+      `Public Expo preview manifest check failed: ${outcome}. ` +
+        publicPreviewRecoveryMessage(),
+    );
+  }
+
+  try {
+    const manifest = JSON.parse(body);
+    if (
+      !manifest ||
+      typeof manifest !== "object" ||
+      typeof manifest.launchAsset?.url !== "string" ||
+      manifest.launchAsset.url.length === 0
+    ) {
+      throw new Error("manifest did not provide a launch asset URL");
+    }
+  } catch (error) {
+    const detail =
+      error instanceof Error ? error.message : "manifest returned invalid JSON";
+    throw new Error(
+      `Public Expo preview manifest check failed: ${outcome}; ${detail}. ` +
+        publicPreviewRecoveryMessage(),
+    );
+  }
+
+  return { outcome };
 }
 
 function localBundleUrl(port, launchAssetUrl) {
@@ -211,6 +308,9 @@ function parseArgs(argv) {
     timeoutMs: Number(process.env.PREVIEW_STARTUP_TIMEOUT_MS) || DEFAULT_TIMEOUT_MS,
     handoffTimeoutMs:
       Number(process.env.PREVIEW_HANDOFF_TIMEOUT_MS) || DEFAULT_HANDOFF_TIMEOUT_MS,
+    publicPreviewTimeoutMs:
+      Number(process.env.PREVIEW_PUBLIC_TIMEOUT_MS) ||
+      DEFAULT_PUBLIC_PREVIEW_TIMEOUT_MS,
   };
 }
 
@@ -223,7 +323,11 @@ async function validateCapturedLog(logFile) {
   console.log(`Expo preview startup output is healthy: ${resolve(logFile)}`);
 }
 
-async function validateLivePreview(timeoutMs, handoffTimeoutMs) {
+async function validateLivePreview(
+  timeoutMs,
+  handoffTimeoutMs,
+  publicPreviewTimeoutMs,
+) {
   const port = await findFreePort();
   const output = [];
   const child = spawn("pnpm", ["run", "dev"], {
@@ -354,10 +458,16 @@ async function validateLivePreview(timeoutMs, handoffTimeoutMs) {
       }
       void (async () => {
         try {
+          const publicManifest = await requestPublicPreviewManifest(
+            publicPreviewTimeoutMs,
+          );
           const handoff = await requestExpoGoHandoff(port, handoffTimeoutMs);
           finish(() => {
             stopChild();
             console.log(`Expo preview reached Metro running status on port ${port}.`);
+            console.log(
+              `Public preview reachability: PASS (${publicManifest.outcome}).`,
+            );
             console.log(
               `Expo Go handoff succeeded: ${handoff.manifest}; ${handoff.bundle}; ` +
                 `path=${handoff.launchAssetPath}`,
@@ -376,9 +486,19 @@ async function validateLivePreview(timeoutMs, handoffTimeoutMs) {
 }
 
 async function main() {
-  const { logFile, timeoutMs, handoffTimeoutMs } = parseArgs(process.argv.slice(2));
+  const {
+    logFile,
+    timeoutMs,
+    handoffTimeoutMs,
+    publicPreviewTimeoutMs,
+  } = parseArgs(process.argv.slice(2));
   if (logFile) await validateCapturedLog(logFile);
-  else await validateLivePreview(timeoutMs, handoffTimeoutMs);
+  else
+    await validateLivePreview(
+      timeoutMs,
+      handoffTimeoutMs,
+      publicPreviewTimeoutMs,
+    );
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
