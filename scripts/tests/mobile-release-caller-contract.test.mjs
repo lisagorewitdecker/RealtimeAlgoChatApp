@@ -396,7 +396,7 @@ test("Android preview evidence validation succeeds when no handoff record change
   );
   assert.match(
     evidenceStep.run,
-    /No Android preview validation records changed; nothing to validate\./,
+    /No Android preview validation records or preflight artifacts changed; nothing to validate\./,
     "zero changed records must explain why validation did not run",
   );
   assert.match(

@@ -1199,6 +1199,21 @@ test("Android preview evidence keeps its pull-request validation and privacy con
   );
   assert.match(
     validationStep.run,
+    /artifacts\/chat-app\/test-results\/encrypted-room-recovery\/android\/\*\*\/android-preview-preflight\.json/,
+    "the job must select changed Android preflight sidecars from the pull request diff",
+  );
+  assert.match(
+    validationStep.run,
+    /changed_preflight_paths[\s\S]*record_path="\$\{changed_path%\/android-preview-preflight\.json\}\/validation-record\.md"/,
+    "a changed Android preflight sidecar must map to its sibling Markdown record",
+  );
+  assert.match(
+    validationStep.run,
+    /checker_args=\("\$record_path"\)[\s\S]*checker_args\+=\("\$preflight_path"\)[\s\S]*validate:android-preview-evidence -- "\$\{checker_args\[@\]\}"/,
+    "changed Android preflight sidecars must be passed explicitly to the checker",
+  );
+  assert.match(
+    validationStep.run,
     /record_url="\$\{GITHUB_SERVER_URL\}\/\$\{GITHUB_REPOSITORY\}\/blob\/\$\{GITHUB_SHA\}\/\$\{record_path\}"/,
     "each changed record must receive a stable GitHub record link",
   );
@@ -1235,19 +1250,33 @@ test("Android preview evidence keeps its pull-request validation and privacy con
 | Expo Go launch on physical Android | **BLOCKED** | No physical phone was available. |
 | Server-side native request evidence | **BLOCKED** | No native Android request was available. |
 `;
+  const blockedPreflight = `{"schema":"android-preview-handoff-preflight/v1","platform":"android","boundaries":{"publicManifestReachability":{"status":"PASS","evidence":"public manifest HTTP 200 (128 bytes)"},"localHandoffProbe":{"status":"NOT_RUN","evidence":"Local manifest/bundle probe not run — no successful probe result was recorded"},"expoGoLaunch":{"status":"NOT_ASSESSED","evidence":"Requires a physical Android phone running stock Expo Go."},"serverNativeRequestEvidence":{"status":"NOT_ASSESSED","evidence":"Requires filtered Metro or API evidence from that physical Expo Go session."}}}
+`;
+  const mismatchedPreflight = blockedPreflight.replace(
+    '"status":"PASS","evidence":"public manifest HTTP 200 (128 bytes)"',
+    '"status":"FAIL","evidence":"Public manifest probe failed — no successful probe result was recorded"',
+  );
 
-  function runAndroidPreviewJob(name, recordText) {
+  function runAndroidPreviewJob(name, recordText, options = {}) {
+    const { sidecarOnly = false, changedPreflight = blockedPreflight } = options;
     const fixtureRoot = path.join(testRoot, `android-preview-${name}`);
     const recordPath = path.join(
       fixtureRoot,
       "artifacts/chat-app/test-results/encrypted-room-recovery/android/20260915T120000Z/validation-record.md",
+    );
+    const preflightPath = path.join(
+      fixtureRoot,
+      "artifacts/chat-app/test-results/encrypted-room-recovery/android/20260915T120000Z/android-preview-preflight.json",
     );
     const summaryPath = path.join(fixtureRoot, "summary.md");
     const runnerPath = path.join(fixtureRoot, "run-job.sh");
     const binDirectory = path.join(fixtureRoot, "bin");
     mkdirSync(path.dirname(recordPath), { recursive: true });
     mkdirSync(binDirectory, { recursive: true });
-    writeFileSync(recordPath, recordText);
+    if (sidecarOnly) {
+      writeFileSync(recordPath, recordText);
+      writeFileSync(preflightPath, blockedPreflight);
+    }
 
     const git = (args) => {
       const result = spawnSync(gitPath, args, {
@@ -1264,13 +1293,19 @@ test("Android preview evidence keeps its pull-request validation and privacy con
     git(["config", "user.email", "contract-test@example.invalid"]);
     git(["config", "user.name", "Contract Test"]);
     writeFileSync(path.join(fixtureRoot, "README.md"), "base\n");
-    git(["add", "README.md"]);
+    git(["add", "README.md", ...(sidecarOnly ? [recordPath, preflightPath] : [])]);
     git(["commit", "--quiet", "-m", "base"]);
     const baseSha = spawnSync(gitPath, ["rev-parse", "HEAD"], {
       cwd: fixtureRoot,
       encoding: "utf8",
     }).stdout.trim();
-    git(["add", recordPath]);
+    if (sidecarOnly) {
+      writeFileSync(preflightPath, changedPreflight);
+      git(["add", preflightPath]);
+    } else {
+      writeFileSync(recordPath, recordText);
+      git(["add", recordPath]);
+    }
     git(["commit", "--quiet", "-m", "android preview record"]);
     const headSha = spawnSync(gitPath, ["rev-parse", "HEAD"], {
       cwd: fixtureRoot,
@@ -1280,7 +1315,7 @@ test("Android preview evidence keeps its pull-request validation and privacy con
     writeStub(
       binDirectory,
       "pnpm",
-      'set -euo pipefail\nrecord="${!#}"\nexec bash "$ANDROID_PREVIEW_CHECKER" "$record"',
+      'set -euo pipefail\nchecker_args=()\nfound_separator=0\nfor arg in "$@"; do\n  if [[ "$arg" == "--" ]]; then\n    found_separator=1\n    continue\n  fi\n  if ((found_separator)); then\n    checker_args+=("$arg")\n  fi\ndone\nexec bash "$ANDROID_PREVIEW_CHECKER" "${checker_args[@]}"',
     );
     writeFileSync(runnerPath, `#!${bashPath}\n${validationStep.run}\n`);
     chmodSync(runnerPath, 0o755);
@@ -1306,6 +1341,7 @@ test("Android preview evidence keeps its pull-request validation and privacy con
     return {
       result,
       recordPath: path.relative(fixtureRoot, recordPath),
+      preflightPath: path.relative(fixtureRoot, preflightPath),
       summary: readFileSync(summaryPath, "utf8"),
     };
   }
@@ -1360,6 +1396,21 @@ test("Android preview evidence keeps its pull-request validation and privacy con
     incompletePass.summary,
     /PRIVATE_EVIDENCE_MARKER|Workspace curl returned HTTP 200|No physical phone was available/,
     "the failed summary must not expose record evidence text",
+  );
+
+  const sidecarOnly = runAndroidPreviewJob("sidecar-only", blockedRecord, {
+    sidecarOnly: true,
+    changedPreflight: mismatchedPreflight,
+  });
+  assert.notEqual(
+    sidecarOnly.result.status,
+    0,
+    "a sidecar-only Android preflight edit must not bypass evidence validation",
+  );
+  assert.match(
+    sidecarOnly.summary,
+    /The preflight JSON public manifest boundary does not match the Markdown record\./,
+    "the matching Markdown record must be checked with a changed sidecar",
   );
 });
 

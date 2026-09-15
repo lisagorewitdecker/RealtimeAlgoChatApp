@@ -106,7 +106,8 @@ jobs:
               --diff-filter=ACDMRT \
               "${ANDROID_PREVIEW_BASE_SHA}...${ANDROID_PREVIEW_HEAD_SHA}" \
               -- \
-              "artifacts/chat-app/test-results/encrypted-room-recovery/android/**/validation-record.md"
+              "artifacts/chat-app/test-results/encrypted-room-recovery/android/**/validation-record.md" \
+              "artifacts/chat-app/test-results/encrypted-room-recovery/android/**/android-preview-preflight.json"
           )"; then
             :
           else
@@ -114,13 +115,33 @@ jobs:
               echo "$summary_header"
               echo
               echo "- Status: **FAIL**"
-              echo "- Missing-boundary reason: could not locate the pull request's changed Android preview records."
+              echo "- Missing-boundary reason: could not locate the pull request's changed Android preview evidence files."
             } >> "$GITHUB_STEP_SUMMARY"
-            echo "Could not locate the pull request's changed Android preview records." >&2
+            echo "Could not locate the pull request's changed Android preview evidence files." >&2
             exit 1
           fi
 
-          mapfile -t changed_records < <(printf '%s\n' "$diff_output" | sed '/^$/d')
+          changed_record_candidates=()
+          changed_preflight_paths=()
+          while IFS= read -r changed_path; do
+            [[ -n "$changed_path" ]] || continue
+            case "$changed_path" in
+              */validation-record.md)
+                changed_record_candidates+=("$changed_path")
+                ;;
+              */android-preview-preflight.json)
+                record_path="${changed_path%/android-preview-preflight.json}/validation-record.md"
+                changed_record_candidates+=("$record_path")
+                changed_preflight_paths+=("$changed_path")
+                ;;
+            esac
+          done < <(printf '%s\n' "$diff_output")
+
+          if ((${#changed_record_candidates[@]} > 0)); then
+            mapfile -t changed_records < <(printf '%s\n' "${changed_record_candidates[@]}" | sort -u)
+          else
+            changed_records=()
+          fi
 
           if ((${#changed_records[@]} == 0)); then
             {
@@ -128,9 +149,9 @@ jobs:
               echo
               echo "- Status: **SKIP**"
               echo "- Changed records checked: **0**"
-              echo "- Validation: **Not applicable; this pull request changed no Android preview validation record.**"
+              echo "- Validation: **Not applicable; this pull request changed no Android preview validation record or preflight artifact.**"
             } >> "$GITHUB_STEP_SUMMARY"
-            echo "No Android preview validation records changed; nothing to validate."
+            echo "No Android preview validation records or preflight artifacts changed; nothing to validate."
             exit 0
           fi
 
@@ -147,6 +168,13 @@ jobs:
             validation_output=""
             validation_status=0
             reasons=""
+            preflight_path=""
+            for changed_preflight_path in "${changed_preflight_paths[@]}"; do
+              if [[ "$changed_preflight_path" == "${record_path%/validation-record.md}/android-preview-preflight.json" ]]; then
+                preflight_path="$changed_preflight_path"
+                break
+              fi
+            done
 
             if [[ ! -f "$record_path" ]]; then
               validation_status=1
@@ -156,7 +184,11 @@ jobs:
                 sed -nE 's/^\*\*Result:[[:space:]]*(PASS|BLOCKED|FAIL).*/\1/p' "$record_path" |
                   head -n 1
               )"
-              if validation_output="$(pnpm run validate:android-preview-evidence -- "$record_path" 2>&1)"; then
+              checker_args=("$record_path")
+              if [[ -n "$preflight_path" ]]; then
+                checker_args+=("$preflight_path")
+              fi
+              if validation_output="$(pnpm run validate:android-preview-evidence -- "${checker_args[@]}" 2>&1)"; then
                 :
               else
                 validation_status=$?
