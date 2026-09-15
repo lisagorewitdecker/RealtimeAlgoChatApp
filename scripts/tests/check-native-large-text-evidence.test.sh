@@ -95,3 +95,23 @@ if grep -Fq "$ANDROID_BUILD_ID" "$SUMMARY_PATH" || grep -Fq "$ANDROID_BUILD_ID" 
   echo "Android candidate build ID leaked into summary or logs." >&2
   exit 1
 fi
+
+BROKEN_RESULTS_ROOT="$TMP_DIR/test-results/native-large-text-mismatched-runner-metadata"
+BROKEN_SUMMARY_PATH="$TMP_DIR/broken-summary.md"
+BROKEN_STDOUT_PATH="$TMP_DIR/broken-stdout.log"
+BROKEN_STDERR_PATH="$TMP_DIR/broken-stderr.log"
+
+RESULTS_ROOT="$BROKEN_RESULTS_ROOT"
+create_platform_fixture ios "$IOS_BUILD_ID"
+create_platform_fixture android "$ANDROID_BUILD_ID"
+perl -0pi -e 's/candidate_build_id=\Q'"$IOS_BUILD_ID"'\E/candidate_build_id=ios-candidate-build-mismatch/' \
+  "$BROKEN_RESULTS_ROOT/ios/2026-09-15T15-03-49Z/runner-metadata.txt"
+
+if GITHUB_STEP_SUMMARY="$BROKEN_SUMMARY_PATH" \
+  bash "$ROOT_DIR/scripts/check-native-large-text-evidence.sh" "$BROKEN_RESULTS_ROOT" \
+  >"$BROKEN_STDOUT_PATH" 2>"$BROKEN_STDERR_PATH"; then
+  echo "Expected runner metadata candidate_build_id mismatch to fail." >&2
+  exit 1
+fi
+
+grep -Fq "Runner metadata candidate_build_id does not match the tested candidate" "$BROKEN_STDERR_PATH"

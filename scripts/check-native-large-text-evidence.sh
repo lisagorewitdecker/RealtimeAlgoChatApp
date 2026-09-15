@@ -464,6 +464,8 @@ validate_platform() {
   if [[ -s "$run_dir/runner-metadata.txt" ]]; then
     local runner_metadata_path="$run_dir/runner-metadata.txt"
     local actual_platform
+    local expected_candidate_build_id
+    local actual_candidate_build_id
     local required_key
     local required_keys=(platform candidate_build_id recorded_at_utc)
     report_duplicate_metadata_keys "$platform" "$runner_metadata_path" "Runner metadata" "runner metadata"
@@ -490,6 +492,15 @@ validate_platform() {
         issue "$platform" "Runner metadata is missing ${required_key}=... in ${run_dir}/runner-metadata.txt. Record the tested device details before review."
       fi
     done
+    if [[ -s "$run_dir/candidate-build-id.txt" ]] &&
+      metadata_key_is_unambiguous "$runner_metadata_path" candidate_build_id; then
+      expected_candidate_build_id="$(first_line_trimmed "$run_dir/candidate-build-id.txt")"
+      actual_candidate_build_id="$(trimmed_value "$runner_metadata_path" candidate_build_id)"
+      if [[ -n "$expected_candidate_build_id" && -n "$actual_candidate_build_id" &&
+        "$actual_candidate_build_id" != "$expected_candidate_build_id" ]]; then
+        issue "$platform" "Runner metadata candidate_build_id does not match the tested candidate in ${run_dir}/candidate-build-id.txt. Upload metadata from the same evidence run you are submitting for review."
+      fi
+    fi
   fi
 
   local sentry_trigger_path="$run_dir/sentry-trigger.txt"
