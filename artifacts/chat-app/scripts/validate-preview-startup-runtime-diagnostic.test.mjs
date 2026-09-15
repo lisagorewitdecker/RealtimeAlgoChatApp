@@ -1,16 +1,24 @@
 import assert from "node:assert/strict";
+import { createRequire } from "node:module";
 import { readFileSync, writeFileSync, mkdtempSync, rmSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
+import {
+  CAPTURED_EXPO_TOOLING,
+  fixtureOutput,
+} from "./preview-startup-runtime-library-fixture.mjs";
+
 const scriptsDirectory = import.meta.dirname;
+const packageRoot = join(scriptsDirectory, "..");
 const validatorPath = join(scriptsDirectory, "validate-preview-startup.mjs");
 const fixturePath = join(
   scriptsDirectory,
   "preview-startup-runtime-library-fixture.mjs",
 );
+const packageRequire = createRequire(join(packageRoot, "package.json"));
 
 function runNodeScript(args, env = {}) {
   const result = spawnSync(process.execPath, args, {
@@ -27,6 +35,11 @@ function findDiagnostic(output) {
   return output
     .split(/\r?\n/)
     .find((line) => line.startsWith("Expo preview startup error:"));
+}
+
+function installedPackageVersion(packageName) {
+  const packageJsonPath = packageRequire.resolve(`${packageName}/package.json`);
+  return JSON.parse(readFileSync(packageJsonPath, "utf8")).version;
 }
 
 const fixtures = [
@@ -119,6 +132,55 @@ test("live and captured preview validation report the same diagnosis for every l
         `${fixtureCase.name} diagnostic exceeded the 512-character limit`,
       );
     }
+  } finally {
+    rmSync(temporaryDirectory, { recursive: true, force: true });
+  }
+});
+
+test("versioned loader samples match the installed Expo tooling", () => {
+  assert.equal(
+    installedPackageVersion("@expo/cli"),
+    CAPTURED_EXPO_TOOLING.expoCli,
+    "Expo CLI changed; refresh the versioned loader samples and update the " +
+      "loader wording parser before relying on preview diagnostics.",
+  );
+  assert.equal(
+    installedPackageVersion("react-native"),
+    CAPTURED_EXPO_TOOLING.reactNative,
+    "React Native changed; refresh the versioned loader samples and update the " +
+      "loader wording parser before relying on preview diagnostics.",
+  );
+
+  for (const fixtureName of [
+    "missing-runtime-library",
+    "missing-runtime-library-dyld",
+    "missing-runtime-library-windows",
+  ]) {
+    const result = runNodeScript([fixturePath], {
+      PREVIEW_STARTUP_TEST_FIXTURE: fixtureName,
+    });
+    assert.equal(result.status, 1, fixtureName);
+    assert.doesNotMatch(
+      result.output,
+      /unsupported loader wording/i,
+      fixtureName,
+    );
+  }
+});
+
+test("unsupported loader wording fails with a maintenance message", () => {
+  const temporaryDirectory = mkdtempSync(
+    join(tmpdir(), "chat-preview-unsupported-loader-"),
+  );
+  const logPath = join(temporaryDirectory, "expo-startup.log");
+
+  try {
+    writeFileSync(logPath, fixtureOutput["unsupported-loader-wording"], "utf8");
+    const result = runNodeScript([validatorPath, "--log-file", logPath]);
+
+    assert.equal(result.status, 1);
+    assert.match(result.output, /Expo preview loader wording changed/);
+    assert.match(result.output, /refresh the versioned loader samples/);
   } finally {
     rmSync(temporaryDirectory, { recursive: true, force: true });
   }

@@ -74,6 +74,14 @@ const STARTUP_FAILURES = [
   /(?:error|failed|unable|cannot).{0,80}(?:react native )?devtools/i,
   /(?:react native )?devtools.{0,80}(?:error|failed|unable|cannot|could not|couldn't)/i,
 ];
+const UNRECOGNIZED_LOADER_FAILURES = [
+  /(?:react native )?devtools.{0,120}(?:launcher|loader|binary).{0,120}(?:exited|terminated|error|failed|unable|cannot|could not|status)/i,
+  /(?:launcher|loader).{0,120}(?:react native )?devtools.{0,120}(?:exited|terminated|error|failed|unable|cannot|could not|status)/i,
+];
+export const LOADER_COMPATIBILITY_MAINTENANCE_MESSAGE =
+  "Expo preview loader wording changed. Update STARTUP_FAILURES and " +
+  "MISSING_LIBRARY_PATTERNS, then refresh the versioned loader samples " +
+  "before relying on this diagnostic.";
 const STARTUP_TEST_FIXTURES = new Set([
   "handoff-server",
   "missing-runtime-library",
@@ -94,6 +102,15 @@ function findStartupFailure(output) {
   return (
     lines.find((line) =>
       STARTUP_FAILURES.some((pattern) => pattern.test(line)),
+    ) ?? null
+  );
+}
+
+function findUnrecognizedLoaderFailure(output) {
+  const lines = output.split(/\r?\n/);
+  return (
+    lines.find((line) =>
+      UNRECOGNIZED_LOADER_FAILURES.some((pattern) => pattern.test(line)),
     ) ?? null
   );
 }
@@ -142,33 +159,44 @@ function compactStartupLibraryPath(path) {
 
 function formatStartupFailure(output) {
   const failure = findStartupFailure(output);
-  if (!failure) return null;
+  if (failure) {
+    const fullFailureDetail = sanitizeStartupDiagnostic(
+      failure,
+      MAX_STARTUP_FAILURE_LINE_LENGTH,
+    );
+    const missingLibrary = findMissingLibrary(output);
+    const libraryDetail =
+      missingLibrary &&
+      (!fullFailureDetail.includes(missingLibrary) ||
+        missingLibrary.length > MAX_STARTUP_LIBRARY_DETAIL_LENGTH)
+        ? ` (missing runtime library: ${compactStartupLibraryPath(missingLibrary)})`
+        : "";
 
-  const fullFailureDetail = sanitizeStartupDiagnostic(
-    failure,
-    MAX_STARTUP_FAILURE_LINE_LENGTH,
-  );
-  const missingLibrary = findMissingLibrary(output);
-  const libraryDetail =
-    missingLibrary &&
-    (!fullFailureDetail.includes(missingLibrary) ||
-      missingLibrary.length > MAX_STARTUP_LIBRARY_DETAIL_LENGTH)
-      ? ` (missing runtime library: ${compactStartupLibraryPath(missingLibrary)})`
-      : "";
+    const failureLength = Math.min(
+      fullFailureDetail.length,
+      Math.max(
+        0,
+        MAX_STARTUP_DIAGNOSTIC_LENGTH -
+          STARTUP_DIAGNOSTIC_PREFIX.length -
+          libraryDetail.length,
+      ),
+    );
+    const failureDetail = fullFailureDetail.slice(0, failureLength);
 
-  const failureLength = Math.min(
-    fullFailureDetail.length,
-    Math.max(
-      0,
-      MAX_STARTUP_DIAGNOSTIC_LENGTH -
-        STARTUP_DIAGNOSTIC_PREFIX.length -
-        libraryDetail.length,
-    ),
-  );
-  const failureDetail = fullFailureDetail.slice(0, failureLength);
+    return `${STARTUP_DIAGNOSTIC_PREFIX}${sanitizeStartupDiagnostic(
+      `${failureDetail}${libraryDetail}`,
+      MAX_STARTUP_DIAGNOSTIC_LENGTH - STARTUP_DIAGNOSTIC_PREFIX.length,
+    )}`;
+  }
+
+  const unrecognizedLoaderFailure = findUnrecognizedLoaderFailure(output);
+  if (!unrecognizedLoaderFailure) return null;
 
   return `${STARTUP_DIAGNOSTIC_PREFIX}${sanitizeStartupDiagnostic(
-    `${failureDetail}${libraryDetail}`,
+    `${LOADER_COMPATIBILITY_MAINTENANCE_MESSAGE} Observed: ${sanitizeStartupDiagnostic(
+      unrecognizedLoaderFailure,
+      MAX_STARTUP_FAILURE_LINE_LENGTH,
+    )}`,
     MAX_STARTUP_DIAGNOSTIC_LENGTH - STARTUP_DIAGNOSTIC_PREFIX.length,
   )}`;
 }

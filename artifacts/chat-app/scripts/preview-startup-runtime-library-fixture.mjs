@@ -1,5 +1,10 @@
 import { createServer } from "node:http";
 
+export const CAPTURED_EXPO_TOOLING = Object.freeze({
+  expoCli: "57.0.20",
+  reactNative: "0.86.3",
+});
+
 const longLinuxLibraryPath =
   `/opt/expo/${"react-native-devtools-cache/".repeat(16)}` +
   "libgtk-3.so.0";
@@ -11,7 +16,7 @@ const longWindowsLibraryPath =
   `C:\\Program Files\\Expo\\${"react native devtools cache\\".repeat(12)}` +
   "libgtk-3-0.dll";
 
-const fixtureOutput = {
+export const fixtureOutput = Object.freeze({
   "missing-runtime-library":
     "Error: /opt/expo/react-native-devtools: error while loading shared " +
     "libraries: libgtk-3.so.0: cannot open shared object file: No such file " +
@@ -34,7 +39,9 @@ const fixtureOutput = {
   "missing-runtime-library-windows-long-path":
     `Error: The code execution cannot proceed because ${longWindowsLibraryPath} ` +
     "was not found. Reinstalling the program may fix this problem.\n",
-};
+  "unsupported-loader-wording":
+    "React Native DevTools launcher exited with status 127\n",
+});
 const fixtureName =
   process.env.PREVIEW_STARTUP_TEST_FIXTURE ?? "missing-runtime-library";
 if (fixtureName === "handoff-server") {
