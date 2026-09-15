@@ -245,8 +245,32 @@ test("generated-client drift evidence remains visible in the CI job log", () => 
   );
   assert.match(
     generatedCheckerSource,
-    /console\.error\(\s*"Run `pnpm --filter @workspace\/api-spec run codegen` and commit the generated output\."\s*,?\s*\)/,
+    /console\.error\(\s*`Run \\`\$\{regenerationCommand\}\\` and commit the generated output\.`\s*\)/,
     "the job log must retain the generated-client regeneration command when summary publishing is unavailable",
+  );
+});
+
+test("generated-client drift evidence is complete in the reviewer-visible summary", () => {
+  assert.match(
+    generatedCheckerSource,
+    /process\.env\.GITHUB_STEP_SUMMARY/,
+    "the checker must publish drift evidence through GitHub's reviewer-visible step summary",
+  );
+  assert.match(
+    generatedCheckerSource,
+    /const fence = markdownFence\(report\)/,
+    "the summary must fence generated content without allowing report text to escape the Markdown block",
+  );
+  assert.ok(
+    generatedCheckerSource.includes(
+      "Regenerate with \\`${regenerationCommand}\\` and commit the generated output.",
+    ),
+    "the summary must include the regeneration command reviewers need",
+  );
+  assert.match(
+    generatedCheckerSource,
+    /Generated API drift detected[\s\S]*regenerationCommand[\s\S]*report[\s\S]*fence/,
+    "the summary must include the heading, command, bounded report, and closing fence",
   );
 });
 
