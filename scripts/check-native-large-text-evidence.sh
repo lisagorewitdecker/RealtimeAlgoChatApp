@@ -356,6 +356,17 @@ first_line_trimmed() {
   head -n 1 "$1" | tr -d '\r' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//'
 }
 
+normalized_nonempty_line_count() {
+  awk '
+    {
+      sub(/\r$/, "")
+      gsub(/^[[:space:]]+|[[:space:]]+$/, "", $0)
+      if (length($0) > 0) count++
+    }
+    END { print count + 0 }
+  ' "$1"
+}
+
 check_required_file() {
   local platform="$1"
   local run_dir="$2"
@@ -412,6 +423,20 @@ validate_platform() {
   check_required_file "$platform" "$run_dir" "sentry-maestro-results.xml" "controlled Sentry probe JUnit result"
   check_required_file "$platform" "$run_dir" "sentry-trigger.txt" "controlled Sentry probe metadata"
   check_required_file "$platform" "$run_dir" "sentry-source-map-evidence.json" "Sentry source-map evidence"
+
+  local candidate_build_id=""
+  local candidate_build_id_path="$run_dir/candidate-build-id.txt"
+  if [[ -s "$candidate_build_id_path" ]]; then
+    local candidate_build_id_line_count
+    candidate_build_id_line_count="$(normalized_nonempty_line_count "$candidate_build_id_path")"
+    if ((candidate_build_id_line_count == 0)); then
+      issue "$platform" "The candidate build ID file at ${candidate_build_id_path} does not contain a normalized build ID. Record exactly one candidate build ID before release review."
+    elif ((candidate_build_id_line_count > 1)); then
+      issue "$platform" "The candidate build ID file at ${candidate_build_id_path} contains multiple normalized lines. Record exactly one candidate build ID before release review."
+    else
+      candidate_build_id="$(first_line_trimmed "$candidate_build_id_path")"
+    fi
+  fi
 
   if [[ -s "$run_dir/pass-fail-record.txt" ]]; then
     local pass_fail_path="$run_dir/pass-fail-record.txt"
@@ -492,9 +517,9 @@ validate_platform() {
         issue "$platform" "Runner metadata is missing ${required_key}=... in ${run_dir}/runner-metadata.txt. Record the tested device details before review."
       fi
     done
-    if [[ -s "$run_dir/candidate-build-id.txt" ]] &&
+    if [[ -n "$candidate_build_id" ]] &&
       metadata_key_is_unambiguous "$runner_metadata_path" candidate_build_id; then
-      expected_candidate_build_id="$(first_line_trimmed "$run_dir/candidate-build-id.txt")"
+      expected_candidate_build_id="$candidate_build_id"
       actual_candidate_build_id="$(trimmed_value "$runner_metadata_path" candidate_build_id)"
       if [[ -n "$expected_candidate_build_id" && -n "$actual_candidate_build_id" &&
         "$actual_candidate_build_id" != "$expected_candidate_build_id" ]]; then
@@ -517,11 +542,9 @@ validate_platform() {
   fi
 
 if [[ -s "$run_dir/sentry-source-map-evidence.json" &&
-    -s "$run_dir/candidate-build-id.txt" ]] &&
+    -n "$candidate_build_id" ]] &&
     ((sentry_trigger_has_errors == 0)); then
-    local candidate_build_id
     local sentry_validation_output
-    candidate_build_id="$(tr -d '\r\n' < "$run_dir/candidate-build-id.txt")"
     if ! sentry_validation_output="$(
       "$NODE_BINARY" --input-type=module - \
         "$run_dir/sentry-source-map-evidence.json" \
@@ -800,11 +823,7 @@ validate_review_record() {
     record_valid=0
   fi
 
-  local tested_build_id=""
-  if [[ -s "$run_dir/candidate-build-id.txt" ]]; then
-    tested_build_id="$(first_line_trimmed "$run_dir/candidate-build-id.txt")"
-  fi
-  if [[ -n "$record_build_id" && -n "$tested_build_id" && "$record_build_id" != "$tested_build_id" ]]; then
+  if [[ -n "$record_build_id" && -n "$candidate_build_id" && "$record_build_id" != "$candidate_build_id" ]]; then
     issue "$platform" "Review record candidate_build_id does not match the tested candidate in ${run_dir}/candidate-build-id.txt. A review covers one evidence set; do not reuse a review record from another build."
     record_valid=0
   fi

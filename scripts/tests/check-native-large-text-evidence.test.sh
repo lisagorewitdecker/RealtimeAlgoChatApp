@@ -6,16 +6,21 @@ TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
 
 RESULTS_ROOT="$TMP_DIR/test-results/native-large-text"
+INVALID_RESULTS_ROOT="$TMP_DIR/test-results-invalid/native-large-text"
 SUMMARY_PATH="$TMP_DIR/summary.md"
 STDOUT_PATH="$TMP_DIR/stdout.log"
 STDERR_PATH="$TMP_DIR/stderr.log"
+INVALID_SUMMARY_PATH="$TMP_DIR/invalid-summary.md"
+INVALID_STDOUT_PATH="$TMP_DIR/invalid-stdout.log"
+INVALID_STDERR_PATH="$TMP_DIR/invalid-stderr.log"
 IOS_BUILD_ID="ios-candidate-build-12345"
 ANDROID_BUILD_ID="android-candidate-build-67890"
 
 create_platform_fixture() {
-  local platform="$1"
-  local build_id="$2"
-  local run_dir="$RESULTS_ROOT/$platform/2026-09-15T15-03-49Z"
+  local results_root="$1"
+  local platform="$2"
+  local build_id="$3"
+  local run_dir="$results_root/$platform/2026-09-15T15-03-49Z"
   local marker="${platform}-marker"
   local frame_file="app/${platform}/probe.ts"
 
@@ -74,8 +79,8 @@ EOF
   done
 }
 
-create_platform_fixture ios "$IOS_BUILD_ID"
-create_platform_fixture android "$ANDROID_BUILD_ID"
+create_platform_fixture "$RESULTS_ROOT" ios "$IOS_BUILD_ID"
+create_platform_fixture "$RESULTS_ROOT" android "$ANDROID_BUILD_ID"
 
 GITHUB_STEP_SUMMARY="$SUMMARY_PATH" \
   bash "$ROOT_DIR/scripts/check-native-large-text-evidence.sh" "$RESULTS_ROOT" \
@@ -101,9 +106,29 @@ BROKEN_SUMMARY_PATH="$TMP_DIR/broken-summary.md"
 BROKEN_STDOUT_PATH="$TMP_DIR/broken-stdout.log"
 BROKEN_STDERR_PATH="$TMP_DIR/broken-stderr.log"
 
-RESULTS_ROOT="$BROKEN_RESULTS_ROOT"
-create_platform_fixture ios "$IOS_BUILD_ID"
-create_platform_fixture android "$ANDROID_BUILD_ID"
+create_platform_fixture "$INVALID_RESULTS_ROOT" ios "$IOS_BUILD_ID"
+create_platform_fixture "$INVALID_RESULTS_ROOT" android "$ANDROID_BUILD_ID"
+cat > "$INVALID_RESULTS_ROOT/ios/2026-09-15T15-03-49Z/candidate-build-id.txt" <<EOF
+$IOS_BUILD_ID
+unexpected-second-id
+EOF
+
+set +e
+GITHUB_STEP_SUMMARY="$INVALID_SUMMARY_PATH" \
+  bash "$ROOT_DIR/scripts/check-native-large-text-evidence.sh" "$INVALID_RESULTS_ROOT" \
+  >"$INVALID_STDOUT_PATH" 2>"$INVALID_STDERR_PATH"
+status=$?
+set -e
+
+if [[ "$status" -eq 0 ]]; then
+  echo "Expected multi-line candidate-build-id.txt to fail validation." >&2
+  exit 1
+fi
+
+grep -Fq "contains multiple normalized lines" "$INVALID_STDERR_PATH"
+
+create_platform_fixture "$BROKEN_RESULTS_ROOT" ios "$IOS_BUILD_ID"
+create_platform_fixture "$BROKEN_RESULTS_ROOT" android "$ANDROID_BUILD_ID"
 perl -0pi -e 's/candidate_build_id=\Q'"$IOS_BUILD_ID"'\E/candidate_build_id=ios-candidate-build-mismatch/' \
   "$BROKEN_RESULTS_ROOT/ios/2026-09-15T15-03-49Z/runner-metadata.txt"
 
