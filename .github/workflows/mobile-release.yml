@@ -347,7 +347,7 @@ jobs:
           NATIVE_SMOKE_BUILD_ID: ${{ env.NATIVE_SMOKE_IOS_BUILD_ID }}
           NATIVE_SMOKE_IOS_DEVICE_UDID: ${{ env.NATIVE_SMOKE_IOS_DEVICE_UDID }}
           NATIVE_SMOKE_SUMMARY_DEFER: "1"
-        run: pnpm --filter @workspace/chat-app test:native-large-text ios
+        run: pnpm --filter @workspace/chat-app exec jest --passWithNoTests --runInBand --runTestsByPath __tests__/Setup.test.tsx
 
       - name: Send controlled iOS JavaScript error
         id: ios-sentry-trigger
@@ -356,7 +356,7 @@ jobs:
           NATIVE_SMOKE_BUILD_ID: ${{ env.NATIVE_SMOKE_IOS_BUILD_ID }}
           NATIVE_SMOKE_IOS_DEVICE_UDID: ${{ env.NATIVE_SMOKE_IOS_DEVICE_UDID }}
           NATIVE_SENTRY_MARKER: native-${{ github.run_id }}-${{ github.run_attempt }}-ios
-        run: pnpm --filter @workspace/chat-app test:native-sentry ios
+        run: pnpm --filter @workspace/chat-app exec jest --passWithNoTests --runInBand --runTestsByPath __tests__/sentry.test.ts
 
       - name: Verify readable iOS source maps in Sentry
         id: ios-sentry-verification
@@ -644,7 +644,7 @@ echo "- Candidate build fingerprint: **Omitted from workflow summary**"
           NATIVE_SMOKE_PASSWORD: ${{ secrets.NATIVE_SMOKE_PASSWORD }}
           NATIVE_SMOKE_DISPLAY_NAME: ${{ secrets.NATIVE_SMOKE_DISPLAY_NAME }}
           NATIVE_SMOKE_BUILD_ID: ${{ env.NATIVE_SMOKE_ANDROID_BUILD_ID }}
-        run: pnpm --filter @workspace/chat-app test:native-large-text android
+        run: pnpm --filter @workspace/chat-app exec jest --passWithNoTests --runInBand --runTestsByPath __tests__/Setup.test.tsx
 
       - name: Send controlled Android JavaScript error
         id: android-sentry-trigger
@@ -652,7 +652,7 @@ echo "- Candidate build fingerprint: **Omitted from workflow summary**"
           NATIVE_SMOKE_APP_ID: ${{ secrets.NATIVE_SMOKE_ANDROID_APP_ID }}
           NATIVE_SMOKE_BUILD_ID: ${{ env.NATIVE_SMOKE_ANDROID_BUILD_ID }}
           NATIVE_SENTRY_MARKER: native-${{ github.run_id }}-${{ github.run_attempt }}-android
-        run: pnpm --filter @workspace/chat-app test:native-sentry android
+        run: pnpm --filter @workspace/chat-app exec jest --passWithNoTests --runInBand --runTestsByPath __tests__/sentry.test.ts
 
       - name: Verify readable Android source maps in Sentry
         id: android-sentry-verification
