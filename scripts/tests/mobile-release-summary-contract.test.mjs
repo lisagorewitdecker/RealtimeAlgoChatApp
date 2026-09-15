@@ -64,6 +64,7 @@ const playwrightConfig = readFileSync(
   "utf8",
 );
 const bashPath = locateExecutable("bash");
+const gitPath = locateExecutable("git");
 
 const iosGateScript = "artifacts/chat-app/e2e/native-large-text/run.sh";
 const androidPreflightScript = "scripts/check-android-release-prerequisites.sh";
@@ -1147,6 +1148,214 @@ test("every summary-writing script the release workflow invokes has a contract",
       `  inventory:  ${JSON.stringify(inventory)}`,
       "Add a contract (static rules plus a sentinel run) for a new summary writer, or remove an entry that no longer writes a summary.",
     ].join("\n"),
+  );
+});
+
+test("Android preview evidence keeps its pull-request validation and privacy contract", () => {
+  const androidJob = workflow.jobs["android-preview-evidence"];
+  assert.ok(androidJob, "the release workflow must define the Android preview job");
+  assert.equal(
+    androidJob.if,
+    "${{ github.event_name == 'pull_request' }}",
+    "Android preview evidence must be isolated to pull requests",
+  );
+  assert.deepEqual(
+    androidJob.steps.find(
+      (step) => step.name === "Validate changed Android preview records",
+    )?.env,
+    {
+      ANDROID_PREVIEW_BASE_SHA:
+        "${{ github.event.pull_request.base.sha }}",
+      ANDROID_PREVIEW_HEAD_SHA:
+        "${{ github.event.pull_request.head.sha }}",
+    },
+    "the Android preview job must compare the pull request base and head",
+  );
+
+  const pullRequestPaths = androidJob ? workflow.on.pull_request.paths : [];
+  assert.ok(
+    pullRequestPaths.includes(
+      "artifacts/chat-app/test-results/encrypted-room-recovery/android/**/validation-record.md",
+    ),
+    "Android validation record changes must trigger the pull-request job",
+  );
+  assert.ok(
+    pullRequestPaths.includes("scripts/check-android-preview-evidence.sh"),
+    "Android evidence checker changes must trigger the pull-request job",
+  );
+
+  const validationStep = androidJob.steps.find(
+    (step) => step.name === "Validate changed Android preview records",
+  );
+  assert.ok(validationStep, "the Android preview job must validate changed records");
+  assert.match(
+    validationStep.run,
+    /git diff[\s\S]*\$\{ANDROID_PREVIEW_BASE_SHA\}\.\.\.\$\{ANDROID_PREVIEW_HEAD_SHA\}[\s\S]*artifacts\/chat-app\/test-results\/encrypted-room-recovery\/android\/\*\*\/validation-record\.md/,
+    "the job must select changed Android validation records from the pull request diff",
+  );
+  assert.match(
+    validationStep.run,
+    /record_url="\$\{GITHUB_SERVER_URL\}\/\$\{GITHUB_REPOSITORY\}\/blob\/\$\{GITHUB_SHA\}\/\$\{record_path\}"/,
+    "each changed record must receive a stable GitHub record link",
+  );
+  assert.ok(
+    validationStep.run.includes(
+      `reasons="$(printf '%s\\n' "$validation_output" | sed -n '/^- /p')"`
+    ),
+    "only fixed checker reason lines may enter the summary",
+  );
+  assert.doesNotMatch(
+    validationStep.run,
+    /cat\s+"\$record_path"|validation_output.*GITHUB_STEP_SUMMARY/,
+    "the job must not print Android record evidence into the summary",
+  );
+
+  const blockedRecord = `# Android SDK 57 preview validation record
+
+**Result: BLOCKED — no physical Android handoff was available**
+
+## Metadata
+
+| Field | Result |
+| --- | --- |
+| Device model | **BLOCKED** — no physical Android device was available |
+| Android version | **BLOCKED** — no physical Android device was available |
+| Expo Go version | **BLOCKED** — no Expo Go session was available |
+
+## Boundary results
+
+| Boundary | Status | Evidence |
+| --- | --- | --- |
+| Public manifest reachability | PASS | Workspace curl returned HTTP 200. |
+| Local handoff probe (manifest and bundle) | NOT_RUN | The local probe was not run. |
+| Expo Go launch on physical Android | **BLOCKED** | No physical phone was available. |
+| Server-side native request evidence | **BLOCKED** | No native Android request was available. |
+`;
+
+  function runAndroidPreviewJob(name, recordText) {
+    const fixtureRoot = path.join(testRoot, `android-preview-${name}`);
+    const recordPath = path.join(
+      fixtureRoot,
+      "artifacts/chat-app/test-results/encrypted-room-recovery/android/20260915T120000Z/validation-record.md",
+    );
+    const summaryPath = path.join(fixtureRoot, "summary.md");
+    const runnerPath = path.join(fixtureRoot, "run-job.sh");
+    const binDirectory = path.join(fixtureRoot, "bin");
+    mkdirSync(path.dirname(recordPath), { recursive: true });
+    mkdirSync(binDirectory, { recursive: true });
+    writeFileSync(recordPath, recordText);
+
+    const git = (args) => {
+      const result = spawnSync(gitPath, args, {
+        cwd: fixtureRoot,
+        encoding: "utf8",
+      });
+      assert.equal(
+        result.status,
+        0,
+        `git ${args.join(" ")} failed:\n${result.stdout}\n${result.stderr}`,
+      );
+    };
+    git(["init", "--quiet"]);
+    git(["config", "user.email", "contract-test@example.invalid"]);
+    git(["config", "user.name", "Contract Test"]);
+    writeFileSync(path.join(fixtureRoot, "README.md"), "base\n");
+    git(["add", "README.md"]);
+    git(["commit", "--quiet", "-m", "base"]);
+    const baseSha = spawnSync(gitPath, ["rev-parse", "HEAD"], {
+      cwd: fixtureRoot,
+      encoding: "utf8",
+    }).stdout.trim();
+    git(["add", recordPath]);
+    git(["commit", "--quiet", "-m", "android preview record"]);
+    const headSha = spawnSync(gitPath, ["rev-parse", "HEAD"], {
+      cwd: fixtureRoot,
+      encoding: "utf8",
+    }).stdout.trim();
+
+    writeStub(
+      binDirectory,
+      "pnpm",
+      'set -euo pipefail\nrecord="${!#}"\nexec bash "$ANDROID_PREVIEW_CHECKER" "$record"',
+    );
+    writeFileSync(runnerPath, `#!${bashPath}\n${validationStep.run}\n`);
+    chmodSync(runnerPath, 0o755);
+
+    const result = spawnSync(bashPath, [runnerPath], {
+      cwd: fixtureRoot,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        PATH: `${binDirectory}${path.delimiter}${process.env.PATH}`,
+        ANDROID_PREVIEW_BASE_SHA: baseSha,
+        ANDROID_PREVIEW_HEAD_SHA: headSha,
+        ANDROID_PREVIEW_CHECKER: path.join(
+          workspaceRoot,
+          "scripts/check-android-preview-evidence.sh",
+        ),
+        GITHUB_SERVER_URL: "https://github.example",
+        GITHUB_REPOSITORY: "example/chat-app",
+        GITHUB_SHA: headSha,
+        GITHUB_STEP_SUMMARY: summaryPath,
+      },
+    });
+    return {
+      result,
+      recordPath: path.relative(fixtureRoot, recordPath),
+      summary: readFileSync(summaryPath, "utf8"),
+    };
+  }
+
+  const blocked = runAndroidPreviewJob("blocked", blockedRecord);
+  assert.equal(
+    blocked.result.status,
+    0,
+    `a valid BLOCKED Android preview record must keep the job successful:\n${blocked.result.stdout}\n${blocked.result.stderr}`,
+  );
+  assert.match(blocked.summary, /- Record result: \*\*BLOCKED \(valid\)\*\*/);
+  assert.match(
+    blocked.summary,
+    new RegExp(
+      `\\[${blocked.recordPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\]\\(https://github\\.example/example/chat-app/blob/[^)]+/${blocked.recordPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\)`,
+    ),
+    "the successful BLOCKED summary must link the checked record",
+  );
+  assert.doesNotMatch(
+    blocked.summary,
+    /Workspace curl returned HTTP 200|No physical phone was available/,
+    "the successful BLOCKED summary must not copy evidence text",
+  );
+
+  const incompletePass = runAndroidPreviewJob(
+    "incomplete-pass",
+    blockedRecord
+      .replace("**Result: BLOCKED", "**Result: PASS")
+      .replace(
+        "No physical phone was available.",
+        "PRIVATE_EVIDENCE_MARKER no physical phone was available.",
+      ),
+  );
+  assert.notEqual(
+    incompletePass.result.status,
+    0,
+    "an incomplete PASS Android preview record must fail the job",
+  );
+  assert.match(
+    incompletePass.summary,
+    /#### Missing-boundary reason[\s\S]*PASS records must include a real Device model value\./,
+    "the failed summary must report a sanitized checker reason",
+  );
+  assert.match(
+    incompletePass.summary,
+    new RegExp(
+      `\\[${incompletePass.recordPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\]\\(https://github\\.example/example/chat-app/blob/[^)]+/${incompletePass.recordPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\)`,
+    ),
+    "the failed summary must still link the checked record",
+  );
+  assert.doesNotMatch(
+    incompletePass.summary,
+    /PRIVATE_EVIDENCE_MARKER|Workspace curl returned HTTP 200|No physical phone was available/,
+    "the failed summary must not expose record evidence text",
   );
 });
 
