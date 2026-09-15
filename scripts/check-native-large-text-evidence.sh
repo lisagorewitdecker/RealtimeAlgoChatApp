@@ -434,7 +434,7 @@ validate_platform() {
   fi
 
   if [[ -s "$run_dir/native-branding-check.md" ]] &&
-    ! grep -Fq -- "- Status: **PASS**" "$run_dir/native-branding-check.md"; then
+    ! grep -Fxq -- "- Status: **PASS**" "$run_dir/native-branding-check.md"; then
     issue "$platform" "The native branding report at ${run_dir}/native-branding-check.md is not PASS. Resolve the native metadata failure and rerun the release gate."
   fi
 
