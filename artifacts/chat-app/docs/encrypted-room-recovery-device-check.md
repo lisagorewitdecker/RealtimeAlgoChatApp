@@ -113,6 +113,36 @@ Expo Go can verify the preview launch boundary, but only the same published
 build installed on two phones can verify secure-storage persistence and
 force-close recovery.
 
+
+### Evidence completeness check
+
+Run the lightweight record check before treating a preview record as a
+successful Android launch:
+
+```sh
+pnpm run validate:android-preview-evidence -- \
+  artifacts/chat-app/test-results/encrypted-room-recovery/android/<UTC timestamp>/validation-record.md
+```
+
+The check enforces these boundaries:
+
+- A `PASS` record must contain real values for **Device model**, **Android
+  version**, and **Expo Go version**. `BLOCKED`, unavailable, pending, and
+  placeholder values are not metadata.
+- A `PASS` record must mark the physical stock Expo Go launch and the Metro
+  observation as `PASS`. Its Metro evidence must explicitly include a native
+  Android request with an Expo Go client or user-agent marker and
+  `platform=android`. Workspace `curl` output, `platform=-`, browser
+  preflights, and Metro startup output cannot satisfy this condition.
+- A `PASS` record must link to an existing, non-empty PNG, JPEG, or WebP
+  redacted screenshot or include a non-placeholder **exact phone error**. A
+  missing, empty, truncated, or non-image screenshot path does not count as
+  evidence.
+- A `BLOCKED` record is valid only when a boundary row explicitly identifies
+  the unavailable physical phone, native request, or other missing device
+  route. Public reachability may remain `PASS`, but it cannot change the
+  overall result to `PASS`.
+
 ## How the app behaves (what "expected" means below)
 
 - Each account/device pair owns a device keypair in secure storage. The public
