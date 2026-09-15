@@ -23,6 +23,9 @@
  *      changing the other platform's fixed report link.
  *   6. A failed platform artifact download keeps the release blocked without
  *      hiding the other platform's report link.
+ *   7. Multiple changed Android preview records are validated independently;
+ *      one failure does not hide the valid record or expose either record's
+ *      evidence text.
  *
  * The static rules catch code paths no scenario exercises; the behavioral runs
  * inject sentinel values for every secret-backed variable and prove the real
@@ -1347,10 +1350,16 @@ test("Android preview evidence keeps its pull-request validation and privacy con
   function runAndroidPreviewJob(name, recordText, options = {}) {
     const { sidecarOnly = false, changedPreflight = blockedPreflight } = options;
     const fixtureRoot = path.join(testRoot, `android-preview-${name}`);
-    const recordPath = path.join(
-      fixtureRoot,
-      "artifacts/chat-app/test-results/encrypted-room-recovery/android/20260915T120000Z/validation-record.md",
+    const recordDefinitions = Array.isArray(recordText)
+      ? recordText
+      : [{ timestamp: "20260915T120000Z", text: recordText }];
+    const recordPaths = recordDefinitions.map(({ timestamp }) =>
+      path.join(
+        fixtureRoot,
+        `artifacts/chat-app/test-results/encrypted-room-recovery/android/${timestamp}/validation-record.md`,
+      ),
     );
+    const recordPath = recordPaths[0];
     const preflightPath = path.join(
       fixtureRoot,
       "artifacts/chat-app/test-results/encrypted-room-recovery/android/20260915T120000Z/android-preview-preflight.json",
@@ -1358,10 +1367,12 @@ test("Android preview evidence keeps its pull-request validation and privacy con
     const summaryPath = path.join(fixtureRoot, "summary.md");
     const runnerPath = path.join(fixtureRoot, "run-job.sh");
     const binDirectory = path.join(fixtureRoot, "bin");
-    mkdirSync(path.dirname(recordPath), { recursive: true });
+    for (const record of recordPaths) {
+      mkdirSync(path.dirname(record), { recursive: true });
+    }
     mkdirSync(binDirectory, { recursive: true });
     if (sidecarOnly) {
-      writeFileSync(recordPath, recordText);
+      writeFileSync(recordPath, recordDefinitions[0].text);
       writeFileSync(preflightPath, blockedPreflight);
     }
 
@@ -1380,7 +1391,11 @@ test("Android preview evidence keeps its pull-request validation and privacy con
     git(["config", "user.email", "contract-test@example.invalid"]);
     git(["config", "user.name", "Contract Test"]);
     writeFileSync(path.join(fixtureRoot, "README.md"), "base\n");
-    git(["add", "README.md", ...(sidecarOnly ? [recordPath, preflightPath] : [])]);
+    git([
+      "add",
+      "README.md",
+      ...(sidecarOnly ? [recordPath, preflightPath] : []),
+    ]);
     git(["commit", "--quiet", "-m", "base"]);
     const baseSha = spawnSync(gitPath, ["rev-parse", "HEAD"], {
       cwd: fixtureRoot,
@@ -1390,8 +1405,10 @@ test("Android preview evidence keeps its pull-request validation and privacy con
       writeFileSync(preflightPath, changedPreflight);
       git(["add", preflightPath]);
     } else {
-      writeFileSync(recordPath, recordText);
-      git(["add", recordPath]);
+      for (const [index, { text }] of recordDefinitions.entries()) {
+        writeFileSync(recordPaths[index], text);
+      }
+      git(["add", ...recordPaths]);
     }
     git(["commit", "--quiet", "-m", "android preview record"]);
     const headSha = spawnSync(gitPath, ["rev-parse", "HEAD"], {
@@ -1428,6 +1445,7 @@ test("Android preview evidence keeps its pull-request validation and privacy con
     return {
       result,
       recordPath: path.relative(fixtureRoot, recordPath),
+      recordPaths: recordPaths.map((record) => path.relative(fixtureRoot, record)),
       preflightPath: path.relative(fixtureRoot, preflightPath),
       summary: readFileSync(summaryPath, "utf8"),
     };
@@ -1483,6 +1501,56 @@ test("Android preview evidence keeps its pull-request validation and privacy con
     incompletePass.summary,
     /PRIVATE_EVIDENCE_MARKER|Workspace curl returned HTTP 200|No physical phone was available/,
     "the failed summary must not expose record evidence text",
+  );
+
+  const multiRecord = runAndroidPreviewJob("multi-record", [
+    { timestamp: "20260915T120000Z", text: blockedRecord },
+    {
+      timestamp: "20260915T121500Z",
+      text: blockedRecord
+        .replace("**Result: BLOCKED", "**Result: PASS")
+        .replace(
+          "No physical phone was available.",
+          "PRIVATE_MULTI_RECORD_EVIDENCE no physical phone was available.",
+        ),
+    },
+  ]);
+  assert.notEqual(
+    multiRecord.result.status,
+    0,
+    "one invalid Android preview record must fail the multi-record job",
+  );
+  assert.match(
+    multiRecord.summary,
+    /- Changed records checked: \*\*2\*\*/,
+    "the summary must count every changed Android preview record",
+  );
+  for (const recordPath of multiRecord.recordPaths) {
+    const escapedPath = recordPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    assert.match(
+      multiRecord.summary,
+      new RegExp(
+        `\\[${escapedPath}\\]\\(https://github\\.example/example/chat-app/blob/[^)]+/${escapedPath}\\)`,
+      ),
+      `the multi-record summary must link ${recordPath}`,
+    );
+  }
+  assert.match(
+    multiRecord.summary,
+    new RegExp(
+      `### \\[${multiRecord.recordPaths[0].replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\][\\s\\S]*- Validation: \\*\\*PASS\\*\\*[\\s\\S]*- Record result: \\*\\*BLOCKED \\(valid\\)\\*\\*`,
+    ),
+    "the valid record must remain represented after another record fails",
+  );
+  assert.match(
+    multiRecord.summary,
+    /Missing-boundary reason[\s\S]*PASS records must include a real Device model value\./,
+    "the invalid record must contribute its sanitized checker reason",
+  );
+  assert.doesNotMatch(
+    multiRecord.summary,
+    /PRIVATE_MULTI_RECORD_EVIDENCE|Workspace curl returned HTTP 200|No physical phone was available/,
+    "a multi-record summary must not expose evidence text from either record",
   );
 
   const sidecarOnly = runAndroidPreviewJob("sidecar-only", blockedRecord, {

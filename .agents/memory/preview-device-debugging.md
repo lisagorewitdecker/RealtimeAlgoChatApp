@@ -11,6 +11,14 @@ Requests to `*.replit.dev` from the container resolve to an internal sidecar
 Replit's "Run this app to see the results here" HTML in an Expo Go 404 means
 the public edge could not reach the workspace app server at that moment.
 
+**Isolated task environments:** `$REPLIT_DEV_DOMAIN` and
+`$REPLIT_EXPO_DEV_DOMAIN` answer every path with a 7-byte `Running`
+placeholder there, even while the local ports serve real responses. The
+workspace preview pane is served by the main workspace's workflows, so
+starting workflows inside a task environment cannot clear a "Your app is not
+running" banner shown in the main workspace. Only local port probes are
+meaningful from a task environment.
+
 **How to see device traffic:** enable the opt-in redacted Metro request
 evidence and restart the Expo workflow; Metro logs one redacted line per
 Metro-level request and refreshes a handoff evidence file. The marker contains
