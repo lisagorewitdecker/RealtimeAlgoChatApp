@@ -1,5 +1,15 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import {
+  appendFileSync,
+  copyFileSync,
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
@@ -34,6 +44,7 @@ const generatedClientStep = steps.find(
 const compatibilityStep = steps.find(
   (step) => step.name === "Check API contract compatibility",
 );
+const generatedClientFixturePath = "lib/api-client-react/src/generated/api.ts";
 
 function resolveRootPackageScript(command) {
   const match = String(command)
@@ -57,9 +68,7 @@ function resolveRootPackageScript(command) {
 function resolveApiSpecPackageScript(command) {
   const match = String(command)
     .trim()
-    .match(
-      /^pnpm\s+--filter\s+@workspace\/api-spec\s+run\s+([^\s]+)$/,
-    );
+    .match(/^pnpm\s+--filter\s+@workspace\/api-spec\s+run\s+([^\s]+)$/);
   assert.ok(
     match,
     `expected an API specification package script command, received: ${command}`,
@@ -73,6 +82,74 @@ function resolveApiSpecPackageScript(command) {
     `expected lib/api-spec/package.json to define the ${scriptName} script`,
   );
   return resolvedCommand;
+}
+
+function createGeneratedClientFixture() {
+  const fixtureRoot = mkdtempSync(
+    path.join(tmpdir(), "api-codegen-workflow-fixture-"),
+  );
+
+  try {
+    const files = execFileSync(
+      "git",
+      ["ls-files", "--cached", "--others", "--exclude-standard", "-z"],
+      {
+        cwd: workspaceRoot,
+        encoding: "utf8",
+        maxBuffer: 64 * 1024 * 1024,
+      },
+    )
+      .split("\0")
+      .filter(Boolean);
+
+    for (const file of files) {
+      const source = path.join(workspaceRoot, file);
+      const destination = path.join(fixtureRoot, file);
+      mkdirSync(path.dirname(destination), { recursive: true });
+      copyFileSync(source, destination);
+    }
+
+    symlinkSync(
+      path.join(workspaceRoot, "node_modules"),
+      path.join(fixtureRoot, "node_modules"),
+      "dir",
+    );
+    for (const packagePath of [
+      "lib/api-client-react",
+      "lib/api-spec",
+      "lib/api-zod",
+    ]) {
+      symlinkSync(
+        path.join(workspaceRoot, packagePath, "node_modules"),
+        path.join(fixtureRoot, packagePath, "node_modules"),
+        "dir",
+      );
+    }
+
+    return fixtureRoot;
+  } catch (error) {
+    rmSync(fixtureRoot, { recursive: true, force: true });
+    throw error;
+  }
+}
+
+function runRootValidation(fixtureRoot) {
+  try {
+    return {
+      status: 0,
+      output: execFileSync("pnpm", ["validate:api-codegen"], {
+        cwd: fixtureRoot,
+        encoding: "utf8",
+        timeout: 240_000,
+        stdio: ["ignore", "pipe", "pipe"],
+      }),
+    };
+  } catch (error) {
+    return {
+      status: error.status ?? 1,
+      output: `${error.stdout ?? ""}${error.stderr ?? ""}`,
+    };
+  }
 }
 
 test("root unit validation invokes the maintained API compatibility behavior suite", () => {
@@ -91,6 +168,58 @@ test("root unit validation invokes the maintained API compatibility behavior sui
     apiSpecPackage.scripts?.["test:compatibility"],
     "the root unit command must resolve the named API specification package script",
   );
+});
+
+test("root API codegen validation fails when the generated client drifts", () => {
+  const originalGeneratedClient = readFileSync(
+    path.join(workspaceRoot, generatedClientFixturePath),
+  );
+  let fixtureRoot;
+
+  try {
+    fixtureRoot = createGeneratedClientFixture();
+    const fixtureGeneratedClient = path.join(
+      fixtureRoot,
+      generatedClientFixturePath,
+    );
+    appendFileSync(
+      fixtureGeneratedClient,
+      "\n// deterministic stale fixture\n",
+    );
+
+    const result = runRootValidation(fixtureRoot);
+
+    assert.notEqual(
+      result.status,
+      0,
+      "the root validation command must fail when generated output drifts",
+    );
+    assert.match(
+      result.output,
+      /Generated API drift detected after regeneration:/,
+    );
+    assert.match(
+      result.output,
+      /Run `pnpm --filter @workspace\/api-spec run codegen` and commit the generated output\./,
+    );
+    assert.deepEqual(
+      readFileSync(fixtureGeneratedClient),
+      Buffer.concat([
+        originalGeneratedClient,
+        Buffer.from("\n// deterministic stale fixture\n"),
+      ]),
+      "the checker must restore the changed fixture after reporting drift",
+    );
+    assert.deepEqual(
+      readFileSync(path.join(workspaceRoot, generatedClientFixturePath)),
+      originalGeneratedClient,
+      "the repository checkout must remain unchanged",
+    );
+  } finally {
+    if (fixtureRoot) {
+      rmSync(fixtureRoot, { recursive: true, force: true });
+    }
+  }
 });
 
 test("generated-client drift evidence remains visible in the CI job log", () => {
@@ -139,9 +268,13 @@ test("generated-client validation remains required for the workflow", () => {
   );
 
   const job = workflow.jobs?.["check-generated"];
-  assert.ok(job, "expected the API codegen workflow to contain the check-generated job");
   assert.ok(
-    job["continue-on-error"] === undefined || job["continue-on-error"] === false,
+    job,
+    "expected the API codegen workflow to contain the check-generated job",
+  );
+  assert.ok(
+    job["continue-on-error"] === undefined ||
+      job["continue-on-error"] === false,
     "the generated-client job must fail the workflow when its checker exits nonzero; do not enable continue-on-error",
   );
 });
