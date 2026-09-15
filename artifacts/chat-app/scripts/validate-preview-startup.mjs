@@ -1,5 +1,5 @@
 import { createServer } from "node:net";
-import { readFile, writeFile } from "node:fs/promises";
+import { appendFile, readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { spawn } from "node:child_process";
 import { setTimeout as delay } from "node:timers/promises";
@@ -10,6 +10,7 @@ const DEFAULT_PUBLIC_PREVIEW_TIMEOUT_MS = 15_000;
 const STARTUP_FAILURE_GRACE_MS = 250;
 const MAX_STARTUP_DIAGNOSTIC_LENGTH = 512;
 const MAX_STARTUP_FAILURE_LINE_LENGTH = 320;
+const MAX_STARTUP_SUMMARY_LENGTH = 512;
 const HANDOFF_PLATFORM_CONFIG = {
   android: {
     schema: "android-preview-handoff-preflight/v1",
@@ -129,6 +130,58 @@ function formatStartupFailure(output) {
     `${failureDetail}${libraryDetail}`,
     MAX_STARTUP_DIAGNOSTIC_LENGTH,
   )}`;
+}
+
+function sanitizeStartupSummaryDiagnostic(value) {
+  return sanitizeStartupDiagnostic(value, MAX_STARTUP_SUMMARY_LENGTH)
+    .replace(/https?:\/\/\S+/gi, "[redacted URL]")
+    .replace(
+      /\b(?:authorization|proxy-authorization)\s*:?.*$/gi,
+      "[redacted authorization]",
+    )
+    .replace(
+      /\b(?:api[_-]?key|credential|password|passwd|secret|token)\s*(?:[=:]\s*|\s+)\S+/gi,
+      "[redacted credential]",
+    )
+    .replace(/[`*_]/g, "")
+    .slice(0, MAX_STARTUP_SUMMARY_LENGTH);
+}
+
+function formatStartupFailureSummary(error) {
+  const message = error instanceof Error ? error.message : String(error);
+  const startupFailure = message.startsWith("Expo preview startup error:")
+    ? message
+    : formatStartupFailure(message);
+  const diagnostic = startupFailure
+    ? sanitizeStartupSummaryDiagnostic(startupFailure)
+    : "Preview startup could not be confirmed. See the workflow log for details.";
+
+  return (
+    "### Expo preview startup\n\n" +
+    "**Status:** FAIL\n\n" +
+    `**Diagnosis:** ${diagnostic}\n\n`
+  );
+}
+
+async function writeStartupFailureSummary(error) {
+  const summaryPath = process.env.GITHUB_STEP_SUMMARY;
+  if (!summaryPath) return;
+
+  try {
+    await appendFile(summaryPath, formatStartupFailureSummary(error), "utf8");
+  } catch {
+    console.error("Could not write the preview startup failure summary.");
+  }
+}
+
+function isStartupValidationInvocation(argv) {
+  if (argv.includes("--validate-record")) return false;
+
+  const logFileIndex = argv.indexOf("--log-file");
+  if (logFileIndex === -1) return true;
+
+  const logFile = argv[logFileIndex + 1];
+  return Boolean(logFile && !logFile.startsWith("--"));
 }
 
 function formatRequestOutcome(stage, response, byteLength) {
@@ -973,7 +1026,11 @@ async function main() {
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
-  main().catch((error) => {
+  const cliArgs = process.argv.slice(2);
+  main().catch(async (error) => {
+    if (isStartupValidationInvocation(cliArgs)) {
+      await writeStartupFailureSummary(error);
+    }
     console.error(error instanceof Error ? error.message : error);
     process.exitCode = 1;
   });
