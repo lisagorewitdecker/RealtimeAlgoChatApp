@@ -56,6 +56,16 @@ test("hosted summary regression checks only the reviewed ref", () => {
     verification,
     /scripts\/run-untrusted-checker\.sh bash scripts\/check-native-large-text-evidence\.sh/,
   );
+  const revisionMetadataIndex = verification.indexOf(
+    'echo "## Reviewed release revision"',
+  );
+  const checkerIndex = verification.indexOf(
+    'if GITHUB_STEP_SUMMARY="$summary_path" bash scripts/run-untrusted-checker.sh',
+  );
+  assert.ok(
+    revisionMetadataIndex >= 0 && revisionMetadataIndex < checkerIndex,
+    "trusted revision metadata must be written before the checker can fail",
+  );
   assert.match(
     verification,
     /Missing result directory: \$blocked_root\/ios/,

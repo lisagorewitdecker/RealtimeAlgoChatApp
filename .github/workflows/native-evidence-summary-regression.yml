@@ -34,6 +34,12 @@ jobs:
           trap 'rm -rf "$blocked_root" "$summary_path"' EXIT
           resolved_commit_sha="$(git rev-parse --verify HEAD)"
 
+          {
+            echo "## Reviewed release revision"
+            printf -- '- Checked ref: `%s`\n' "$REVIEWED_REF"
+            printf -- '- Resolved commit SHA: `%s`\n' "$resolved_commit_sha"
+          } >> "$GITHUB_STEP_SUMMARY"
+
           if GITHUB_STEP_SUMMARY="$summary_path" bash scripts/run-untrusted-checker.sh bash scripts/check-native-large-text-evidence.sh "$blocked_root"; then
             echo "The blocked native evidence scenario unexpectedly passed." >&2
             exit 1
@@ -100,9 +106,4 @@ jobs:
           require_only_missing_result_finding "$android_section" "- \`Missing result directory: $blocked_root/android. Run the android native large-text gate and upload its timestamped result directory.\`"
           require_not_contains "$android_section" "$blocked_root/ios"
 
-          {
-            echo "## Reviewed release revision"
-            printf -- '- Checked ref: `%s`\n' "$REVIEWED_REF"
-            printf -- '- Resolved commit SHA: `%s`\n' "$resolved_commit_sha"
-          } >> "$GITHUB_STEP_SUMMARY"
           cat "$summary_path" >> "$GITHUB_STEP_SUMMARY"
