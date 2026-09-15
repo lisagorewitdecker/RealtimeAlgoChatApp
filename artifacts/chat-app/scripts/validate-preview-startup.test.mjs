@@ -223,6 +223,38 @@ test("rejects credential-bearing public preview configuration before making a re
   }
 });
 
+test("rejects malformed PREVIEW_PUBLIC_URL configuration before making a request", async () => {
+  const fetchMock = mockFetch(new Response("{}"));
+
+  try {
+    await assert.rejects(
+      requestPublicPreviewManifest(1_000, {
+        PREVIEW_PUBLIC_URL: "https://[invalid",
+      }),
+      /Public Expo preview manifest URL configuration is invalid.*PREVIEW_PUBLIC_URL or REPLIT_EXPO_DEV_DOMAIN/,
+    );
+    assert.equal(fetchMock.request, undefined);
+  } finally {
+    fetchMock.restore();
+  }
+});
+
+test("rejects malformed REPLIT_EXPO_DEV_DOMAIN configuration before making a request", async () => {
+  const fetchMock = mockFetch(new Response("{}"));
+
+  try {
+    await assert.rejects(
+      requestPublicPreviewManifest(1_000, {
+        REPLIT_EXPO_DEV_DOMAIN: "https://[invalid",
+      }),
+      /Public Expo preview manifest URL configuration is invalid.*PREVIEW_PUBLIC_URL or REPLIT_EXPO_DEV_DOMAIN/,
+    );
+    assert.equal(fetchMock.request, undefined);
+  } finally {
+    fetchMock.restore();
+  }
+});
+
 test("rejects malformed public manifests with actionable recovery guidance", async () => {
   const fetchMock = mockFetch(new Response("{not-json", { status: 200 }));
 
