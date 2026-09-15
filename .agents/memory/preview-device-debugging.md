@@ -11,10 +11,13 @@ Requests to `*.replit.dev` from the container resolve to an internal sidecar
 Replit's "Run this app to see the results here" HTML in an Expo Go 404 means
 the public edge could not reach the workspace app server at that moment.
 
-**How to see device traffic:** set `EXPO_DEV_REQUEST_LOG=1` in the development
-environment and restart the Expo workflow; the Metro config then logs one line
-per Metro-level request (status, host, platform, user agent, path). Manifest
-requests are handled by Expo middleware before that hook and are not logged.
+**How to see device traffic:** enable the opt-in redacted Metro request
+evidence and restart the Expo workflow; Metro logs one redacted line per
+Metro-level request and refreshes a handoff evidence file. The marker contains
+only status, timing, normalized platform, client class, and coarse resource
+class.
+Manifest requests are handled by Expo middleware before that hook and are not
+logged.
 In the API access log, a native client is the one that sends no `OPTIONS`
 preflights; browser tabs preflight every cross-origin call.
 
@@ -48,3 +51,11 @@ The local Expo Go handoff check must request the platform manifest first and
 follow its `launchAsset.url` pathname for the bundle; a guessed `/index.bundle`
 route is not equivalent. This validates Metro's native-client routing locally,
 but does not replace a real-device check through the public edge.
+
+**Why:** retaining raw hosts, URLs, or user-agent strings makes it too easy to
+copy credentials or account context into native evidence, while workflow
+console output is difficult to preserve as a timestamped handoff artifact.
+
+**How to apply:** filter the retained log for
+`platform=android client=Expo Go` (or the corresponding iOS platform), exclude
+`OPTIONS`, and copy only the redacted marker into the handoff record.

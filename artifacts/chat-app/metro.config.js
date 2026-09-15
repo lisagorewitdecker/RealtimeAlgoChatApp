@@ -1,12 +1,48 @@
+const fs = require("node:fs");
+const path = require("node:path");
 const { getSentryExpoConfig } = require("@sentry/react-native/metro");
+const {
+  formatRequestEvidence,
+  resolveEvidencePath,
+} = require("./metro-request-evidence");
 
 const config = getSentryExpoConfig(__dirname);
 
 // Opt-in request log for debugging phones that cannot load the development
-// preview. Prints one line per request that reaches Metro (bundles, assets,
-// lazy route bundles) with the host and client the phone used, without
-// touching bodies or auth headers. Enable with EXPO_DEV_REQUEST_LOG=1.
-if (process.env.EXPO_DEV_REQUEST_LOG === "1") {
+// preview. The log is deliberately redacted: it includes only request
+// metadata and coarse client/resource classifications, never a host, URL,
+// query string, or raw user-agent. Enable with EXPO_DEV_REQUEST_LOG=1, or set
+// EXPO_DEV_REQUEST_EVIDENCE_FILE to enable it and write to a handoff path.
+const requestLogEnabled =
+  process.env.EXPO_DEV_REQUEST_LOG === "1" ||
+  Boolean(process.env.EXPO_DEV_REQUEST_EVIDENCE_FILE);
+
+let requestEvidenceStream;
+if (requestLogEnabled) {
+  const configuredEvidencePath = process.env.EXPO_DEV_REQUEST_EVIDENCE_FILE;
+  const evidencePath = resolveEvidencePath(configuredEvidencePath, __dirname);
+  try {
+    fs.mkdirSync(path.dirname(evidencePath), { recursive: true });
+    requestEvidenceStream = fs.createWriteStream(evidencePath, {
+      flags: "w",
+      encoding: "utf8",
+    });
+    requestEvidenceStream.on("error", (error) => {
+      console.warn(
+        `[dev-request] Redacted evidence file became unavailable; ` +
+          `continuing with console output (${error.code ?? "unknown error"}).`,
+      );
+      requestEvidenceStream = undefined;
+    });
+  } catch (error) {
+    console.warn(
+      `[dev-request] Could not open the redacted evidence file; ` +
+        `continuing with console output (${error.code ?? "unknown error"}).`,
+    );
+  }
+}
+
+if (requestLogEnabled) {
   const previousEnhance = config.server?.enhanceMiddleware;
   config.server = {
     ...config.server,
@@ -17,13 +53,9 @@ if (process.env.EXPO_DEV_REQUEST_LOG === "1") {
       return (req, res, next) => {
         const startedAt = Date.now();
         res.once("finish", () => {
-          const url = String(req.url ?? "").slice(0, 140);
-          console.log(
-            `[dev-request] ${new Date().toISOString()} ${req.method} ${res.statusCode} ` +
-              `${Date.now() - startedAt}ms host=${req.headers.host ?? "-"} ` +
-              `platform=${req.headers["expo-platform"] ?? "-"} ` +
-              `ua=${String(req.headers["user-agent"] ?? "-").slice(0, 60)} ${url}`,
-          );
+          const evidence = formatRequestEvidence(req, res, startedAt);
+          console.log(evidence);
+          requestEvidenceStream?.write(`${evidence}\n`);
         });
         return wrapped(req, res, next);
       };

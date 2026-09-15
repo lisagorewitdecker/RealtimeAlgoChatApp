@@ -78,8 +78,18 @@ For either option:
    version, UTC time, and the non-secret preview host label. Do not record an
    account email, token, QR payload, or URL containing credentials.
 2. Set `EXPO_DEV_REQUEST_LOG=1` in the development environment and restart the
-   managed Chat App/Expo workflow before the handoff. After the workflow
-   reports that Metro is ready, run:
+   managed Chat App/Expo workflow before the handoff. Metro writes a fresh,
+   redacted request log to
+   `artifacts/chat-app/.expo/dev-request-evidence.log`. To retain the evidence
+   directly in the timestamped record instead, set
+   `EXPO_DEV_REQUEST_EVIDENCE_FILE` to
+   `test-results/encrypted-room-recovery/android/<UTC timestamp>/logs/metro-request-evidence.txt`
+   before restarting. This path is relative to the Chat App package root used
+   by the managed workflow. The file's lines contain only status, timing,
+   `platform`, a client class, `user-agent=[redacted]`, and a coarse resource
+   class; they never contain a host, URL, query string, credentials, account
+   data, or message content. After the workflow reports that Metro is ready,
+   run:
 
    ```sh
    pnpm --filter @workspace/chat-app run validate:preview-startup
@@ -98,8 +108,20 @@ For either option:
    message content cropped or blurred. Treat the launch as observed only when
    both the phone screen and
    server-side request evidence are available. A native request has no
-   browser `OPTIONS` preflight; record the Android/Expo Go user-agent or
-   client marker from the filtered log without retaining the full host or URL.
+   browser `OPTIONS` preflight. Filter the retained file to the native Android
+   marker before adding it to the record:
+
+   ```sh
+   grep 'platform=android client=Expo Go' \
+     artifacts/chat-app/test-results/encrypted-room-recovery/android/<UTC timestamp>/logs/metro-request-evidence.txt \
+     | grep -v ' OPTIONS ' \
+     > artifacts/chat-app/test-results/encrypted-room-recovery/android/<UTC timestamp>/logs/native-android-request-evidence.txt
+   ```
+
+   Reference `logs/native-android-request-evidence.txt` in the
+   **Server-side native request evidence** row. Copy only the marker
+   (`platform=android; client=Expo Go; user-agent=[redacted]`) into the
+   Markdown row; do not retain the full host or URL.
 4. If Expo Go cannot launch, record the exact phone error and a redacted
    screenshot. A workspace `curl`, a browser tab, or a Metro startup line
    proves public reachability or workflow readiness only; the preview preflight
@@ -280,11 +302,18 @@ Store under `test-results/encrypted-room-recovery/<platform>/<UTC timestamp>/`:
 When a phone cannot load the development preview at all (Expo Go reports
 "There was a problem running the requested project"), set
 `EXPO_DEV_REQUEST_LOG=1` in the development environment and restart the Expo
-workflow: Metro then logs one line per device request (status, host, platform,
-client, path) so you can see whether the phone reaches the dev server and what
-it fetched. Probing the preview URL from inside the workspace is not
-conclusive, because those requests bypass the public edge. In the API log a
-native client is the one without `OPTIONS` preflights; browser tabs send them.
+workflow. Metro then logs one redacted line per device request and refreshes
+the same evidence at
+`artifacts/chat-app/.expo/dev-request-evidence.log` (or the path supplied by
+`EXPO_DEV_REQUEST_EVIDENCE_FILE`). The line includes status, platform, client,
+and resource class, but no host, URL, query string, credentials, account data,
+or message content. The automated local preflight is labeled
+`client=preview-validation`, so it cannot satisfy the native filter. Probing
+the preview URL from inside the workspace is not
+conclusive, because those requests bypass the public edge. In the filtered
+file, a native Android request is identified by
+`platform=android client=Expo Go`; browser and curl probes retain their own
+client classes and do not satisfy the native evidence row.
 
 Never record: credentials, session tokens, private or public keys in full,
 message or sandbox plaintext, envelope payloads, or database rows.
