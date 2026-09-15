@@ -36,6 +36,8 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Verify generated API clients
+        env:
+          GITHUB_STEP_SUMMARY: ""
         run: pnpm validate:api-codegen
 
       # For an intentional versioned break, add both declarations to the pull request description.

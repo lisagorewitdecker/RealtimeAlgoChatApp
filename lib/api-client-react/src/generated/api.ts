@@ -519,3 +519,5 @@ export function useGetRoom<TData = Awaited<ReturnType<typeof getRoom>>, TError =
 
   return withQueryKey(query, queryOptions.queryKey);
 }
+
+// controlled stale generated-client probe
