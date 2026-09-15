@@ -873,8 +873,11 @@ echo "- Candidate build fingerprint: **Omitted from workflow summary**"
     if: >-
       ${{
         needs.mobile-release-gate.result == 'success' &&
-        github.event_name == 'workflow_dispatch' &&
-        inputs.publish == true
+(
+  github.event_name == 'workflow_call' ||
+  (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/mobile-v')) ||
+  (github.event_name == 'workflow_dispatch' && inputs.publish == true)
+)
       }}
     needs:
       - mobile-release-gate
