@@ -11,6 +11,8 @@ const STARTUP_FAILURE_GRACE_MS = 250;
 const MAX_STARTUP_DIAGNOSTIC_LENGTH = 512;
 const MAX_STARTUP_FAILURE_LINE_LENGTH = 320;
 const MAX_STARTUP_SUMMARY_LENGTH = 512;
+const MAX_STARTUP_LIBRARY_DETAIL_LENGTH = 192;
+const STARTUP_DIAGNOSTIC_PREFIX = "Expo preview startup error: ";
 const HANDOFF_PLATFORM_CONFIG = {
   android: {
     schema: "android-preview-handoff-preflight/v1",
@@ -68,7 +70,7 @@ const STARTUP_FAILURES = [
   /error while loading shared libraries:/i,
   /cannot open shared object file/i,
   /library not loaded:/i,
-  /cannot proceed because .{1,160} was not found/i,
+  /cannot proceed because [^\r\n]+ was not found/i,
   /(?:error|failed|unable|cannot).{0,80}(?:react native )?devtools/i,
   /(?:react native )?devtools.{0,80}(?:error|failed|unable|cannot|could not|couldn't)/i,
 ];
@@ -76,14 +78,14 @@ const STARTUP_TEST_FIXTURES = new Set([
   "missing-runtime-library",
   "missing-runtime-library-dyld",
   "missing-runtime-library-windows",
+  "missing-runtime-library-long-path",
+  "missing-runtime-library-dyld-long-path",
+  "missing-runtime-library-windows-long-path",
 ]);
 const MISSING_LIBRARY_PATTERNS = [
-  new RegExp(
-    String.raw`error while loading shared libraries:\s*([A-Za-z0-9._+@/-]{1,128})\s*:\s*cannot open shared object file`,
-    "i",
-  ),
-  /library not loaded:\s*([A-Za-z0-9._+@/-]{1,128})/i,
-  /cannot proceed because\s+([A-Za-z0-9._+@/-]{1,128})\s+was not found/i,
+  /error while loading shared libraries:\s*(.+?)\s*:\s*cannot open shared object file/i,
+  /library not loaded:\s*([^\r\n]+)/i,
+  /cannot proceed because\s+(.+?)\s+was not found/i,
 ];
 
 function findStartupFailure(output) {
@@ -106,29 +108,67 @@ function sanitizeStartupDiagnostic(value, maxLength) {
 
 function findMissingLibrary(output) {
   for (const pattern of MISSING_LIBRARY_PATTERNS) {
-    const missingLibrary = output.match(pattern)?.[1];
+    const rawMissingLibrary = output.match(pattern)?.[1];
+    const missingLibrary = rawMissingLibrary
+      ?.trim()
+      .replace(/^(['"])(.*)\1$/, "$2");
     if (missingLibrary) return missingLibrary;
   }
   return null;
+}
+
+function compactStartupLibraryPath(path) {
+  if (path.length <= MAX_STARTUP_LIBRARY_DETAIL_LENGTH) return path;
+
+  const separatorIndex = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
+  const libraryIdentifier =
+    separatorIndex >= 0 ? path.slice(separatorIndex + 1) : path;
+  const ellipsis = "…";
+  const preservedPrefixLength = Math.max(
+    0,
+    MAX_STARTUP_LIBRARY_DETAIL_LENGTH -
+      ellipsis.length -
+      libraryIdentifier.length -
+      (separatorIndex >= 0 ? 1 : 0),
+  );
+
+  if (separatorIndex < 0 || libraryIdentifier.length >= MAX_STARTUP_LIBRARY_DETAIL_LENGTH) {
+    return `${ellipsis}${path.slice(-MAX_STARTUP_LIBRARY_DETAIL_LENGTH + ellipsis.length)}`;
+  }
+
+  return `${path.slice(0, preservedPrefixLength)}${ellipsis}${path.slice(separatorIndex)}`;
 }
 
 function formatStartupFailure(output) {
   const failure = findStartupFailure(output);
   if (!failure) return null;
 
-  const failureDetail = sanitizeStartupDiagnostic(
+  const fullFailureDetail = sanitizeStartupDiagnostic(
     failure,
     MAX_STARTUP_FAILURE_LINE_LENGTH,
   );
   const missingLibrary = findMissingLibrary(output);
   const libraryDetail =
-    missingLibrary && !failureDetail.includes(missingLibrary)
-      ? ` (missing runtime library: ${missingLibrary})`
+    missingLibrary &&
+    (!fullFailureDetail.includes(missingLibrary) ||
+      missingLibrary.length > MAX_STARTUP_LIBRARY_DETAIL_LENGTH)
+      ? ` (missing runtime library: ${compactStartupLibraryPath(missingLibrary)})`
       : "";
 
-  return `Expo preview startup error: ${sanitizeStartupDiagnostic(
+  const failureLength = Math.min(
+    fullFailureDetail.length,
+    Math.max(
+      0,
+      MAX_STARTUP_DIAGNOSTIC_LENGTH -
+        STARTUP_DIAGNOSTIC_PREFIX.length -
+        libraryDetail.length,
+    ),
+  );
+  const failureDetail = fullFailureDetail.slice(0, failureLength);
+
+  return `${STARTUP_DIAGNOSTIC_PREFIX}${sanitizeStartupDiagnostic(
     `${failureDetail}${libraryDetail}`,
-    MAX_STARTUP_DIAGNOSTIC_LENGTH,
+    MAX_STARTUP_DIAGNOSTIC_LENGTH - STARTUP_DIAGNOSTIC_PREFIX.length,
   )}`;
 }
 
