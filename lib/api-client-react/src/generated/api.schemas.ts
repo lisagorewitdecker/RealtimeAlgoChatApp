@@ -142,3 +142,4 @@ export interface RoomResponse {
 export type UnauthorizedResponse = {
   error: string;
 };
+// task-475 stale generated-client probe marker
