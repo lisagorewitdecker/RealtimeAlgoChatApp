@@ -23,13 +23,17 @@ on:
     inputs:
       native_smoke_ios_build_id:
         description: Non-secret EAS build ID of the iOS candidate
-        required: true
+        required: false
         type: string
       native_smoke_android_build_id:
         description: Non-secret EAS build ID of the Android candidate
-        required: true
+        required: false
         type: string
     secrets:
+      NATIVE_SMOKE_IOS_BUILD_ID:
+        required: false
+      NATIVE_SMOKE_ANDROID_BUILD_ID:
+        required: false
       EAS_TOKEN:
         required: true
       SENTRY_AUTH_TOKEN:
@@ -70,8 +74,8 @@ permissions:
 env:
   PNPM_VERSION: 10.26.1
   EAS_CLI_VERSION: 23.2.0
-  NATIVE_SMOKE_IOS_BUILD_ID: ${{ inputs.native_smoke_ios_build_id || vars.NATIVE_SMOKE_IOS_BUILD_ID }}
-  NATIVE_SMOKE_ANDROID_BUILD_ID: ${{ inputs.native_smoke_android_build_id || vars.NATIVE_SMOKE_ANDROID_BUILD_ID }}
+  NATIVE_SMOKE_IOS_BUILD_ID: ${{ inputs.native_smoke_ios_build_id || secrets.NATIVE_SMOKE_IOS_BUILD_ID || vars.NATIVE_SMOKE_IOS_BUILD_ID }}
+  NATIVE_SMOKE_ANDROID_BUILD_ID: ${{ inputs.native_smoke_android_build_id || secrets.NATIVE_SMOKE_ANDROID_BUILD_ID || vars.NATIVE_SMOKE_ANDROID_BUILD_ID }}
 
 jobs:
   native-evidence-summary-regression:
