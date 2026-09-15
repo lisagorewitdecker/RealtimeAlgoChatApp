@@ -28,6 +28,9 @@
  *      evidence text.
  *   8. A duplicate Android preflight field fails with the fixed redacted-schema
  *      message without exposing the duplicate value or raw artifact content.
+ *   9. A failed artifact extraction clears partial platform output before its
+ *      retry, while a permanently missing artifact still reaches the fixed
+ *      platform-specific blocking summary.
  *
  * The static rules catch code paths no scenario exercises; the behavioral runs
  * inject sentinel values for every secret-backed variable and prove the real
@@ -3238,6 +3241,94 @@ test("partial native reruns keep each platform linked to its own artifact", () =
     [artifactNames.android, artifactNames.ios].sort(),
     "the final gate must download both stable platform artifact names",
   );
+
+  const cleanupScenarios = [
+    {
+      jobId: "mobile-release-gate",
+      initialStepId: "download",
+      retryStepId: "retry",
+      cleanupNameSuffix: "before retry",
+    },
+    {
+      jobId: "mobile-publish",
+      initialStepId: "download-publish",
+      retryStepId: "retry-publish",
+      cleanupNameSuffix: "before publishing retry",
+    },
+  ];
+  for (const {
+    jobId,
+    initialStepId,
+    retryStepId,
+    cleanupNameSuffix,
+  } of cleanupScenarios) {
+    const job = workflow.jobs[jobId];
+    for (const platform of ["ios", "android"]) {
+      const initialStep = job.steps.find(
+        (step) => step.id === `${initialStepId}-${platform}-native-smoke`,
+      );
+      const retryStep = job.steps.find(
+        (step) => step.id === `${retryStepId}-${platform}-native-smoke`,
+      );
+      const cleanupStep = job.steps.find(
+        (step) =>
+          step.name ===
+          `Clear partial ${platform === "ios" ? "iOS" : "Android"} native smoke artifacts ${cleanupNameSuffix}`,
+      );
+      const platformPath = `test-results/native-large-text/${platform}`;
+
+      assert.ok(initialStep, `${jobId}: ${platform} initial download is required`);
+      assert.ok(retryStep, `${jobId}: ${platform} retry download is required`);
+      assert.ok(
+        cleanupStep,
+        `${jobId}: ${platform} retry must clear partial output first`,
+      );
+      assert.equal(
+        cleanupStep.if,
+        `\${{ always() && steps.${initialStep.id}.outcome != 'success' }}`,
+        `${jobId}: ${platform} cleanup must run only after an unsuccessful initial download`,
+      );
+      assert.equal(
+        cleanupStep.run,
+        `rm -rf -- ${platformPath} && mkdir -p -- ${platformPath}`,
+        `${jobId}: ${platform} cleanup must recreate the download directory`,
+      );
+      assert.equal(
+        retryStep.if,
+        cleanupStep.if,
+        `${jobId}: ${platform} retry must use the same failure condition as cleanup`,
+      );
+      assert.equal(
+        retryStep.with.path,
+        platformPath,
+        `${jobId}: ${platform} retry must extract into the recreated platform directory`,
+      );
+
+      const partialRoot = mkdtempSync(
+        path.join(tmpdir(), `native-partial-${jobId}-${platform}-`),
+      );
+      const partialPath = path.join(partialRoot, platformPath);
+      mkdirSync(partialPath, { recursive: true });
+      const privateMarker = path.join(partialPath, "stale-private-evidence.txt");
+      writeFileSync(privateMarker, "private evidence must not survive retry");
+      const cleanupResult = spawnSync(
+        bashPath,
+        ["-c", cleanupStep.run.replaceAll(platformPath, partialPath)],
+        { cwd: workspaceRoot, encoding: "utf8" },
+      );
+      assert.equal(
+        cleanupResult.status,
+        0,
+        `${jobId}: ${platform} partial-output cleanup should succeed`,
+      );
+      assert.deepEqual(
+        readdirSync(partialPath),
+        [],
+        `${jobId}: ${platform} retry directory must not retain partial files`,
+      );
+      rmSync(partialRoot, { recursive: true, force: true });
+    }
+  }
 
   function runEvidenceSummary(name, artifacts, urls) {
     const downloadedRoot = materializeDownloadedArtifacts(name, artifacts);

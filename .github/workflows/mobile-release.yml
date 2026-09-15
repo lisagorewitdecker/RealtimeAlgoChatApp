@@ -1185,6 +1185,10 @@ jobs:
           name: native-large-text-ios
           path: test-results/native-large-text/ios
 
+      - name: Clear partial iOS native smoke artifacts before retry
+        if: ${{ always() && steps.download-ios-native-smoke.outcome != 'success' }}
+        run: rm -rf -- test-results/native-large-text/ios && mkdir -p -- test-results/native-large-text/ios
+
       - name: Retry iOS native smoke artifact download
         if: ${{ always() && steps.download-ios-native-smoke.outcome != 'success' }}
         continue-on-error: true
@@ -1202,6 +1206,10 @@ jobs:
         with:
           name: native-large-text-android
           path: test-results/native-large-text/android
+
+      - name: Clear partial Android native smoke artifacts before retry
+        if: ${{ always() && steps.download-android-native-smoke.outcome != 'success' }}
+        run: rm -rf -- test-results/native-large-text/android && mkdir -p -- test-results/native-large-text/android
 
       - name: Retry Android native smoke artifact download
         if: ${{ always() && steps.download-android-native-smoke.outcome != 'success' }}
@@ -1297,6 +1305,10 @@ jobs:
           name: native-large-text-ios
           path: test-results/native-large-text/ios
 
+      - name: Clear partial iOS native smoke artifacts before publishing retry
+        if: ${{ always() && steps.download-publish-ios-native-smoke.outcome != 'success' }}
+        run: rm -rf -- test-results/native-large-text/ios && mkdir -p -- test-results/native-large-text/ios
+
       - name: Retry iOS native smoke artifact download for publishing
         if: ${{ always() && steps.download-publish-ios-native-smoke.outcome != 'success' }}
         continue-on-error: true
@@ -1314,6 +1326,10 @@ jobs:
         with:
           name: native-large-text-android
           path: test-results/native-large-text/android
+
+      - name: Clear partial Android native smoke artifacts before publishing retry
+        if: ${{ always() && steps.download-publish-android-native-smoke.outcome != 'success' }}
+        run: rm -rf -- test-results/native-large-text/android && mkdir -p -- test-results/native-large-text/android
 
       - name: Retry Android native smoke artifact download for publishing
         if: ${{ always() && steps.download-publish-android-native-smoke.outcome != 'success' }}
