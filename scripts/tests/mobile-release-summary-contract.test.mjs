@@ -2466,6 +2466,11 @@ test("failed platform artifact downloads preserve the other platform report", ()
     iosSection,
     /native evidence artifact download did not complete/,
   );
+  assert.match(
+    iosSection,
+    /- Recovery: \*\*Rerun the iOS native large-text job, or make the existing iOS artifact available, then rerun the mobile release gate\.\*\*/,
+    "the failed iOS download must include a fixed recovery action",
+  );
   assert.match(iosSection, /- Detailed evidence report: \*\*Unavailable\*\*/);
   assert.doesNotMatch(
     iosSection,
@@ -2487,6 +2492,76 @@ test("failed platform artifact downloads preserve the other platform report", ()
     summary,
     /::|attacker\.example/,
     "download diagnostics must not introduce workflow commands or unsafe summary text",
+  );
+});
+
+test("both failed platform artifact downloads include fixed recovery actions", () => {
+  const evidenceRoot = path.join(testRoot, "both-failed-platform-download");
+  mkdirSync(evidenceRoot, { recursive: true });
+
+  const summaryPath = path.join(
+    testRoot,
+    "both-failed-platform-download-summary.md",
+  );
+  const result = spawnSync(
+    bashPath,
+    [
+      path.join(workspaceRoot, untrustedCheckerWrapperScript),
+      bashPath,
+      path.join(workspaceRoot, nativeEvidenceCheckerScript),
+      evidenceRoot,
+    ],
+    {
+      cwd: workspaceRoot,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        GITHUB_STEP_SUMMARY: summaryPath,
+        NATIVE_IOS_EVIDENCE_DOWNLOAD_RESULT: "failure",
+        NATIVE_ANDROID_EVIDENCE_DOWNLOAD_RESULT: "failure",
+        NATIVE_IOS_EVIDENCE_ARTIFACT_URL:
+          "https://github.example/example/chat-app/actions/runs/123/artifacts/456",
+        NATIVE_ANDROID_EVIDENCE_ARTIFACT_URL:
+          "https://github.example/example/chat-app/actions/runs/123/artifacts/789",
+      },
+    },
+  );
+  assert.notEqual(
+    result.status,
+    0,
+    "both failed platform artifact downloads must keep the release blocked",
+  );
+
+  const summary = readFileSync(summaryPath, "utf8");
+  const iosSection = summary.match(
+    /## iOS native large-text evidence[\s\S]*?(?=## Android native large-text evidence)/,
+  )?.[0];
+  const androidSection = summary.match(
+    /## Android native large-text evidence[\s\S]*/,
+  )?.[0];
+  assert.ok(iosSection, "the summary should include the failed iOS section");
+  assert.ok(
+    androidSection,
+    "the summary should include the failed Android section",
+  );
+  assert.match(iosSection, /- Status: \*\*FAIL\*\*/);
+  assert.match(iosSection, /- Artifact download: \*\*FAIL\*\*/);
+  assert.match(
+    iosSection,
+    /- Recovery: \*\*Rerun the iOS native large-text job, or make the existing iOS artifact available, then rerun the mobile release gate\.\*\*/,
+    "the failed iOS download must include a fixed recovery action",
+  );
+  assert.match(androidSection, /- Status: \*\*FAIL\*\*/);
+  assert.match(androidSection, /- Artifact download: \*\*FAIL\*\*/);
+  assert.match(
+    androidSection,
+    /- Recovery: \*\*Rerun the Android native large-text job, or make the existing Android artifact available, then rerun the mobile release gate\.\*\*/,
+    "the failed Android download must include a fixed recovery action",
+  );
+  assert.doesNotMatch(
+    summary,
+    /github\.example|::|attacker\.example/,
+    "both failed downloads must not expose artifact URLs or unsafe summary text",
   );
 });
 
@@ -2766,7 +2841,7 @@ test("native evidence checker output is isolated from workflow commands", () => 
 
   assert.equal(
     checkerCallers.length,
-    4,
+    5,
     "every native evidence checker caller must be inventoried by this contract",
   );
   assert.equal(

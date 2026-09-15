@@ -319,6 +319,7 @@ jobs:
           require_contains "$ios_section" "- Validated run directory: **Unavailable**"
           require_contains "$ios_section" "- Detailed evidence report: **Unavailable**"
           require_contains "$ios_section" "native evidence artifact download did not complete"
+          require_contains "$ios_section" "- Recovery: **Rerun the iOS native large-text job, or make the existing iOS artifact available, then rerun the mobile release gate.**"
           require_not_contains "$ios_section" "https://github.example"
 
           require_contains "$android_section" "- Status: **FAIL**"
@@ -327,6 +328,69 @@ jobs:
           require_contains "$android_section" "- Detailed evidence report: **Unavailable**"
           require_contains "$android_section" "Missing result directory:"
           require_not_contains "$android_section" "$failed_download_root/ios"
+
+          cat "$summary_path" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Verify both platform artifact download failures have recovery guidance
+        shell: bash
+        run: |
+          set -euo pipefail
+          failed_download_root="$(mktemp -d)"
+          summary_path="$(mktemp)"
+          trap 'rm -rf "$failed_download_root" "$summary_path"' EXIT
+
+          if \
+            GITHUB_STEP_SUMMARY="$summary_path" \
+            NATIVE_IOS_EVIDENCE_DOWNLOAD_RESULT=failure \
+            NATIVE_ANDROID_EVIDENCE_DOWNLOAD_RESULT=failure \
+            NATIVE_IOS_EVIDENCE_ARTIFACT_URL="https://github.example/example/chat-app/actions/runs/123/artifacts/456" \
+            NATIVE_ANDROID_EVIDENCE_ARTIFACT_URL="https://github.example/example/chat-app/actions/runs/123/artifacts/789" \
+            bash scripts/run-untrusted-checker.sh bash scripts/check-native-large-text-evidence.sh "$failed_download_root"; then
+            echo "The both-failed native evidence download scenario unexpectedly passed." >&2
+            exit 1
+          fi
+
+          require_contains() {
+            local section="$1"
+            local expected="$2"
+            if ! grep -Fq -- "$expected" <<< "$section"; then
+              echo "Expected both-failed native evidence summary to contain: $expected" >&2
+              exit 1
+            fi
+          }
+
+          require_not_contains() {
+            local section="$1"
+            local unexpected="$2"
+            if grep -Fq -- "$unexpected" <<< "$section"; then
+              echo "Both-failed native evidence summary contained unsafe detail: $unexpected" >&2
+              exit 1
+            fi
+          }
+
+          ios_section="$(
+            awk '
+              /^## iOS native large-text evidence$/ { collecting=1 }
+              /^## Android native large-text evidence$/ { collecting=0 }
+              collecting { print }
+            ' "$summary_path"
+          )"
+          android_section="$(
+            awk '
+              /^## Android native large-text evidence$/ { collecting=1 }
+              collecting { print }
+            ' "$summary_path"
+          )"
+
+          require_contains "$ios_section" "- Status: **FAIL**"
+          require_contains "$ios_section" "- Artifact download: **FAIL**"
+          require_contains "$ios_section" "- Recovery: **Rerun the iOS native large-text job, or make the existing iOS artifact available, then rerun the mobile release gate.**"
+          require_not_contains "$ios_section" "https://github.example"
+
+          require_contains "$android_section" "- Status: **FAIL**"
+          require_contains "$android_section" "- Artifact download: **FAIL**"
+          require_contains "$android_section" "- Recovery: **Rerun the Android native large-text job, or make the existing Android artifact available, then rerun the mobile release gate.**"
+          require_not_contains "$android_section" "https://github.example"
 
           cat "$summary_path" >> "$GITHUB_STEP_SUMMARY"
 

@@ -881,6 +881,13 @@ write_evidence_summary() {
         echo "- Validated run directory: **Unavailable**"
         echo "- Detailed evidence report: **Unavailable**"
       fi
+      if [[ "$download_status" == "FAIL" ]]; then
+        if [[ "$platform" == "ios" ]]; then
+          echo "- Recovery: **Rerun the iOS native large-text job, or make the existing iOS artifact available, then rerun the mobile release gate.**"
+        else
+          echo "- Recovery: **Rerun the Android native large-text job, or make the existing Android artifact available, then rerun the mobile release gate.**"
+        fi
+      fi
       if [[ -n "${SUMMARY_ISSUES[$platform]}" ]]; then
         echo
         echo "### Blocking evidence findings"
