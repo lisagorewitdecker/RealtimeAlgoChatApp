@@ -803,8 +803,7 @@ validate_review_record() {
   fi
 
   case "$decision" in
-    APPROVED | "")
-      ;;
+APPROVED)
     REJECTED)
       issue "$platform" "The review record at ${record_path} records a rejected decision. A rejected review blocks release; resolve the recorded findings, rerun the native large-text gate, and record a new review."
       if [[ -n "$notes" ]]; then
