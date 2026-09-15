@@ -1209,8 +1209,29 @@ jobs:
           EVIDENCE_RESULT: ${{ steps.evidence-completeness.outcome }}
         run: |
           set -euo pipefail
+          supported_node_range="$(
+            node --input-type=module -e '
+            import { readFileSync } from "node:fs";
+
+            try {
+              const packageJson = JSON.parse(readFileSync("package.json", "utf8"));
+              const configuredRange = packageJson?.engines?.node;
+              if (typeof configuredRange !== "string" || configuredRange.trim() === "") {
+                process.stdout.write(
+                  "missing or non-string value (set package.json engines.node to a valid semver range)",
+                );
+              } else {
+                process.stdout.write(JSON.stringify(configuredRange.trim()));
+              }
+            } catch {
+              process.stdout.write(
+                "unavailable because package.json is not valid JSON (fix package.json before rerunning)",
+              );
+            }
+            '
+          )"
           if [[ "$EVIDENCE_RESULT" != "success" || "$IOS_RESULT" != "success" || "$ANDROID_RESULT" != "success" || "$IDLE_PROFILE_RESULT" != "success" || "$SUMMARY_REGRESSION_RESULT" != "success" ]]; then
-            echo "Mobile release blocked: evidence=$EVIDENCE_RESULT iOS=$IOS_RESULT Android=$ANDROID_RESULT idle-profile=$IDLE_PROFILE_RESULT summary-regression=$SUMMARY_REGRESSION_RESULT." >&2
+            echo "Mobile release blocked: evidence=$EVIDENCE_RESULT iOS=$IOS_RESULT Android=$ANDROID_RESULT idle-profile=$IDLE_PROFILE_RESULT summary-regression=$SUMMARY_REGRESSION_RESULT. Supported Node.js range from package.json engines.node: ${supported_node_range} (must be a valid semver range)." >&2
             exit 1
           fi
           echo "Mobile release gate passed native accessibility and idle-profile registration checks."

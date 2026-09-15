@@ -184,7 +184,9 @@ function assertMobileReleaseNodeVersions(releaseWorkflow, nodeRange) {
   for (const { jobId, configuredVersion } of configuredJobs) {
     assert.ok(
       configuredVersion !== undefined,
-      `mobile-release job "${jobId}" must configure node-version`,
+      `mobile-release job "${jobId}" must configure node-version; package.json engines.node range is ${JSON.stringify(
+        nodeRange,
+      )}`,
     );
     if (
       !nodeVersionSatisfiesRange(
@@ -391,8 +393,50 @@ test("missing mobile release Node versions identify the affected job and require
         error.message.includes("must configure node-version"),
         "the failure must explain that node-version is required",
       );
+      assert.ok(
+        error.message.includes(
+          `package.json engines.node range is ${JSON.stringify(nodeRange)}`,
+        ),
+        "the failure must identify the supported package.json Node range",
+      );
       return true;
     },
+  );
+});
+
+test("blocked release diagnostics identify the supported Node range safely", () => {
+  const gateSteps = workflow.jobs?.["mobile-release-gate"]?.steps ?? [];
+  const blockStep = gateSteps.find(
+    (step) => step.name === "Block release unless both native checks pass",
+  );
+  assert.ok(
+    blockStep,
+    "mobile-release-gate must retain its final release-blocking step",
+  );
+  assert.match(
+    blockStep.run,
+    /Supported Node\.js range from package\.json engines\.node:/,
+    "blocked release output must identify the supported package.json Node range",
+  );
+  assert.match(
+    blockStep.run,
+    /must be a valid semver range/,
+    "blocked release output must explain how to fix a malformed Node range",
+  );
+  assert.match(
+    blockStep.run,
+    /JSON\.stringify\(configuredRange\.trim\(\)\)/,
+    "the configured Node range must be escaped before it reaches the log",
+  );
+  assert.match(
+    blockStep.run,
+    /package\.json is not valid JSON/,
+    "malformed package.json output must remain actionable",
+  );
+  assert.match(
+    blockStep.run,
+    /summary-regression=\$SUMMARY_REGRESSION_RESULT\./,
+    "blocked release output must use the declared summary regression result",
   );
 });
 
