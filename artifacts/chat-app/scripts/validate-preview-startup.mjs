@@ -512,6 +512,10 @@ function publicPreviewRecoveryMessage() {
 }
 
 export function getPublicPreviewManifestUrl(environment = process.env) {
+  const configuredSetting =
+    environment.PREVIEW_PUBLIC_URL != null
+      ? "PREVIEW_PUBLIC_URL"
+      : "REPLIT_EXPO_DEV_DOMAIN";
   const configuredUrl =
     environment.PREVIEW_PUBLIC_URL ?? environment.REPLIT_EXPO_DEV_DOMAIN;
   if (!configuredUrl) {
@@ -529,8 +533,9 @@ export function getPublicPreviewManifestUrl(environment = process.env) {
     );
   } catch {
     throw new Error(
-      "Public Expo preview manifest URL configuration is invalid. Set " +
-        "PREVIEW_PUBLIC_URL or REPLIT_EXPO_DEV_DOMAIN to a valid HTTPS URL " +
+      `Public Expo preview manifest URL configuration from ${configuredSetting} ` +
+        "is invalid. Set " +
+        `${configuredSetting} to a valid HTTPS URL ` +
         "before running the live preview handoff preflight.",
     );
   }
