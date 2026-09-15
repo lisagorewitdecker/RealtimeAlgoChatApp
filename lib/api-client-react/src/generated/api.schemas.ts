@@ -142,3 +142,5 @@ export interface RoomResponse {
 export type UnauthorizedResponse = {
   error: string;
 };
+
+// Controlled stale-client marker for Task 474
