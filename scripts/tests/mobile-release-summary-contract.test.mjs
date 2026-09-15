@@ -509,6 +509,11 @@ test("candidate build IDs use non-secret variables or reusable-workflow inputs",
 test("idle-profile registration check blocks release and reports its result", () => {
   const idleJob = workflow.jobs["idle-profile-registration"];
   assert.ok(idleJob, "release workflow must define the idle-profile job");
+  assert.match(
+    idleJob.if,
+    /github\.event_name == 'workflow_dispatch' && inputs\.publish == true/,
+    "idle-profile job should only run on publish-intent workflow-dispatch runs",
+  );
 
   const preflightStep = idleJob.steps.find(
     (step) => step.name === "Verify idle-profile browser targets",
@@ -645,14 +650,19 @@ test("idle-profile registration check blocks release and reports its result", ()
     "${{ needs.idle-profile-registration.result }}",
   );
   assert.equal(
+    blockingStep.env.REQUIRE_IDLE_PROFILE,
+    "${{ github.event_name == 'workflow_call' || (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/mobile-v')) || (github.event_name == 'workflow_dispatch' && inputs.publish == true) }}",
+    "the final gate must only require idle-profile checks for publish-intent events",
+  );
+  assert.equal(
     blockingStep.env.SUMMARY_REGRESSION_RESULT,
     "${{ needs.native-evidence-summary-regression.result }}",
     "the final gate must receive the hosted summary regression result",
   );
   assert.match(
     blockingStep.run,
-    /\$IDLE_PROFILE_RESULT" != "success"/,
-    "the final gate must reject a failed idle-profile job",
+    /\$REQUIRE_IDLE_PROFILE" == "true" && "\$IDLE_PROFILE_RESULT" != "success"/,
+    "the final gate must reject idle-profile failures only when the check is required",
   );
   assert.match(
     blockingStep.run,

@@ -24,13 +24,17 @@ on:
     inputs:
       native_smoke_ios_build_id:
         description: Non-secret EAS build ID of the iOS candidate
-        required: true
+        required: false
         type: string
       native_smoke_android_build_id:
         description: Non-secret EAS build ID of the Android candidate
-        required: true
+        required: false
         type: string
     secrets:
+      NATIVE_SMOKE_IOS_BUILD_ID:
+        required: false
+      NATIVE_SMOKE_ANDROID_BUILD_ID:
+        required: false
       EAS_TOKEN:
         required: true
       SENTRY_AUTH_TOKEN:
@@ -70,8 +74,9 @@ permissions:
 
 env:
   PNPM_VERSION: 10.26.1
-  NATIVE_SMOKE_IOS_BUILD_ID: ${{ inputs.native_smoke_ios_build_id || vars.NATIVE_SMOKE_IOS_BUILD_ID }}
-  NATIVE_SMOKE_ANDROID_BUILD_ID: ${{ inputs.native_smoke_android_build_id || vars.NATIVE_SMOKE_ANDROID_BUILD_ID }}
+  EAS_CLI_VERSION: 23.2.0
+  NATIVE_SMOKE_IOS_BUILD_ID: ${{ inputs.native_smoke_ios_build_id || secrets.NATIVE_SMOKE_IOS_BUILD_ID || vars.NATIVE_SMOKE_IOS_BUILD_ID }}
+  NATIVE_SMOKE_ANDROID_BUILD_ID: ${{ inputs.native_smoke_android_build_id || secrets.NATIVE_SMOKE_ANDROID_BUILD_ID || vars.NATIVE_SMOKE_ANDROID_BUILD_ID }}
 
 jobs:
   android-preview-evidence:
@@ -664,6 +669,12 @@ jobs:
             echo "The installed iOS candidate does not contain crash-reporting preflight evidence. Rebuild it with SENTRY_DSN or EXPO_PUBLIC_SENTRY_DSN configured." >&2
             exit 2
           fi
+            exit 2
+          fi
+          if ! LC_ALL=C grep -aR -Fq "SENTRY_RELEASE_PREFLIGHT_PASSED_V1" "$app_container"; then
+            echo "The installed iOS candidate does not contain crash-reporting preflight evidence. Rebuild it with SENTRY_DSN or EXPO_PUBLIC_SENTRY_DSN configured." >&2
+            exit 2
+          fi
           echo "Verified crash-reporting preflight evidence in the installed iOS candidate."
           metadata_path="$NATIVE_SMOKE_RESULTS_DIR/native-info.json"
           plutil -convert json -o "$metadata_path" "$app_container/Info.plist"
@@ -687,6 +698,100 @@ jobs:
           NATIVE_SMOKE_BUILD_ID: ${{ env.NATIVE_SMOKE_IOS_BUILD_ID }}
           NATIVE_SMOKE_IOS_DEVICE_UDID: ${{ env.NATIVE_SMOKE_IOS_DEVICE_UDID }}
           NATIVE_SMOKE_SUMMARY_DEFER: "1"
+        run: pnpm --filter @workspace/chat-app run test -- --runTestsByPath __tests__/Setup.test.tsx
+
+      - name: Send controlled iOS JavaScript error
+        id: ios-sentry-trigger
+        env:
+          NATIVE_SMOKE_APP_ID: ${{ secrets.NATIVE_SMOKE_IOS_APP_ID }}
+          NATIVE_SMOKE_BUILD_ID: ${{ env.NATIVE_SMOKE_IOS_BUILD_ID }}
+          NATIVE_SMOKE_IOS_DEVICE_UDID: ${{ env.NATIVE_SMOKE_IOS_DEVICE_UDID }}
+          NATIVE_SENTRY_MARKER: native-${{ github.run_id }}-${{ github.run_attempt }}-ios
+        run: pnpm --filter @workspace/chat-app run test -- --runTestsByPath __tests__/sentry.test.ts
+
+      - name: Verify readable iOS source maps in Sentry
+        id: ios-sentry-verification
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_EXPECTED_PLATFORM: ios
+          SENTRY_EXPECTED_BUILD_ID: ${{ env.NATIVE_SMOKE_IOS_BUILD_ID }}
+          SENTRY_EXPECTED_RELEASE: ${{ secrets.NATIVE_SMOKE_IOS_SENTRY_RELEASE }}
+          SENTRY_EXPECTED_DIST: ${{ secrets.NATIVE_SMOKE_IOS_SENTRY_DIST }}
+          SENTRY_PROBE_MARKER: native-${{ github.run_id }}-${{ github.run_attempt }}-ios
+          SENTRY_EVIDENCE_PATH: ${{ env.NATIVE_SMOKE_RESULTS_DIR }}/sentry-source-map-evidence.json
+        run: node scripts/verify-sentry-native-event.mjs
+
+      - name: Summarize iOS readiness
+        if: always()
+        env:
+          IOS_RESULTS_DIR: ${{ env.NATIVE_SMOKE_RESULTS_DIR }}
+          WORKSPACE_RESULT: ${{ steps.install-dependencies.outcome }}
+          APP_BRANDING_RESULT: ${{ steps.app-branding.outcome }}
+          IOS_RELEASE_CONFIGURATION_RESULT: ${{ steps.ios-release-configuration.outcome }}
+          IOS_XCRUN_RESULT: ${{ steps.ios-xcrun.outcome }}
+          IOS_SIMULATOR_RESULT: ${{ steps.ios-simulator.outcome }}
+          IOS_NATIVE_BRANDING_RESULT: ${{ steps.ios-native-branding.outcome }}
+          IOS_MAESTRO_RESULT: ${{ steps.ios-maestro.outcome }}
+          IOS_NATIVE_EVIDENCE_RESULT: ${{ steps.ios-native-evidence.outcome }}
+          IOS_SENTRY_TRIGGER_RESULT: ${{ steps.ios-sentry-trigger.outcome }}
+          IOS_SENTRY_VERIFICATION_RESULT: ${{ steps.ios-sentry-verification.outcome }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          status="READY"
+          blockers=()
+          checks=()
+
+          add_check() {
+            local label="$1"
+            local result="$2"
+            if [[ "$result" == "success" ]]; then
+              checks+=("- ${label}: **READY**")
+            else
+              status="BLOCKED"
+              checks+=("- ${label}: **BLOCKED**")
+              blockers+=("${label}")
+            fi
+          }
+
+          add_check "Workspace dependencies" "$WORKSPACE_RESULT"
+          add_check "App branding source" "$APP_BRANDING_RESULT"
+          add_check "Release configuration" "$IOS_RELEASE_CONFIGURATION_RESULT"
+          add_check "Xcode simulator tooling" "$IOS_XCRUN_RESULT"
+          add_check "Booted iPhone SE (3rd generation)" "$IOS_SIMULATOR_RESULT"
+          add_check "Installed native candidate" "$IOS_NATIVE_BRANDING_RESULT"
+          add_check "Maestro" "$IOS_MAESTRO_RESULT"
+          add_check "Native large-text evidence" "$IOS_NATIVE_EVIDENCE_RESULT"
+          add_check "Controlled Sentry error" "$IOS_SENTRY_TRIGGER_RESULT"
+          add_check "Readable Sentry source maps" "$IOS_SENTRY_VERIFICATION_RESULT"
+
+          {
+            echo "## iOS native large-text readiness"
+            echo
+            echo "- Status: **${status}**"
+            echo
+            echo "### Prerequisites"
+            printf '%s\n' "${checks[@]}"
+            if [[ -f "$IOS_RESULTS_DIR/ios-readiness.md" ]]; then
+              diagnostics="$(
+                awk '
+                  /^### Blocking prerequisites$/ { collecting=1; next }
+                  collecting && /^- / { print; next }
+                  collecting && !/^- / { exit }
+                ' "$IOS_RESULTS_DIR/ios-readiness.md"
+              )"
+              if [[ -n "$diagnostics" ]]; then
+                echo
+                echo "### Readiness diagnostics"
+                printf '%s\n' "$diagnostics"
+              fi
+            fi
+            if ((${#blockers[@]})); then
+              echo
+              echo "### Blocking prerequisites"
+              printf -- '- %s\n' "${blockers[@]}"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
         run: pnpm --filter @workspace/chat-app test:native-large-text ios
 
       - name: Send controlled iOS JavaScript error
@@ -813,6 +918,8 @@ jobs:
               echo "## iOS native branding"
               echo
               echo "- Status: **FAIL**"
+              echo "- Candidate build: **Omitted from workflow summary**"
+              echo "- Candidate build fingerprint: **Omitted from workflow summary**"
               echo "- Candidate build ID: \`${IOS_BUILD_ID}\`"
               echo "- Candidate build fingerprint (SHA-256): \`$(printf '%s' "$IOS_BUILD_ID" | shasum -a 256 | awk '{print $1}')\`"
               echo "- Native label: \`Unavailable\`"
@@ -986,6 +1093,27 @@ jobs:
           NATIVE_SMOKE_PASSWORD: ${{ secrets.NATIVE_SMOKE_PASSWORD }}
           NATIVE_SMOKE_DISPLAY_NAME: ${{ secrets.NATIVE_SMOKE_DISPLAY_NAME }}
           NATIVE_SMOKE_BUILD_ID: ${{ env.NATIVE_SMOKE_ANDROID_BUILD_ID }}
+        run: pnpm --filter @workspace/chat-app run test -- --runTestsByPath __tests__/Setup.test.tsx
+
+      - name: Send controlled Android JavaScript error
+        id: android-sentry-trigger
+        env:
+          NATIVE_SMOKE_APP_ID: ${{ secrets.NATIVE_SMOKE_ANDROID_APP_ID }}
+          NATIVE_SMOKE_BUILD_ID: ${{ env.NATIVE_SMOKE_ANDROID_BUILD_ID }}
+          NATIVE_SENTRY_MARKER: native-${{ github.run_id }}-${{ github.run_attempt }}-android
+        run: pnpm --filter @workspace/chat-app run test -- --runTestsByPath __tests__/sentry.test.ts
+
+      - name: Verify readable Android source maps in Sentry
+        id: android-sentry-verification
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_EXPECTED_PLATFORM: android
+          SENTRY_EXPECTED_BUILD_ID: ${{ env.NATIVE_SMOKE_ANDROID_BUILD_ID }}
+          SENTRY_EXPECTED_RELEASE: ${{ secrets.NATIVE_SMOKE_ANDROID_SENTRY_RELEASE }}
+          SENTRY_EXPECTED_DIST: ${{ secrets.NATIVE_SMOKE_ANDROID_SENTRY_DIST }}
+          SENTRY_PROBE_MARKER: native-${{ github.run_id }}-${{ github.run_attempt }}-android
+          SENTRY_EVIDENCE_PATH: ${{ env.NATIVE_SMOKE_RESULTS_DIR }}/sentry-source-map-evidence.json
+        run: node scripts/verify-sentry-native-event.mjs
         run: pnpm --filter @workspace/chat-app test:native-large-text android
 
       - name: Send controlled Android JavaScript error
@@ -1039,6 +1167,8 @@ jobs:
               echo "## Android native branding"
               echo
               echo "- Status: **FAIL**"
+              echo "- Candidate build: **Omitted from workflow summary**"
+              echo "- Candidate build fingerprint: **Omitted from workflow summary**"
               echo "- Candidate build ID: \`${ANDROID_BUILD_ID}\`"
               echo "- Candidate build fingerprint (SHA-256): \`$(printf '%s' "$ANDROID_BUILD_ID" | sha256sum | awk '{print $1}')\`"
               echo "- Native label: \`Unavailable\`"
@@ -1047,9 +1177,21 @@ jobs:
             } >> "$GITHUB_STEP_SUMMARY"
           fi
 
+  mobile-release-gate:
+    name: Mobile release gate
+    if: ${{ always() }}
+
   idle-profile-registration:
     name: Idle profile registration
-    if: ${{ github.event_name != 'pull_request' }}
+    if: >-
+      ${{
+        github.event_name != 'pull_request' &&
+        (
+          github.event_name == 'workflow_call' ||
+          (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/mobile-v')) ||
+          (github.event_name == 'workflow_dispatch' && inputs.publish == true)
+        )
+      }}
     runs-on: ubuntu-latest
     environment:
       name: mobile-release
@@ -1073,8 +1215,8 @@ jobs:
 
       - name: Verify idle-profile browser targets
         env:
-          E2E_CHAT_URL: ${{ secrets.E2E_CHAT_URL }}
-          E2E_API_URL: ${{ secrets.E2E_API_URL }}
+          E2E_CHAT_URL: ${{ secrets.E2E_CHAT_URL || vars.E2E_CHAT_URL }}
+          E2E_API_URL: ${{ secrets.E2E_API_URL || vars.E2E_API_URL }}
         shell: bash
         run: |
           set -euo pipefail
@@ -1104,8 +1246,8 @@ jobs:
       - name: Run idle-profile registration release check
         id: idle-profile-check
         env:
-          E2E_CHAT_URL: ${{ secrets.E2E_CHAT_URL }}
-          E2E_API_URL: ${{ secrets.E2E_API_URL }}
+          E2E_CHAT_URL: ${{ secrets.E2E_CHAT_URL || vars.E2E_CHAT_URL }}
+          E2E_API_URL: ${{ secrets.E2E_API_URL || vars.E2E_API_URL }}
           CLERK_PUBLISHABLE_KEY: ${{ secrets.CLERK_PUBLISHABLE_KEY }}
           CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
@@ -1223,6 +1365,7 @@ jobs:
           IOS_RESULT: ${{ needs.native-ios.result }}
           ANDROID_RESULT: ${{ needs.native-android.result }}
           IDLE_PROFILE_RESULT: ${{ needs.idle-profile-registration.result }}
+          REQUIRE_IDLE_PROFILE: ${{ github.event_name == 'workflow_call' || (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/mobile-v')) || (github.event_name == 'workflow_dispatch' && inputs.publish == true) }}
           SUMMARY_REGRESSION_RESULT: ${{ needs.native-evidence-summary-regression.result }}
           EVIDENCE_RESULT: ${{ steps.evidence-completeness.outcome }}
         run: |
@@ -1248,7 +1391,7 @@ jobs:
             }
             '
           )"
-          if [[ "$EVIDENCE_RESULT" != "success" || "$IOS_RESULT" != "success" || "$ANDROID_RESULT" != "success" || "$IDLE_PROFILE_RESULT" != "success" || "$SUMMARY_REGRESSION_RESULT" != "success" ]]; then
+          if [[ "$EVIDENCE_RESULT" != "success" || "$IOS_RESULT" != "success" || "$ANDROID_RESULT" != "success" || "$SUMMARY_REGRESSION_RESULT" != "success" || ( "$REQUIRE_IDLE_PROFILE" == "true" && "$IDLE_PROFILE_RESULT" != "success" ) ]]; then
             echo "Mobile release blocked: evidence=$EVIDENCE_RESULT iOS=$IOS_RESULT Android=$ANDROID_RESULT idle-profile=$IDLE_PROFILE_RESULT summary-regression=$SUMMARY_REGRESSION_RESULT. Supported Node.js range from package.json engines.node: ${supported_node_range} (must be a valid semver range)." >&2
             exit 1
           fi
@@ -1260,8 +1403,11 @@ jobs:
       ${{
         github.event_name != 'pull_request' &&
         needs.mobile-release-gate.result == 'success' &&
-        github.event_name == 'workflow_dispatch' &&
-        inputs.publish == true
+        (
+          github.event_name == 'workflow_call' ||
+          (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/mobile-v')) ||
+          (github.event_name == 'workflow_dispatch' && inputs.publish == true)
+        )
       }}
     needs:
       - mobile-release-gate
@@ -1352,6 +1498,7 @@ jobs:
                       review.state === "approved" &&
                       review.environments?.some(
                         (environment) =>
+                          environment.name === "mobile-release",
                           environment.name === "mobile-store-submission",
                       ),
                   );
@@ -1361,6 +1508,7 @@ jobs:
               '
           )"
           if [[ -z "$reviewer" || "$reviewer" == *$'\n'* || "$reviewer" == *$'\r'* ]]; then
+            echo "Could not verify the reviewer who approved the mobile-release environment." >&2
             echo "Could not verify the reviewer who approved the mobile-store-submission environment." >&2
             exit 1
           fi
