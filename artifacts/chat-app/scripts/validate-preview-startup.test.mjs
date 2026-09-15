@@ -16,6 +16,7 @@ import test from "node:test";
 import {
   createHandoffPreflightRecord,
   formatHandoffPreflight,
+  getPublicPreviewManifestUrl,
   requestLocalHandoffProbe,
   requestPublicPreviewManifest,
   readAndValidateHandoffPreflight,
@@ -437,6 +438,48 @@ test("reports missing public preview configuration before making a request", asy
     assert.equal(fetchMock.request, undefined);
   } finally {
     fetchMock.restore();
+  }
+});
+
+test("falls back to REPLIT_EXPO_DEV_DOMAIN when PREVIEW_PUBLIC_URL is null", () => {
+  const url = getPublicPreviewManifestUrl({
+    PREVIEW_PUBLIC_URL: null,
+    REPLIT_EXPO_DEV_DOMAIN: "preview.example.test/expo",
+  });
+
+  assert.equal(String(url), "https://preview.example.test/expo/");
+});
+
+test("falls back to REPLIT_EXPO_DEV_DOMAIN when PREVIEW_PUBLIC_URL is undefined", () => {
+  const url = getPublicPreviewManifestUrl({
+    PREVIEW_PUBLIC_URL: undefined,
+    REPLIT_EXPO_DEV_DOMAIN: "preview.example.test/expo",
+  });
+
+  assert.equal(String(url), "https://preview.example.test/expo/");
+});
+
+test("reports missing configuration when PREVIEW_PUBLIC_URL is empty", () => {
+  assert.throws(
+    () =>
+      getPublicPreviewManifestUrl({
+        PREVIEW_PUBLIC_URL: "",
+        REPLIT_EXPO_DEV_DOMAIN: "preview.example.test/expo",
+      }),
+    /Public Expo preview manifest URL is not configured.*REPLIT_EXPO_DEV_DOMAIN or PREVIEW_PUBLIC_URL/,
+  );
+});
+
+test("reports malformed fallback configuration from REPLIT_EXPO_DEV_DOMAIN for nullish PREVIEW_PUBLIC_URL", () => {
+  for (const previewPublicUrl of [null, undefined]) {
+    assert.throws(
+      () =>
+        getPublicPreviewManifestUrl({
+          PREVIEW_PUBLIC_URL: previewPublicUrl,
+          REPLIT_EXPO_DEV_DOMAIN: "https://[invalid",
+        }),
+      /Public Expo preview manifest URL configuration from REPLIT_EXPO_DEV_DOMAIN is invalid/,
+    );
   }
 });
 
