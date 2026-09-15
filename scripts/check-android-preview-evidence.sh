@@ -10,7 +10,8 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 if [[ "${1:-}" == "--" ]]; then
   shift
 fi
-RECORD_PATH="${1:-$ROOT_DIR/artifacts/chat-app/test-results/encrypted-room-recovery/android/20260914T144407Z/validation-record.md}"
+RECORD_ROOT="$ROOT_DIR/artifacts/chat-app/test-results/encrypted-room-recovery/android"
+RECORD_PATH="${1:-}"
 FAILURES=()
 
 failure() {
@@ -302,7 +303,22 @@ validate_blocked_record() {
   fi
 }
 
-if [[ ! -f "$RECORD_PATH" ]]; then
+if [[ -z "$RECORD_PATH" ]]; then
+  RECORD_PATH="$(
+    find "$RECORD_ROOT" \
+      -mindepth 2 \
+      -maxdepth 2 \
+      -type f \
+      -name validation-record.md \
+      -print 2>/dev/null |
+      sort |
+      tail -n 1
+  )"
+fi
+
+if [[ -z "$RECORD_PATH" ]]; then
+  failure "No Android preview evidence record was found under ${RECORD_ROOT}."
+elif [[ ! -f "$RECORD_PATH" ]]; then
   failure "Android preview evidence record does not exist."
 else
   result="$(sed -nE 's/^\*\*Result:[[:space:]]*(PASS|BLOCKED|FAIL).*/\1/p' "$RECORD_PATH" | head -n 1)"

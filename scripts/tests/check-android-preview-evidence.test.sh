@@ -56,6 +56,60 @@ EOF
 blocked_output="$(bash "$CHECKER" "$blocked_record" 2>&1)"
 assert_contains "$blocked_output" "validation passed"
 
+default_output="$(bash "$CHECKER" 2>&1)"
+assert_contains "$default_output" "validation passed"
+
+non_latest_root="$TEST_ROOT/non-latest-record"
+non_latest_android_root="$non_latest_root/artifacts/chat-app/test-results/encrypted-room-recovery/android"
+latest_blocked="$non_latest_android_root/20991231T000000Z/validation-record.md"
+changed_non_latest="$non_latest_android_root/20260101T000000Z/validation-record.md"
+mkdir -p "$(dirname "$latest_blocked")" "$(dirname "$changed_non_latest")"
+write_record "$latest_blocked" <<'EOF'
+# Latest valid Android preview validation record
+
+**Result: BLOCKED — no physical Android handoff was available**
+
+| Boundary | Status | Evidence |
+| --- | --- | --- |
+| Fresh preview opened in stock Expo Go on Android | **BLOCKED** | No physical phone was available. |
+EOF
+write_record "$changed_non_latest" <<'EOF'
+# Baseline Android preview validation record
+
+**Result: BLOCKED — no physical Android handoff was available**
+
+| Boundary | Status | Evidence |
+| --- | --- | --- |
+| Fresh preview opened in stock Expo Go on Android | **BLOCKED** | No physical phone was available. |
+EOF
+git -C "$non_latest_root" init -q
+git -C "$non_latest_root" config user.email test@example.invalid
+git -C "$non_latest_root" config user.name "Android preview evidence test"
+git -C "$non_latest_root" add .
+git -C "$non_latest_root" commit -qm "baseline Android preview records"
+write_record "$changed_non_latest" <<'EOF'
+# Changed incomplete Android preview validation record
+
+**Result: PASS — physical Android preview handoff observed**
+EOF
+changed_records="$(
+  git -C "$non_latest_root" diff \
+    --name-only \
+    --diff-filter=ACDMRT \
+    HEAD \
+    -- \
+    "artifacts/chat-app/test-results/encrypted-room-recovery/android/**/validation-record.md"
+)"
+assert_contains "$changed_records" "20260101T000000Z/validation-record.md"
+assert_not_contains "$changed_records" "20991231T000000Z/validation-record.md"
+if non_latest_output="$(bash "$CHECKER" "$non_latest_root/$(
+  printf '%s\n' "$changed_records" | head -n 1
+)" 2>&1)"; then
+  printf 'An incomplete changed non-latest PASS record unexpectedly passed while a valid latest record existed.\n' >&2
+  exit 1
+fi
+assert_contains "$non_latest_output" "PASS records must include a real Device model value."
+
 pass_record="$TEST_ROOT/pass/validation-record.md"
 mkdir -p "$(dirname "$pass_record")/screenshots"
 printf '%s' \
