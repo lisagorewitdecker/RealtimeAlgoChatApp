@@ -606,8 +606,12 @@ export async function requestPublicPreviewManifest(
   let response;
   let body;
   try {
-    response = await fetchWithDeadline(url, { headers }, deadline);
-    body = await response.text();
+    ({ response, body } = await requestWithDeadline(
+      url,
+      { headers },
+      deadline,
+      (manifestResponse) => manifestResponse.text(),
+    ));
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
     throw new Error(
@@ -661,16 +665,38 @@ function localBundleUrl(port, launchAssetUrl) {
   return `http://127.0.0.1:${port}${parsedUrl.pathname}${parsedUrl.search}`;
 }
 
-async function fetchWithDeadline(url, options, deadline) {
+async function requestWithDeadline(url, options, deadline, readBody) {
   const remainingMs = deadline - Date.now();
   if (remainingMs <= 0) {
-    throw new Error("request deadline exceeded");
+    throw new Error("request deadline exceeded before request started");
   }
 
   const controller = new AbortController();
-  const abortTimer = setTimeout(() => controller.abort(), remainingMs);
+  let deadlineAbortError;
+  const abortPromise = new Promise((resolve, reject) => {
+    controller.signal.addEventListener(
+      "abort",
+      () => reject(deadlineAbortError ?? new Error("request aborted")),
+      { once: true },
+    );
+  });
+  const abortTimer = setTimeout(() => {
+    deadlineAbortError = new Error(
+      "request aborted by deadline (configured request deadline)",
+    );
+    controller.abort(deadlineAbortError);
+  }, remainingMs);
+
   try {
-    return await fetch(url, { ...options, signal: controller.signal });
+    const response = await Promise.race([
+      fetch(url, { ...options, signal: controller.signal }),
+      abortPromise,
+    ]);
+    const body = await Promise.race([readBody(response), abortPromise]);
+    return { response, body };
+  } catch (error) {
+    if (deadlineAbortError) throw deadlineAbortError;
+    throw error;
   } finally {
     clearTimeout(abortTimer);
   }
@@ -702,12 +728,14 @@ export async function requestLocalHandoffProbe(
     };
 
     try {
-      const manifestResponse = await fetchWithDeadline(
+      const manifestRequest = await requestWithDeadline(
         `http://127.0.0.1:${port}/`,
         { headers },
         deadline,
+        (response) => response.text(),
       );
-      const manifestBody = await manifestResponse.text();
+      const { response: manifestResponse, body: manifestBody } =
+        manifestRequest;
       outcome.manifest = formatRequestOutcome(
         "manifest",
         manifestResponse,
@@ -730,12 +758,13 @@ export async function requestLocalHandoffProbe(
         throw new Error("manifest did not provide a launch asset URL");
       }
 
-      const bundleResponse = await fetchWithDeadline(
+      const bundleRequest = await requestWithDeadline(
         localBundleUrl(port, launchAssetUrl),
         { headers },
         deadline,
+        (response) => response.arrayBuffer(),
       );
-      const bundleBody = await bundleResponse.arrayBuffer();
+      const { response: bundleResponse, body: bundleBody } = bundleRequest;
       outcome.bundle = formatRequestOutcome(
         "bundle",
         bundleResponse,
@@ -757,6 +786,7 @@ export async function requestLocalHandoffProbe(
           outcome.manifest ?? "manifest request did not complete",
           outcome.bundle ?? "bundle request did not complete",
           error instanceof Error ? error.message : String(error),
+          publicPreviewRecoveryMessage(),
         ].join(" "),
       );
       if (Date.now() >= deadline) break;

@@ -338,6 +338,94 @@ globalThis.fetch = async (url, options = {}) => {
   },
 );
 
+test(
+  "aborts a stalled local manifest request at its deadline with recovery guidance",
+  { timeout: 1_000 },
+  async () => {
+    const originalFetch = globalThis.fetch;
+    let request;
+    globalThis.fetch = async (url, options) => {
+      request = { url, options };
+      return new Promise((resolve, reject) => {
+        options.signal.addEventListener(
+          "abort",
+          () => reject(new Error("fetch aborted")),
+          { once: true },
+        );
+      });
+    };
+
+    try {
+      await assert.rejects(
+        requestLocalHandoffProbe(4_321, 25),
+        (error) => {
+          assert.match(error.message, /manifest request did not complete/);
+          assert.match(error.message, /aborted by deadline/i);
+          assert.match(
+            error.message,
+            /Restart or repair the managed Chat App\/Expo workflow/,
+          );
+          return true;
+        },
+      );
+      assert.equal(request.options.signal.aborted, true);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  },
+);
+
+test(
+  "aborts a stalled local bundle request at its deadline with recovery guidance",
+  { timeout: 1_000 },
+  async () => {
+    const originalFetch = globalThis.fetch;
+    let request;
+    let requestCount = 0;
+    globalThis.fetch = async (url, options) => {
+      requestCount += 1;
+      request = { url, options };
+      if (requestCount === 1) {
+        return new Response(
+          JSON.stringify({
+            launchAsset: {
+              url: "https://preview.example.test/_expo/static/js/bundle",
+            },
+          }),
+          { status: 200 },
+        );
+      }
+      return new Promise((resolve, reject) => {
+        options.signal.addEventListener(
+          "abort",
+          () => reject(new Error("fetch aborted")),
+          { once: true },
+        );
+      });
+    };
+
+    try {
+      await assert.rejects(
+        requestLocalHandoffProbe(4_321, 25),
+        (error) => {
+          assert.match(error.message, /manifest HTTP 200/);
+          assert.match(error.message, /bundle request did not complete/);
+          assert.match(error.message, /aborted by deadline/i);
+          assert.match(
+            error.message,
+            /Restart or repair the managed Chat App\/Expo workflow/,
+          );
+          return true;
+        },
+      );
+      assert.equal(requestCount, 2);
+      assert.equal(request.options.signal.aborted, true);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  },
+);
+
 test("reports missing public preview configuration before making a request", async () => {
   const fetchMock = mockFetch(new Response("{}"));
 
