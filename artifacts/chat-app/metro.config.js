@@ -11,8 +11,10 @@ const config = getSentryExpoConfig(__dirname);
 // Opt-in request log for debugging phones that cannot load the development
 // preview. The log is deliberately redacted: it includes only request
 // metadata and coarse client/resource classifications, never a host, URL,
-// query string, or raw user-agent. Enable with EXPO_DEV_REQUEST_LOG=1, or set
-// EXPO_DEV_REQUEST_EVIDENCE_FILE to enable it and write to a handoff path.
+// query string, or raw user-agent. Enable with EXPO_DEV_REQUEST_LOG=1 to write
+// the default file at .expo/dev-request-evidence.log, or set
+// EXPO_DEV_REQUEST_EVIDENCE_FILE to enable it and write to a handoff path
+// relative to the Chat App package root.
 const requestLogEnabled =
   process.env.EXPO_DEV_REQUEST_LOG === "1" ||
   Boolean(process.env.EXPO_DEV_REQUEST_EVIDENCE_FILE);

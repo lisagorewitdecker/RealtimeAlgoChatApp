@@ -21,7 +21,17 @@ published build is not a substitute.
    Expo Go from the App Store, records the iPhone model, iOS version, and Expo
    Go version, then opens the link in Expo Go on a fresh app launch.
 2. Set `EXPO_DEV_REQUEST_LOG=1` in the development environment and restart the
-   managed Chat App/Expo workflow. After Metro is ready, run:
+   managed Chat App/Expo workflow before the handoff. Metro writes a fresh,
+   redacted request log to
+   `artifacts/chat-app/.expo/dev-request-evidence.log`. To retain the evidence
+   directly in the timestamped record instead, set
+   `EXPO_DEV_REQUEST_EVIDENCE_FILE` to
+   `test-results/encrypted-room-recovery/ios/<UTC timestamp>/logs/metro-request-evidence.txt`
+   before restarting. This path is relative to the Chat App package root used
+   by the managed workflow. The file's lines contain only status, timing,
+   `platform`, a client class, `user-agent=[redacted]`, and a coarse resource
+   class; they never contain a host, URL, query string, credentials, account
+   data, or message content. After Metro is ready, run:
 
    ```sh
    pnpm --filter @workspace/chat-app run validate:preview-startup -- \
@@ -42,13 +52,27 @@ published build is not a substitute.
 4. The operator opens the fresh preview in stock Expo Go, waits for the Chat App
    landing screen, and captures a redacted screenshot. Treat the phone launch
    as observed only when both the iPhone screen and filtered server-side native
-   request evidence are available. The native request should identify an iOS
-   or Expo Go client marker and `platform=ios`; do not retain a full host, URL,
-   credential, account identifier, or message.
+   request evidence are available. A native request has no browser `OPTIONS`
+   preflight. Filter the retained file to the native iOS marker before adding
+   it to the record:
+
+   ```sh
+   grep 'platform=ios client=Expo Go' \
+     artifacts/chat-app/test-results/encrypted-room-recovery/ios/<UTC timestamp>/logs/metro-request-evidence.txt \
+     | grep -v ' OPTIONS ' \
+     > artifacts/chat-app/test-results/encrypted-room-recovery/ios/<UTC timestamp>/logs/native-ios-request-evidence.txt
+   ```
+
+   Reference `logs/native-ios-request-evidence.txt` in the
+   **Server-side native request evidence** row. Copy only the marker
+   (`platform=ios; client=Expo Go; user-agent=[redacted]`) into the Markdown
+   row; do not retain the full host, URL, credentials, account identifiers, or
+   message content. Browser and curl probes retain their own client classes and
+   do not qualify as native iPhone evidence.
 5. If Expo Go cannot launch, record the exact iPhone error and a redacted
-   screenshot. A workspace request, browser tab, local probe, or Metro startup
-   line proves public reachability or workflow readiness only. It does not
-   prove an Expo Go session launched.
+   screenshot. A workspace `curl`, a browser tab, or a Metro startup line
+   proves public reachability or workflow readiness only; the preview preflight
+   is also not proof of an Expo Go session launch.
 6. Save `validation-record.md` under
    `test-results/encrypted-room-recovery/ios/<UTC timestamp>/`. Keep all four
    rows below even when one is `FAIL`, `BLOCKED`, or `NOT_ASSESSED`. A public
@@ -71,7 +95,7 @@ server-side logs.
 | Public manifest reachability | PASS / FAIL | Preflight `publicManifestReachability` result; status and byte count only |
 | Local handoff probe (manifest and bundle) | PASS / FAIL / NOT_RUN | Preflight `localHandoffProbe` result; no URL or launch payload |
 | Expo Go launch on physical iPhone | PASS / FAIL / BLOCKED | iPhone screen reached the landing screen, or the exact phone error |
-| Server-side native request evidence | PASS / FAIL / BLOCKED | Filtered Metro/API marker with `platform=ios` and an Expo Go client or user-agent; no full host, URL, credentials, or message content |
+| Server-side native request evidence | PASS / FAIL / BLOCKED | Reference `logs/native-ios-request-evidence.txt`; copy only the filtered `platform=ios; client=Expo Go; user-agent=[redacted]` marker, with no host, URL, account, or message data |
 
 The local handoff probe is a workspace request against Metro. It proves that
 the manifest and bundle can be fetched locally, not that Expo Go launched on a
