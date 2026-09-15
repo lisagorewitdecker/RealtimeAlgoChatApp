@@ -1424,6 +1424,10 @@ test("Android preview evidence keeps its pull-request validation and privacy con
     '"status":"PASS","evidence":"public manifest HTTP 200 (128 bytes)"',
     '"status":"FAIL","evidence":"Public manifest probe failed — no successful probe result was recorded"',
   );
+  const changedBlockedPreflight = blockedPreflight.replace(
+    "public manifest HTTP 200 (128 bytes)",
+    "public manifest HTTP 200 (256 bytes)",
+  );
 
   function runAndroidPreviewJob(name, recordText, options = {}) {
     const {
@@ -1441,11 +1445,14 @@ test("Android preview evidence keeps its pull-request validation and privacy con
         `artifacts/chat-app/test-results/encrypted-room-recovery/android/${timestamp}/validation-record.md`,
       ),
     );
-    const recordPath = recordPaths[0];
-    const preflightPath = path.join(
-      fixtureRoot,
-      "artifacts/chat-app/test-results/encrypted-room-recovery/android/20260915T120000Z/android-preview-preflight.json",
+    const preflightPaths = recordDefinitions.map(({ timestamp }) =>
+      path.join(
+        fixtureRoot,
+        `artifacts/chat-app/test-results/encrypted-room-recovery/android/${timestamp}/android-preview-preflight.json`,
+      ),
     );
+    const recordPath = recordPaths[0];
+    const preflightPath = preflightPaths[0];
     const summaryPath = path.join(fixtureRoot, "summary.md");
     const runnerPath = path.join(fixtureRoot, "run-job.sh");
     const binDirectory = path.join(fixtureRoot, "bin");
@@ -1464,6 +1471,16 @@ test("Android preview evidence keeps its pull-request validation and privacy con
     if (sidecarOnly) {
       writeFileSync(recordPath, recordDefinitions[0].text);
       writeFileSync(preflightPath, blockedPreflight);
+    } else {
+      for (const [
+        index,
+        { text, baseText, preflight },
+      ] of recordDefinitions.entries()) {
+        if (preflight !== undefined) {
+          writeFileSync(recordPaths[index], baseText ?? text);
+          writeFileSync(preflightPaths[index], blockedPreflight);
+        }
+      }
     }
 
     const git = (args) => {
@@ -1484,7 +1501,16 @@ test("Android preview evidence keeps its pull-request validation and privacy con
     git([
       "add",
       "README.md",
-      ...(sidecarOnly ? [recordPath, preflightPath] : []),
+      ...(sidecarOnly
+        ? [recordPath, preflightPath]
+        : [
+            ...recordDefinitions.flatMap(({ preflight }, index) =>
+              preflight === undefined ? [] : [recordPaths[index]],
+            ),
+            ...recordDefinitions.flatMap(({ preflight }, index) =>
+              preflight === undefined ? [] : [preflightPaths[index]],
+            ),
+          ]),
       ...(!missingValidator ? [validatorPath] : []),
     ]);
     git(["commit", "--quiet", "-m", "base"]);
@@ -1496,10 +1522,19 @@ test("Android preview evidence keeps its pull-request validation and privacy con
       writeFileSync(preflightPath, changedPreflight);
       git(["add", preflightPath]);
     } else {
-      for (const [index, { text }] of recordDefinitions.entries()) {
+      for (const [index, { text, preflight }] of recordDefinitions.entries()) {
         writeFileSync(recordPaths[index], text);
+        if (preflight !== undefined) {
+          writeFileSync(preflightPaths[index], preflight);
+        }
       }
-      git(["add", ...recordPaths]);
+      git([
+        "add",
+        ...recordPaths,
+        ...recordDefinitions.flatMap(({ preflight }, index) =>
+          preflight === undefined ? [] : [preflightPaths[index]],
+        ),
+      ]);
     }
     git(["commit", "--quiet", "-m", "android preview record"]);
     const headSha = spawnSync(gitPath, ["rev-parse", "HEAD"], {
@@ -1508,10 +1543,11 @@ test("Android preview evidence keeps its pull-request validation and privacy con
     }).stdout.trim();
 
     const pnpmCalledPath = path.join(fixtureRoot, "pnpm-called");
+    const checkerArgsLogPath = path.join(fixtureRoot, "checker-args.log");
     writeStub(
       binDirectory,
       "pnpm",
-      `set -euo pipefail\ntouch ${shellQuote(pnpmCalledPath)}\nchecker_args=()\nfound_separator=0\nfor arg in "$@"; do\n  if [[ "$arg" == "--" ]]; then\n    found_separator=1\n    continue\n  fi\n  if ((found_separator)); then\n    checker_args+=("$arg")\n  fi\ndone\nexec bash "$ANDROID_PREVIEW_CHECKER" "\${checker_args[@]}"`,
+      `set -euo pipefail\ntouch ${shellQuote(pnpmCalledPath)}\nchecker_args=()\nfound_separator=0\nfor arg in "$@"; do\n  if [[ "$arg" == "--" ]]; then\n    found_separator=1\n    continue\n  fi\n  if ((found_separator)); then\n    checker_args+=("$arg")\n  fi\ndone\nprintf '%s\\t%s\\n' "\${checker_args[0]}" "\${checker_args[1]:-}" >> "$ANDROID_PREVIEW_ARGS_LOG"\nexec bash "$ANDROID_PREVIEW_CHECKER" "\${checker_args[@]}"`,
     );
     writeFileSync(runnerPath, `#!${bashPath}\n${validationStep.run}\n`);
     chmodSync(runnerPath, 0o755);
@@ -1532,6 +1568,7 @@ test("Android preview evidence keeps its pull-request validation and privacy con
         GITHUB_REPOSITORY: "example/chat-app",
         GITHUB_SHA: headSha,
         GITHUB_STEP_SUMMARY: summaryPath,
+        ANDROID_PREVIEW_ARGS_LOG: checkerArgsLogPath,
       },
     });
     return {
@@ -1539,6 +1576,15 @@ test("Android preview evidence keeps its pull-request validation and privacy con
       recordPath: path.relative(fixtureRoot, recordPath),
       recordPaths: recordPaths.map((record) => path.relative(fixtureRoot, record)),
       preflightPath: path.relative(fixtureRoot, preflightPath),
+      preflightPaths: preflightPaths.map((preflight) =>
+        path.relative(fixtureRoot, preflight),
+      ),
+      checkerArgs: existsSync(checkerArgsLogPath)
+        ? readFileSync(checkerArgsLogPath, "utf8")
+            .trim()
+            .split("\n")
+            .map((line) => line.split("\t"))
+        : [],
       summary: readFileSync(summaryPath, "utf8"),
       checkerInvoked: existsSync(pnpmCalledPath),
     };
@@ -1597,35 +1643,41 @@ test("Android preview evidence keeps its pull-request validation and privacy con
   );
 
   const multiRecord = runAndroidPreviewJob("multi-record", [
-    { timestamp: "20260915T120000Z", text: blockedRecord },
     {
-      timestamp: "20260915T121500Z",
-      text: blockedRecord
-        .replace("**Result: BLOCKED", "**Result: PASS")
-        .replace(
-          "No physical phone was available.",
-          "PRIVATE_MULTI_RECORD_EVIDENCE no physical phone was available.",
-        ),
+      timestamp: "20260915T120000Z",
+      baseText: blockedRecord,
+      text: blockedRecord.replace(
+        "The local probe was not run.",
+        "The local probe was not run for this record.",
+      ),
+      preflight: changedBlockedPreflight,
     },
     {
-      timestamp: "20260915T123000Z",
-      text: blockedRecord
-        .replace("**Result: BLOCKED", "**Result: PASS")
-        .replace(
-          "No physical phone was available.",
-          "PRIVATE_SECOND_MULTI_RECORD_EVIDENCE no physical phone was available.",
-        ),
+      timestamp: "20260915T121500Z",
+      text: blockedRecord.replace(
+        "No physical phone was available.",
+        "PRIVATE_MULTI_RECORD_EVIDENCE no physical phone was available.",
+      ),
+      preflight: mismatchedPreflight,
     },
   ]);
   assert.notEqual(
     multiRecord.result.status,
     0,
-    "multiple invalid Android preview records must fail the multi-record job",
+    "a mismatched Android preview sidecar must fail only its record",
   );
   assert.match(
     multiRecord.summary,
-    /- Changed records checked: \*\*3\*\*/,
-    "the summary must count every changed Android preview record",
+    /- Changed records checked: \*\*2\*\*/,
+    "the summary must count both changed Android preview records",
+  );
+  assert.deepEqual(
+    multiRecord.checkerArgs,
+    [
+      [multiRecord.recordPaths[0], multiRecord.preflightPaths[0]],
+      [multiRecord.recordPaths[1], multiRecord.preflightPaths[1]],
+    ],
+    "each changed Android preflight sidecar must be passed to the checker with its sibling record",
   );
   for (const recordPath of multiRecord.recordPaths) {
     const escapedPath = recordPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -1665,27 +1717,20 @@ test("Android preview evidence keeps its pull-request validation and privacy con
   assert.match(
     multiRecord.summary,
     new RegExp(
-      `### \\[${multiRecord.recordPaths[1].replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\][\\s\\S]*- Validation: \\*\\*FAIL\\*\\*[\\s\\S]*Missing-boundary reason[\\s\\S]*PASS records must include a real Device model value\\.`,
+      `### \\[${multiRecord.recordPaths[1].replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\][\\s\\S]*- Validation: \\*\\*FAIL\\*\\*[\\s\\S]*Missing-boundary reason[\\s\\S]*preflight JSON public manifest boundary does not match the Markdown record\\.`,
     ),
-    "the first invalid record must contribute its sanitized checker reason",
-  );
-  assert.match(
-    multiRecord.summary,
-    new RegExp(
-      `### \\[${multiRecord.recordPaths[2].replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\][\\s\\S]*- Validation: \\*\\*FAIL\\*\\*[\\s\\S]*Missing-boundary reason[\\s\\S]*PASS records must include a real Device model value\\.`,
-    ),
-    "the second invalid record must contribute its sanitized checker reason",
+    "the mismatched record must contribute its sanitized checker reason",
   );
   assert.equal(
     multiRecord.summary.match(
       /- Validation: \*\*FAIL\*\*/g,
     )?.length ?? 0,
-    2,
-    "the summary must preserve the overall failure status for both invalid records",
+    1,
+    "the summary must preserve the failure status only for the affected record",
   );
   assert.doesNotMatch(
     multiRecord.summary,
-    /PRIVATE_MULTI_RECORD_EVIDENCE|PRIVATE_SECOND_MULTI_RECORD_EVIDENCE|Workspace curl returned HTTP 200|No physical phone was available/,
+    /PRIVATE_MULTI_RECORD_EVIDENCE|Workspace curl returned HTTP 200|No physical phone was available/,
     "a multi-record summary must not expose evidence text from either record",
   );
 
