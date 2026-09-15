@@ -10,7 +10,20 @@ const DEFAULT_PUBLIC_PREVIEW_TIMEOUT_MS = 15_000;
 const STARTUP_FAILURE_GRACE_MS = 250;
 const MAX_STARTUP_DIAGNOSTIC_LENGTH = 512;
 const MAX_STARTUP_FAILURE_LINE_LENGTH = 320;
-const HANDOFF_PREFLIGHT_SCHEMA = "android-preview-handoff-preflight/v1";
+const HANDOFF_PLATFORM_CONFIG = {
+  android: {
+    schema: "android-preview-handoff-preflight/v1",
+    manifestPlatform: "android",
+    displayName: "Android",
+    phoneDescription: "a physical Android phone",
+  },
+  ios: {
+    schema: "ios-preview-handoff-preflight/v1",
+    manifestPlatform: "ios",
+    displayName: "iOS",
+    phoneDescription: "a physical iPhone",
+  },
+};
 const READY_MARKERS = [/Starting Metro Bundler/i, /› Metro:/i];
 const STARTUP_FAILURES = [
   /error while loading shared libraries:/i,
@@ -74,13 +87,22 @@ function safePreflightFailure(status) {
 }
 
 export function createHandoffPreflightRecord({
+  platform = "android",
   publicManifest = null,
   localHandoff = null,
   publicManifestFailed = false,
   localHandoffFailed = false,
 } = {}) {
+  const platformConfig = HANDOFF_PLATFORM_CONFIG[platform];
+  if (!platformConfig) {
+    throw new Error(
+      `Unsupported preview handoff platform "${platform}". Expected ios or android.`,
+    );
+  }
+
   return {
-    schema: HANDOFF_PREFLIGHT_SCHEMA,
+    schema: platformConfig.schema,
+    platform,
     boundaries: {
       publicManifestReachability: {
         status: publicManifest
@@ -108,7 +130,7 @@ export function createHandoffPreflightRecord({
       },
       expoGoLaunch: {
         status: "NOT_ASSESSED",
-        evidence: "Requires a physical Android phone running stock Expo Go.",
+        evidence: `Requires ${platformConfig.phoneDescription} running stock Expo Go.`,
       },
       serverNativeRequestEvidence: {
         status: "NOT_ASSESSED",
@@ -121,8 +143,15 @@ export function createHandoffPreflightRecord({
 
 export function formatHandoffPreflight(record) {
   const { boundaries } = record;
+  const platformConfig = HANDOFF_PLATFORM_CONFIG[record.platform ?? "android"];
+  if (!platformConfig) {
+    throw new Error(
+      `Unsupported preview handoff platform "${record.platform}". Expected ios or android.`,
+    );
+  }
+
   return [
-    "Android preview handoff preflight (public and local probes only):",
+    `${platformConfig.displayName} preview handoff preflight (public and local probes only):`,
     `public_manifest_reachability=${boundaries.publicManifestReachability.status}; evidence=${boundaries.publicManifestReachability.evidence}`,
     `local_handoff_probe=${boundaries.localHandoffProbe.status}; evidence=${boundaries.localHandoffProbe.evidence}`,
     `expo_go_launch=${boundaries.expoGoLaunch.status}; evidence=${boundaries.expoGoLaunch.evidence}`,
@@ -177,12 +206,20 @@ export function getPublicPreviewManifestUrl(environment = process.env) {
 export async function requestPublicPreviewManifest(
   timeoutMs,
   environment = process.env,
+  platform = "android",
 ) {
+  const platformConfig = HANDOFF_PLATFORM_CONFIG[platform];
+  if (!platformConfig) {
+    throw new Error(
+      `Unsupported preview handoff platform "${platform}". Expected ios or android.`,
+    );
+  }
+
   const url = getPublicPreviewManifestUrl(environment);
   const deadline = Date.now() + timeoutMs;
   const headers = {
     Accept: "application/json",
-    "expo-platform": "android",
+    "expo-platform": platformConfig.manifestPlatform,
     "user-agent": "Expo/57.0.0 (preview-validation)",
   };
 
@@ -259,10 +296,21 @@ async function fetchWithDeadline(url, options, deadline) {
   }
 }
 
-async function requestLocalHandoffProbe(port, timeoutMs) {
+export async function requestLocalHandoffProbe(
+  port,
+  timeoutMs,
+  platform = "android",
+) {
+  const platformConfig = HANDOFF_PLATFORM_CONFIG[platform];
+  if (!platformConfig) {
+    throw new Error(
+      `Unsupported preview handoff platform "${platform}". Expected ios or android.`,
+    );
+  }
+
   const deadline = Date.now() + timeoutMs;
   const headers = {
-    "expo-platform": "android",
+    "expo-platform": platformConfig.manifestPlatform,
     "user-agent": "Expo/57.0.0 (preview-validation)",
   };
   let lastError = null;
@@ -379,8 +427,20 @@ async function findFreePort() {
 }
 
 function parseArgs(argv) {
+  const platformIndex = argv.indexOf("--platform");
   const logFileIndex = argv.indexOf("--log-file");
   const recordOutputIndex = argv.indexOf("--record-output");
+  const platform =
+    platformIndex === -1 ? "android" : argv[platformIndex + 1];
+  if (
+    platformIndex !== -1 &&
+    (!platform || platform.startsWith("--") || !HANDOFF_PLATFORM_CONFIG[platform])
+  ) {
+    throw new Error(
+      "--platform requires either ios or android for the preview handoff preflight.",
+    );
+  }
+
   const recordOutput =
     recordOutputIndex === -1 ? null : argv[recordOutputIndex + 1];
   if (
@@ -390,6 +450,7 @@ function parseArgs(argv) {
     throw new Error("--record-output requires a path to a JSON output file.");
   }
   return {
+    platform,
     logFile: logFileIndex === -1 ? null : argv[logFileIndex + 1],
     recordOutput,
     timeoutMs:
@@ -415,6 +476,7 @@ async function validateCapturedLog(logFile) {
 }
 
 async function validateLivePreview(
+  platform,
   timeoutMs,
   handoffTimeoutMs,
   publicPreviewTimeoutMs,
@@ -555,11 +617,18 @@ async function validateLivePreview(
         try {
           publicManifest = await requestPublicPreviewManifest(
             publicPreviewTimeoutMs,
+            process.env,
+            platform,
           );
           phase = "local";
-          localHandoff = await requestLocalHandoffProbe(port, handoffTimeoutMs);
+          localHandoff = await requestLocalHandoffProbe(
+            port,
+            handoffTimeoutMs,
+            platform,
+          );
           phase = "record";
           const record = createHandoffPreflightRecord({
+            platform,
             publicManifest,
             localHandoff,
           });
@@ -574,6 +643,7 @@ async function validateLivePreview(
           });
         } catch (error) {
           const record = createHandoffPreflightRecord({
+            platform,
             publicManifest,
             localHandoff,
             publicManifestFailed: phase === "public",
@@ -605,6 +675,7 @@ async function validateLivePreview(
 async function main() {
   const {
     logFile,
+    platform,
     timeoutMs,
     handoffTimeoutMs,
     publicPreviewTimeoutMs,
@@ -613,6 +684,7 @@ async function main() {
   if (logFile) await validateCapturedLog(logFile);
   else
     await validateLivePreview(
+      platform,
       timeoutMs,
       handoffTimeoutMs,
       publicPreviewTimeoutMs,

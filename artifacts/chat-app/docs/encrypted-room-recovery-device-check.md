@@ -39,6 +39,13 @@ single-phone smoke test.
 5. Safe read access to the environment's database or API for the boundary
    check (ciphertext-only inspection). Do not copy payloads into evidence.
 
+The corresponding iOS SDK 57 preview handoff, including its four-boundary
+record template, is documented in
+[native-room-key-persistence-device-check.md](native-room-key-persistence-device-check.md).
+Use that iOS record for public reachability, the local probe, the physical
+Expo Go launch, and server-side native request evidence; do not reuse the
+Android labels below for an iPhone.
+
 ## SDK 57 Android preview handoff
 
 The development-preview launch boundary has a separate, repeatable route. It

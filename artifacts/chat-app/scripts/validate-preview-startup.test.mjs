@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
+import { createServer } from "node:http";
 import test from "node:test";
 
 import {
   createHandoffPreflightRecord,
   formatHandoffPreflight,
+  requestLocalHandoffProbe,
   requestPublicPreviewManifest,
   writeHandoffPreflight,
 } from "./validate-preview-startup.mjs";
@@ -60,6 +62,62 @@ test("accepts a public HTTP 200 manifest and sends the Android Expo header", asy
     });
   } finally {
     fetchMock.restore();
+  }
+});
+
+test("accepts a public HTTP 200 manifest and sends the iOS Expo header", async () => {
+  const fetchMock = mockFetch(
+    new Response(
+      JSON.stringify({
+        launchAsset: {
+          url: "https://preview.example.test/_expo/static/js/bundle",
+        },
+      }),
+      { status: 200 },
+    ),
+  );
+
+  try {
+    await requestPublicPreviewManifest(1_000, previewEnvironment, "ios");
+
+    assert.equal(fetchMock.request.options.headers["expo-platform"], "ios");
+  } finally {
+    fetchMock.restore();
+  }
+});
+
+test("local iOS handoff probe requests both manifest and bundle with the iOS header", async () => {
+  const observedPlatforms = [];
+  const server = createServer((request, response) => {
+    observedPlatforms.push(request.headers["expo-platform"]);
+    response.setHeader("content-type", "application/json");
+    if (request.url === "/") {
+      response.end(
+        JSON.stringify({
+          launchAsset: {
+            url: "https://preview.example.test/_expo/static/js/ios-bundle",
+          },
+        }),
+      );
+      return;
+    }
+    response.setHeader("content-type", "application/javascript");
+    response.end("console.log('ios');");
+  });
+
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  assert.notEqual(typeof address, "string");
+
+  try {
+    const result = await requestLocalHandoffProbe(address.port, 1_000, "ios");
+    assert.match(result.manifest, /^manifest HTTP 200/);
+    assert.match(result.bundle, /^bundle HTTP 200/);
+    assert.deepEqual(observedPlatforms, ["ios", "ios"]);
+  } finally {
+    await new Promise((resolve, reject) =>
+      server.close((error) => (error ? reject(error) : resolve())),
+    );
   }
 });
 
@@ -200,6 +258,7 @@ test("preflight record keeps public and local probes separate from phone evidenc
   });
 
   assert.equal(record.schema, "android-preview-handoff-preflight/v1");
+  assert.equal(record.platform, "android");
   assert.equal(record.boundaries.publicManifestReachability.status, "PASS");
   assert.equal(record.boundaries.localHandoffProbe.status, "PASS");
   assert.equal(record.boundaries.expoGoLaunch.status, "NOT_ASSESSED");
@@ -214,6 +273,25 @@ test("preflight record keeps public and local probes separate from phone evidenc
   assert.match(output, /expo_go_launch=NOT_ASSESSED/);
   assert.match(output, /server_native_request_evidence=NOT_ASSESSED/);
   assert.doesNotMatch(output, /https?:\/\/|qr|token|message/i);
+});
+
+test("iOS preflight records use iOS schema, labels, and phone placeholders", () => {
+  const record = createHandoffPreflightRecord({
+    platform: "ios",
+    publicManifestFailed: true,
+  });
+
+  assert.equal(record.schema, "ios-preview-handoff-preflight/v1");
+  assert.equal(record.platform, "ios");
+  assert.match(record.boundaries.expoGoLaunch.evidence, /physical iPhone/);
+  assert.match(
+    record.boundaries.serverNativeRequestEvidence.evidence,
+    /physical Expo Go session/,
+  );
+  assert.match(
+    formatHandoffPreflight(record),
+    /^iOS preview handoff preflight/m,
+  );
 });
 
 test("public-edge failure does not become missing-phone evidence", () => {
