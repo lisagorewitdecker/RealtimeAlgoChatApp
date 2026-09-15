@@ -81,10 +81,11 @@ For either option:
    This preflight checks the public Expo manifest endpoint using the managed
    `REPLIT_EXPO_DEV_DOMAIN` and then performs the local Expo Go manifest and
    bundle probe. Do not start the phone session unless the output includes
-   `Public preview reachability: PASS`. A non-200 public manifest response
+   `public_manifest_reachability=PASS`. A non-200 public manifest response
    means the public edge is unhealthy: restart or repair the managed workflow
    and rerun the preflight. The preflight's public-edge result is reachability
    evidence only, not native-device evidence.
+
 3. The operator opens the fresh preview from stock Expo Go, waits for the Chat
    App landing screen, and captures a screenshot with account identifiers and
    message content cropped or blurred. Treat the launch as observed only when
@@ -96,14 +97,52 @@ For either option:
    screenshot. A workspace `curl`, a browser tab, or a Metro startup line
    proves public reachability or workflow readiness only; the preview preflight
    is also not proof of an Expo Go session launch.
-5. Append `validation-record.md` under
+5. Save the redacted machine-readable preflight when one is useful for review:
+
+   ```sh
+   pnpm --filter @workspace/chat-app run validate:preview-startup -- \
+     --record-output /tmp/android-preview-preflight.json
+   ```
+
+   The JSON contains status and byte-count summaries only. It does not contain
+   the manifest URL, launch-asset URL, QR payload, credentials, account data,
+   or message content. Copy its four boundary values into the record template
+   below. `expoGoLaunch=NOT_ASSESSED` and
+   `serverNativeRequestEvidence=NOT_ASSESSED` are expected until a physical
+   Android phone supplies those results.
+
+6. Append `validation-record.md` under
    `test-results/encrypted-room-recovery/android/<UTC timestamp>/`. Include
-   separate rows for the public-edge reachability result and the Expo Go
-   launch result, along with the device metadata and redacted evidence paths.
+   the four explicit handoff rows below, along with the device metadata and
+   redacted evidence paths. Do not replace a `FAIL` public-edge result with a
+   `BLOCKED` phone result: they are separate boundaries. A public `PASS` with
+   phone or native evidence `BLOCKED` means the public edge worked but no phone
+   evidence was available.
    When no physical route is available, write `BLOCKED` rows rather than
    inventing device values. Because the repository ignores artifact-level
    `test-results/`, force-add the completed record with `git add -f` so it is
    retained; do not create a duplicate copy under `docs/`.
+
+### Android preview handoff record template
+
+Copy this table into the timestamped `validation-record.md` and replace each
+status and evidence note. The first two rows are produced by the workspace
+preflight; the last two require the physical phone session and filtered
+server-side logs. Keep the four rows even when their status is `BLOCKED`,
+`FAIL`, or `NOT_ASSESSED`.
+
+| Handoff boundary | Status | Evidence |
+| --- | --- | --- |
+| Public manifest reachability | PASS / FAIL | Preflight `publicManifestReachability` result; status and byte count only |
+| Local handoff probe (manifest and bundle) | PASS / FAIL / NOT_RUN | Preflight `localHandoffProbe` result; no URL or launch payload |
+| Expo Go launch on physical Android | PASS / FAIL / BLOCKED | Phone screen reached the landing screen, or the exact phone error |
+| Server-side native request evidence | PASS / FAIL / BLOCKED | Filtered Metro/API marker with `platform=android` and an Expo Go client or user-agent; no full host, URL, credentials, or message content |
+
+The local handoff probe is a workspace request against Metro. It proves that
+the manifest and bundle can be fetched locally, not that Expo Go launched on a
+phone. The server-side native request row is the separate proof that the phone
+made the request. A public-edge `FAIL` means the phone handoff should not start;
+it is not a substitute for, or evidence of, a missing phone session.
 
 The current blocked baseline is
 `test-results/encrypted-room-recovery/android/20260914T144407Z/validation-record.md`.
@@ -112,7 +151,6 @@ This preview handoff is separate from the release-candidate procedure below.
 Expo Go can verify the preview launch boundary, but only the same published
 build installed on two phones can verify secure-storage persistence and
 force-close recovery.
-
 
 ### Evidence completeness check
 
@@ -129,8 +167,9 @@ The check enforces these boundaries:
 - A `PASS` record must contain real values for **Device model**, **Android
   version**, and **Expo Go version**. `BLOCKED`, unavailable, pending, and
   placeholder values are not metadata.
-- A `PASS` record must mark the physical stock Expo Go launch and the Metro
-  observation as `PASS`. Its Metro evidence must explicitly include a native
+- A `PASS` record must mark public manifest reachability, the local manifest and
+  bundle probe, the physical stock Expo Go launch, and server-side native
+  request evidence as `PASS`. The native evidence must explicitly include an
   Android request with an Expo Go client or user-agent marker and
   `platform=android`. Workspace `curl` output, `platform=-`, browser
   preflights, and Metro startup output cannot satisfy this condition.

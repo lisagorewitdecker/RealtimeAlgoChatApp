@@ -13,6 +13,7 @@
     "validate:preview-startup": "node scripts/validate-preview-startup.mjs",
     "test": "jest --passWithNoTests --runInBand && pnpm run test:build-preflight && pnpm run test:branding && pnpm run test:preview-startup",
     "test:build-preflight": "node --test scripts/build.test.js",
+    "test:preview-preflight": "node --test scripts/validate-preview-startup.test.mjs",
     "test:branding": "node --test scripts/validate-branding.test.mjs",
     "test:preview-startup": "node --test scripts/validate-preview-startup.test.mjs",
     "validate:branding": "node scripts/validate-branding.mjs",

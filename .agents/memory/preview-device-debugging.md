@@ -31,6 +31,19 @@ both looked healthy from in-container probes.
 **How to apply:** any time a user reports an Expo Go loading error or a
 phone-only bug, capture the request log and compare manifest dates first.
 
+The handoff record must keep four outcomes separate: public manifest
+reachability, the local manifest/bundle probe, the physical Expo Go launch, and
+server-side native request evidence. A successful public or local probe is not
+phone evidence.
+
+**Why:** operators can otherwise copy a successful workspace/public probe into
+the Android record and accidentally imply that a physical phone launched the
+preview.
+
+**How to apply:** use the redacted preflight summary for the first two rows and
+keep the phone and native-request rows `BLOCKED` or `NOT_ASSESSED` until both
+physical evidence sources exist.
+
 The local Expo Go handoff check must request the platform manifest first and
 follow its `launchAsset.url` pathname for the bundle; a guessed `/index.bundle`
 route is not equivalent. This validates Metro's native-client routing locally,

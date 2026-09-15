@@ -1,5 +1,5 @@
 import { createServer } from "node:net";
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { spawn } from "node:child_process";
 import { setTimeout as delay } from "node:timers/promises";
@@ -10,6 +10,7 @@ const DEFAULT_PUBLIC_PREVIEW_TIMEOUT_MS = 15_000;
 const STARTUP_FAILURE_GRACE_MS = 250;
 const MAX_STARTUP_DIAGNOSTIC_LENGTH = 512;
 const MAX_STARTUP_FAILURE_LINE_LENGTH = 320;
+const HANDOFF_PREFLIGHT_SCHEMA = "android-preview-handoff-preflight/v1";
 const READY_MARKERS = [/Starting Metro Bundler/i, /› Metro:/i];
 const STARTUP_FAILURES = [
   /error while loading shared libraries:/i,
@@ -25,8 +26,9 @@ const MISSING_LIBRARY = new RegExp(
 function findStartupFailure(output) {
   const lines = output.split(/\r?\n/);
   return (
-    lines.find((line) => STARTUP_FAILURES.some((pattern) => pattern.test(line))) ??
-    null
+    lines.find((line) =>
+      STARTUP_FAILURES.some((pattern) => pattern.test(line)),
+    ) ?? null
   );
 }
 
@@ -65,6 +67,75 @@ function formatStartupFailure(output) {
 
 function formatRequestOutcome(stage, response, byteLength) {
   return `${stage} HTTP ${response.status} (${byteLength} bytes)`;
+}
+
+function safePreflightFailure(status) {
+  return `${status} — no successful probe result was recorded`;
+}
+
+export function createHandoffPreflightRecord({
+  publicManifest = null,
+  localHandoff = null,
+  publicManifestFailed = false,
+  localHandoffFailed = false,
+} = {}) {
+  return {
+    schema: HANDOFF_PREFLIGHT_SCHEMA,
+    boundaries: {
+      publicManifestReachability: {
+        status: publicManifest
+          ? "PASS"
+          : publicManifestFailed
+            ? "FAIL"
+            : "NOT_RUN",
+        evidence:
+          publicManifest?.outcome ??
+          safePreflightFailure(
+            publicManifestFailed
+              ? "Public manifest probe failed"
+              : "Public manifest probe not run",
+          ),
+      },
+      localHandoffProbe: {
+        status: localHandoff ? "PASS" : localHandoffFailed ? "FAIL" : "NOT_RUN",
+        evidence: localHandoff
+          ? `${localHandoff.manifest}; ${localHandoff.bundle}`
+          : safePreflightFailure(
+              localHandoffFailed
+                ? "Local manifest/bundle probe failed"
+                : "Local manifest/bundle probe not run",
+            ),
+      },
+      expoGoLaunch: {
+        status: "NOT_ASSESSED",
+        evidence: "Requires a physical Android phone running stock Expo Go.",
+      },
+      serverNativeRequestEvidence: {
+        status: "NOT_ASSESSED",
+        evidence:
+          "Requires filtered Metro or API evidence from that physical Expo Go session.",
+      },
+    },
+  };
+}
+
+export function formatHandoffPreflight(record) {
+  const { boundaries } = record;
+  return [
+    "Android preview handoff preflight (public and local probes only):",
+    `public_manifest_reachability=${boundaries.publicManifestReachability.status}; evidence=${boundaries.publicManifestReachability.evidence}`,
+    `local_handoff_probe=${boundaries.localHandoffProbe.status}; evidence=${boundaries.localHandoffProbe.evidence}`,
+    `expo_go_launch=${boundaries.expoGoLaunch.status}; evidence=${boundaries.expoGoLaunch.evidence}`,
+    `server_native_request_evidence=${boundaries.serverNativeRequestEvidence.status}; evidence=${boundaries.serverNativeRequestEvidence.evidence}`,
+  ].join("\n");
+}
+
+export async function writeHandoffPreflight(outputPath, record) {
+  await writeFile(
+    resolve(outputPath),
+    `${JSON.stringify(record, null, 2)}\n`,
+    "utf8",
+  );
 }
 
 function publicPreviewRecoveryMessage() {
@@ -121,8 +192,7 @@ export async function requestPublicPreviewManifest(
     response = await fetchWithDeadline(url, { headers }, deadline);
     body = await response.text();
   } catch (error) {
-    const detail =
-      error instanceof Error ? error.message : String(error);
+    const detail = error instanceof Error ? error.message : String(error);
     throw new Error(
       `Public Expo preview manifest check failed before a response: ${detail}. ` +
         publicPreviewRecoveryMessage(),
@@ -189,10 +259,10 @@ async function fetchWithDeadline(url, options, deadline) {
   }
 }
 
-async function requestExpoGoHandoff(port, timeoutMs) {
+async function requestLocalHandoffProbe(port, timeoutMs) {
   const deadline = Date.now() + timeoutMs;
   const headers = {
-    "expo-platform": "ios",
+    "expo-platform": "android",
     "user-agent": "Expo/57.0.0 (preview-validation)",
   };
   let lastError = null;
@@ -255,7 +325,7 @@ async function requestExpoGoHandoff(port, timeoutMs) {
     } catch (error) {
       lastError = new Error(
         [
-          "Expo Go handoff failed:",
+          "Local Expo Go manifest/bundle probe failed:",
           outcome.manifest ?? "manifest request did not complete",
           outcome.bundle ?? "bundle request did not complete",
           error instanceof Error ? error.message : String(error),
@@ -266,7 +336,12 @@ async function requestExpoGoHandoff(port, timeoutMs) {
     }
   }
 
-  throw lastError ?? new Error("Expo Go handoff failed before a request completed.");
+  throw (
+    lastError ??
+    new Error(
+      "Local Expo Go manifest/bundle probe failed before a request completed.",
+    )
+  );
 }
 
 export function validatePreviewOutput(output) {
@@ -290,7 +365,9 @@ async function findFreePort() {
     server.listen(0, "127.0.0.1", () => {
       const address = server.address();
       if (!address || typeof address === "string") {
-        server.close(() => reject(new Error("Could not determine a free port.")));
+        server.close(() =>
+          reject(new Error("Could not determine a free port.")),
+        );
         return;
       }
       server.close((error) => {
@@ -303,11 +380,23 @@ async function findFreePort() {
 
 function parseArgs(argv) {
   const logFileIndex = argv.indexOf("--log-file");
+  const recordOutputIndex = argv.indexOf("--record-output");
+  const recordOutput =
+    recordOutputIndex === -1 ? null : argv[recordOutputIndex + 1];
+  if (
+    recordOutputIndex !== -1 &&
+    (!recordOutput || recordOutput.startsWith("--"))
+  ) {
+    throw new Error("--record-output requires a path to a JSON output file.");
+  }
   return {
     logFile: logFileIndex === -1 ? null : argv[logFileIndex + 1],
-    timeoutMs: Number(process.env.PREVIEW_STARTUP_TIMEOUT_MS) || DEFAULT_TIMEOUT_MS,
+    recordOutput,
+    timeoutMs:
+      Number(process.env.PREVIEW_STARTUP_TIMEOUT_MS) || DEFAULT_TIMEOUT_MS,
     handoffTimeoutMs:
-      Number(process.env.PREVIEW_HANDOFF_TIMEOUT_MS) || DEFAULT_HANDOFF_TIMEOUT_MS,
+      Number(process.env.PREVIEW_HANDOFF_TIMEOUT_MS) ||
+      DEFAULT_HANDOFF_TIMEOUT_MS,
     publicPreviewTimeoutMs:
       Number(process.env.PREVIEW_PUBLIC_TIMEOUT_MS) ||
       DEFAULT_PUBLIC_PREVIEW_TIMEOUT_MS,
@@ -316,7 +405,9 @@ function parseArgs(argv) {
 
 async function validateCapturedLog(logFile) {
   if (!logFile) {
-    throw new Error("--log-file requires a path to captured Expo startup output.");
+    throw new Error(
+      "--log-file requires a path to captured Expo startup output.",
+    );
   }
   const output = await readFile(resolve(logFile), "utf8");
   validatePreviewOutput(output);
@@ -327,6 +418,7 @@ async function validateLivePreview(
   timeoutMs,
   handoffTimeoutMs,
   publicPreviewTimeoutMs,
+  recordOutput,
 ) {
   const port = await findFreePort();
   const output = [];
@@ -457,27 +549,52 @@ async function validateLivePreview(
         return;
       }
       void (async () => {
+        let publicManifest;
+        let localHandoff;
+        let phase = "public";
         try {
-          const publicManifest = await requestPublicPreviewManifest(
+          publicManifest = await requestPublicPreviewManifest(
             publicPreviewTimeoutMs,
           );
-          const handoff = await requestExpoGoHandoff(port, handoffTimeoutMs);
+          phase = "local";
+          localHandoff = await requestLocalHandoffProbe(port, handoffTimeoutMs);
+          phase = "record";
+          const record = createHandoffPreflightRecord({
+            publicManifest,
+            localHandoff,
+          });
+          if (recordOutput) await writeHandoffPreflight(recordOutput, record);
           finish(() => {
             stopChild();
-            console.log(`Expo preview reached Metro running status on port ${port}.`);
             console.log(
-              `Public preview reachability: PASS (${publicManifest.outcome}).`,
+              `Expo preview reached Metro running status on port ${port}.`,
             );
-            console.log(
-              `Expo Go handoff succeeded: ${handoff.manifest}; ${handoff.bundle}; ` +
-                `path=${handoff.launchAssetPath}`,
-            );
+            console.log(formatHandoffPreflight(record));
             resolveResult();
           });
         } catch (error) {
+          const record = createHandoffPreflightRecord({
+            publicManifest,
+            localHandoff,
+            publicManifestFailed: phase === "public",
+            localHandoffFailed: phase === "local",
+          });
+          console.log(formatHandoffPreflight(record));
+
+          let finalError = error;
+          if (recordOutput && phase !== "record") {
+            try {
+              await writeHandoffPreflight(recordOutput, record);
+            } catch (recordError) {
+              finalError = new AggregateError(
+                [error, recordError],
+                "Preview handoff preflight failed and its record could not be written.",
+              );
+            }
+          }
           finish(() => {
             stopChild();
-            rejectResult(error);
+            rejectResult(finalError);
           });
         }
       })();
@@ -491,6 +608,7 @@ async function main() {
     timeoutMs,
     handoffTimeoutMs,
     publicPreviewTimeoutMs,
+    recordOutput,
   } = parseArgs(process.argv.slice(2));
   if (logFile) await validateCapturedLog(logFile);
   else
@@ -498,6 +616,7 @@ async function main() {
       timeoutMs,
       handoffTimeoutMs,
       publicPreviewTimeoutMs,
+      recordOutput,
     );
 }
 

@@ -21,7 +21,11 @@ failure() {
 table_value() {
   local field="$1"
   awk -F'|' -v expected="$field" '
-    $2 ~ "^[[:space:]]*" expected "[[:space:]]*$" {
+    {
+      label = $2
+      gsub(/^[[:space:]]+|[[:space:]]+$/, "", label)
+    }
+    label == expected {
       value = $3
       gsub(/^[[:space:]]+|[[:space:]]+$/, "", value)
       print value
@@ -33,7 +37,11 @@ table_value() {
 boundary_row() {
   local boundary="$1"
   awk -F'|' -v expected="$boundary" '
-    $2 ~ "^[[:space:]]*" expected "[[:space:]]*$" {
+    {
+      label = $2
+      gsub(/^[[:space:]]+|[[:space:]]+$/, "", label)
+    }
+    label == expected {
       print
       exit
     }
@@ -46,6 +54,48 @@ boundary_status() {
   row="$(boundary_row "$boundary")"
   [[ -n "$row" ]] || return 0
   awk -F'|' '{ value = $3; gsub(/\*/,"",value); gsub(/^[[:space:]]+|[[:space:]]+$/,"",value); print tolower(value) }' <<<"$row"
+}
+
+require_handoff_boundary() {
+  local boundary="$1"
+  if [[ -z "$(boundary_row "$boundary")" ]]; then
+    failure "Android preview evidence records must include the '${boundary}' boundary row."
+  fi
+}
+
+validate_handoff_boundaries() {
+  require_handoff_boundary "Public manifest reachability"
+  require_handoff_boundary "Local handoff probe (manifest and bundle)"
+  require_handoff_boundary "Expo Go launch on physical Android"
+  require_handoff_boundary "Server-side native request evidence"
+
+  validate_boundary_status "Public manifest reachability" pass fail
+  validate_boundary_status \
+    "Local handoff probe (manifest and bundle)" \
+    pass fail not_run
+  validate_boundary_status "Expo Go launch on physical Android" pass fail blocked
+  validate_boundary_status \
+    "Server-side native request evidence" \
+    pass fail blocked
+}
+
+validate_boundary_status() {
+  local boundary="$1"
+  shift
+  local status
+  status="$(boundary_status "$boundary")"
+  if [[ -z "$status" ]]; then
+    failure "The '${boundary}' boundary row must have a non-empty status."
+    return
+  fi
+
+  local allowed
+  for allowed in "$@"; do
+    if [[ "$status" == "$allowed" ]]; then
+      return
+    fi
+  done
+  failure "The '${boundary}' boundary row has unsupported status '${status}'."
 }
 
 is_missing_metadata() {
@@ -216,16 +266,27 @@ validate_pass_record() {
     fi
   done
 
-  local launch_status
-  launch_status="$(boundary_status "Fresh preview opened in stock Expo Go on Android")"
+  local public_status local_status launch_status native_status
+  public_status="$(boundary_status "Public manifest reachability")"
+  if [[ "$public_status" != "pass" ]]; then
+    failure "PASS records must mark public manifest reachability as PASS."
+  fi
+
+  local_status="$(boundary_status "Local handoff probe (manifest and bundle)")"
+  if [[ "$local_status" != "pass" ]]; then
+    failure "PASS records must mark the local manifest and bundle probe as PASS."
+  fi
+
+  launch_status="$(boundary_status "Expo Go launch on physical Android")"
   if [[ "$launch_status" != "pass" ]]; then
     failure "PASS records must mark the stock Expo Go Android launch boundary as PASS."
   fi
 
   local native_row native_lower
-  native_row="$(boundary_row "Expo Go session launch observed at Metro")"
+  native_row="$(boundary_row "Server-side native request evidence")"
   native_lower="$(printf '%s' "$native_row" | tr '[:upper:]' '[:lower:]')"
-  if [[ "$(boundary_status "Expo Go session launch observed at Metro")" != "pass" ||
+  native_status="$(boundary_status "Server-side native request evidence")"
+  if [[ "$native_status" != "pass" ||
     "$native_lower" != *"native request evidence"* ||
     "$native_lower" != *"platform=android"* ||
     ( "$native_lower" != *"client=expo go"* && "$native_lower" != *"expo go user-agent"* ) ||
@@ -280,10 +341,8 @@ validate_blocked_record() {
   local blocked_boundary=""
   local boundary row lower
   for boundary in \
-    "Fresh preview opened in stock Expo Go on Android" \
-    "Phone model, Android version, and Expo Go version captured" \
-    "Expo Go session launch observed at Metro" \
-    "Redacted screenshot or exact phone error captured"; do
+    "Expo Go launch on physical Android" \
+    "Server-side native request evidence"; do
     row="$(boundary_row "$boundary")"
     lower="$(printf '%s' "$row" | tr '[:upper:]' '[:lower:]' | tr -d '*')"
     if [[ "$lower" == *"| blocked |"* &&
@@ -321,6 +380,7 @@ if [[ -z "$RECORD_PATH" ]]; then
 elif [[ ! -f "$RECORD_PATH" ]]; then
   failure "Android preview evidence record does not exist."
 else
+  validate_handoff_boundaries
   result="$(sed -nE 's/^\*\*Result:[[:space:]]*(PASS|BLOCKED|FAIL).*/\1/p' "$RECORD_PATH" | head -n 1)"
   case "$result" in
     PASS)

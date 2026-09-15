@@ -49,9 +49,10 @@ write_record "$blocked_record" <<'EOF'
 
 | Boundary | Status | Evidence |
 | --- | --- | --- |
-| Public preview host reachable | PASS | Workspace curl returned HTTP 200. |
-| Fresh preview opened in stock Expo Go on Android | **BLOCKED** | No physical phone was available. |
-| Expo Go session launch observed at Metro | **BLOCKED** | No native Android request was available. |
+| Public manifest reachability | PASS | Workspace curl returned HTTP 200. |
+| Local handoff probe (manifest and bundle) | NOT_RUN | The local probe was not run. |
+| Expo Go launch on physical Android | **BLOCKED** | No physical phone was available. |
+| Server-side native request evidence | **BLOCKED** | No native Android request was available. |
 EOF
 blocked_output="$(bash "$CHECKER" "$blocked_record" 2>&1)"
 assert_contains "$blocked_output" "validation passed"
@@ -86,6 +87,22 @@ if missing_default_output="$(bash "$empty_discovery_root/scripts/check-android-p
 fi
 assert_contains "$missing_default_output" "No Android preview evidence record was found under"
 
+for malformed_status in "" GARBAGE; do
+  malformed_record="$TEST_ROOT/malformed-status-${malformed_status:-blank}.md"
+  sed \
+    -e "s#| Public manifest reachability | PASS |.*#| Public manifest reachability | ${malformed_status} | Public result. |#" \
+    "$blocked_record" >"$malformed_record"
+  if malformed_output="$(bash "$CHECKER" "$malformed_record" 2>&1)"; then
+    printf 'Record with public manifest status %s unexpectedly passed.\n' \
+      "${malformed_status:-blank}" >&2
+    exit 1
+  fi
+  assert_contains "$malformed_output" "Public manifest reachability"
+done
+
+default_output="$(bash "$CHECKER" 2>&1)"
+assert_contains "$default_output" "validation passed"
+
 non_latest_root="$TEST_ROOT/non-latest-record"
 non_latest_android_root="$non_latest_root/artifacts/chat-app/test-results/encrypted-room-recovery/android"
 latest_blocked="$non_latest_android_root/20991231T000000Z/validation-record.md"
@@ -98,7 +115,10 @@ write_record "$latest_blocked" <<'EOF'
 
 | Boundary | Status | Evidence |
 | --- | --- | --- |
-| Fresh preview opened in stock Expo Go on Android | **BLOCKED** | No physical phone was available. |
+| Public manifest reachability | PASS | Public probe returned HTTP 200. |
+| Local handoff probe (manifest and bundle) | NOT_RUN | The local probe was not run. |
+| Expo Go launch on physical Android | **BLOCKED** | No physical phone was available. |
+| Server-side native request evidence | **BLOCKED** | No native Android request was available. |
 EOF
 write_record "$changed_non_latest" <<'EOF'
 # Baseline Android preview validation record
@@ -107,7 +127,10 @@ write_record "$changed_non_latest" <<'EOF'
 
 | Boundary | Status | Evidence |
 | --- | --- | --- |
-| Fresh preview opened in stock Expo Go on Android | **BLOCKED** | No physical phone was available. |
+| Public manifest reachability | PASS | Public probe returned HTTP 200. |
+| Local handoff probe (manifest and bundle) | NOT_RUN | The local probe was not run. |
+| Expo Go launch on physical Android | **BLOCKED** | No physical phone was available. |
+| Server-side native request evidence | **BLOCKED** | No native Android request was available. |
 EOF
 git -C "$non_latest_root" init -q
 git -C "$non_latest_root" config user.email test@example.invalid
@@ -159,8 +182,10 @@ write_record "$pass_record" <<'EOF'
 
 | Boundary | Status | Evidence |
 | --- | --- | --- |
-| Fresh preview opened in stock Expo Go on Android | PASS | Landing screen rendered. |
-| Expo Go session launch observed at Metro | PASS | Native request evidence: platform=android; client=Expo Go; user-agent=[redacted] |
+| Public manifest reachability | PASS | Public manifest returned HTTP 200. |
+| Local handoff probe (manifest and bundle) | PASS | Manifest and bundle returned HTTP 200. |
+| Expo Go launch on physical Android | PASS | Landing screen rendered. |
+| Server-side native request evidence | PASS | Native request evidence: platform=android; client=Expo Go; user-agent=[redacted] |
 | Redacted screenshot or exact phone error captured | PASS | Redacted screenshot: screenshots/preview-launch.png |
 | Screenshot redaction review | PASS | Redaction review: PASS — account identifiers, message content, tokens, and host details are absent. |
 EOF
@@ -363,9 +388,9 @@ assert_not_contains "$unclear_output" "No physical phone was available"
 
 unrelated_blocked="$TEST_ROOT/unrelated-blocked.md"
 sed \
-  -e 's#| Fresh preview opened in stock Expo Go on Android | \*\*BLOCKED\*\* |.*#| Fresh preview opened in stock Expo Go on Android | PASS | Landing screen rendered. |#' \
+  -e 's#| Expo Go launch on physical Android | \*\*BLOCKED\*\* |.*#| Expo Go launch on physical Android | PASS | Landing screen rendered. |#' \
   -e 's#| Phone model, Android version, and Expo Go version captured | \*\*BLOCKED\*\* |.*#| Phone model, Android version, and Expo Go version captured | PASS | Metadata captured. |#' \
-  -e 's#| Expo Go session launch observed at Metro | \*\*BLOCKED\*\* |.*#| Expo Go session launch observed at Metro | PASS | Native request observed. |#' \
+  -e 's#| Server-side native request evidence | \*\*BLOCKED\*\* |.*#| Server-side native request evidence | PASS | Native request observed. |#' \
   -e 's#| Redacted screenshot or exact phone error captured | \*\*BLOCKED\*\* |.*#| Redacted screenshot or exact phone error captured | PASS | Evidence captured. |#' \
   "$blocked_record" >"$unrelated_blocked"
 printf '%s\n' '| Unrelated bookkeeping | **BLOCKED** | no physical archive copy available. |' \
