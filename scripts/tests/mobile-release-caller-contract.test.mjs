@@ -406,6 +406,31 @@ test("Android preview evidence validation succeeds when no handoff record change
   );
 });
 
+test("Android preview evidence runs for every pull request", () => {
+  assert.ok(
+    Object.prototype.hasOwnProperty.call(workflow.on ?? {}, "pull_request"),
+    "mobile release workflow must support pull_request",
+  );
+  const pullRequest = workflow.on.pull_request ?? {};
+  assert.equal(
+    pullRequest.paths,
+    undefined,
+    "the required Android preview evidence check must not use a pull_request paths filter",
+  );
+  assert.equal(
+    pullRequest["paths-ignore"],
+    undefined,
+    "the required Android preview evidence check must not use a pull_request paths-ignore filter",
+  );
+
+  const evidenceJob = workflow.jobs?.["android-preview-evidence"];
+  assert.equal(
+    evidenceJob?.name,
+    "Android preview evidence",
+    "the required status-check context must remain aligned with the evidence job name",
+  );
+});
+
 test("routine unit validation runs the caller contract check", () => {
   const command =
     "node --test scripts/tests/mobile-release-caller-contract.test.mjs";

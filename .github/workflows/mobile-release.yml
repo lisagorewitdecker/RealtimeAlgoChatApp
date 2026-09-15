@@ -20,11 +20,6 @@ on:
     tags:
       - "mobile-v*"
   pull_request:
-    paths:
-      - "artifacts/chat-app/test-results/encrypted-room-recovery/android/**/validation-record.md"
-      - "scripts/check-android-preview-evidence.sh"
-      - "package.json"
-      - ".github/workflows/mobile-release.yml"
   workflow_call:
     inputs:
       native_smoke_ios_build_id:
@@ -80,6 +75,7 @@ env:
 
 jobs:
   android-preview-evidence:
+    # Keep this display name synchronized with the required check in the repository ruleset.
     name: Android preview evidence
     if: ${{ github.event_name == 'pull_request' }}
     runs-on: ubuntu-latest

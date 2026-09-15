@@ -52,8 +52,10 @@ const HANDOFF_EVIDENCE_PATTERNS = Object.freeze({
       /^Local manifest\/bundle probe not run — no successful probe result was recorded$/,
   },
   expoGoLaunch: {
-    NOT_ASSESSED:
-      /^Requires a physical Android phone running stock Expo Go\.$/,
+    NOT_ASSESSED: (platformConfig) =>
+      new RegExp(
+        `^Requires ${platformConfig.phoneDescription} running stock Expo Go\\.$`,
+      ),
   },
   serverNativeRequestEvidence: {
     NOT_ASSESSED:
@@ -167,9 +169,13 @@ export function validateHandoffPreflightRecord(record) {
       invalidHandoffRecord(`has an invalid ${boundary} boundary`);
     }
     const evidencePattern = HANDOFF_EVIDENCE_PATTERNS[boundary][result.status];
+    const resolvedEvidencePattern =
+      typeof evidencePattern === "function"
+        ? evidencePattern(platformConfig)
+        : evidencePattern;
     if (
       typeof result.evidence !== "string" ||
-      !evidencePattern?.test(result.evidence)
+      !resolvedEvidencePattern?.test(result.evidence)
     ) {
       invalidHandoffRecord(`has unsafe evidence for the ${boundary} boundary`);
     }

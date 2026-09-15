@@ -71,3 +71,4 @@
 - [GitHub probe write permissions](github-probe-write-permissions.md) — verify commit/tree access before planning a live CI probe; ref creation alone is not enough.
 - [GitHub connection workflow scope](github-connection-workflow-scope.md) — it cannot touch workflow files or logs; prove hosted runs from a minimal PAT-pushed temp branch.
 - [Android preflight JSON contract](android-preflight-json-contract.md) — validate optional redacted sidecars and compare public/local statuses with the Markdown handoff record.
+- [GitHub ruleset status checks](github-ruleset-status-checks.md) — required checks accept an omitted integration ID; sending JSON null is rejected by the ruleset API.

@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { createServer } from "node:http";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 
 import {
@@ -293,6 +296,36 @@ test("iOS preflight records use iOS schema, labels, and phone placeholders", () 
     formatHandoffPreflight(record),
     /^iOS preview handoff preflight/m,
   );
+});
+
+test("writes and validates an iOS preflight record", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "ios-preview-preflight-"));
+  const outputPath = join(directory, "ios-preview-preflight.json");
+  const record = createHandoffPreflightRecord({
+    platform: "ios",
+    publicManifest: {
+      outcome: "public manifest HTTP 200 (128 bytes)",
+    },
+    localHandoff: {
+      manifest: "manifest HTTP 200 (64 bytes)",
+      bundle: "bundle HTTP 200 (4096 bytes)",
+    },
+  });
+
+  try {
+    await writeHandoffPreflight(outputPath, record);
+    const writtenRecord = JSON.parse(readFileSync(outputPath, "utf8"));
+    assert.doesNotThrow(() =>
+      validateHandoffPreflightRecord(writtenRecord),
+    );
+    assert.equal(writtenRecord.platform, "ios");
+    assert.match(
+      writtenRecord.boundaries.expoGoLaunch.evidence,
+      /physical iPhone/,
+    );
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 test("public-edge failure does not become missing-phone evidence", () => {

@@ -1172,16 +1172,20 @@ test("Android preview evidence keeps its pull-request validation and privacy con
     "the Android preview job must compare the pull request base and head",
   );
 
-  const pullRequestPaths = androidJob ? workflow.on.pull_request.paths : [];
   assert.ok(
-    pullRequestPaths.includes(
-      "artifacts/chat-app/test-results/encrypted-room-recovery/android/**/validation-record.md",
-    ),
-    "Android validation record changes must trigger the pull-request job",
+    Object.prototype.hasOwnProperty.call(workflow.on ?? {}, "pull_request"),
+    "the release workflow must support pull_request",
   );
-  assert.ok(
-    pullRequestPaths.includes("scripts/check-android-preview-evidence.sh"),
-    "Android evidence checker changes must trigger the pull-request job",
+  const pullRequest = workflow.on.pull_request ?? {};
+  assert.equal(
+    pullRequest.paths,
+    undefined,
+    "the required Android preview evidence check must not use a pull_request paths filter",
+  );
+  assert.equal(
+    pullRequest["paths-ignore"],
+    undefined,
+    "the required Android preview evidence check must not use a pull_request paths-ignore filter",
   );
 
   const validationStep = androidJob.steps.find(
