@@ -87,6 +87,68 @@ EOF
 blocked_output="$(bash "$CHECKER" "$blocked_record" 2>&1)"
 assert_contains "$blocked_output" "validation passed"
 
+json_contract_root="$TEST_ROOT/json-contract"
+json_contract_record="$json_contract_root/validation-record.md"
+mkdir -p "$json_contract_root"
+cp "$blocked_record" "$json_contract_record"
+json_contract_path="$json_contract_root/ios-preview-preflight.json"
+
+invalid_schema_sentinel="ios-preview-schema-tampered"
+cat >"$json_contract_path" <<EOF
+{"schema":"$invalid_schema_sentinel","platform":"ios","boundaries":{"publicManifestReachability":{"status":"PASS","evidence":"public manifest HTTP 200 (128 bytes)"},"localHandoffProbe":{"status":"NOT_RUN","evidence":"Local manifest/bundle probe not run — no successful probe result was recorded"},"expoGoLaunch":{"status":"NOT_ASSESSED","evidence":"Requires a physical iPhone running stock Expo Go."},"serverNativeRequestEvidence":{"status":"NOT_ASSESSED","evidence":"Requires filtered Metro or API evidence from that physical Expo Go session."}}}
+EOF
+if invalid_schema_output="$(bash "$CHECKER" "$json_contract_record" 2>&1)"; then
+  printf 'iOS preflight JSON with an invalid schema unexpectedly passed.\n' >&2
+  exit 1
+fi
+assert_contains "$invalid_schema_output" "does not satisfy the redacted schema"
+assert_not_contains "$invalid_schema_output" "$invalid_schema_sentinel"
+
+cat >"$json_contract_path" <<'EOF'
+{"schema":"ios-preview-handoff-preflight/v1","platform":"ios","boundaries":{"publicManifestReachability":{"status":"GARBAGE","evidence":"public manifest HTTP 200 (128 bytes)"},"localHandoffProbe":{"status":"NOT_RUN","evidence":"Local manifest/bundle probe not run — no successful probe result was recorded"},"expoGoLaunch":{"status":"NOT_ASSESSED","evidence":"Requires a physical iPhone running stock Expo Go."},"serverNativeRequestEvidence":{"status":"NOT_ASSESSED","evidence":"Requires filtered Metro or API evidence from that physical Expo Go session."}}}
+EOF
+if invalid_status_output="$(bash "$CHECKER" "$json_contract_record" 2>&1)"; then
+  printf 'iOS preflight JSON with an invalid boundary status unexpectedly passed.\n' >&2
+  exit 1
+fi
+assert_contains "$invalid_status_output" "does not satisfy the redacted schema"
+assert_not_contains "$invalid_status_output" "GARBAGE"
+
+unsafe_json_sentinel="https://preview-fixture.replit.dev/account=fixture-account/message=fixture-message"
+cat >"$json_contract_path" <<EOF
+{"schema":"ios-preview-handoff-preflight/v1","platform":"ios","boundaries":{"publicManifestReachability":{"status":"PASS","evidence":"$unsafe_json_sentinel"},"localHandoffProbe":{"status":"NOT_RUN","evidence":"safe"},"expoGoLaunch":{"status":"NOT_ASSESSED","evidence":"Requires a physical iPhone running stock Expo Go."},"serverNativeRequestEvidence":{"status":"NOT_ASSESSED","evidence":"Requires filtered Metro or API evidence from that physical Expo Go session."}}}
+EOF
+if unsafe_json_output="$(bash "$CHECKER" "$json_contract_record" 2>&1)"; then
+  printf 'iOS preflight JSON with unsafe evidence unexpectedly passed.\n' >&2
+  exit 1
+fi
+assert_contains "$unsafe_json_output" "does not satisfy the redacted schema"
+assert_not_contains "$unsafe_json_output" "$unsafe_json_sentinel"
+
+cat >"$json_contract_path" <<'EOF'
+{"schema":"ios-preview-handoff-preflight/v1","platform":"ios","boundaries":{"publicManifestReachability":{"status":"FAIL","evidence":"Public manifest probe failed — no successful probe result was recorded"},"localHandoffProbe":{"status":"NOT_RUN","evidence":"Local manifest/bundle probe not run — no successful probe result was recorded"},"expoGoLaunch":{"status":"NOT_ASSESSED","evidence":"Requires a physical iPhone running stock Expo Go."},"serverNativeRequestEvidence":{"status":"NOT_ASSESSED","evidence":"Requires filtered Metro or API evidence from that physical Expo Go session."}}}
+EOF
+if public_mismatch_output="$(bash "$CHECKER" "$json_contract_record" 2>&1)"; then
+  printf 'iOS preflight JSON public-edge mismatch unexpectedly passed.\n' >&2
+  exit 1
+fi
+assert_contains "$public_mismatch_output" "public manifest boundary does not match"
+
+cat >"$json_contract_path" <<'EOF'
+{"schema":"ios-preview-handoff-preflight/v1","platform":"ios","boundaries":{"publicManifestReachability":{"status":"PASS","evidence":"public manifest HTTP 200 (128 bytes)"},"localHandoffProbe":{"status":"FAIL","evidence":"Local manifest/bundle probe failed — no successful probe result was recorded"},"expoGoLaunch":{"status":"NOT_ASSESSED","evidence":"Requires a physical iPhone running stock Expo Go."},"serverNativeRequestEvidence":{"status":"NOT_ASSESSED","evidence":"Requires filtered Metro or API evidence from that physical Expo Go session."}}}
+EOF
+if local_mismatch_output="$(bash "$CHECKER" "$json_contract_record" 2>&1)"; then
+  printf 'iOS preflight JSON local-probe mismatch unexpectedly passed.\n' >&2
+  exit 1
+fi
+assert_contains "$local_mismatch_output" "local handoff boundary does not match"
+
+cat >"$json_contract_path" <<'EOF'
+{"schema":"ios-preview-handoff-preflight/v1","platform":"ios","boundaries":{"publicManifestReachability":{"status":"PASS","evidence":"public manifest HTTP 200 (128 bytes)"},"localHandoffProbe":{"status":"NOT_RUN","evidence":"Local manifest/bundle probe not run — no successful probe result was recorded"},"expoGoLaunch":{"status":"NOT_ASSESSED","evidence":"Requires a physical iPhone running stock Expo Go."},"serverNativeRequestEvidence":{"status":"NOT_ASSESSED","evidence":"Requires filtered Metro or API evidence from that physical Expo Go session."}}}
+EOF
+json_contract_valid_output="$(bash "$CHECKER" "$json_contract_record" 2>&1)"
+assert_contains "$json_contract_valid_output" "validation passed"
+
 public_failure_record="$TEST_ROOT/public-failure/validation-record.md"
 mkdir -p "$(dirname "$public_failure_record")"
 write_record "$public_failure_record" <<'EOF'
