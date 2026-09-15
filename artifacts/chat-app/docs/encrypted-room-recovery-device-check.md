@@ -136,8 +136,12 @@ The check enforces these boundaries:
   preflights, and Metro startup output cannot satisfy this condition.
 - A `PASS` record must link to an existing, non-empty PNG, JPEG, or WebP
   redacted screenshot or include a non-placeholder **exact phone error**. A
-  missing, empty, truncated, or non-image screenshot path does not count as
-  evidence.
+  screenshot also requires a separate `Screenshot redaction review` row with
+  status `PASS`. The checker scans printable image metadata for account
+  identifiers, message fields, token markers, and host or URL details without
+  echoing matched content; a reviewer must still inspect text rendered in the
+  pixels. A missing, empty, truncated, or non-image screenshot path does not
+  count as evidence.
 - A `BLOCKED` record is valid only when a boundary row explicitly identifies
   the unavailable physical phone, native request, or other missing device
   route. Public reachability may remain `PASS`, but it cannot change the
@@ -219,7 +223,10 @@ Store under `test-results/encrypted-room-recovery/<platform>/<UTC timestamp>/`:
 - `validation-record.md` — metadata table and the pass/fail matrix, one row per
   step above, with `PASS`, `FAIL`, or `BLOCKED` plus a one-line evidence note.
 - `screenshots/` — crop or blur message bodies, sandbox contents, account
-  emails, and any key material before saving.
+  emails, and any key material before saving. Add a `Screenshot redaction
+  review` boundary row after inspecting the saved image; mark it `PASS` only
+  when account identifiers, message content, tokens, and host details are not
+  visible.
 - `logs/` — device logs filtered to app lines, with tokens and URLs containing
   credentials removed.
 - `automated-regression.txt` — commands and results from step 11.

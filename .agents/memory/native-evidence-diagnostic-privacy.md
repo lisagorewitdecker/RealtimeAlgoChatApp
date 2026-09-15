@@ -9,6 +9,19 @@ Native evidence release diagnostics should name the failing condition and artifa
 
 **How to apply:** When adding a native evidence validation branch, use a fixed reason for parser failures, reject unsafe artifact path components, render summary paths and findings as sanitized code text, avoid interpolating parsed values or keys into issue/notice messages, and add a release-level assertion that useful failure context remains while fixture sentinel values and control-input names are absent.
 
+For image-backed evidence, a binary scan can catch printable account, message,
+token, and host metadata without reproducing the match, but it cannot verify
+text rendered into pixels. Require a separate human redaction-review result for
+screenshots and keep automated findings category-only.
+
+**Why:** Image metadata and visible pixels are different privacy boundaries;
+accepting a file solely because it has a valid image header leaves reviewers
+responsible for an unrecorded safety decision.
+
+**How to apply:** When a screenshot is part of a PASS record, validate its
+printable metadata and require a dedicated PASS review row. Phone-error-only
+evidence does not need a screenshot review.
+
 Native evidence checker output must be bracketed by GitHub's stop-commands guard at the workflow boundary. Keep the checker output visible and preserve its exit status, but do not let evidence-derived text be parsed as a workflow command or annotation.
 
 **Why:** The checker may receive uploaded evidence that is not trustworthy. A future diagnostic branch could reintroduce control sequences even if the current duplicate-field paths are generic and the job summary is sanitized.

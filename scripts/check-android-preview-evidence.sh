@@ -132,6 +132,38 @@ is_supported_image_file() {
   return 1
 }
 
+screenshot_contains_forbidden_text() {
+  local image_path="$1"
+  local pattern="$2"
+  strings -a -n 4 "$image_path" 2>/dev/null |
+    LC_ALL=C grep -Eiq -- "$pattern"
+}
+
+validate_screenshot_redaction() {
+  local screenshot_file="$1"
+  local category
+
+  if screenshot_contains_forbidden_text "$screenshot_file" \
+    '[[:alnum:]][[:alnum:]._%+-]*@[[:alnum:].-]+\.[[:alpha:]]{2,}|(account|user(name)?|member|profile)[[:space:]_-]*(id|email|name)?[[:space:]]*[:=]'; then
+    failure "The PASS record's screenshot contains forbidden account identifier content; replace it with a reviewed redacted capture."
+  fi
+
+  if screenshot_contains_forbidden_text "$screenshot_file" \
+    'message[[:space:]_-]*(body|content|text)?[[:space:]]*[:=]|plaintext[[:space:]_-]*(body|content|text)?[[:space:]]*[:=]|conversation[[:space:]_-]*(body|content|text)?[[:space:]]*[:=]'; then
+    failure "The PASS record's screenshot contains forbidden message content; replace it with a reviewed redacted capture."
+  fi
+
+  if screenshot_contains_forbidden_text "$screenshot_file" \
+    'bearer[[:space:]]+[A-Za-z0-9._~+/-]{8,}|(^|[^[:alpha:]])(auth|access|refresh|session|api)?[_-]?token[[:space:]]*(value)?[[:space:]]*[:=]'; then
+    failure "The PASS record's screenshot contains forbidden token content; replace it with a reviewed redacted capture."
+  fi
+
+  if screenshot_contains_forbidden_text "$screenshot_file" \
+    '(https?|wss?|exp)://|(^|[^[:alpha:]])(host|hostname|origin)[[:space:]]*[:=]|localhost([:/]|$)|[[:alnum:].-]+\.(replit\.dev|repl\.co|replit\.app)([^[:alnum:].-]|$)'; then
+    failure "The PASS record's screenshot contains forbidden host details; replace it with a reviewed redacted capture."
+  fi
+}
+
 is_meaningful_phone_error() {
   local value="$1"
   value="$(printf '%s' "$value" | tr '[:upper:]' '[:lower:]')"
@@ -206,7 +238,7 @@ validate_pass_record() {
     failure "PASS records require native Android/Expo Go request evidence; workspace curl output is insufficient."
   fi
 
-  local result_row result_lower screenshot_path screenshot_file
+  local result_row result_lower screenshot_path screenshot_file redaction_row
   result_row="$(boundary_row "Redacted screenshot or exact phone error captured")"
   result_lower="$(printf '%s' "$result_row" | tr '[:upper:]' '[:lower:]')"
   if [[ "$(boundary_status "Redacted screenshot or exact phone error captured")" != "pass" ]]; then
@@ -220,6 +252,12 @@ validate_pass_record() {
       ! -f "$screenshot_file" ]] ||
       ! is_supported_image_file "$screenshot_file"; then
       failure "The PASS record's redacted screenshot path must point to an existing non-empty supported image file."
+    else
+      redaction_row="$(boundary_row "Screenshot redaction review")"
+      if [[ "$(boundary_status "Screenshot redaction review")" != "pass" ]]; then
+        failure "PASS records with a screenshot require a separate Screenshot redaction review row marked PASS."
+      fi
+      validate_screenshot_redaction "$screenshot_file"
     fi
   else
     phone_error="$(printf '%s' "$result_row" | awk -F'|' '

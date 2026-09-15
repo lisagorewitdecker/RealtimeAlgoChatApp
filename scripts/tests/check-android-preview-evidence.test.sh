@@ -81,6 +81,7 @@ write_record "$pass_record" <<'EOF'
 | Fresh preview opened in stock Expo Go on Android | PASS | Landing screen rendered. |
 | Expo Go session launch observed at Metro | PASS | Native request evidence: platform=android; client=Expo Go; user-agent=[redacted] |
 | Redacted screenshot or exact phone error captured | PASS | Redacted screenshot: screenshots/preview-launch.png |
+| Screenshot redaction review | PASS | Redaction review: PASS — account identifiers, message content, tokens, and host details are absent. |
 EOF
 pass_output="$(bash "$CHECKER" "$pass_record" 2>&1)"
 assert_contains "$pass_output" "validation passed"
@@ -194,6 +195,58 @@ if non_image_output="$(bash "$CHECKER" "$non_image" 2>&1)"; then
   exit 1
 fi
 assert_contains "$non_image_output" "redacted screenshot path must point to an existing non-empty supported image file"
+
+missing_redaction_review="$TEST_ROOT/missing-redaction-review.md"
+mkdir -p "$(dirname "$missing_redaction_review")/screenshots"
+cp "$(dirname "$pass_record")/screenshots/preview-launch.png" \
+  "$(dirname "$missing_redaction_review")/screenshots/preview-launch.png"
+sed '/| Screenshot redaction review |/d' "$pass_record" >"$missing_redaction_review"
+if missing_review_output="$(bash "$CHECKER" "$missing_redaction_review" 2>&1)"; then
+  printf 'PASS record with no screenshot redaction review unexpectedly passed.\n' >&2
+  exit 1
+fi
+assert_contains "$missing_review_output" "separate Screenshot redaction review row marked PASS"
+
+write_png_with_text() {
+  local output_path="$1"
+  local text="$2"
+  node - "$output_path" "$text" <<'NODE'
+const fs = require("node:fs");
+
+const [, , outputPath, text] = process.argv;
+const base = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+  "base64",
+);
+const iend = base.subarray(base.length - 12);
+const textData = Buffer.from(`tEXt${text}`, "utf8");
+const length = Buffer.alloc(4);
+length.writeUInt32BE(textData.length);
+const textChunk = Buffer.concat([length, textData, Buffer.alloc(4)]);
+fs.writeFileSync(outputPath, Buffer.concat([base.subarray(0, base.length - 12), textChunk, iend]));
+NODE
+}
+
+declare -A forbidden_fixtures=(
+  [account]='account_email=preview-fixture@example.test'
+  [message]='message_body=preview-fixture-message'
+  [token]='Authorization: Bearer preview-fixture-token-123456'
+  [host]='host=https://preview-fixture.replit.dev'
+)
+for category in account message token host; do
+  forbidden_record="$TEST_ROOT/forbidden-${category}.md"
+  forbidden_screenshot="$(dirname "$forbidden_record")/screenshots/forbidden-${category}.png"
+  mkdir -p "$(dirname "$forbidden_screenshot")"
+  write_png_with_text "$forbidden_screenshot" "${forbidden_fixtures[$category]}"
+  sed "s#screenshots/preview-launch.png#screenshots/forbidden-${category}.png#" \
+    "$pass_record" >"$forbidden_record"
+  if forbidden_output="$(bash "$CHECKER" "$forbidden_record" 2>&1)"; then
+    printf 'PASS record with forbidden %s screenshot content unexpectedly passed.\n' "$category" >&2
+    exit 1
+  fi
+  assert_contains "$forbidden_output" "forbidden ${category}"
+  assert_not_contains "$forbidden_output" "${forbidden_fixtures[$category]}"
+done
 
 for placeholder in "" TODO pending blocked placeholder -; do
   empty_phone_error="$TEST_ROOT/phone-error-${placeholder:-empty}.md"
