@@ -69,6 +69,7 @@ permissions:
 
 env:
   PNPM_VERSION: 10.26.1
+  EAS_CLI_VERSION: 23.2.0
   NATIVE_SMOKE_IOS_BUILD_ID: ${{ inputs.native_smoke_ios_build_id || vars.NATIVE_SMOKE_IOS_BUILD_ID }}
   NATIVE_SMOKE_ANDROID_BUILD_ID: ${{ inputs.native_smoke_android_build_id || vars.NATIVE_SMOKE_ANDROID_BUILD_ID }}
 
@@ -1026,11 +1027,11 @@ echo "- Candidate build fingerprint: **Omitted from workflow summary**"
           ANDROID_BUILD_ID: ${{ env.NATIVE_SMOKE_ANDROID_BUILD_ID }}
         run: |
           set -euo pipefail
-          pnpm dlx eas-cli@latest submit \
+          pnpm dlx eas-cli@${{ env.EAS_CLI_VERSION }} submit \
             --platform ios \
             --id "$IOS_BUILD_ID" \
             --non-interactive
-          pnpm dlx eas-cli@latest submit \
+          pnpm dlx eas-cli@${{ env.EAS_CLI_VERSION }} submit \
             --platform android \
             --id "$ANDROID_BUILD_ID" \
             --non-interactive
