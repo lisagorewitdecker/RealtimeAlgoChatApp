@@ -2911,6 +2911,96 @@ test("both failed platform artifact downloads include fixed recovery actions", (
   );
 });
 
+test("unsafe download metadata cannot alter fixed platform recovery actions", () => {
+  const evidenceRoot = path.join(testRoot, "unsafe-download-metadata");
+  mkdirSync(evidenceRoot, { recursive: true });
+
+  const summaryPath = path.join(
+    testRoot,
+    "unsafe-download-metadata-summary.md",
+  );
+  const shellMarkerPath = path.join(
+    testRoot,
+    "unsafe-download-metadata-shell-marker",
+  );
+  const iosDownloadResult = `failure; touch "${shellMarkerPath}" [iOS](https://attacker.example/ios)\n::error::ios`;
+  const androidDownloadResult = `$(touch "${shellMarkerPath}") [Android](https://attacker.example/android)\n\`::warning::\``;
+  const iosArtifactUrl = `https://github.example/example/chat-app/actions/runs/123/artifacts/456)](https://attacker.example/second)\n::error::$(touch "${shellMarkerPath}")`;
+  const androidArtifactUrl =
+    "https://attacker.example/report.md)](https://attacker.example/second);echo android";
+  const result = spawnSync(
+    bashPath,
+    [
+      path.join(workspaceRoot, untrustedCheckerWrapperScript),
+      bashPath,
+      path.join(workspaceRoot, nativeEvidenceCheckerScript),
+      evidenceRoot,
+    ],
+    {
+      cwd: workspaceRoot,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        GITHUB_STEP_SUMMARY: summaryPath,
+        NATIVE_IOS_EVIDENCE_DOWNLOAD_RESULT: iosDownloadResult,
+        NATIVE_ANDROID_EVIDENCE_DOWNLOAD_RESULT: androidDownloadResult,
+        NATIVE_IOS_EVIDENCE_ARTIFACT_URL: iosArtifactUrl,
+        NATIVE_ANDROID_EVIDENCE_ARTIFACT_URL: androidArtifactUrl,
+      },
+    },
+  );
+  assert.notEqual(
+    result.status,
+    0,
+    "unsafe download outcomes must still block the release",
+  );
+  assert.equal(
+    existsSync(shellMarkerPath),
+    false,
+    "download metadata must never be evaluated as shell commands",
+  );
+
+  const summary = readFileSync(summaryPath, "utf8");
+  const recoveryLines = summary
+    .split("\n")
+    .filter((line) => line.startsWith("- Recovery:"));
+  assert.deepEqual(
+    recoveryLines,
+    [
+      "- Recovery: **Rerun the iOS native large-text job, or make the existing iOS artifact available, then rerun the mobile release gate.**",
+      "- Recovery: **Rerun the Android native large-text job, or make the existing Android artifact available, then rerun the mobile release gate.**",
+    ],
+    "both platform recovery instructions must remain fixed plain text",
+  );
+  assert.match(
+    summary,
+    /## iOS native large-text evidence[\s\S]*- Status: \*\*FAIL\*\*[\s\S]*- Artifact download: \*\*FAIL\*\*/,
+    "unsafe iOS download metadata must remain a fixed blocking failure",
+  );
+  assert.match(
+    summary,
+    /## Android native large-text evidence[\s\S]*- Status: \*\*FAIL\*\*[\s\S]*- Artifact download: \*\*FAIL\*\*/,
+    "unsafe Android download metadata must remain a fixed blocking failure",
+  );
+  for (const unsafeValue of [
+    iosDownloadResult,
+    androidDownloadResult,
+    iosArtifactUrl,
+    androidArtifactUrl,
+  ]) {
+    assert.equal(
+      summary.includes(unsafeValue),
+      false,
+      "unsafe download metadata must not reach the reviewer-facing summary",
+    );
+  }
+  assert.doesNotMatch(
+    summary,
+    /attacker\.example|::error::|::warning::|unsafe-download-metadata-shell-marker/,
+    "unsafe shell and Markdown control text must stay out of the recovery summary",
+  );
+});
+
 test("partial native reruns keep each platform linked to its own artifact", () => {
   const artifactNames = {
     ios: "native-large-text-ios",
