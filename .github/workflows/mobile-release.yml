@@ -1179,10 +1179,28 @@ jobs:
           name: native-large-text-ios
           path: test-results/native-large-text/ios
 
+      - name: Retry iOS native smoke artifact download
+        if: ${{ always() && steps.download-ios-native-smoke.outcome != 'success' }}
+        continue-on-error: true
+        id: retry-ios-native-smoke
+        uses: actions/download-artifact@v4
+        with:
+          name: native-large-text-ios
+          path: test-results/native-large-text/ios
+
       - name: Download Android native smoke artifacts
         if: ${{ always() }}
         continue-on-error: true
         id: download-android-native-smoke
+        uses: actions/download-artifact@v4
+        with:
+          name: native-large-text-android
+          path: test-results/native-large-text/android
+
+      - name: Retry Android native smoke artifact download
+        if: ${{ always() && steps.download-android-native-smoke.outcome != 'success' }}
+        continue-on-error: true
+        id: retry-android-native-smoke
         uses: actions/download-artifact@v4
         with:
           name: native-large-text-android
@@ -1195,8 +1213,8 @@ jobs:
         env:
           NATIVE_IOS_EVIDENCE_ARTIFACT_URL: ${{ needs.native-ios.outputs.native_evidence_artifact_url }}
           NATIVE_ANDROID_EVIDENCE_ARTIFACT_URL: ${{ needs.native-android.outputs.native_evidence_artifact_url }}
-          NATIVE_IOS_EVIDENCE_DOWNLOAD_RESULT: ${{ steps.download-ios-native-smoke.outcome }}
-          NATIVE_ANDROID_EVIDENCE_DOWNLOAD_RESULT: ${{ steps.download-android-native-smoke.outcome }}
+          NATIVE_IOS_EVIDENCE_DOWNLOAD_RESULT: ${{ steps.download-ios-native-smoke.outcome == 'success' && 'success' || steps.retry-ios-native-smoke.outcome }}
+          NATIVE_ANDROID_EVIDENCE_DOWNLOAD_RESULT: ${{ steps.download-android-native-smoke.outcome == 'success' && 'success' || steps.retry-android-native-smoke.outcome }}
         run: bash scripts/run-untrusted-checker.sh bash scripts/check-native-large-text-evidence.sh
 
       - name: Block release unless both native checks pass
@@ -1265,12 +1283,36 @@ jobs:
           node-version: 24
 
       - name: Download iOS native smoke artifacts
+        if: ${{ always() }}
+        continue-on-error: true
+        id: download-publish-ios-native-smoke
+        uses: actions/download-artifact@v4
+        with:
+          name: native-large-text-ios
+          path: test-results/native-large-text/ios
+
+      - name: Retry iOS native smoke artifact download for publishing
+        if: ${{ always() && steps.download-publish-ios-native-smoke.outcome != 'success' }}
+        continue-on-error: true
+        id: retry-publish-ios-native-smoke
         uses: actions/download-artifact@v4
         with:
           name: native-large-text-ios
           path: test-results/native-large-text/ios
 
       - name: Download Android native smoke artifacts
+        if: ${{ always() }}
+        continue-on-error: true
+        id: download-publish-android-native-smoke
+        uses: actions/download-artifact@v4
+        with:
+          name: native-large-text-android
+          path: test-results/native-large-text/android
+
+      - name: Retry Android native smoke artifact download for publishing
+        if: ${{ always() && steps.download-publish-android-native-smoke.outcome != 'success' }}
+        continue-on-error: true
+        id: retry-publish-android-native-smoke
         uses: actions/download-artifact@v4
         with:
           name: native-large-text-android

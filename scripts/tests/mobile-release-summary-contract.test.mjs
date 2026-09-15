@@ -701,13 +701,13 @@ test("failed native evidence checks remain reviewable before blocking release", 
   );
   assert.equal(
     evidenceStep.env.NATIVE_IOS_EVIDENCE_DOWNLOAD_RESULT,
-    "${{ steps.download-ios-native-smoke.outcome }}",
-    "the evidence checker must receive the iOS artifact download result",
+    "${{ steps.download-ios-native-smoke.outcome == 'success' && 'success' || steps.retry-ios-native-smoke.outcome }}",
+    "the evidence checker must receive the iOS initial or retry artifact download result",
   );
   assert.equal(
     evidenceStep.env.NATIVE_ANDROID_EVIDENCE_DOWNLOAD_RESULT,
-    "${{ steps.download-android-native-smoke.outcome }}",
-    "the evidence checker must receive the Android artifact download result",
+    "${{ steps.download-android-native-smoke.outcome == 'success' && 'success' || steps.retry-android-native-smoke.outcome }}",
+    "the evidence checker must receive the Android initial or retry artifact download result",
   );
 
   assert.ok(
@@ -779,6 +779,91 @@ test("failed native evidence checks remain reviewable before blocking release", 
       `${platform}: missing evidence must remain visible without hiding the check failure`,
     );
   }
+});
+
+test("native evidence downloads retry without exposing evidence contents", () => {
+  const downloadPairs = [
+    [
+      "mobile-release-gate",
+      "ios",
+      "download-ios-native-smoke",
+      "retry-ios-native-smoke",
+    ],
+    [
+      "mobile-release-gate",
+      "android",
+      "download-android-native-smoke",
+      "retry-android-native-smoke",
+    ],
+    [
+      "mobile-publish",
+      "ios",
+      "download-publish-ios-native-smoke",
+      "retry-publish-ios-native-smoke",
+    ],
+    [
+      "mobile-publish",
+      "android",
+      "download-publish-android-native-smoke",
+      "retry-publish-android-native-smoke",
+    ],
+  ];
+
+  for (const [jobId, platform, downloadId, retryId] of downloadPairs) {
+    const steps = workflow.jobs[jobId].steps;
+    const download = steps.find((step) => step.id === downloadId);
+    const retry = steps.find((step) => step.id === retryId);
+
+    assert.equal(
+      download?.uses,
+      "actions/download-artifact@v4",
+      `${jobId}: ${platform} must use the official artifact downloader`,
+    );
+    assert.equal(
+      retry?.uses,
+      "actions/download-artifact@v4",
+      `${jobId}: ${platform} retry must use the official artifact downloader`,
+    );
+    assert.equal(
+      download?.["continue-on-error"],
+      true,
+      `${jobId}: ${platform} initial download must allow the retry to run`,
+    );
+    assert.equal(
+      retry?.["continue-on-error"],
+      true,
+      `${jobId}: ${platform} retry must preserve the platform-specific checker summary`,
+    );
+    assert.equal(
+      retry?.if,
+      `\${{ always() && steps.${downloadId}.outcome != 'success' }}`,
+      `${jobId}: ${platform} retry must run only after a non-successful initial download`,
+    );
+    assert.deepEqual(
+      retry?.with,
+      download?.with,
+      `${jobId}: ${platform} retry must retrieve the same artifact into the same evidence directory`,
+    );
+    assert.equal(
+      retry?.run,
+      undefined,
+      `${jobId}: ${platform} retry must not shell-print downloaded evidence`,
+    );
+  }
+
+  const evidenceStep = workflow.jobs["mobile-release-gate"].steps.find(
+    (step) => step.name === "Validate native evidence completeness",
+  );
+  assert.equal(
+    evidenceStep?.env?.NATIVE_IOS_EVIDENCE_DOWNLOAD_RESULT,
+    "${{ steps.download-ios-native-smoke.outcome == 'success' && 'success' || steps.retry-ios-native-smoke.outcome }}",
+    "the iOS checker must receive the successful initial or retry outcome",
+  );
+  assert.equal(
+    evidenceStep?.env?.NATIVE_ANDROID_EVIDENCE_DOWNLOAD_RESULT,
+    "${{ steps.download-android-native-smoke.outcome == 'success' && 'success' || steps.retry-android-native-smoke.outcome }}",
+    "the Android checker must receive the successful initial or retry outcome",
+  );
 });
 
 test("failed native evidence checks remain reviewable before blocking release", () => {
@@ -911,7 +996,9 @@ test("publish requires candidate-bound approvals from the current run attempt", 
 
   for (const jobId of ["mobile-release-gate", "mobile-publish"]) {
     const downloads = workflow.jobs[jobId].steps.filter(
-      (step) => step[`uses`] === "actions/download-artifact@v4",
+      (step) =>
+        step[`uses`] === "actions/download-artifact@v4" &&
+        step.id?.startsWith("download"),
     );
     assert.deepEqual(
       downloads.map((step) => step.with.name).sort(),
@@ -2890,7 +2977,9 @@ test("partial native reruns keep each platform linked to its own artifact", () =
   );
 
   const gateDownloads = workflow.jobs["mobile-release-gate"].steps.filter(
-    (step) => step.uses === "actions/download-artifact@v4",
+    (step) =>
+      step.uses === "actions/download-artifact@v4" &&
+      step.id?.startsWith("download"),
   );
   assert.deepEqual(
     gateDownloads.map((step) => step.with.name).sort(),
