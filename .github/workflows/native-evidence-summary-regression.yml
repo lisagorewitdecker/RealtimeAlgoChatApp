@@ -1,0 +1,100 @@
+name: Native evidence summary regression
+
+on:
+  workflow_dispatch:
+    inputs:
+      reviewed_ref:
+        description: Git branch, tag, or commit SHA to verify
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  verify-hosted-summary:
+    name: Verify hosted native evidence summary
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out reviewed release revision
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.reviewed_ref }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Verify unavailable iOS and Android summaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          blocked_root="$(mktemp -d)"
+          summary_path="$(mktemp)"
+          trap 'rm -rf "$blocked_root" "$summary_path"' EXIT
+
+          if GITHUB_STEP_SUMMARY="$summary_path" bash scripts/run-untrusted-checker.sh bash scripts/check-native-large-text-evidence.sh "$blocked_root"; then
+            echo "The blocked native evidence scenario unexpectedly passed." >&2
+            exit 1
+          fi
+
+          ios_section="$(
+            awk '
+              /^## iOS native large-text evidence$/ { collecting=1 }
+              /^## Android native large-text evidence$/ { collecting=0 }
+              collecting { print }
+            ' "$summary_path"
+          )"
+          android_section="$(
+            awk '
+              /^## Android native large-text evidence$/ { collecting=1 }
+              collecting { print }
+            ' "$summary_path"
+          )"
+
+          require_contains() {
+            local section="$1"
+            local expected="$2"
+            if ! grep -Fq -- "$expected" <<< "$section"; then
+              echo "Expected hosted summary to contain: $expected" >&2
+              exit 1
+            fi
+          }
+
+          require_not_contains() {
+            local section="$1"
+            local unexpected="$2"
+            if grep -Fq -- "$unexpected" <<< "$section"; then
+              echo "Hosted summary contained cross-platform detail: $unexpected" >&2
+              exit 1
+            fi
+          }
+
+          require_only_missing_result_finding() {
+            local section="$1"
+            local expected="$2"
+            local findings
+            findings="$(
+              awk '
+                /^### Blocking evidence findings$/ { collecting=1; next }
+                /^### / { collecting=0 }
+                collecting && /^- `/ { print }
+              ' <<< "$section"
+            )"
+            if [[ "$findings" != "$expected" ]]; then
+              printf 'Expected exactly one platform-specific blocking finding:\n%s\n' "$findings" >&2
+              exit 1
+            fi
+          }
+
+          require_contains "$ios_section" "- Status: **FAIL**"
+          require_contains "$ios_section" "- Validated run directory: **Unavailable**"
+          require_contains "$ios_section" "- Detailed evidence report: **Unavailable**"
+          require_only_missing_result_finding "$ios_section" "- \`Missing result directory: $blocked_root/ios. Run the ios native large-text gate and upload its timestamped result directory.\`"
+          require_not_contains "$ios_section" "$blocked_root/android"
+
+          require_contains "$android_section" "- Status: **FAIL**"
+          require_contains "$android_section" "- Validated run directory: **Unavailable**"
+          require_contains "$android_section" "- Detailed evidence report: **Unavailable**"
+          require_only_missing_result_finding "$android_section" "- \`Missing result directory: $blocked_root/android. Run the android native large-text gate and upload its timestamped result directory.\`"
+          require_not_contains "$android_section" "$blocked_root/ios"
+
+          cat "$summary_path" >> "$GITHUB_STEP_SUMMARY"
