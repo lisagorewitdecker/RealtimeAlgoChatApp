@@ -34,16 +34,37 @@ const fixtures = [
     name: "Linux shared-library loader",
     fixture: "missing-runtime-library",
     detail: /shared libraries: libgtk-3\.so\.0: cannot open shared object file/,
+    libraryIdentifier: "libgtk-3.so.0",
   },
   {
     name: "macOS dyld loader",
     fixture: "missing-runtime-library-dyld",
     detail: /Library not loaded: \/opt\/homebrew\/lib\/libgtk-3\.dylib/,
+    libraryIdentifier: "libgtk-3.dylib",
   },
   {
     name: "Windows loader",
     fixture: "missing-runtime-library-windows",
     detail: /cannot proceed because libgtk-3-0\.dll was not found/,
+    libraryIdentifier: "libgtk-3-0.dll",
+  },
+  {
+    name: "Linux shared-library loader with a long path",
+    fixture: "missing-runtime-library-long-path",
+    detail: /missing runtime library: .*libgtk-3\.so\.0/,
+    libraryIdentifier: "libgtk-3.so.0",
+  },
+  {
+    name: "macOS dyld loader with a long path",
+    fixture: "missing-runtime-library-dyld-long-path",
+    detail: /missing runtime library: .*libgtk-3\.dylib/,
+    libraryIdentifier: "libgtk-3.dylib",
+  },
+  {
+    name: "Windows loader with a long path",
+    fixture: "missing-runtime-library-windows-long-path",
+    detail: /missing runtime library: .*libgtk-3-0\.dll/,
+    libraryIdentifier: "libgtk-3-0.dll",
   },
 ];
 
@@ -58,6 +79,12 @@ test("live and captured preview validation report the same diagnosis for every l
         PREVIEW_STARTUP_TEST_FIXTURE: fixtureCase.fixture,
       });
       assert.equal(fixture.status, 1, fixtureCase.name);
+      if (fixtureCase.fixture.includes("long-path")) {
+        assert.ok(
+          fixture.output.length > 384,
+          `${fixtureCase.name} fixture did not cross the long-path boundary`,
+        );
+      }
 
       const capturedLogPath = join(
         temporaryDirectory,
@@ -82,6 +109,11 @@ test("live and captured preview validation report the same diagnosis for every l
       assert.ok(capturedDiagnostic, fixtureCase.name);
       assert.equal(liveDiagnostic, capturedDiagnostic, fixtureCase.name);
       assert.match(capturedDiagnostic, fixtureCase.detail, fixtureCase.name);
+      assert.match(
+        capturedDiagnostic,
+        new RegExp(fixtureCase.libraryIdentifier.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
+        `${fixtureCase.name} lost its library identifier`,
+      );
       assert.ok(
         capturedDiagnostic.length <= 512,
         `${fixtureCase.name} diagnostic exceeded the 512-character limit`,

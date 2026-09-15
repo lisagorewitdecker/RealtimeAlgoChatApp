@@ -1,5 +1,10 @@
 const path = require("node:path");
 
+const MAX_REQUEST_EVIDENCE_LINES = 1_000;
+const REQUEST_EVIDENCE_TRUNCATION_NOTICE =
+  `[dev-request] Evidence file truncated after ` +
+  `${MAX_REQUEST_EVIDENCE_LINES - 1} request lines; console output continues.`;
+
 function classifyClient(request) {
   const userAgent = String(request.headers["user-agent"] ?? "").toLowerCase();
   if (userAgent.includes("preview-validation")) return "preview-validation";
@@ -56,9 +61,41 @@ function resolveEvidencePath(configuredPath, packageRoot) {
     : path.join(packageRoot, ".expo", "dev-request-evidence.log");
 }
 
+function createEvidenceAppender(writeLine, maxLines = MAX_REQUEST_EVIDENCE_LINES) {
+  if (!Number.isInteger(maxLines) || maxLines < 2) {
+    throw new RangeError("maxLines must be an integer greater than one");
+  }
+
+  let retainedLines = 0;
+  let truncated = false;
+  const truncationNotice =
+    maxLines === MAX_REQUEST_EVIDENCE_LINES
+      ? REQUEST_EVIDENCE_TRUNCATION_NOTICE
+      : `[dev-request] Evidence file truncated after ${
+          maxLines - 1
+        } request lines; console output continues.`;
+
+  return (evidence) => {
+    if (truncated) return false;
+
+    if (retainedLines === maxLines - 1) {
+      if (!writeLine(`${truncationNotice}\n`)) return false;
+      truncated = true;
+      return false;
+    }
+
+    if (!writeLine(`${evidence}\n`)) return false;
+    retainedLines += 1;
+    return true;
+  };
+}
+
 module.exports = {
+  MAX_REQUEST_EVIDENCE_LINES,
+  REQUEST_EVIDENCE_TRUNCATION_NOTICE,
   classifyClient,
   classifyResource,
+  createEvidenceAppender,
   formatRequestEvidence,
   normalizePlatform,
   resolveEvidencePath,

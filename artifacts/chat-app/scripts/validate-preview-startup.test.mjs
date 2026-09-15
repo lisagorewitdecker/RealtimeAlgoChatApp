@@ -279,7 +279,7 @@ test("rejects malformed PREVIEW_PUBLIC_URL configuration before making a request
       requestPublicPreviewManifest(1_000, {
         PREVIEW_PUBLIC_URL: "https://[invalid",
       }),
-      /Public Expo preview manifest URL configuration is invalid.*PREVIEW_PUBLIC_URL or REPLIT_EXPO_DEV_DOMAIN/,
+      /Public Expo preview manifest URL configuration from PREVIEW_PUBLIC_URL is invalid/,
     );
     assert.equal(fetchMock.request, undefined);
   } finally {
@@ -295,7 +295,24 @@ test("rejects malformed REPLIT_EXPO_DEV_DOMAIN configuration before making a req
       requestPublicPreviewManifest(1_000, {
         REPLIT_EXPO_DEV_DOMAIN: "https://[invalid",
       }),
-      /Public Expo preview manifest URL configuration is invalid.*PREVIEW_PUBLIC_URL or REPLIT_EXPO_DEV_DOMAIN/,
+      /Public Expo preview manifest URL configuration from REPLIT_EXPO_DEV_DOMAIN is invalid/,
+    );
+    assert.equal(fetchMock.request, undefined);
+  } finally {
+    fetchMock.restore();
+  }
+});
+
+test("reports the malformed higher-precedence preview setting when both are configured", async () => {
+  const fetchMock = mockFetch(new Response("{}"));
+
+  try {
+    await assert.rejects(
+      requestPublicPreviewManifest(1_000, {
+        PREVIEW_PUBLIC_URL: "https://[invalid",
+        REPLIT_EXPO_DEV_DOMAIN: "preview.example.test",
+      }),
+      /Public Expo preview manifest URL configuration from PREVIEW_PUBLIC_URL is invalid/,
     );
     assert.equal(fetchMock.request, undefined);
   } finally {
