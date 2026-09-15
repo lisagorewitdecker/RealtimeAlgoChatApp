@@ -177,6 +177,48 @@ test("reports public manifest request failures with recovery guidance", async ()
   }
 });
 
+test(
+  "aborts a stalled public manifest request at its deadline with recovery guidance",
+  { timeout: 1_000 },
+  async () => {
+    const originalFetch = globalThis.fetch;
+    let abortObserved = false;
+    let request;
+    globalThis.fetch = async (url, options) => {
+      request = { url, options };
+      return new Promise((resolve, reject) => {
+        options.signal.addEventListener(
+          "abort",
+          () => {
+            abortObserved = true;
+            reject(new Error("request aborted by deadline"));
+          },
+          { once: true },
+        );
+      });
+    };
+
+    try {
+      await assert.rejects(
+        requestPublicPreviewManifest(25, previewEnvironment),
+        (error) => {
+          assert.match(error.message, /aborted by deadline/i);
+          assert.match(error.message, /deadline|abort/i);
+          assert.match(
+            error.message,
+            /Restart or repair the managed Chat App\/Expo workflow/,
+          );
+          return true;
+        },
+      );
+      assert.equal(abortObserved, true);
+      assert.equal(request.options.signal.aborted, true);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  },
+);
+
 test("reports missing public preview configuration before making a request", async () => {
   const fetchMock = mockFetch(new Response("{}"));
 
