@@ -229,6 +229,129 @@ jobs:
 
           exit "$overall_status"
 
+  ios-preview-evidence:
+    # Keep this display name synchronized with the required check in the repository ruleset.
+    name: iOS preview evidence
+    if: ${{ github.event_name == 'pull_request' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out handoff record
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Validate changed iOS preview records
+        env:
+          IOS_PREVIEW_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          IOS_PREVIEW_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          summary_header="## iOS preview evidence"
+          diff_output=""
+          if diff_output="$(
+            git diff \
+              --name-only \
+              --diff-filter=ACDMRT \
+              "${IOS_PREVIEW_BASE_SHA}...${IOS_PREVIEW_HEAD_SHA}" \
+              -- \
+              "artifacts/chat-app/test-results/encrypted-room-recovery/ios/**/validation-record.md"
+          )"; then
+            :
+          else
+            {
+              echo "$summary_header"
+              echo
+              echo "- Status: **FAIL**"
+              echo "- Missing-boundary reason: could not locate the pull request's changed iOS preview records."
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "Could not locate the pull request's changed iOS preview records." >&2
+            exit 1
+          fi
+
+          mapfile -t changed_records < <(printf '%s\n' "$diff_output" | sed '/^$/d')
+
+          if ((${#changed_records[@]} == 0)); then
+            {
+              echo "$summary_header"
+              echo
+              echo "- Status: **SKIP**"
+              echo "- Changed records checked: **0**"
+              echo "- Validation: **Not applicable; this pull request changed no iOS preview validation record.**"
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "No iOS preview validation records changed; nothing to validate."
+            exit 0
+          fi
+
+          {
+            echo "$summary_header"
+            echo
+            echo "- Changed records checked: **${#changed_records[@]}**"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          overall_status=0
+          for record_path in "${changed_records[@]}"; do
+            record_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/blob/${GITHUB_SHA}/${record_path}"
+            record_result=""
+            validation_output=""
+            validation_status=0
+            reasons=""
+
+            if [[ ! -f "$record_path" ]]; then
+              validation_status=1
+              reasons="- The changed iOS preview validation record is missing from the checked-out commit."
+            else
+              record_result="$(
+                sed -nE 's/^\*\*Result:[[:space:]]*(PASS|BLOCKED|FAIL).*/\1/p' "$record_path" |
+                  head -n 1
+              )"
+              if validation_output="$(pnpm run validate:ios-preview-evidence -- "$record_path" 2>&1)"; then
+                :
+              else
+                validation_status=$?
+                reasons="$(printf '%s\n' "$validation_output" | sed -n '/^- /p')"
+              fi
+            fi
+
+            if ((validation_status != 0)); then
+              overall_status=1
+              if [[ -z "$reasons" ]]; then
+                reasons="- The iOS preview evidence record did not satisfy the validation contract."
+              fi
+            fi
+
+            {
+              echo
+              echo "### [${record_path}](${record_url})"
+              if ((validation_status == 0)); then
+                echo "- Validation: **PASS**"
+                if [[ "$record_result" == "BLOCKED" ]]; then
+                  echo "- Record result: **BLOCKED (valid)**"
+                else
+                  echo "- Record result: **${record_result:-Unavailable}**"
+                fi
+              else
+                echo "- Validation: **FAIL**"
+                echo "- Record result: **${record_result:-Unavailable}**"
+                echo
+                echo "#### Missing-boundary reason"
+                printf '%s\n' "$reasons"
+              fi
+            } >> "$GITHUB_STEP_SUMMARY"
+
+            if ((validation_status != 0)); then
+              printf '%s\n' "$reasons" >&2
+            fi
+          done
+
+          exit "$overall_status"
+
   native-evidence-summary-regression:
     name: Native evidence summary regression
     if: ${{ github.event_name != 'pull_request' }}

@@ -1414,6 +1414,146 @@ test("Android preview evidence keeps its pull-request validation and privacy con
   );
 });
 
+test("iOS preview evidence skips clean pull requests and blocks malformed changed records", () => {
+  const iosJob = workflow.jobs["ios-preview-evidence"];
+  assert.ok(iosJob, "the release workflow must define the iOS preview job");
+  assert.equal(
+    iosJob.if,
+    "${{ github.event_name == 'pull_request' }}",
+    "iOS preview evidence must be isolated to pull requests",
+  );
+
+  const validationStep = iosJob.steps.find(
+    (step) => step.name === "Validate changed iOS preview records",
+  );
+  assert.ok(validationStep, "the iOS preview job must validate changed records");
+  assert.match(
+    validationStep.run,
+    /No iOS preview validation records changed; nothing to validate\./,
+    "zero changed records must skip successfully",
+  );
+  assert.match(
+    validationStep.run,
+    /pnpm run validate:ios-preview-evidence -- "\$record_path"/,
+    "changed iOS records must run the focused checker",
+  );
+
+  function runIosPreviewJob(name, { recordText, deleteRecord = false }) {
+    const fixtureRoot = path.join(testRoot, `ios-preview-${name}`);
+    const recordPath = path.join(
+      fixtureRoot,
+      "artifacts/chat-app/test-results/encrypted-room-recovery/ios/20260915T120000Z/validation-record.md",
+    );
+    const summaryPath = path.join(fixtureRoot, "summary.md");
+    const runnerPath = path.join(fixtureRoot, "run-job.sh");
+    const binDirectory = path.join(fixtureRoot, "bin");
+    const baselineRecordText = "# iOS preview validation record\n";
+    mkdirSync(path.dirname(recordPath), { recursive: true });
+    mkdirSync(binDirectory, { recursive: true });
+    writeFileSync(recordPath, baselineRecordText);
+
+    const git = (args) => {
+      const result = spawnSync(gitPath, args, {
+        cwd: fixtureRoot,
+        encoding: "utf8",
+      });
+      assert.equal(
+        result.status,
+        0,
+        `git ${args.join(" ")} failed:\n${result.stdout}\n${result.stderr}`,
+      );
+    };
+    git(["init", "--quiet"]);
+    git(["config", "user.email", "contract-test@example.invalid"]);
+    git(["config", "user.name", "Contract Test"]);
+    writeFileSync(path.join(fixtureRoot, "README.md"), "base\n");
+    git(["add", "README.md", recordPath]);
+    git(["commit", "--quiet", "-m", "base iOS preview record"]);
+    const baseSha = spawnSync(gitPath, ["rev-parse", "HEAD"], {
+      cwd: fixtureRoot,
+      encoding: "utf8",
+    }).stdout.trim();
+
+    if (deleteRecord) {
+      rmSync(recordPath);
+    } else {
+      writeFileSync(recordPath, recordText);
+    }
+    git(["add", "-A"]);
+    git(["commit", "--quiet", "-m", "changed iOS preview record"]);
+    const headSha = spawnSync(gitPath, ["rev-parse", "HEAD"], {
+      cwd: fixtureRoot,
+      encoding: "utf8",
+    }).stdout.trim();
+
+    writeStub(
+      binDirectory,
+      "pnpm",
+      'set -euo pipefail\nrecord="${!#}"\nexec bash "$IOS_PREVIEW_CHECKER" "$record"',
+    );
+    writeFileSync(runnerPath, `#!${bashPath}\n${validationStep.run}\n`);
+    chmodSync(runnerPath, 0o755);
+
+    const result = spawnSync(bashPath, [runnerPath], {
+      cwd: fixtureRoot,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        PATH: `${binDirectory}${path.delimiter}${process.env.PATH}`,
+        IOS_PREVIEW_BASE_SHA: baseSha,
+        IOS_PREVIEW_HEAD_SHA: headSha,
+        IOS_PREVIEW_CHECKER: path.join(
+          workspaceRoot,
+          "scripts/check-ios-preview-evidence.sh",
+        ),
+        GITHUB_SERVER_URL: "https://github.example",
+        GITHUB_REPOSITORY: "example/chat-app",
+        GITHUB_SHA: headSha,
+        GITHUB_STEP_SUMMARY: summaryPath,
+      },
+    });
+    return {
+      result,
+      summary: readFileSync(summaryPath, "utf8"),
+    };
+  }
+
+  const malformed = runIosPreviewJob("malformed", {
+    recordText:
+      "# iOS preview validation record\n\nPRIVATE_IOS_EVIDENCE_MARKER\n",
+  });
+  assert.notEqual(
+    malformed.result.status,
+    0,
+    "a malformed changed iOS preview record must fail the job",
+  );
+  assert.match(
+    malformed.summary,
+    /Validation: \*\*FAIL\*\*[\s\S]*Evidence record must declare/,
+    "the failed summary must report a fixed checker reason",
+  );
+  assert.doesNotMatch(
+    malformed.summary,
+    /PRIVATE_IOS_EVIDENCE_MARKER/,
+    "the failed summary must not copy iOS record evidence",
+  );
+
+  const deleted = runIosPreviewJob("deleted", {
+    recordText: "# iOS preview validation record\n",
+    deleteRecord: true,
+  });
+  assert.notEqual(
+    deleted.result.status,
+    0,
+    "a deleted changed iOS preview record must fail the job",
+  );
+  assert.match(
+    deleted.summary,
+    /changed iOS preview validation record is missing/,
+    "the summary must identify the missing changed iOS record",
+  );
+});
+
 // ---------------------------------------------------------------------------
 // Static script contracts
 // ---------------------------------------------------------------------------

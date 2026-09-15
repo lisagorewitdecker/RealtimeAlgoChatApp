@@ -80,6 +80,30 @@ iPhone made the request. A public-edge `FAIL` means the phone handoff should
 not start; it is not a substitute for, or evidence of, a missing phone
 session.
 
+Run the focused checker before committing a timestamped record:
+
+```sh
+pnpm run validate:ios-preview-evidence -- \
+  artifacts/chat-app/test-results/encrypted-room-recovery/ios/<UTC timestamp>/validation-record.md
+```
+
+The checker requires all four boundary rows, checks any adjacent
+`ios-preview-preflight.json` against the redacted preflight schema, requires
+`platform=ios` plus an Expo Go marker in native request evidence, and keeps
+the outcomes distinct:
+
+- A public manifest `FAIL` must be recorded as `Result: FAIL`; it is a
+  public-edge outage, not missing physical-phone evidence.
+- A `Result: BLOCKED` record must have public reachability `PASS` and identify
+  the blocked physical-iPhone or server-native boundary.
+- A complete `Result: PASS` record must have all four boundaries `PASS` and
+  real device, iOS, and Expo Go metadata.
+
+The shell regression fixtures are available directly with
+`pnpm run test:ios-preview-evidence`. They cover a blocked phone record, a
+public-edge failure, and a complete pass without changing the separate
+release-candidate native large-text evidence checker or its fixtures.
+
 ## Background
 
 `expo-secure-store` (installed `57.0.4`) rejects any key name outside

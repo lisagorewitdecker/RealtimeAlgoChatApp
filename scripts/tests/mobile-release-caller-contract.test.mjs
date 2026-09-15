@@ -406,6 +406,28 @@ test("Android preview evidence validation succeeds when no handoff record change
   );
 });
 
+test("iOS preview evidence validation succeeds when no handoff record changed", () => {
+  const evidenceStep = workflow.jobs?.["ios-preview-evidence"]?.steps?.find(
+    (step) => step.name === "Validate changed iOS preview records",
+  );
+  assert.ok(evidenceStep, "the iOS preview evidence validation step must exist");
+  assert.match(
+    evidenceStep.run,
+    /Status: \*\*SKIP\*\*/,
+    "zero changed records must be reported as skipped",
+  );
+  assert.match(
+    evidenceStep.run,
+    /No iOS preview validation records changed; nothing to validate\./,
+    "zero changed records must explain why validation did not run",
+  );
+  assert.match(
+    evidenceStep.run,
+    /exit 0/,
+    "zero changed records must exit successfully",
+  );
+});
+
 test("Android preview evidence runs for every pull request", () => {
   assert.ok(
     Object.prototype.hasOwnProperty.call(workflow.on ?? {}, "pull_request"),
@@ -428,6 +450,60 @@ test("Android preview evidence runs for every pull request", () => {
     evidenceJob?.name,
     "Android preview evidence",
     "the required status-check context must remain aligned with the evidence job name",
+  );
+});
+
+test("iOS preview evidence runs for every pull request", () => {
+  assert.ok(
+    Object.prototype.hasOwnProperty.call(workflow.on ?? {}, "pull_request"),
+    "mobile release workflow must support pull_request",
+  );
+  const pullRequest = workflow.on.pull_request ?? {};
+  assert.equal(
+    pullRequest.paths,
+    undefined,
+    "the required iOS preview evidence check must not use a pull_request paths filter",
+  );
+  assert.equal(
+    pullRequest["paths-ignore"],
+    undefined,
+    "the required iOS preview evidence check must not use a pull_request paths-ignore filter",
+  );
+
+  const evidenceJob = workflow.jobs?.["ios-preview-evidence"];
+  assert.equal(
+    evidenceJob?.name,
+    "iOS preview evidence",
+    "the required status-check context must remain aligned with the evidence job name",
+  );
+  const evidenceStep = evidenceJob?.steps?.find(
+    (step) => step.name === "Validate changed iOS preview records",
+  );
+  assert.ok(evidenceStep, "the iOS preview evidence job must validate changed records");
+  assert.deepEqual(
+    evidenceStep.env,
+    {
+      IOS_PREVIEW_BASE_SHA:
+        "${{ github.event.pull_request.base.sha }}",
+      IOS_PREVIEW_HEAD_SHA:
+        "${{ github.event.pull_request.head.sha }}",
+    },
+    "the iOS preview job must compare the pull request base and head",
+  );
+  assert.match(
+    evidenceStep.run,
+    /git diff[\s\S]*\$\{IOS_PREVIEW_BASE_SHA\}\.\.\.\$\{IOS_PREVIEW_HEAD_SHA\}[\s\S]*artifacts\/chat-app\/test-results\/encrypted-room-recovery\/ios\/\*\*\/validation-record\.md/,
+    "the job must select changed iOS validation records from the pull request diff",
+  );
+  assert.match(
+    evidenceStep.run,
+    /pnpm run validate:ios-preview-evidence -- "\$record_path"/,
+    "the job must run the focused iOS checker for every changed record",
+  );
+  assert.match(
+    evidenceStep.run,
+    /changed iOS preview validation record is missing/,
+    "deleted or missing changed records must fail the job",
   );
 });
 
