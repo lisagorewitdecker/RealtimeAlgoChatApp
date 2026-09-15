@@ -38,6 +38,12 @@
           "project": "react-native"
         }
       ],
+      [
+        "@clerk/expo",
+        {
+          "appleSignIn": false
+        }
+      ],
       "expo-font",
       [
         "expo-splash-screen",
