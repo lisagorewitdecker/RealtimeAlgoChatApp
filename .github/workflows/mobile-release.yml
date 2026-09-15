@@ -555,6 +555,109 @@ jobs:
 
           cat "$summary_path" >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Verify temporary native evidence artifact outage recovers on retry
+        shell: bash
+        run: |
+          set -euo pipefail
+          recovery_root="$(mktemp -d)"
+          pass_summary_path="$(mktemp)"
+          failed_retry_summary_path="$(mktemp)"
+          attempt_file="$recovery_root/ios-download-attempt"
+          trap 'rm -rf "$recovery_root" "$pass_summary_path" "$failed_retry_summary_path"' EXIT
+
+          write_controlled_evidence() {
+            local platform="$1"
+            local run_dir="$recovery_root/$platform/20260915T120000Z"
+            mkdir -p "$run_dir/screenshots" "$run_dir/call-surface"
+            printf 'controlled\n' > "$run_dir/candidate-build-id.txt"
+            if [[ "$platform" == "ios" ]]; then
+              printf 'platform=ios\ncandidate_build_id=controlled\nrecorded_at_utc=2026-09-15T12:00:00Z\ndevice=controlled-device\n' > "$run_dir/runner-metadata.txt"
+            else
+              printf 'platform=android\ncandidate_build_id=controlled\nrecorded_at_utc=2026-09-15T12:00:00Z\ndevice_serial=controlled\ndevice_model=controlled\nandroid_release=controlled\nandroid_api=36\nscreen_dp=320x568\ndensity_dpi=160\nuser_rotation=0\n' > "$run_dir/runner-metadata.txt"
+            fi
+            printf 'platform=%s\nrun_mode=release-gate\ncandidate_build_id=controlled\nstatus=PASS\nrecorded_at_utc=2026-09-15T12:00:00Z\n' "$platform" > "$run_dir/pass-fail-record.txt"
+            printf '{}\n' > "$run_dir/native-info.json"
+            printf '# Native branding validation\n\n- Status: **PASS**\n' > "$run_dir/native-branding-check.md"
+            printf '<testsuite tests="1" failures="0"></testsuite>\n' > "$run_dir/maestro-results.xml"
+            printf '<testsuite tests="1" failures="0"></testsuite>\n' > "$run_dir/sentry-maestro-results.xml"
+            printf 'platform=%s\ncandidate_build_id=controlled\nmarker=controlled\n' "$platform" > "$run_dir/sentry-trigger.txt"
+            printf '{"status":"PASS","eventId":"0123456789abcdef0123456789abcdef","platform":"%s","candidateBuildId":"controlled","marker":"controlled","release":"controlled","dist":"1","readableFrame":{"filename":"controlled.tsx","function":"createNativeSourceMapProbeError","line":1,"column":1}}\n' "$platform" > "$run_dir/sentry-source-map-evidence.json"
+            for screenshot_index in $(seq 1 11); do
+              printf 'controlled screenshot\n' > "$run_dir/screenshots/screen-$screenshot_index.png"
+            done
+            for call_index in $(seq 1 2); do
+              printf 'controlled call surface\n' > "$run_dir/call-surface/call-$call_index.png"
+            done
+          }
+
+          download_ios_once() {
+            local attempt=0
+            if [[ -s "$attempt_file" ]]; then
+              attempt="$(cat "$attempt_file")"
+            fi
+            attempt=$((attempt + 1))
+            printf '%s\n' "$attempt" > "$attempt_file"
+            if ((attempt == 1)); then
+              echo "Controlled iOS artifact outage injected on the first download attempt." >&2
+              return 1
+            fi
+            write_controlled_evidence ios
+          }
+
+          set +e
+          download_ios_once
+          initial_download_status=$?
+          set -e
+          if [[ "$initial_download_status" == "0" ]]; then
+            echo "The controlled iOS first download unexpectedly succeeded." >&2
+            exit 1
+          fi
+          if [[ -e "$recovery_root/ios" ]]; then
+            echo "The failed first download left partial iOS evidence behind." >&2
+            exit 1
+          fi
+
+          set +e
+          download_ios_once
+          retry_download_status=$?
+          set -e
+          if [[ "$retry_download_status" != "0" ]]; then
+            echo "The controlled iOS retry did not recover the artifact download." >&2
+            exit 1
+          fi
+          if [[ "$(cat "$attempt_file")" != "2" ]]; then
+            echo "The controlled iOS artifact was not attempted exactly once before retry." >&2
+            exit 1
+          fi
+
+          write_controlled_evidence android
+
+          if \
+            GITHUB_STEP_SUMMARY="$pass_summary_path" \
+            NATIVE_IOS_EVIDENCE_DOWNLOAD_RESULT=success \
+            NATIVE_ANDROID_EVIDENCE_DOWNLOAD_RESULT=success \
+            bash scripts/run-untrusted-checker.sh bash scripts/check-native-large-text-evidence.sh "$recovery_root"; then
+            :
+          else
+            echo "The native evidence checker rejected the artifact after a successful retry." >&2
+            exit 1
+          fi
+
+          if \
+            GITHUB_STEP_SUMMARY="$failed_retry_summary_path" \
+            NATIVE_IOS_EVIDENCE_DOWNLOAD_RESULT=failure \
+            NATIVE_ANDROID_EVIDENCE_DOWNLOAD_RESULT=success \
+            bash scripts/run-untrusted-checker.sh bash scripts/check-native-large-text-evidence.sh "$recovery_root"; then
+            echo "The native evidence checker passed despite a failed retry." >&2
+            exit 1
+          fi
+
+          grep -Fq -- "- Status: **PASS**" "$pass_summary_path"
+          grep -Fq -- "- Artifact download: **PASS**" "$pass_summary_path"
+          grep -Fq -- "- Status: **FAIL**" "$failed_retry_summary_path"
+          grep -Fq -- "- Artifact download: **FAIL**" "$failed_retry_summary_path"
+          cat "$pass_summary_path" >> "$GITHUB_STEP_SUMMARY"
+
   native-ios:
     name: Native large-text smoke (iOS)
     if: ${{ github.event_name != 'pull_request' }}

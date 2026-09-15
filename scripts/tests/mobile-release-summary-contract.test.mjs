@@ -31,6 +31,8 @@
  *   9. A failed artifact extraction clears partial platform output before its
  *      retry, while a permanently missing artifact still reaches the fixed
  *      platform-specific blocking summary.
+ *  10. A controlled hosted artifact outage recovers only after the retry
+ *      succeeds, while a failed retry still blocks native evidence.
  *
  * The static rules catch code paths no scenario exercises; the behavioral runs
  * inject sentinel values for every secret-backed variable and prove the real
@@ -871,6 +873,65 @@ test("native evidence downloads retry without exposing evidence contents", () =>
     evidenceStep?.env?.NATIVE_ANDROID_EVIDENCE_DOWNLOAD_RESULT,
     "${{ steps.download-android-native-smoke.outcome == 'success' && 'success' || steps.retry-android-native-smoke.outcome }}",
     "the Android checker must receive the successful initial or retry outcome",
+  );
+});
+
+test("hosted native evidence regression proves a transient download recovers", () => {
+  const regressionJob = workflow.jobs["native-evidence-summary-regression"];
+  const recoveryStep = regressionJob.steps.find(
+    (step) =>
+      step.name ===
+      "Verify temporary native evidence artifact outage recovers on retry",
+  );
+
+  assert.ok(
+    recoveryStep,
+    "the hosted regression job must exercise a temporary artifact outage",
+  );
+  assert.match(
+    recoveryStep.run,
+    /download_ios_once[\s\S]*initial_download_status=\$\?[\s\S]*retry_download_status=\$\?/,
+    "the hosted regression must execute an initial failed download and a retry",
+  );
+  assert.match(
+    recoveryStep.run,
+    /if \[\[ "\$initial_download_status" == "0" \]\]/,
+    "the hosted regression must reject an unexpectedly successful first attempt",
+  );
+  assert.match(
+    recoveryStep.run,
+    /if \[\[ -e "\$recovery_root\/ios" \]\]/,
+    "the hosted regression must prove the failed first attempt leaves no evidence behind",
+  );
+  assert.match(
+    recoveryStep.run,
+    /if \[\[ "\$retry_download_status" != "0" \]\]/,
+    "the hosted regression must reject a failed retry",
+  );
+  assert.match(
+    recoveryStep.run,
+    /NATIVE_IOS_EVIDENCE_DOWNLOAD_RESULT=success[\s\S]*NATIVE_ANDROID_EVIDENCE_DOWNLOAD_RESULT=success[\s\S]*check-native-large-text-evidence\.sh "\$recovery_root"/,
+    "the native checker must receive success only after the retry succeeds",
+  );
+  assert.match(
+    recoveryStep.run,
+    /NATIVE_IOS_EVIDENCE_DOWNLOAD_RESULT=failure[\s\S]*check-native-large-text-evidence\.sh "\$recovery_root"/,
+    "the hosted regression must prove a failed retry remains blocking",
+  );
+  assert.match(
+    recoveryStep.run,
+    /The native evidence checker passed despite a failed retry\./,
+    "the hosted regression must fail if the checker accepts a failed retry",
+  );
+  assert.match(
+    recoveryStep.run,
+    /cat "\$pass_summary_path" >> "\$GITHUB_STEP_SUMMARY"/,
+    "the hosted regression must publish only the recovered, privacy-safe summary",
+  );
+  assert.doesNotMatch(
+    recoveryStep.run,
+    /cat\s+.*(?:candidate-build-id|runner-metadata|pass-fail-record|sentry-source-map)/,
+    "the hosted recovery scenario must not print downloaded evidence contents",
   );
 });
 
@@ -3464,7 +3525,7 @@ test("native evidence checker output is isolated from workflow commands", () => 
 
   assert.equal(
     checkerCallers.length,
-    5,
+    6,
     "every native evidence checker caller must be inventoried by this contract",
   );
   assert.equal(
