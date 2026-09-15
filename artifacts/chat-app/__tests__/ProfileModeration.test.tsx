@@ -3,6 +3,7 @@ import { fireEvent, render, waitFor } from "@testing-library/react-native";
 import { StyleSheet, type StyleProp, type ViewStyle } from "react-native";
 import { BottomTabBarHeightContext } from "expo-router/js-tabs";
 import ProfileScreen from "../app/(tabs)/profile";
+import { onTestPlatform } from "../test-utils/platform";
 
 const mockUseApp = jest.fn();
 const mockUseAccessibility = jest.fn();
@@ -888,7 +889,9 @@ describe("profile layout under the tab bar and keyboard", () => {
   it("reserves the measured tab bar height below the profile content", () => {
     // The classic tab navigator publishes its measured bar height (bottom
     // inset included) through this context; the bar overlays the screen and
-    // is opaque on Android and web, so the scroll content must clear it.
+    // is opaque on Android and web, so the scroll content must clear it. This
+    // suite runs under the iOS and Android Jest projects, so the reservation
+    // is checked on the platform where the bar actually hides content.
     mockInsets.bottom = 34;
     const view = render(
       <BottomTabBarHeightContext.Provider value={83}>
@@ -932,5 +935,16 @@ describe("profile layout under the tab bar and keyboard", () => {
     expect(avoidingView.props.behavior).toBe("padding");
     expect(avoidingView.props.keyboardVerticalOffset).toBe(0);
     expect(getByTestId("profile-scroll").props.keyboardShouldPersistTaps).toBe("handled");
+  });
+
+  it("shows the user ID in the platform's monospace face", () => {
+    const { getByText } = render(<ProfileScreen />);
+
+    // iOS ships Courier; Android has no such face and must fall back to the
+    // system monospace family or the ID renders in the default proportional
+    // font. The Android Jest project is what proves the fallback branch.
+    expect(StyleSheet.flatten(getByText("user-admin").props.style).fontFamily).toBe(
+      onTestPlatform({ ios: "Courier", android: "monospace" }),
+    );
   });
 });

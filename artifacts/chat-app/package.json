@@ -23,22 +23,6 @@
     "test:native-large-text": "bash e2e/native-large-text/run.sh",
     "test:native-sentry": "bash e2e/sentry-source-map/run.sh"
   },
-  "jest": {
-    "preset": "jest-expo",
-    "setupFiles": [
-      "<rootDir>/jest.setup.js"
-    ],
-    "moduleNameMapper": {
-      "^@/(.*)$": "<rootDir>/$1"
-    },
-    "testPathIgnorePatterns": [
-      "/node_modules/",
-      "<rootDir>/scripts/"
-    ],
-    "setupFilesAfterEnv": [
-      "<rootDir>/jest.setup-after-env.js"
-    ]
-  },
   "devDependencies": {
     "@babel/core": "^7.29.7",
     "@clerk/expo": "^4.6.1",

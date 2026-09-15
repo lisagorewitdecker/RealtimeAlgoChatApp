@@ -1,0 +1,30 @@
+---
+name: jest-expo platform projects
+description: How the Chat App gets Android coverage from Jest, and two jest-expo behaviours that make the obvious approaches silently wrong.
+---
+
+# jest-expo platform projects
+
+Rule: platform coverage comes from Jest `projects` with explicit per-project
+`testMatch` lists, not from jest-expo's `*.test.android.tsx` file-suffix
+convention, and platform-dependent expectations are keyed on `Platform.OS`
+inside shared suites rather than skipped.
+
+**Why:**
+- The default `jest-expo` preset keeps Jest's default `testMatch`
+  (`**/__tests__/**/*.[jt]s?(x)`), so an `X.test.android.tsx` file would
+  also run under the iOS project. Only `jest-expo/ios` and `jest-expo/android`
+  install platform-suffixed patterns.
+- In tests, `Platform.OS` is not inlined by babel-preset-expo (that only
+  happens in production); it comes from haste's `defaultPlatform`, so the
+  Android preset works purely through module resolution. Nothing fails if that
+  resolution stops matching the project label, which is why the Android
+  project has a setup file that throws unless `Platform.OS === "android"`.
+- `process.env.EXPO_OS` *is* inlined at transform time per project, so it is
+  useless as a runtime guard.
+
+**How to apply:** new layout-bearing suites are added to the Android list in
+the Chat App's Jest config (the config throws if a listed file is missing);
+expectations that differ by platform use the shared `onTestPlatform` helper so
+neither project reports skipped tests. The Android pass adds roughly 10% to a
+warm run and noticeably more on a cold babel cache.

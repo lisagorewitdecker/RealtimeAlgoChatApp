@@ -284,6 +284,7 @@ export default function AiPanel({ roomId: _roomId }: Props) {
 
       {/* Input */}
       <View
+        testID="ai-panel-input-bar"
         style={[
           styles.inputBar,
           {

@@ -79,3 +79,4 @@
 - [expo-router vendored react-navigation](expo-router-vendored-navigation.md) — read tab-bar height from the `expo-router/js-tabs` context (inset fallback); never add `@react-navigation/*`.
 - [Clerk Expo iOS builds](clerk-expo-ios-build.md) — keep the `@clerk/expo` plugin in app.json: it lifts iOS to 17.0 so the ClerkExpo pod links; otherwise pod install dies on a nil SPM target.
 - [GitHub edited-event evidence](github-edited-event-evidence.md) — REST timelines may omit PR body edits; retain the edit timestamp, unchanged head SHA, and subsequent run creation time.
+- [jest-expo platform projects](jest-expo-platform-projects.md) — the default preset also matches `*.test.android.tsx`; use explicit per-project testMatch lists and guard the Android project's `Platform.OS`.
