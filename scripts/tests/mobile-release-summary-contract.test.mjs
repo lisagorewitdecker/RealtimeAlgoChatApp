@@ -1739,6 +1739,54 @@ test("iOS preview evidence skips clean pull requests and blocks malformed change
     "the failed summary must not copy iOS record evidence",
   );
 
+  const blocked = runIosPreviewJob("blocked", {
+    recordText: `# iOS preview validation record
+
+**Result: BLOCKED — no physical iPhone was available**
+
+| Boundary | Status | Evidence |
+| --- | --- | --- |
+| Public manifest reachability | PASS | Public edge was reachable. |
+| Local handoff probe (manifest and bundle) | NOT_RUN | No local probe was available. |
+| Expo Go launch on physical iPhone | BLOCKED | No physical phone was available. |
+| Server-side native request evidence | BLOCKED | No native request was available. |
+`,
+  });
+  assert.equal(
+    blocked.result.status,
+    0,
+    "a valid physical-phone BLOCKED record must pass the job",
+  );
+  assert.match(
+    blocked.summary,
+    /Validation: \*\*PASS\*\*[\s\S]*Record result: \*\*BLOCKED \(valid physical-phone handoff unavailable\)\*\*/,
+    "the summary must distinguish a valid physical-phone BLOCKED record",
+  );
+
+  const publicFailure = runIosPreviewJob("public-failure", {
+    recordText: `# iOS preview validation record
+
+**Result: FAIL — the public preview edge was unavailable**
+
+| Boundary | Status | Evidence |
+| --- | --- | --- |
+| Public manifest reachability | FAIL | The public edge was unavailable. |
+| Local handoff probe (manifest and bundle) | NOT_RUN | The public probe failed first. |
+| Expo Go launch on physical iPhone | FAIL | Physical launch was not attempted after the public failure. |
+| Server-side native request evidence | FAIL | Native request evidence was not available after the public failure. |
+`,
+  });
+  assert.equal(
+    publicFailure.result.status,
+    0,
+    "a public-edge FAIL record must pass record-shape validation",
+  );
+  assert.match(
+    publicFailure.summary,
+    /Validation: \*\*PASS\*\*[\s\S]*Record result: \*\*FAIL \(public edge\)\*\*/,
+    "the summary must distinguish a public-edge FAIL record",
+  );
+
   const deleted = runIosPreviewJob("deleted", {
     recordText: "# iOS preview validation record\n",
     deleteRecord: true,

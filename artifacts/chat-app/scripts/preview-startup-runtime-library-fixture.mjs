@@ -1,4 +1,5 @@
 import { createServer } from "node:http";
+import { fileURLToPath } from "node:url";
 
 export const CAPTURED_EXPO_TOOLING = Object.freeze({
   expoCli: "57.0.20",
@@ -42,41 +43,43 @@ export const fixtureOutput = Object.freeze({
   "unsupported-loader-wording":
     "React Native DevTools launcher exited with status 127\n",
 });
-const fixtureName =
-  process.env.PREVIEW_STARTUP_TEST_FIXTURE ?? "missing-runtime-library";
-if (fixtureName === "handoff-server") {
-  const port = Number(process.env.PORT);
-  const server = createServer((request, response) => {
-    if (request.url === "/") {
-      response.setHeader("content-type", "application/json");
-      response.end(
-        JSON.stringify({
-          launchAsset: {
-            url: "https://preview.example.test/_expo/static/js/bundle",
-          },
-        }),
-      );
-      return;
+if (fileURLToPath(import.meta.url) === process.argv[1]) {
+  const fixtureName =
+    process.env.PREVIEW_STARTUP_TEST_FIXTURE ?? "missing-runtime-library";
+  if (fixtureName === "handoff-server") {
+    const port = Number(process.env.PORT);
+    const server = createServer((request, response) => {
+      if (request.url === "/") {
+        response.setHeader("content-type", "application/json");
+        response.end(
+          JSON.stringify({
+            launchAsset: {
+              url: "https://preview.example.test/_expo/static/js/bundle",
+            },
+          }),
+        );
+        return;
+      }
+
+      response.setHeader("content-type", "application/javascript");
+      response.end("console.log('preview validation fixture');");
+    });
+
+    const shutdown = () => {
+      server.close();
+      process.exit(0);
+    };
+    process.once("SIGTERM", shutdown);
+    process.once("SIGINT", shutdown);
+    server.listen(port, "127.0.0.1", () => {
+      process.stdout.write("Starting Metro Bundler\n");
+    });
+  } else {
+    const output = fixtureOutput[fixtureName];
+    if (!output) {
+      throw new Error(`Unknown preview startup fixture: ${fixtureName}`);
     }
-
-    response.setHeader("content-type", "application/javascript");
-    response.end("console.log('preview validation fixture');");
-  });
-
-  const shutdown = () => {
-    server.close();
-    process.exit(0);
-  };
-  process.once("SIGTERM", shutdown);
-  process.once("SIGINT", shutdown);
-  server.listen(port, "127.0.0.1", () => {
-    process.stdout.write("Starting Metro Bundler\n");
-  });
-} else {
-  const output = fixtureOutput[fixtureName];
-  if (!output) {
-    throw new Error(`Unknown preview startup fixture: ${fixtureName}`);
+    process.stderr.write(output);
+    process.exitCode = 1;
   }
-  process.stderr.write(output);
-  process.exitCode = 1;
 }

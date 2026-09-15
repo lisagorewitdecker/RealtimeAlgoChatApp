@@ -600,6 +600,16 @@ test("iOS preview evidence runs for every pull request", () => {
     /changed iOS preview validation record is missing/,
     "deleted or missing changed records must fail the job",
   );
+  assert.match(
+    evidenceStep.run,
+    /BLOCKED \(valid physical-phone handoff unavailable\)/,
+    "a valid physical-phone BLOCKED record must be distinguished in the summary",
+  );
+  assert.match(
+    evidenceStep.run,
+    /FAIL \(public edge\)/,
+    "a public-edge FAIL record must be distinguished in the summary",
+  );
 });
 
 test("routine unit validation runs the caller contract check", () => {

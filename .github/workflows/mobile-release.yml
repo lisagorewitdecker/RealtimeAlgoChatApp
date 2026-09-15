@@ -331,11 +331,17 @@ jobs:
               echo "### [${record_path}](${record_url})"
               if ((validation_status == 0)); then
                 echo "- Validation: **PASS**"
-                if [[ "$record_result" == "BLOCKED" ]]; then
-                  echo "- Record result: **BLOCKED (valid)**"
-                else
-                  echo "- Record result: **${record_result:-Unavailable}**"
-                fi
+                case "$record_result" in
+                  BLOCKED)
+                    echo "- Record result: **BLOCKED (valid physical-phone handoff unavailable)**"
+                    ;;
+                  FAIL)
+                    echo "- Record result: **FAIL (public edge)**"
+                    ;;
+                  *)
+                    echo "- Record result: **${record_result:-Unavailable}**"
+                    ;;
+                esac
               else
                 echo "- Validation: **FAIL**"
                 echo "- Record result: **${record_result:-Unavailable}**"
