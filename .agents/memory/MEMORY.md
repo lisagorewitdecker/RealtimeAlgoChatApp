@@ -69,7 +69,7 @@
 - [.replit merge regressions](replit-config-merge-regressions.md) — task merges can drop validation workflows and the post-merge timeout; diff against the pre-merge revision, restore via platform tooling.
 - [Generated-check test controls](generated-check-fault-controls.md) — test-only environment faults and fixture paths require explicit, separate subprocess opt-ins.
 - [GitHub probe write permissions](github-probe-write-permissions.md) — verify commit/tree access before planning a live CI probe; ref creation alone is not enough.
-- [GitHub connection workflow scope](github-connection-workflow-scope.md) — it cannot touch workflow files or logs; shell/Git-pane pushes need a valid Git Providers grant or an owner PAT; check redactions before pushing.
+- [GitHub connection workflow scope](github-connection-workflow-scope.md) — cannot touch workflow files or logs; pushes need a valid Git Providers grant or owner PAT; check redactions first.
 - [Open merges vs task merges](open-merges-vs-task-merges.md) — platform task merges hard-reset the main checkout and destroy any in-progress merge; merge in a git worktree, then fast-forward.
 - [Android preflight JSON contract](android-preflight-json-contract.md) — validate optional redacted sidecars and compare public/local statuses with the Markdown handoff record.
 - [GitHub ruleset status checks](github-ruleset-status-checks.md) — required checks accept an omitted integration ID; sending JSON null is rejected by the ruleset API.
