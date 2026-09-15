@@ -144,3 +144,4 @@ export type UnauthorizedResponse = {
 };
 
 // Temporary stale generated-client probe for task 449
+// Synchronize-event update
