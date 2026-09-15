@@ -88,6 +88,33 @@ test("rejects any response that is not exactly HTTP 200 with recovery guidance",
   }
 });
 
+test("reports public manifest request failures with recovery guidance", async () => {
+  const fetchMock = mockFetch(
+    Promise.reject(
+      new Error("fetch failed: connect ETIMEDOUT preview.example.test:443"),
+    ),
+  );
+
+  try {
+    await assert.rejects(
+      requestPublicPreviewManifest(1_000, previewEnvironment),
+      (error) => {
+        assert.match(
+          error.message,
+          /Public Expo preview manifest check failed before a response: fetch failed: connect ETIMEDOUT preview\.example\.test:443/,
+        );
+        assert.match(
+          error.message,
+          /Restart or repair the managed Chat App\/Expo workflow/,
+        );
+        return true;
+      },
+    );
+  } finally {
+    fetchMock.restore();
+  }
+});
+
 test("reports missing public preview configuration before making a request", async () => {
   const fetchMock = mockFetch(new Response("{}"));
 
