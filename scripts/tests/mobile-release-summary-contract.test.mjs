@@ -1607,25 +1607,52 @@ test("Android preview evidence keeps its pull-request validation and privacy con
           "PRIVATE_MULTI_RECORD_EVIDENCE no physical phone was available.",
         ),
     },
+    {
+      timestamp: "20260915T123000Z",
+      text: blockedRecord
+        .replace("**Result: BLOCKED", "**Result: PASS")
+        .replace(
+          "No physical phone was available.",
+          "PRIVATE_SECOND_MULTI_RECORD_EVIDENCE no physical phone was available.",
+        ),
+    },
   ]);
   assert.notEqual(
     multiRecord.result.status,
     0,
-    "one invalid Android preview record must fail the multi-record job",
+    "multiple invalid Android preview records must fail the multi-record job",
   );
   assert.match(
     multiRecord.summary,
-    /- Changed records checked: \*\*2\*\*/,
+    /- Changed records checked: \*\*3\*\*/,
     "the summary must count every changed Android preview record",
   );
   for (const recordPath of multiRecord.recordPaths) {
     const escapedPath = recordPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const recordLinkPattern = new RegExp(
+      `\\[${escapedPath}\\]\\(https://github\\.example/example/chat-app/blob/[^)]+/${escapedPath}\\)`,
+      "g",
+    );
+    const recordSectionPattern = new RegExp(
+      `### \\[${escapedPath}\\]\\(https://github\\.example/example/chat-app/blob/[^)]+/${escapedPath}\\)[\\s\\S]*?(?=\\n### |$)`,
+      "g",
+    );
+    assert.equal(
+      multiRecord.summary.match(recordLinkPattern)?.length ?? 0,
+      1,
+      `the multi-record summary must include exactly one stable link for ${recordPath}`,
+    );
+    assert.equal(
+      multiRecord.summary.match(recordSectionPattern)?.length ?? 0,
+      1,
+      `the multi-record summary must include exactly one validation section for ${recordPath}`,
+    );
     assert.match(
       multiRecord.summary,
       new RegExp(
-        `\\[${escapedPath}\\]\\(https://github\\.example/example/chat-app/blob/[^)]+/${escapedPath}\\)`,
+        `### \\[${escapedPath}\\]\\(https://github\\.example/example/chat-app/blob/[^)]+/${escapedPath}\\)[\\s\\S]*?- Validation: \\*\\*(?:PASS|FAIL)\\*\\*`,
       ),
-      `the multi-record summary must link ${recordPath}`,
+      `the multi-record summary must include the validation result for ${recordPath}`,
     );
   }
   assert.match(
@@ -1637,12 +1664,28 @@ test("Android preview evidence keeps its pull-request validation and privacy con
   );
   assert.match(
     multiRecord.summary,
-    /Missing-boundary reason[\s\S]*PASS records must include a real Device model value\./,
-    "the invalid record must contribute its sanitized checker reason",
+    new RegExp(
+      `### \\[${multiRecord.recordPaths[1].replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\][\\s\\S]*- Validation: \\*\\*FAIL\\*\\*[\\s\\S]*Missing-boundary reason[\\s\\S]*PASS records must include a real Device model value\\.`,
+    ),
+    "the first invalid record must contribute its sanitized checker reason",
+  );
+  assert.match(
+    multiRecord.summary,
+    new RegExp(
+      `### \\[${multiRecord.recordPaths[2].replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\][\\s\\S]*- Validation: \\*\\*FAIL\\*\\*[\\s\\S]*Missing-boundary reason[\\s\\S]*PASS records must include a real Device model value\\.`,
+    ),
+    "the second invalid record must contribute its sanitized checker reason",
+  );
+  assert.equal(
+    multiRecord.summary.match(
+      /- Validation: \*\*FAIL\*\*/g,
+    )?.length ?? 0,
+    2,
+    "the summary must preserve the overall failure status for both invalid records",
   );
   assert.doesNotMatch(
     multiRecord.summary,
-    /PRIVATE_MULTI_RECORD_EVIDENCE|Workspace curl returned HTTP 200|No physical phone was available/,
+    /PRIVATE_MULTI_RECORD_EVIDENCE|PRIVATE_SECOND_MULTI_RECORD_EVIDENCE|Workspace curl returned HTTP 200|No physical phone was available/,
     "a multi-record summary must not expose evidence text from either record",
   );
 
