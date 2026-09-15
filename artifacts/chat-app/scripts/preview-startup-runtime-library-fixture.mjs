@@ -6,6 +6,33 @@ export const CAPTURED_EXPO_TOOLING = Object.freeze({
   reactNative: "0.86.3",
 });
 
+export const CAPTURED_LOADER_SAMPLES = Object.freeze([
+  Object.freeze({
+    name: "Linux shared-library loader",
+    fixture: "missing-runtime-library",
+  }),
+  Object.freeze({
+    name: "macOS dyld loader",
+    fixture: "missing-runtime-library-dyld",
+  }),
+  Object.freeze({
+    name: "Windows loader",
+    fixture: "missing-runtime-library-windows",
+  }),
+  Object.freeze({
+    name: "Linux shared-library loader with a long path",
+    fixture: "missing-runtime-library-long-path",
+  }),
+  Object.freeze({
+    name: "macOS dyld loader with a long path",
+    fixture: "missing-runtime-library-dyld-long-path",
+  }),
+  Object.freeze({
+    name: "Windows loader with a long path",
+    fixture: "missing-runtime-library-windows-long-path",
+  }),
+]);
+
 const longLinuxLibraryPath =
   `/opt/expo/${"react-native-devtools-cache/".repeat(16)}` +
   "libgtk-3.so.0";

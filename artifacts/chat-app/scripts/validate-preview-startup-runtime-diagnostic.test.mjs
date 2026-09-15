@@ -8,6 +8,7 @@ import test from "node:test";
 
 import {
   CAPTURED_EXPO_TOOLING,
+  CAPTURED_LOADER_SAMPLES,
   fixtureOutput,
 } from "./preview-startup-runtime-library-fixture.mjs";
 
@@ -21,9 +22,13 @@ const fixturePath = join(
 const packageRequire = createRequire(join(packageRoot, "package.json"));
 
 function runNodeScript(args, env = {}) {
+  const childEnvironment = { ...process.env, ...env };
+  if (!Object.hasOwn(env, "GITHUB_STEP_SUMMARY")) {
+    delete childEnvironment.GITHUB_STEP_SUMMARY;
+  }
   const result = spawnSync(process.execPath, args, {
     encoding: "utf8",
-    env: { ...process.env, ...env },
+    env: childEnvironment,
   });
   return {
     status: result.status,
@@ -40,6 +45,29 @@ function findDiagnostic(output) {
 function installedPackageVersion(packageName) {
   const packageJsonPath = packageRequire.resolve(`${packageName}/package.json`);
   return JSON.parse(readFileSync(packageJsonPath, "utf8")).version;
+}
+
+const capturedLoaderSampleNames = CAPTURED_LOADER_SAMPLES.map(
+  ({ name }) => name,
+).join(", ");
+
+function capturedToolingVersionMismatch({
+  displayName,
+  packageName,
+  capturedVersion,
+}) {
+  const installedVersion = installedPackageVersion(packageName);
+  if (installedVersion === capturedVersion) {
+    return null;
+  }
+
+  return (
+    `${displayName} changed: loader samples were captured with ${capturedVersion}, ` +
+      `but the installed version is ${installedVersion}. Affected captured loader ` +
+      `samples: ${capturedLoaderSampleNames}. Refresh the captured samples in ` +
+      "preview-startup-runtime-library-fixture.mjs and update the loader wording " +
+      "parser in validate-preview-startup.mjs before relying on preview diagnostics."
+  );
 }
 
 const fixtures = [
@@ -138,24 +166,23 @@ test("live and captured preview validation report the same diagnosis for every l
 });
 
 test("versioned loader samples match the installed Expo tooling", () => {
-  assert.equal(
-    installedPackageVersion("@expo/cli"),
-    CAPTURED_EXPO_TOOLING.expoCli,
-    "Expo CLI changed; refresh the versioned loader samples and update the " +
-      "loader wording parser before relying on preview diagnostics.",
-  );
-  assert.equal(
-    installedPackageVersion("react-native"),
-    CAPTURED_EXPO_TOOLING.reactNative,
-    "React Native changed; refresh the versioned loader samples and update the " +
-      "loader wording parser before relying on preview diagnostics.",
-  );
+  const mismatches = [
+    capturedToolingVersionMismatch({
+      displayName: "Expo CLI",
+      packageName: "@expo/cli",
+      capturedVersion: CAPTURED_EXPO_TOOLING.expoCli,
+    }),
+    capturedToolingVersionMismatch({
+      displayName: "React Native",
+      packageName: "react-native",
+      capturedVersion: CAPTURED_EXPO_TOOLING.reactNative,
+    }),
+  ].filter(Boolean);
+  if (mismatches.length > 0) {
+    assert.fail(mismatches.join("\n"));
+  }
 
-  for (const fixtureName of [
-    "missing-runtime-library",
-    "missing-runtime-library-dyld",
-    "missing-runtime-library-windows",
-  ]) {
+  for (const { fixture: fixtureName } of CAPTURED_LOADER_SAMPLES) {
     const result = runNodeScript([fixturePath], {
       PREVIEW_STARTUP_TEST_FIXTURE: fixtureName,
     });
@@ -182,6 +209,32 @@ test("unsupported loader wording fails with a maintenance message", () => {
     assert.match(result.output, /Expo preview loader wording changed/);
     assert.match(result.output, /refresh the versioned loader samples/);
   } finally {
+    rmSync(temporaryDirectory, { recursive: true, force: true });
+  }
+});
+
+test("fixture validation does not append to an inherited workflow summary", () => {
+  const temporaryDirectory = mkdtempSync(
+    join(tmpdir(), "chat-preview-loader-summary-inheritance-"),
+  );
+  const summaryPath = join(temporaryDirectory, "summary.md");
+  writeFileSync(summaryPath, "existing summary\n", "utf8");
+  const inheritedSummary = process.env.GITHUB_STEP_SUMMARY;
+
+  try {
+    process.env.GITHUB_STEP_SUMMARY = summaryPath;
+    const result = runNodeScript([validatorPath], {
+      PREVIEW_STARTUP_TEST_FIXTURE: "missing-runtime-library",
+    });
+
+    assert.equal(result.status, 1, result.output);
+    assert.equal(readFileSync(summaryPath, "utf8"), "existing summary\n");
+  } finally {
+    if (inheritedSummary === undefined) {
+      delete process.env.GITHUB_STEP_SUMMARY;
+    } else {
+      process.env.GITHUB_STEP_SUMMARY = inheritedSummary;
+    }
     rmSync(temporaryDirectory, { recursive: true, force: true });
   }
 });
