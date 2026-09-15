@@ -1,11 +1,14 @@
 import React from "react";
 import { fireEvent, render, waitFor } from "@testing-library/react-native";
+import { StyleSheet, type StyleProp, type ViewStyle } from "react-native";
+import { BottomTabBarHeightContext } from "expo-router/js-tabs";
 import ProfileScreen from "../app/(tabs)/profile";
 
 const mockUseApp = jest.fn();
 const mockUseAccessibility = jest.fn();
 const mockGetToken = jest.fn();
 const mockFetch = jest.fn();
+const mockInsets = { top: 0, bottom: 0, left: 0, right: 0 };
 
 jest.mock("@clerk/expo", () => ({
   useAuth: () => ({ getToken: mockGetToken }),
@@ -22,6 +25,14 @@ jest.mock("@/contexts/AccessibilityContext", () => ({
 
 jest.mock("@/contexts/SocketContext", () => ({
   useSocket: () => ({ isConnected: true, connectionError: null }),
+}));
+
+jest.mock("@/contexts/CryptoContext", () => ({
+  useCrypto: () => ({
+    deviceKeyStatus: "registered",
+    publicKeyB64: "",
+    resetDeviceIdentity: jest.fn(),
+  }),
 }));
 
 jest.mock("@/hooks/useColors", () => ({
@@ -46,7 +57,32 @@ jest.mock("expo-haptics", () => ({
 }));
 
 jest.mock("react-native-safe-area-context", () => ({
-  useSafeAreaInsets: () => ({ top: 0, bottom: 0 }),
+  useSafeAreaInsets: () => ({ ...mockInsets }),
+}));
+
+// The real module pulls in expo-router's ESM-only dependencies, which Jest
+// cannot parse. The screen only needs the tab bar height context, so provide
+// one shared context instance that the tests can populate like the classic
+// tab navigator does.
+jest.mock("expo-router/js-tabs", () => {
+  const mockReact = require("react");
+  return {
+    BottomTabBarHeightContext: mockReact.createContext(undefined),
+  };
+});
+
+jest.mock("react-native-keyboard-controller", () => ({
+  KeyboardAvoidingView: ({
+    children,
+    ...props
+  }: {
+    children: React.ReactNode;
+    [key: string]: unknown;
+  }) => {
+    const mockReact = require("react");
+    const { View: MockView } = require("react-native");
+    return mockReact.createElement(MockView, props, children);
+  },
 }));
 
 jest.mock("@expo/vector-icons", () => {
@@ -97,6 +133,18 @@ describe("profile moderation controls", () => {
     fireEvent.press(getByTestId("accessibility-high-contrast-toggle"));
 
     expect(accessibilityValue.setHighContrast).toHaveBeenCalledWith(true);
+  });
+
+  it("keeps non-sensitive build information available on the profile screen", () => {
+    const { getByTestId, getByText } = render(<ProfileScreen />);
+
+    expect(getByTestId("build-identity")).toBeTruthy();
+    expect(getByText("BUILD INFORMATION")).toBeTruthy();
+    expect(getByText("App version")).toBeTruthy();
+    expect(getByText("Build ID")).toBeTruthy();
+    expect(getByText("Update created")).toBeTruthy();
+    expect(getByText("Runtime")).toBeTruthy();
+    expect(getByText("Client")).toBeTruthy();
   });
 
   it("lets users choose a text size from accessibility settings", () => {
@@ -815,5 +863,74 @@ describe("profile moderation controls", () => {
     fireEvent.press(getByTestId("ban-account-button"));
 
     await waitFor(() => expect(historyCallCount).toBe(2));
+  });
+});
+
+describe("profile layout under the tab bar and keyboard", () => {
+  beforeEach(() => {
+    process.env.EXPO_PUBLIC_DOMAIN = "api.example.test";
+    mockGetToken.mockReset().mockResolvedValue("clerk-token");
+    mockFetch.mockReset();
+    globalThis.fetch = mockFetch as unknown as typeof fetch;
+    mockUseApp.mockReturnValue(appValue);
+    mockUseAccessibility.mockReturnValue(accessibilityValue);
+    mockInsets.top = 0;
+    mockInsets.bottom = 0;
+  });
+
+  function contentPaddingBottom(view: {
+    getByTestId: (testID: string) => { props: Record<string, unknown> };
+  }) {
+    const style = view.getByTestId("profile-scroll").props.contentContainerStyle as StyleProp<ViewStyle>;
+    return StyleSheet.flatten(style).paddingBottom;
+  }
+
+  it("reserves the measured tab bar height below the profile content", () => {
+    // The classic tab navigator publishes its measured bar height (bottom
+    // inset included) through this context; the bar overlays the screen and
+    // is opaque on Android and web, so the scroll content must clear it.
+    mockInsets.bottom = 34;
+    const view = render(
+      <BottomTabBarHeightContext.Provider value={83}>
+        <ProfileScreen />
+      </BottomTabBarHeightContext.Provider>,
+    );
+
+    expect(contentPaddingBottom(view)).toBe(83 + 24);
+  });
+
+  it("tracks the tab bar height as the navigator re-measures it", () => {
+    const view = render(
+      <BottomTabBarHeightContext.Provider value={49}>
+        <ProfileScreen />
+      </BottomTabBarHeightContext.Provider>,
+    );
+    expect(contentPaddingBottom(view)).toBe(49 + 24);
+
+    view.rerender(
+      <BottomTabBarHeightContext.Provider value={84}>
+        <ProfileScreen />
+      </BottomTabBarHeightContext.Provider>,
+    );
+    expect(contentPaddingBottom(view)).toBe(84 + 24);
+  });
+
+  it("falls back to the safe-area inset when no tab bar height is published", () => {
+    // Native iOS 26 tabs (and a screen rendered outside the navigator) publish
+    // no measured height; the safe-area inset already covers what the system
+    // draws at the bottom.
+    mockInsets.bottom = 34;
+    const view = render(<ProfileScreen />);
+
+    expect(contentPaddingBottom(view)).toBe(34 + 24);
+  });
+
+  it("avoids the keyboard with the keyboard-controller padding strategy on every platform", () => {
+    const { getByTestId } = render(<ProfileScreen />);
+
+    const avoidingView = getByTestId("profile-keyboard-avoiding-view");
+    expect(avoidingView.props.behavior).toBe("padding");
+    expect(avoidingView.props.keyboardVerticalOffset).toBe(0);
+    expect(getByTestId("profile-scroll").props.keyboardShouldPersistTaps).toBe("handled");
   });
 });

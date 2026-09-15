@@ -3,12 +3,41 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { build as esbuild } from "esbuild";
 import esbuildPluginPino from "esbuild-plugin-pino";
-import { rm } from "node:fs/promises";
+import { readFile, readdir, rm, writeFile } from "node:fs/promises";
 
 // Plugins (e.g. 'esbuild-plugin-pino') may use `require` to resolve dependencies
 globalThis.require = createRequire(import.meta.url);
 
 const artifactDir = path.dirname(fileURLToPath(import.meta.url));
+
+async function makeLoggingWorkerPathsRelocatable(distDir) {
+  const bundledFiles = (await readdir(distDir)).filter((file) =>
+    file.endsWith(".mjs"),
+  );
+  const absoluteOutputDir = `const outputDir = ${JSON.stringify(distDir)};`;
+  const relativeOutputDir = "const outputDir = globalThis.__dirname;";
+  let replacements = 0;
+
+  await Promise.all(
+    bundledFiles.map(async (file) => {
+      const filePath = path.join(distDir, file);
+      const contents = await readFile(filePath, "utf8");
+      if (!contents.includes(absoluteOutputDir)) return;
+
+      const updated = contents.replaceAll(absoluteOutputDir, relativeOutputDir);
+      replacements +=
+        contents.split(absoluteOutputDir).length -
+        updated.split(absoluteOutputDir).length;
+      await writeFile(filePath, updated);
+    }),
+  );
+
+  if (replacements === 0) {
+    throw new Error(
+      "Pino bundle did not contain the expected logging-worker path declaration.",
+    );
+  }
+}
 
 async function buildAll() {
   const distDir = path.resolve(artifactDir, "dist");
@@ -24,6 +53,13 @@ async function buildAll() {
     format: "esm",
     outdir: distDir,
     outExtension: { ".js": ".mjs" },
+    // The preload (instrument.mjs) and the application (index.mjs) share one
+    // copy of Sentry, pino and the logger through a common chunk. Without
+    // splitting each entry would carry its own copy: the Sentry client the
+    // preload initializes would not be the one the application reports
+    // through, and each copy of the logger would spawn its own transport
+    // worker.
+    splitting: true,
     logLevel: "info",
     // Some packages may not be bundleable, so we externalize them, we can add more here as needed.
     // Some of the packages below may not be imported or installed, but we're adding them in case they are in the future.
@@ -102,10 +138,11 @@ async function buildAll() {
       "puppeteer",
       "puppeteer-core",
       "electron",
-      // Sentry's preload must observe Express loading at runtime. Keeping both
-      // packages outside the bundle lets Node's import hooks instrument Express.
-      "@sentry/node",
-      "express",
+      // @sentry/node and express are deliberately bundled. Leaving them
+      // external would let Sentry's import hooks instrument Express for
+      // tracing, but tracing is disabled (see src/instrument.ts), and loading
+      // them from node_modules costs thousands of small file reads on every
+      // cold start — the dominant part of production startup time.
     ],
     sourcemap: "linked",
     plugins: [
@@ -124,6 +161,7 @@ globalThis.__dirname = __bannerPath.dirname(globalThis.__filename);
     `,
     },
   });
+  await makeLoggingWorkerPathsRelocatable(distDir);
 
   await esbuild({
     entryPoints: [path.resolve(artifactDir, "src/cryptoClient.ts")],

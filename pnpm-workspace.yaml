@@ -98,7 +98,7 @@ onlyBuiltDependencies:
 
 packageExtensions:
   # react-native-worklets dynamically loads this Babel package without declaring it.
-  react-native-worklets@0.5.1:
+  react-native-worklets@0.10.1:
     dependencies:
       '@babel/generator': ^7.29.2
 overrides:

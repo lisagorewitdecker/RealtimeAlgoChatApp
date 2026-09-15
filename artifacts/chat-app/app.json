@@ -6,13 +6,7 @@
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "chat-app",
-    "userInterfaceStyle": "automatic",
-    "newArchEnabled": true,
-    "splash": {
-      "image": "./assets/images/icon.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#0D0D1A"
-    },
+    "userInterfaceStyle": "dark",
     "ios": {
       "supportsTablet": false,
       "infoPlist": {
@@ -37,8 +31,24 @@
           "origin": "https://replit.com/"
         }
       ],
+      [
+        "@sentry/react-native/expo",
+        {
+          "organization": "lisagorewitdecker-06",
+          "project": "react-native"
+        }
+      ],
       "expo-font",
-      "expo-web-browser"
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/images/icon.png",
+          "imageWidth": 200,
+          "backgroundColor": "#0D0D1A"
+        }
+      ],
+      "expo-web-browser",
+      "@sentry/react-native"
     ],
     "experiments": {
       "typedRoutes": true,

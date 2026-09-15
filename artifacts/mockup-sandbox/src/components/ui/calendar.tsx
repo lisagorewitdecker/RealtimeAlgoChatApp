@@ -11,12 +11,6 @@ import { DayButton, DayPicker, getDefaultClassNames } from "react-day-picker"
 import { cn } from "@/lib/utils"
 import { Button, buttonVariants } from "@/components/ui/button"
 
-function isMutableRefObject<T>(
-  ref: React.Ref<T> | undefined
-): ref is React.MutableRefObject<T | null> {
-  return typeof ref === "object" && ref !== null && "current" in ref
-}
-
 function Calendar({
   className,
   classNames,
@@ -134,11 +128,12 @@ function Calendar({
         Root: ({ className, rootRef, ...props }) => {
           const setRootRef: React.RefCallback<HTMLDivElement> = (node) => {
             if (typeof rootRef === "function") {
-              rootRef(node)
-              return
+              return rootRef(node) as unknown as ReturnType<
+                React.RefCallback<HTMLDivElement>
+              >
             }
 
-            if (isMutableRefObject(rootRef)) {
+            if (rootRef) {
               rootRef.current = node
             }
           }

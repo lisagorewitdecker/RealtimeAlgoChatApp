@@ -71,5 +71,3 @@ Secrets (Clerk keys, admin allowlist, session secret, Anthropic access) are mana
 - Server-resolved Clerk identity always overrides any client-supplied identity claims.
 - Room access is granted only via signed server-issued capabilities, not client-asserted room membership.
 - See `replit.md` for project-specific conventions and decisions as they're recorded.
-
-

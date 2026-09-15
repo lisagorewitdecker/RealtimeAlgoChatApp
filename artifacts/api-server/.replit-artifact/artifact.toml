@@ -5,7 +5,7 @@ version = "1.0.0"
 id = "3B4_FFSkEVBkAeYMFRJ2e"
 
 [[services]]
-localPort = 8080
+localPort = 8080 # API service port; production run uses the same PORT value.
 name = "API Server"
 paths = ["/api"]
 
@@ -22,11 +22,12 @@ NODE_ENV = "production"
 
 [services.production.run]
 # we don't run through pnpm to make startup faster in production
-args = ["node", "--enable-source-maps", "artifacts/api-server/dist/index.mjs"]
+args = ["node", "--enable-source-maps", "--import", "./artifacts/api-server/dist/instrument.mjs", "./artifacts/api-server/dist/index.mjs"]
 
 [services.production.run.env]
 PORT = "8080"
 NODE_ENV = "production"
 
 [services.production.health.startup]
+# Canonical API readiness check; /api only points callers here.
 path = "/api/healthz"

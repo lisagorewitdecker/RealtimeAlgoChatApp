@@ -1,0 +1,99 @@
+appId: ${NATIVE_SMOKE_APP_ID}
+---
+- openLink: ${NATIVE_SMOKE_SCHEME}://room/native-large-text-smoke-room?roomName=Native%20large%20text%20join%20fixture&create=true
+- extendedWaitUntil:
+    visible:
+      id: room-participant-count
+    timeout: 20000
+- tapOn:
+    id: room-back-button
+- extendedWaitUntil:
+    visible:
+      id: new-room-button
+    timeout: 10000
+- tapOn:
+    id: new-room-button
+- extendedWaitUntil:
+    visible:
+      id: new-room-scroll
+    timeout: 10000
+- tapOn:
+    id: room-name-input
+- inputText: Native large text smoke room with a long name
+- assertVisible:
+    id: room-submit-button
+- takeScreenshot: ${NATIVE_SMOKE_SCREENSHOT_DIR}/05-new-room-create-keyboard
+- tapOn:
+    id: room-submit-button
+- extendedWaitUntil:
+    visible:
+      id: room-participant-count
+    timeout: 20000
+- assertVisible:
+    id: room-call-button
+- assertVisible:
+    id: room-users-button
+- tapOn:
+    id: room-users-button
+- assertVisible:
+    id: room-member-list
+- tapOn:
+    id: room-composer-input
+- inputText: A multiline-sized message that wraps across the smallest supported screen.
+- assertVisible:
+    id: room-send-button
+- takeScreenshot: ${NATIVE_SMOKE_SCREENSHOT_DIR}/06-room-keyboard
+- hideKeyboard
+- tapOn:
+    id: room-call-button
+- tapOn:
+    text: "Allow"
+    optional: true
+- tapOn:
+    text: "While using the app"
+    optional: true
+- extendedWaitUntil:
+    visible:
+      id: call-webview
+    timeout: 20000
+- extendedWaitUntil:
+    visible: "Embedded call controls fit the viewport"
+    timeout: 10000
+- assertVisible:
+    id: call-dismiss-button
+- takeScreenshot: ${NATIVE_SMOKE_SCREENSHOT_DIR}/07-call-host-and-webview
+- tapOn:
+    id: call-dismiss-button
+- extendedWaitUntil:
+    visible:
+      id: room-back-button
+    timeout: 10000
+- tapOn:
+    id: room-back-button
+- extendedWaitUntil:
+    visible:
+      id: new-room-button
+    timeout: 10000
+- tapOn:
+    id: new-room-button
+- tapOn:
+    id: new-room-mode-join
+- tapOn:
+    id: room-id-input
+- inputText: native-large-text-smoke-room
+- assertVisible:
+    id: room-submit-button
+- takeScreenshot: ${NATIVE_SMOKE_SCREENSHOT_DIR}/08-new-room-join-keyboard
+- tapOn:
+    id: room-submit-button
+- extendedWaitUntil:
+    visible:
+      id: room-participant-count
+    timeout: 20000
+- takeScreenshot: ${NATIVE_SMOKE_SCREENSHOT_DIR}/09-joined-room
+- tapOn:
+    id: room-back-button
+- extendedWaitUntil:
+    visible:
+      id: new-room-button
+    timeout: 10000

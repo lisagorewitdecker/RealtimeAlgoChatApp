@@ -1,0 +1,61 @@
+Android native large-text runner check
+======================================
+Checked (UTC): 2026-09-03
+Result: BLOCKED — this workspace cannot run the Android physical-device supplement.
+
+Host:
+- OS/kernel: Linux x86_64 (Replit workspace; kernel 6.18.48)
+- adb: NOT FOUND
+- sdkmanager: NOT FOUND
+- avdmanager: NOT FOUND
+- emulator: NOT FOUND
+- maestro: NOT FOUND
+- eas: NOT FOUND
+- java: NOT FOUND
+- pnpm: FOUND (10.26.1)
+- curl/unzip/sha256sum: FOUND
+- ANDROID_HOME: not set
+- ANDROID_SDK_ROOT: not set
+
+Device and release candidate:
+- Connected Android device: unavailable; `adb devices` could not be run (`adb: command not found`)
+- Prepared release-candidate application ID: not available
+- Prepared release-candidate build ID: not available
+- Dedicated verified smoke account: not available to this runner
+- NATIVE_SMOKE_DISPLAY_NAME: not set
+
+Provisioning preflight:
+- Script: `bash scripts/provision-android-runner.sh --help` passed
+- Script syntax: `bash -n scripts/provision-android-runner.sh` passed
+- Verification command: `bash scripts/provision-android-runner.sh`
+- Verification exit status: 2
+- Verification output: `Required command not found: sdkmanager`
+- Verification behavior: read-only; no SDK packages, licenses, or AVD state were changed
+- Isolated empty-SDK install smoke: passed with a temporary local command-line
+  tools archive and mocked SDK package tools; confirmed package-tool ordering,
+  AVD creation, and 320x568 mdpi portrait configuration
+
+Project gate attempt:
+- Command: pnpm --filter @workspace/chat-app test:native-large-text android
+- Exit status: 2
+- Output: Required command not found: maestro
+- The gate stopped before device discovery, app launch, sign-in, or screenshot capture.
+- The gate now records `runner-metadata.txt` and `pass-fail-record.txt` inside
+  each run directory, validates the exact installed application ID, and rejects
+  a non-portrait Android target before launching Maestro. No such run directory
+  was created because this host still lacks Maestro.
+
+No Android device model, Android version, OEM skin, keyboard/locale, accessibility
+settings, screenshots, permission observations, clipping results, or
+keyboard-obscured-action results were produced.
+
+Resume requirements:
+1. Use a prepared Android runner with adb, Android SDK/platform tools, and Maestro.
+2. Connect a representative Android device (or the prepared small emulator for
+   the automated gate) and verify it is reachable with adb.
+3. Install the release candidate and provide its application/build IDs through
+   the runner's secret store.
+4. Provide the dedicated verified smoke account through the runner's secret store.
+5. Set Profile accessibility to 140% text, High contrast on, Reduced motion on,
+   and portrait orientation, then run the manual supplement in
+   artifacts/chat-app/docs/native-large-text-device-check.md.

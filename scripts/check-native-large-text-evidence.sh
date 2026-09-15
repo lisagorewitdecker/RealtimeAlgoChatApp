@@ -456,6 +456,9 @@ validate_platform() {
       elif [[ "$pass_fail_status" != "PASS" ]]; then
         issue "$platform" "The pass/fail record at ${pass_fail_path} is not PASS. Failed or blocked runner output is not reviewed device evidence; complete the run before release review."
       fi
+    if metadata_key_is_unambiguous "$pass_fail_path" status &&
+      [[ "$(metadata_value "$pass_fail_path" status | tr -d '\r' | sed 's/[[:space:]]*$//')" != "PASS" ]]; then
+      issue "$platform" "The pass/fail record at ${pass_fail_path} is not PASS. Failed or blocked runner output is not reviewed device evidence; complete the run before release review."
     fi
 
     local run_mode
@@ -464,6 +467,8 @@ validate_platform() {
       if [[ -z "$run_mode" ]]; then
         issue "$platform" "The pass/fail record at ${pass_fail_path} does not declare run_mode=release-gate. Only release-gate runs on the smallest supported device are release evidence; re-run the current native large-text gate."
       elif [[ "$run_mode" == "diagnostic-only" ]]; then
+      run_mode="$(metadata_value "$pass_fail_path" run_mode)"
+      if [[ "$run_mode" == "diagnostic-only" ]]; then
         issue "$platform" "The pass/fail record at ${pass_fail_path} is from a diagnostic-only run (NATIVE_SMOKE_ALLOW_LARGER_DEVICE=1), not release evidence. Re-run the release gate on the smallest supported device without the override."
       elif [[ "$run_mode" != "release-gate" ]]; then
         issue "$platform" "The pass/fail record at ${pass_fail_path} does not declare run_mode=release-gate. Only release-gate runs on the smallest supported device are release evidence; re-run the current native large-text gate."
@@ -475,6 +480,7 @@ validate_platform() {
 
   if [[ -s "$run_dir/native-branding-check.md" ]] &&
     ! grep -Fxq -- "- Status: **PASS**" "$run_dir/native-branding-check.md"; then
+    ! grep -Fq -- "- Status: **PASS**" "$run_dir/native-branding-check.md"; then
     issue "$platform" "The native branding report at ${run_dir}/native-branding-check.md is not PASS. Resolve the native metadata failure and rerun the release gate."
   fi
 
@@ -557,6 +563,160 @@ validate_platform() {
         --expected-release "" \
         --expected-dist "" \
         2>&1
+  if [[ -s "$run_dir/sentry-source-map-evidence.json" ]] &&
+    ((sentry_trigger_has_errors == 0)); then
+    local candidate_build_id
+    local sentry_validation_output
+    candidate_build_id="$(tr -d '\r\n' < "$run_dir/candidate-build-id.txt")"
+    if ! sentry_validation_output="$(
+      "$NODE_BINARY" --input-type=module - \
+        "$run_dir/sentry-source-map-evidence.json" \
+        "$sentry_trigger_path" \
+        "$platform" \
+        "$candidate_build_id" <<'NODE'
+import { readFileSync } from "node:fs";
+
+const [, , evidencePath, triggerPath, platform, candidateBuildId] = process.argv;
+const rawEvidence = readFileSync(evidencePath, "utf8");
+if (/(?:auth(?:orization)?[_-]?token|sentry_auth_token|bearer\s+[A-Za-z0-9._-]+)/i.test(rawEvidence)) {
+  throw new Error("evidence contains credential-like content");
+}
+let evidence;
+try {
+  evidence = JSON.parse(rawEvidence);
+} catch {
+  throw new Error("evidence is not valid JSON");
+}
+function duplicateJsonFields(raw) {
+  let index = 0;
+  const duplicates = [];
+
+  function skipWhitespace() {
+    while (/\s/.test(raw[index] ?? "")) index += 1;
+  }
+
+  function readString() {
+    const start = index;
+    index += 1;
+    while (index < raw.length) {
+      if (raw[index] === "\\") {
+        index += 2;
+      } else if (raw[index] === '"') {
+        index += 1;
+        return JSON.parse(raw.slice(start, index));
+      } else {
+        index += 1;
+      }
+    }
+    throw new Error("unterminated JSON string");
+  }
+
+  function scanValue() {
+    skipWhitespace();
+    if (raw[index] === "{") {
+      scanObject();
+    } else if (raw[index] === "[") {
+      scanArray();
+    } else if (raw[index] === '"') {
+      readString();
+    } else {
+      while (index < raw.length && !/[,\]}]/.test(raw[index])) index += 1;
+    }
+  }
+
+  function scanObject() {
+    const keys = new Set();
+    index += 1;
+    skipWhitespace();
+    if (raw[index] === "}") {
+      index += 1;
+      return;
+    }
+    while (index < raw.length) {
+      skipWhitespace();
+      const key = readString();
+      if (keys.has(key)) duplicates.push(key);
+      keys.add(key);
+      skipWhitespace();
+      index += 1;
+      scanValue();
+      skipWhitespace();
+      if (raw[index] === "}") {
+        index += 1;
+        return;
+      }
+      index += 1;
+    }
+  }
+
+  function scanArray() {
+    index += 1;
+    skipWhitespace();
+    if (raw[index] === "]") {
+      index += 1;
+      return;
+    }
+    while (index < raw.length) {
+      scanValue();
+      skipWhitespace();
+      if (raw[index] === "]") {
+        index += 1;
+        return;
+      }
+      index += 1;
+    }
+  }
+
+  scanValue();
+  return [...new Set(duplicates)];
+}
+const duplicateFields = duplicateJsonFields(rawEvidence);
+if (duplicateFields.length > 0) {
+  throw new Error("duplicate JSON field(s)");
+}
+const trigger = Object.fromEntries(
+  readFileSync(triggerPath, "utf8")
+    .trim()
+    .split(/\r?\n/)
+    .map((line) => {
+      const index = line.indexOf("=");
+      return [line.slice(0, index), line.slice(index + 1)];
+    }),
+);
+const requiredStrings = [
+  "eventId",
+  "marker",
+  "release",
+  "dist",
+];
+if (evidence.status !== "PASS") throw new Error("status is not PASS");
+if (evidence.platform !== platform) throw new Error("platform does not match");
+if (evidence.candidateBuildId !== candidateBuildId) {
+  throw new Error("candidate build ID does not match");
+}
+if (trigger.platform !== platform) throw new Error("trigger platform does not match");
+if (trigger.candidate_build_id !== candidateBuildId) {
+  throw new Error("trigger candidate build ID does not match");
+}
+if (trigger.marker !== evidence.marker) throw new Error("trigger marker does not match");
+for (const key of requiredStrings) {
+  if (typeof evidence[key] !== "string" || evidence[key].trim() === "") {
+    throw new Error(`${key} is missing`);
+  }
+}
+const frame = evidence.readableFrame;
+if (
+  !frame ||
+  typeof frame.filename !== "string" ||
+  !/\.[cm]?[jt]sx?$/i.test(frame.filename) ||
+  typeof frame.function !== "string" ||
+  !frame.function.includes("createNativeSourceMapProbeError") ||
+  !Number.isInteger(frame.line) ||
+  !Number.isInteger(frame.column)
+) {
+  throw new Error("readable source-mapped frame is missing");
+}
+NODE
     )"; then
       issue "$platform" "Invalid Sentry source-map evidence at ${run_dir}/sentry-source-map-evidence.json: ${sentry_validation_output:-validation failed}."
     fi
@@ -687,6 +847,11 @@ validate_review_record() {
   fi
 
   if [[ -n "$record_build_id" && -n "$candidate_build_id" && "$record_build_id" != "$candidate_build_id" ]]; then
+  local tested_build_id=""
+  if [[ -s "$run_dir/candidate-build-id.txt" ]]; then
+    tested_build_id="$(first_line_trimmed "$run_dir/candidate-build-id.txt")"
+  fi
+  if [[ -n "$record_build_id" && -n "$tested_build_id" && "$record_build_id" != "$tested_build_id" ]]; then
     issue "$platform" "Review record candidate_build_id does not match the tested candidate in ${run_dir}/candidate-build-id.txt. A review covers one evidence set; do not reuse a review record from another build."
     record_valid=0
   fi
@@ -710,6 +875,7 @@ validate_review_record() {
 
   case "$decision" in
     APPROVED)
+    APPROVED | "")
       ;;
     REJECTED)
       issue "$platform" "The review record at ${record_path} records a rejected decision. A rejected review blocks release; resolve the recorded findings, rerun the native large-text gate, and record a new review."
@@ -787,6 +953,13 @@ write_evidence_summary() {
       else
         echo "- Validated run directory: **Unavailable**"
         echo "- Detailed evidence report: **Unavailable**"
+      fi
+      if [[ "$download_status" == "FAIL" ]]; then
+        if [[ "$platform" == "ios" ]]; then
+          echo "- Recovery: **Rerun the iOS native large-text job, or make the existing iOS artifact available, then rerun the mobile release gate.**"
+        else
+          echo "- Recovery: **Rerun the Android native large-text job, or make the existing Android artifact available, then rerun the mobile release gate.**"
+        fi
       fi
       if [[ -n "${SUMMARY_ISSUES[$platform]}" ]]; then
         echo

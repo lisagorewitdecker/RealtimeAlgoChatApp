@@ -1,0 +1,53 @@
+appId: ${NATIVE_SMOKE_APP_ID}
+---
+- openLink: ${NATIVE_SMOKE_SCHEME}://
+- extendedWaitUntil:
+    visible:
+      id: new-room-button
+    timeout: 15000
+- tapOn: "Profile"
+- extendedWaitUntil:
+    visible:
+      id: profile-scroll
+    timeout: 10000
+- scrollUntilVisible:
+    element:
+      id: accessibility-settings
+    direction: DOWN
+- tapOn:
+    id: accessibility-font-scale-140
+- runFlow:
+    when:
+      visible: "High contrast: off"
+    commands:
+      - tapOn: "High contrast: off"
+- runFlow:
+    when:
+      visible: "Reduced motion: off"
+    commands:
+      - tapOn: "Reduced motion: off"
+- assertVisible: "Current size: 140%"
+- assertVisible: "High contrast: on"
+- assertVisible: "Reduced motion: on"
+- takeScreenshot: ${NATIVE_SMOKE_SCREENSHOT_DIR}/10-profile-accessibility
+- scrollUntilVisible:
+    element:
+      id: profile-edit-name-button
+    direction: UP
+- tapOn:
+    id: profile-edit-name-button
+- tapOn:
+    id: profile-display-name-input
+- eraseText: 30
+- inputText: ${NATIVE_SMOKE_DISPLAY_NAME}
+- assertVisible:
+    id: profile-save-name-button
+- takeScreenshot: ${NATIVE_SMOKE_SCREENSHOT_DIR}/11-profile-edit-keyboard
+- tapOn:
+    id: profile-save-name-button
+- assertVisible: "Saved!"
+- scrollUntilVisible:
+    element:
+      id: accessibility-settings
+    direction: DOWN
+- assertVisible: "Current size: 140%"

@@ -15,6 +15,13 @@ type ToasterToast = ToastProps & {
   action?: ToastActionElement
 }
 
+const actionTypes = {
+  ADD_TOAST: "ADD_TOAST",
+  UPDATE_TOAST: "UPDATE_TOAST",
+  DISMISS_TOAST: "DISMISS_TOAST",
+  REMOVE_TOAST: "REMOVE_TOAST",
+} as const
+
 let count = 0
 
 function genId() {
@@ -22,21 +29,23 @@ function genId() {
   return count.toString()
 }
 
+type ActionType = typeof actionTypes
+
 type Action =
   | {
-      type: "ADD_TOAST"
+      type: ActionType["ADD_TOAST"]
       toast: ToasterToast
     }
   | {
-      type: "UPDATE_TOAST"
+      type: ActionType["UPDATE_TOAST"]
       toast: Partial<ToasterToast>
     }
   | {
-      type: "DISMISS_TOAST"
+      type: ActionType["DISMISS_TOAST"]
       toastId?: ToasterToast["id"]
     }
   | {
-      type: "REMOVE_TOAST"
+      type: ActionType["REMOVE_TOAST"]
       toastId?: ToasterToast["id"]
     }
 
@@ -131,7 +140,7 @@ type Toast = Omit<ToasterToast, "id">
 function toast({ ...props }: Toast) {
   const id = genId()
 
-  const update = (props: Partial<Omit<ToasterToast, "id">>) =>
+  const update = (props: ToasterToast) =>
     dispatch({
       type: "UPDATE_TOAST",
       toast: { ...props, id },
@@ -168,7 +177,7 @@ function useToast() {
         listeners.splice(index, 1)
       }
     }
-  }, [])
+  }, [state])
 
   return {
     ...state,

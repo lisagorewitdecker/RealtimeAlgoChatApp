@@ -1,0 +1,9 @@
+> @workspace/api-server@0.0.0 test:e2e:banned-room
+> playwright install chromium && playwright test --config e2e/playwright.config.ts
+
+Running 2 tests using 1 worker
+
+PASS [setup] e2e/global.setup.ts:6:1 obtain a Clerk testing token (263ms)
+PASS [chromium] e2e/banned-room.spec.ts:132:1 an active banned member sees the explanation and sees it again on revisit (15.2s)
+
+2 passed (24.9s)

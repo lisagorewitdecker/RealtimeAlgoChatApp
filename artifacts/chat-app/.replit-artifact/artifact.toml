@@ -1,0 +1,29 @@
+kind = "mobile"
+previewPath = "/"
+title = "Chat App"
+version = "1.0.0"
+id = "artifacts/chat-app"
+router = "expo-domain"
+
+[[integratedSkills]]
+name = "expo"
+version = "1.0.0"
+
+[[services]]
+# The production static server answers this lightweight startup probe.
+ensurePreviewReachable = "/status"
+name = "expo"
+paths = [ "/" ]
+localPort = 21127 # Expo service port; the artifact environment sets PORT to match.
+
+[services.development]
+run = "pnpm --filter @workspace/chat-app run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/chat-app", "run", "build" ]
+# Start the zero-dependency server directly so publish readiness does not depend on pnpm startup.
+run = [ "node", "artifacts/chat-app/server/serve.js" ]
+
+[services.env]
+PORT = "21127"
+BASE_PATH = "/"

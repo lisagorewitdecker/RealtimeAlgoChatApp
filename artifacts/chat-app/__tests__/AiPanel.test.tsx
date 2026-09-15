@@ -1,5 +1,5 @@
 import React from "react";
-import { render, waitFor } from "@testing-library/react-native";
+import { act, render, waitFor } from "@testing-library/react-native";
 import SandboxScreen, {
   prepareWebSandboxHtml,
 } from "../app/sandbox/[roomId]";
@@ -86,6 +86,12 @@ describe("sandbox assistant host", () => {
       getToken: mockGetToken,
       isLoaded: true,
       isSignedIn: true,
+    });
+  });
+
+  afterEach(async () => {
+    await act(async () => {
+      await Promise.resolve();
     });
   });
 

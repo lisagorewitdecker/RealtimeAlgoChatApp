@@ -5,6 +5,8 @@ on:
     branches: ["development"]
   pull_request:
     branches: ["development"]
+    types: [opened, synchronize, reopened, edited]
+
 permissions:
   contents: read
 
@@ -14,36 +16,58 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
+        id: checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
       - name: Set up pnpm
-        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1
+        id: setup-pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
         with:
           version: 10.26.1
 
       - name: Set up Node.js
+        id: setup-node
         uses: actions/setup-node@v4
         with:
           node-version: 24
           cache: pnpm
 
       - name: Install workspace dependencies
-        run: pnpm install --frozen-lockfile --ignore-scripts
+        id: install-dependencies
+        run: pnpm install --frozen-lockfile
 
       - name: Verify generated API clients
-        run: |
-          if [[ -f artifacts/api-spec/package.json ]]; then
-            pnpm validate:api-codegen
-          else
-            echo "No artifacts/api-spec workspace present; skipping generated API client validation."
-          fi
+        run: pnpm validate:api-codegen
 
+      - name: Verify generated API-break guidance
+        run: pnpm validate:api-break-guidance
+
+      # For an intentional versioned break, add both declarations to the pull request description.
+      # Inline example:
+      #   API_BREAKING_CHANGE_JUSTIFICATION: <why the existing contract must break>
+      #   API_BREAKING_CHANGE_MIGRATION_PLAN: <how existing consumers move to the new contract>
+      #
+      # Multi-step migration plan example:
+      #   API_BREAKING_CHANGE_MIGRATION_PLAN:
+      #     - Release the updated client first.
+      #     - Keep the old API available during migration.
+      #     - Remove the old API after adoption is confirmed.
+      #   (End the block with a blank line or the next API_BREAKING_CHANGE_* marker.)
+      # Pull request runs reject breaking changes when either declaration is absent.
+      # Push runs skip compatibility enforcement because the change was enforced
+      # on its pull request before merge, and print that reason in the log and job
+      # summary. Every decision is published through GITHUB_STEP_SUMMARY.
       - name: Check API contract compatibility
-        run: |
-          if [[ -f artifacts/api-spec/package.json ]]; then
-            pnpm validate:api-compatibility
-          else
-            echo "No artifacts/api-spec workspace present; skipping API contract compatibility validation."
-          fi
+        if: >-
+          ${{
+            always() &&
+            steps.checkout.outcome == 'success' &&
+            steps.setup-pnpm.outcome == 'success' &&
+            steps.setup-node.outcome == 'success' &&
+            steps.install-dependencies.outcome == 'success'
+          }}
+        env:
+          API_BREAKING_CHANGE_PR_BODY: ${{ github.event.pull_request.body }}
+        run: pnpm validate:api-compatibility

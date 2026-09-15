@@ -1,0 +1,14 @@
+{
+  "name": "@workspace/api-spec",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "codegen": "orval --config ./orval.config.ts && node ./scripts/postprocess-generated.mjs && pnpm -w run typecheck:libs",
+    "check-generated": "pnpm run test && node ./scripts/check-generated.mjs",
+    "test": "node ./scripts/postprocess-generated.test.mjs && pnpm run test:compatibility && node ./scripts/generated-drift-report.test.mjs && node ./scripts/check-staged-codegen-backups.test.mjs && node ./scripts/check-generated.test.mjs",
+    "test:compatibility": "node ./scripts/check-contract-compatibility.test.mjs"
+  },
+  "devDependencies": {
+    "orval": "^8.27.0"
+  }
+}
