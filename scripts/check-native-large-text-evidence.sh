@@ -433,12 +433,16 @@ validate_platform() {
 
     local run_mode
     if metadata_key_is_unambiguous "$pass_fail_path" run_mode; then
-      run_mode="$(metadata_value "$pass_fail_path" run_mode)"
-      if [[ "$run_mode" == "diagnostic-only" ]]; then
+      run_mode="$(trimmed_value "$pass_fail_path" run_mode)"
+      if [[ -z "$run_mode" ]]; then
+        issue "$platform" "The pass/fail record at ${pass_fail_path} does not declare run_mode=release-gate. Only release-gate runs on the smallest supported device are release evidence; re-run the current native large-text gate."
+      elif [[ "$run_mode" == "diagnostic-only" ]]; then
         issue "$platform" "The pass/fail record at ${pass_fail_path} is from a diagnostic-only run (NATIVE_SMOKE_ALLOW_LARGER_DEVICE=1), not release evidence. Re-run the release gate on the smallest supported device without the override."
       elif [[ "$run_mode" != "release-gate" ]]; then
         issue "$platform" "The pass/fail record at ${pass_fail_path} does not declare run_mode=release-gate. Only release-gate runs on the smallest supported device are release evidence; re-run the current native large-text gate."
       fi
+    else
+      issue "$platform" "The pass/fail record at ${pass_fail_path} does not declare run_mode=release-gate. Only release-gate runs on the smallest supported device are release evidence; re-run the current native large-text gate."
     fi
   fi
 
