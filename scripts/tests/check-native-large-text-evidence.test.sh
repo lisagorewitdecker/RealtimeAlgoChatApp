@@ -82,6 +82,15 @@ EOF
 create_platform_fixture "$RESULTS_ROOT" ios "$IOS_BUILD_ID"
 create_platform_fixture "$RESULTS_ROOT" android "$ANDROID_BUILD_ID"
 
+node "$ROOT_DIR/scripts/verify-sentry-native-event.mjs" \
+  --evidence-path "$RESULTS_ROOT/ios/2026-09-15T15-03-49Z/sentry-source-map-evidence.json" \
+  --trigger-path "$RESULTS_ROOT/ios/2026-09-15T15-03-49Z/sentry-trigger.txt" \
+  --platform ios \
+  --candidate-build-id "$IOS_BUILD_ID" \
+  --expected-probe-marker ios-marker \
+  --expected-release release-ios \
+  --expected-dist 1
+
 GITHUB_STEP_SUMMARY="$SUMMARY_PATH" \
   bash "$ROOT_DIR/scripts/check-native-large-text-evidence.sh" "$RESULTS_ROOT" \
   >"$STDOUT_PATH" 2>"$STDERR_PATH"
@@ -126,6 +135,25 @@ if [[ "$status" -eq 0 ]]; then
 fi
 
 grep -Fq "contains multiple normalized lines" "$INVALID_STDERR_PATH"
+
+DIRECTORY_RESULTS_ROOT="$TMP_DIR/test-results/native-large-text-directory-artifact"
+DIRECTORY_SUMMARY_PATH="$TMP_DIR/directory-summary.md"
+DIRECTORY_STDOUT_PATH="$TMP_DIR/directory-stdout.log"
+DIRECTORY_STDERR_PATH="$TMP_DIR/directory-stderr.log"
+
+create_platform_fixture "$DIRECTORY_RESULTS_ROOT" ios "$IOS_BUILD_ID"
+create_platform_fixture "$DIRECTORY_RESULTS_ROOT" android "$ANDROID_BUILD_ID"
+rm -f "$DIRECTORY_RESULTS_ROOT/ios/2026-09-15T15-03-49Z/candidate-build-id.txt"
+mkdir "$DIRECTORY_RESULTS_ROOT/ios/2026-09-15T15-03-49Z/candidate-build-id.txt"
+
+if GITHUB_STEP_SUMMARY="$DIRECTORY_SUMMARY_PATH" \
+  bash "$ROOT_DIR/scripts/check-native-large-text-evidence.sh" "$DIRECTORY_RESULTS_ROOT" \
+  >"$DIRECTORY_STDOUT_PATH" 2>"$DIRECTORY_STDERR_PATH"; then
+  echo "Expected directory artifact to fail validation." >&2
+  exit 1
+fi
+
+grep -Fq "is not a regular file" "$DIRECTORY_STDERR_PATH"
 
 create_platform_fixture "$BROKEN_RESULTS_ROOT" ios "$IOS_BUILD_ID"
 create_platform_fixture "$BROKEN_RESULTS_ROOT" android "$ANDROID_BUILD_ID"

@@ -459,7 +459,6 @@ jobs:
           IOS_RESULTS_DIR: ${{ env.NATIVE_SMOKE_RESULTS_DIR }}
           IOS_BRANDING_ARTIFACT_URL: ${{ steps.upload-ios-native-smoke.outputs.artifact-url }}
           IOS_NATIVE_BRANDING_RESULT: ${{ steps.ios-native-branding.outcome }}
-          IOS_BUILD_ID: ${{ env.NATIVE_SMOKE_IOS_BUILD_ID }}
         shell: bash
         run: |
           set -euo pipefail
@@ -473,8 +472,8 @@ jobs:
               echo "## iOS native branding"
               echo
               echo "- Status: **FAIL**"
-echo "- Candidate build: **Omitted from workflow summary**"
-echo "- Candidate build fingerprint: **Omitted from workflow summary**"
+              echo "- Candidate build: **Omitted from workflow summary**"
+              echo "- Candidate build fingerprint: **Omitted from workflow summary**"
               echo "- Native label: \`Unavailable\`"
               echo "- Permission copy: **UNAVAILABLE** (native metadata was not inspected)"
               echo "- Detailed report: [native-branding-check.md](${report_url})"
@@ -683,7 +682,6 @@ echo "- Candidate build fingerprint: **Omitted from workflow summary**"
           ANDROID_RESULTS_DIR: ${{ env.NATIVE_SMOKE_RESULTS_DIR }}
           ANDROID_BRANDING_ARTIFACT_URL: ${{ steps.upload-android-native-smoke.outputs.artifact-url }}
           ANDROID_NATIVE_BRANDING_RESULT: ${{ steps.android-native-branding.outcome }}
-          ANDROID_BUILD_ID: ${{ env.NATIVE_SMOKE_ANDROID_BUILD_ID }}
         shell: bash
         run: |
           set -euo pipefail
@@ -697,8 +695,8 @@ echo "- Candidate build fingerprint: **Omitted from workflow summary**"
               echo "## Android native branding"
               echo
               echo "- Status: **FAIL**"
-              echo "- Candidate build ID: \`${ANDROID_BUILD_ID}\`"
-              echo "- Candidate build fingerprint (SHA-256): \`$(printf '%s' "$ANDROID_BUILD_ID" | sha256sum | awk '{print $1}')\`"
+              echo "- Candidate build: **Omitted from workflow summary**"
+              echo "- Candidate build fingerprint: **Omitted from workflow summary**"
               echo "- Native label: \`Unavailable\`"
               echo "- Permission declarations: **UNAVAILABLE** (native metadata was not inspected)"
               echo "- Detailed report: [native-branding-check.md](${report_url})"
