@@ -4,19 +4,19 @@
   "boundaries": {
     "publicManifestReachability": {
       "status": "PASS",
-      "evidence": "public manifest HTTP 200 (controlled verification)"
+      "evidence": "public manifest HTTP 200 (128 bytes)"
     },
     "localHandoffProbe": {
       "status": "NOT_RUN",
-      "evidence": "Local manifest/bundle probe was not run for this controlled verification"
+      "evidence": "Local manifest/bundle probe not run — no successful probe result was recorded"
     },
     "expoGoLaunch": {
       "status": "NOT_ASSESSED",
-      "evidence": "Requires a physical Android phone running stock Expo Go"
+      "evidence": "Requires a physical Android phone running stock Expo Go."
     },
     "serverNativeRequestEvidence": {
       "status": "NOT_ASSESSED",
-      "evidence": "Requires filtered native Android or Expo Go request evidence"
+      "evidence": "Requires filtered Metro or API evidence from that physical Expo Go session."
     }
   }
 }
