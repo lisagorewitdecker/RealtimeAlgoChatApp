@@ -24,6 +24,42 @@ const HANDOFF_PLATFORM_CONFIG = {
     phoneDescription: "a physical iPhone",
   },
 };
+const HANDOFF_BOUNDARIES = Object.freeze([
+  "publicManifestReachability",
+  "localHandoffProbe",
+  "expoGoLaunch",
+  "serverNativeRequestEvidence",
+]);
+const HANDOFF_ALLOWED_STATUSES = Object.freeze({
+  publicManifestReachability: new Set(["PASS", "FAIL", "NOT_RUN"]),
+  localHandoffProbe: new Set(["PASS", "FAIL", "NOT_RUN"]),
+  expoGoLaunch: new Set(["NOT_ASSESSED"]),
+  serverNativeRequestEvidence: new Set(["NOT_ASSESSED"]),
+});
+const HANDOFF_EVIDENCE_PATTERNS = Object.freeze({
+  publicManifestReachability: {
+    PASS: /^public manifest HTTP 200 \(\d+ bytes\)$/,
+    FAIL: /^Public manifest probe failed — no successful probe result was recorded$/,
+    NOT_RUN:
+      /^Public manifest probe not run — no successful probe result was recorded$/,
+  },
+  localHandoffProbe: {
+    PASS:
+      /^manifest HTTP 200 \(\d+ bytes\); bundle HTTP 200 \(\d+ bytes\)$/,
+    FAIL:
+      /^Local manifest\/bundle probe failed — no successful probe result was recorded$/,
+    NOT_RUN:
+      /^Local manifest\/bundle probe not run — no successful probe result was recorded$/,
+  },
+  expoGoLaunch: {
+    NOT_ASSESSED:
+      /^Requires a physical Android phone running stock Expo Go\.$/,
+  },
+  serverNativeRequestEvidence: {
+    NOT_ASSESSED:
+      /^Requires filtered Metro or API evidence from that physical Expo Go session\.$/,
+  },
+});
 const READY_MARKERS = [/Starting Metro Bundler/i, /› Metro:/i];
 const STARTUP_FAILURES = [
   /error while loading shared libraries:/i,
@@ -84,6 +120,88 @@ function formatRequestOutcome(stage, response, byteLength) {
 
 function safePreflightFailure(status) {
   return `${status} — no successful probe result was recorded`;
+}
+
+function isPlainObject(value) {
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    !Array.isArray(value)
+  );
+}
+
+function hasExactKeys(value, expectedKeys) {
+  const keys = Object.keys(value);
+  return (
+    keys.length === expectedKeys.length &&
+    expectedKeys.every((key) => Object.hasOwn(value, key))
+  );
+}
+
+function invalidHandoffRecord(message) {
+  throw new Error(`Preview handoff preflight JSON ${message}.`);
+}
+
+export function validateHandoffPreflightRecord(record) {
+  const platformConfig =
+    isPlainObject(record) && HANDOFF_PLATFORM_CONFIG[record.platform];
+  if (
+    !isPlainObject(record) ||
+    !platformConfig ||
+    !hasExactKeys(record, ["schema", "platform", "boundaries"]) ||
+    record.schema !== platformConfig.schema ||
+    !isPlainObject(record.boundaries) ||
+    !hasExactKeys(record.boundaries, HANDOFF_BOUNDARIES)
+  ) {
+    invalidHandoffRecord("does not match the expected redacted schema");
+  }
+
+  for (const boundary of HANDOFF_BOUNDARIES) {
+    const result = record.boundaries[boundary];
+    if (
+      !isPlainObject(result) ||
+      !hasExactKeys(result, ["status", "evidence"]) ||
+      typeof result.status !== "string" ||
+      !HANDOFF_ALLOWED_STATUSES[boundary].has(result.status)
+    ) {
+      invalidHandoffRecord(`has an invalid ${boundary} boundary`);
+    }
+    const evidencePattern = HANDOFF_EVIDENCE_PATTERNS[boundary][result.status];
+    if (
+      typeof result.evidence !== "string" ||
+      !evidencePattern?.test(result.evidence)
+    ) {
+      invalidHandoffRecord(`has unsafe evidence for the ${boundary} boundary`);
+    }
+  }
+
+  if (
+    record.boundaries.localHandoffProbe.status !== "NOT_RUN" &&
+    record.boundaries.publicManifestReachability.status !== "PASS"
+  ) {
+    invalidHandoffRecord(
+      "cannot report a local probe without public reachability",
+    );
+  }
+
+  return record;
+}
+
+export async function readAndValidateHandoffPreflight(outputPath) {
+  let source;
+  try {
+    source = await readFile(resolve(outputPath), "utf8");
+  } catch {
+    throw new Error("Preview handoff preflight JSON could not be read.");
+  }
+
+  let record;
+  try {
+    record = JSON.parse(source);
+  } catch {
+    throw new Error("Preview handoff preflight JSON is not valid JSON.");
+  }
+  return validateHandoffPreflightRecord(record);
 }
 
 export function createHandoffPreflightRecord({
@@ -160,6 +278,7 @@ export function formatHandoffPreflight(record) {
 }
 
 export async function writeHandoffPreflight(outputPath, record) {
+  validateHandoffPreflightRecord(record);
   await writeFile(
     resolve(outputPath),
     `${JSON.stringify(record, null, 2)}\n`,
@@ -673,6 +792,21 @@ async function validateLivePreview(
 }
 
 async function main() {
+  const validateRecordIndex = process.argv.indexOf("--validate-record");
+  if (validateRecordIndex !== -1) {
+    const outputPath = process.argv[validateRecordIndex + 1];
+    if (!outputPath || outputPath.startsWith("--")) {
+      throw new Error("--validate-record requires a JSON file path.");
+    }
+    const record = await readAndValidateHandoffPreflight(outputPath);
+    for (const boundary of HANDOFF_BOUNDARIES) {
+      console.log(
+        `${boundary}=${record.boundaries[boundary].status}`,
+      );
+    }
+    return;
+  }
+
   const {
     logFile,
     platform,

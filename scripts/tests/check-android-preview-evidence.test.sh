@@ -30,6 +30,11 @@ write_record() {
   cat >"$path"
 }
 
+write_preflight() {
+  local path="$1"
+  cat >"$path"
+}
+
 blocked_record="$TEST_ROOT/blocked/validation-record.md"
 mkdir -p "$(dirname "$blocked_record")"
 write_record "$blocked_record" <<'EOF'
@@ -54,8 +59,84 @@ write_record "$blocked_record" <<'EOF'
 | Expo Go launch on physical Android | **BLOCKED** | No physical phone was available. |
 | Server-side native request evidence | **BLOCKED** | No native Android request was available. |
 EOF
+blocked_preflight="$(dirname "$blocked_record")/android-preview-preflight.json"
+write_preflight "$blocked_preflight" <<'EOF'
+{
+  "schema": "android-preview-handoff-preflight/v1",
+  "platform": "android",
+  "boundaries": {
+    "publicManifestReachability": {
+      "status": "PASS",
+      "evidence": "public manifest HTTP 200 (128 bytes)"
+    },
+    "localHandoffProbe": {
+      "status": "NOT_RUN",
+      "evidence": "Local manifest/bundle probe not run — no successful probe result was recorded"
+    },
+    "expoGoLaunch": {
+      "status": "NOT_ASSESSED",
+      "evidence": "Requires a physical Android phone running stock Expo Go."
+    },
+    "serverNativeRequestEvidence": {
+      "status": "NOT_ASSESSED",
+      "evidence": "Requires filtered Metro or API evidence from that physical Expo Go session."
+    }
+  }
+}
+EOF
 blocked_output="$(bash "$CHECKER" "$blocked_record" 2>&1)"
 assert_contains "$blocked_output" "validation passed"
+
+json_contract_root="$TEST_ROOT/json-contract"
+json_contract_record="$json_contract_root/validation-record.md"
+mkdir -p "$json_contract_root"
+cp "$blocked_record" "$json_contract_record"
+json_contract_path="$json_contract_root/android-preview-preflight.json"
+
+cat >"$json_contract_path" <<'EOF'
+{"schema":"android-preview-handoff-preflight/v1","platform":"android","boundaries":{"publicManifestReachability":{"status":"GARBAGE","evidence":"safe"},"localHandoffProbe":{"status":"NOT_RUN","evidence":"safe"},"expoGoLaunch":{"status":"NOT_ASSESSED","evidence":"safe"},"serverNativeRequestEvidence":{"status":"NOT_ASSESSED","evidence":"safe"}}}
+EOF
+if invalid_json_output="$(bash "$CHECKER" "$json_contract_record" 2>&1)"; then
+  printf 'Malformed Android preflight JSON unexpectedly passed.\n' >&2
+  exit 1
+fi
+assert_contains "$invalid_json_output" "does not satisfy the redacted schema"
+assert_not_contains "$invalid_json_output" "GARBAGE"
+
+unsafe_json_sentinel="https://preview-fixture.replit.dev/account=fixture-account/message=fixture-message"
+cat >"$json_contract_path" <<EOF
+{"schema":"android-preview-handoff-preflight/v1","platform":"android","boundaries":{"publicManifestReachability":{"status":"PASS","evidence":"$unsafe_json_sentinel"},"localHandoffProbe":{"status":"NOT_RUN","evidence":"safe"},"expoGoLaunch":{"status":"NOT_ASSESSED","evidence":"safe"},"serverNativeRequestEvidence":{"status":"NOT_ASSESSED","evidence":"safe"}}}
+EOF
+if unsafe_json_output="$(bash "$CHECKER" "$json_contract_record" 2>&1)"; then
+  printf 'Android preflight JSON with unsafe evidence unexpectedly passed.\n' >&2
+  exit 1
+fi
+assert_contains "$unsafe_json_output" "does not satisfy the redacted schema"
+assert_not_contains "$unsafe_json_output" "$unsafe_json_sentinel"
+
+cat >"$json_contract_path" <<'EOF'
+{"schema":"android-preview-handoff-preflight/v1","platform":"android","boundaries":{"publicManifestReachability":{"status":"FAIL","evidence":"Public manifest probe failed — no successful probe result was recorded"},"localHandoffProbe":{"status":"NOT_RUN","evidence":"Local manifest/bundle probe not run — no successful probe result was recorded"},"expoGoLaunch":{"status":"NOT_ASSESSED","evidence":"Requires a physical Android phone running stock Expo Go."},"serverNativeRequestEvidence":{"status":"NOT_ASSESSED","evidence":"Requires filtered Metro or API evidence from that physical Expo Go session."}}}
+EOF
+if public_mismatch_output="$(bash "$CHECKER" "$json_contract_record" 2>&1)"; then
+  printf 'Android preflight JSON public-edge mismatch unexpectedly passed.\n' >&2
+  exit 1
+fi
+assert_contains "$public_mismatch_output" "public manifest boundary does not match"
+
+cat >"$json_contract_path" <<'EOF'
+{"schema":"android-preview-handoff-preflight/v1","platform":"android","boundaries":{"publicManifestReachability":{"status":"PASS","evidence":"public manifest HTTP 200 (128 bytes)"},"localHandoffProbe":{"status":"FAIL","evidence":"Local manifest/bundle probe failed — no successful probe result was recorded"},"expoGoLaunch":{"status":"NOT_ASSESSED","evidence":"Requires a physical Android phone running stock Expo Go."},"serverNativeRequestEvidence":{"status":"NOT_ASSESSED","evidence":"Requires filtered Metro or API evidence from that physical Expo Go session."}}}
+EOF
+if local_mismatch_output="$(bash "$CHECKER" "$json_contract_record" 2>&1)"; then
+  printf 'Android preflight JSON local-probe mismatch unexpectedly passed.\n' >&2
+  exit 1
+fi
+assert_contains "$local_mismatch_output" "local handoff boundary does not match"
+
+cat >"$json_contract_path" <<'EOF'
+{"schema":"android-preview-handoff-preflight/v1","platform":"android","boundaries":{"publicManifestReachability":{"status":"PASS","evidence":"public manifest HTTP 200 (128 bytes)"},"localHandoffProbe":{"status":"NOT_RUN","evidence":"Local manifest/bundle probe not run — no successful probe result was recorded"},"expoGoLaunch":{"status":"NOT_ASSESSED","evidence":"Requires a physical Android phone running stock Expo Go."},"serverNativeRequestEvidence":{"status":"NOT_ASSESSED","evidence":"Requires filtered Metro or API evidence from that physical Expo Go session."}}}
+EOF
+missing_phone_output="$(bash "$CHECKER" "$json_contract_record" 2>&1)"
+assert_contains "$missing_phone_output" "validation passed"
 
 # Default discovery must be exercised against an isolated repository layout:
 # the workspace's artifact-level test-results/ tree is gitignored, so a clean
@@ -65,15 +146,19 @@ assert_contains "$blocked_output" "validation passed"
 discovery_root="$TEST_ROOT/default-discovery"
 discovery_android_root="$discovery_root/artifacts/chat-app/test-results/encrypted-room-recovery/android"
 mkdir -p "$discovery_root/scripts" \
+  "$discovery_root/artifacts/chat-app/scripts" \
   "$discovery_android_root/20260101T000000Z" \
   "$discovery_android_root/20260102T000000Z"
 cp "$CHECKER" "$discovery_root/scripts/"
+cp "$ROOT_DIR/artifacts/chat-app/scripts/validate-preview-startup.mjs" \
+  "$discovery_root/artifacts/chat-app/scripts/"
 write_record "$discovery_android_root/20260101T000000Z/validation-record.md" <<'EOF'
 # Older Android preview validation record
 
 **Result: PASS — physical Android preview handoff observed**
 EOF
 cp "$blocked_record" "$discovery_android_root/20260102T000000Z/validation-record.md"
+cp "$blocked_preflight" "$discovery_android_root/20260102T000000Z/android-preview-preflight.json"
 default_output="$(bash "$discovery_root/scripts/check-android-preview-evidence.sh" 2>&1)"
 assert_contains "$default_output" "validation passed: $discovery_android_root/20260102T000000Z/validation-record.md"
 
@@ -99,9 +184,6 @@ for malformed_status in "" GARBAGE; do
   fi
   assert_contains "$malformed_output" "Public manifest reachability"
 done
-
-default_output="$(bash "$CHECKER" 2>&1)"
-assert_contains "$default_output" "validation passed"
 
 non_latest_root="$TEST_ROOT/non-latest-record"
 non_latest_android_root="$non_latest_root/artifacts/chat-app/test-results/encrypted-room-recovery/android"

@@ -70,3 +70,4 @@
 - [Generated-check test controls](generated-check-fault-controls.md) — test-only environment faults and fixture paths require explicit, separate subprocess opt-ins.
 - [GitHub probe write permissions](github-probe-write-permissions.md) — verify commit/tree access before planning a live CI probe; ref creation alone is not enough.
 - [GitHub connection workflow scope](github-connection-workflow-scope.md) — it cannot touch workflow files or logs; prove hosted runs from a minimal PAT-pushed temp branch.
+- [Android preflight JSON contract](android-preflight-json-contract.md) — validate optional redacted sidecars and compare public/local statuses with the Markdown handoff record.

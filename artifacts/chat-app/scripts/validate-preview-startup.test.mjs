@@ -7,6 +7,7 @@ import {
   formatHandoffPreflight,
   requestLocalHandoffProbe,
   requestPublicPreviewManifest,
+  validateHandoffPreflightRecord,
   writeHandoffPreflight,
 } from "./validate-preview-startup.mjs";
 
@@ -306,6 +307,108 @@ test("public-edge failure does not become missing-phone evidence", () => {
     record.boundaries.serverNativeRequestEvidence.status,
     "NOT_ASSESSED",
   );
+});
+
+test("validates the redacted JSON schema and every boundary status enum", () => {
+  const record = createHandoffPreflightRecord({
+    publicManifest: {
+      outcome: "public manifest HTTP 200 (128 bytes)",
+    },
+    localHandoff: {
+      manifest: "manifest HTTP 200 (64 bytes)",
+      bundle: "bundle HTTP 200 (4096 bytes)",
+    },
+  });
+
+  assert.doesNotThrow(() =>
+    validateHandoffPreflightRecord(JSON.parse(JSON.stringify(record))),
+  );
+
+  for (const [boundary, status] of [
+    ["publicManifestReachability", "BLOCKED"],
+    ["localHandoffProbe", "BLOCKED"],
+    ["expoGoLaunch", "PASS"],
+    ["serverNativeRequestEvidence", "BLOCKED"],
+  ]) {
+    const invalid = structuredClone(record);
+    invalid.boundaries[boundary].status = status;
+    assert.throws(
+      () => validateHandoffPreflightRecord(invalid),
+      /invalid .* boundary|expected redacted schema/i,
+    );
+  }
+
+  const extraField = structuredClone(record);
+  extraField.boundaries.publicManifestReachability.url = "https://secret.example";
+  assert.throws(
+    () => validateHandoffPreflightRecord(extraField),
+    /expected redacted schema|invalid .* boundary/i,
+  );
+
+  const impossibleLocalProbe = createHandoffPreflightRecord({
+    localHandoff: {
+      manifest: "manifest HTTP 200 (64 bytes)",
+      bundle: "bundle HTTP 200 (4096 bytes)",
+    },
+  });
+  assert.throws(
+    () => validateHandoffPreflightRecord(impossibleLocalProbe),
+    /cannot report a local probe without public reachability/,
+  );
+});
+
+test("keeps public-edge, local-probe, and phone evidence boundaries distinct", () => {
+  const publicFailure = createHandoffPreflightRecord({
+    publicManifestFailed: true,
+  });
+  const localFailure = createHandoffPreflightRecord({
+    publicManifest: {
+      outcome: "public manifest HTTP 200 (128 bytes)",
+    },
+    localHandoffFailed: true,
+  });
+
+  assert.doesNotThrow(() => validateHandoffPreflightRecord(publicFailure));
+  assert.equal(
+    publicFailure.boundaries.publicManifestReachability.status,
+    "FAIL",
+  );
+  assert.equal(publicFailure.boundaries.localHandoffProbe.status, "NOT_RUN");
+  assert.equal(publicFailure.boundaries.expoGoLaunch.status, "NOT_ASSESSED");
+
+  assert.doesNotThrow(() => validateHandoffPreflightRecord(localFailure));
+  assert.equal(
+    localFailure.boundaries.publicManifestReachability.status,
+    "PASS",
+  );
+  assert.equal(localFailure.boundaries.localHandoffProbe.status, "FAIL");
+  assert.equal(localFailure.boundaries.expoGoLaunch.status, "NOT_ASSESSED");
+});
+
+test("rejects sensitive or non-redacted evidence without echoing it", () => {
+  const record = createHandoffPreflightRecord();
+  for (const evidence of [
+    "https://preview.example.test/manifest.json",
+    "Authorization: Bearer secret-token",
+    "qr_payload=secret",
+    "account_email=person@example.test",
+    "message_body=private message",
+    "person@example.test",
+    "credential-value-123",
+    "preview.example.test/private/path",
+    "private message",
+  ]) {
+    const invalid = structuredClone(record);
+    invalid.boundaries.publicManifestReachability.evidence = evidence;
+    assert.throws(
+      () => validateHandoffPreflightRecord(invalid),
+      (error) => {
+        assert.match(error.message, /unsafe evidence/);
+        assert.doesNotMatch(error.message, new RegExp(evidence, "i"));
+        return true;
+      },
+    );
+  }
 });
 
 test("record output reports unwritable parent paths", async () => {

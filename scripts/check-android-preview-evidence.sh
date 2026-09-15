@@ -12,6 +12,11 @@ if [[ "${1:-}" == "--" ]]; then
 fi
 RECORD_ROOT="$ROOT_DIR/artifacts/chat-app/test-results/encrypted-room-recovery/android"
 RECORD_PATH="${1:-}"
+PREFLIGHT_PATH="${2:-}"
+PREFLIGHT_PATH_EXPLICIT=0
+if [[ -n "$PREFLIGHT_PATH" ]]; then
+  PREFLIGHT_PATH_EXPLICIT=1
+fi
 FAILURES=()
 
 failure() {
@@ -77,6 +82,62 @@ validate_handoff_boundaries() {
   validate_boundary_status \
     "Server-side native request evidence" \
     pass fail blocked
+}
+
+validate_preflight_json() {
+  local preflight_path="$1"
+  local status_output actual_status expected_status boundary
+
+  if [[ -z "$preflight_path" ]]; then
+    return
+  fi
+  if [[ ! -f "$preflight_path" ]]; then
+    if ((PREFLIGHT_PATH_EXPLICIT)); then
+      failure "The Android preview preflight JSON artifact does not exist."
+    fi
+    return
+  fi
+
+  if ! status_output="$(
+    node "$ROOT_DIR/artifacts/chat-app/scripts/validate-preview-startup.mjs" \
+      --validate-record "$preflight_path" 2>/dev/null
+  )"; then
+    failure "The Android preview preflight JSON artifact does not satisfy the redacted schema."
+    return
+  fi
+
+  for boundary in \
+    "publicManifestReachability" \
+    "localHandoffProbe" \
+    "expoGoLaunch" \
+    "serverNativeRequestEvidence"; do
+    actual_status="$(
+      printf '%s\n' "$status_output" |
+        awk -F= -v expected="$boundary" '$1 == expected { print tolower($2); exit }'
+    )"
+    if [[ -z "$actual_status" ]]; then
+      failure "The Android preview preflight JSON artifact is missing a required boundary."
+      return
+    fi
+  done
+
+  expected_status="$(boundary_status "Public manifest reachability")"
+  actual_status="$(
+    printf '%s\n' "$status_output" |
+      awk -F= '$1 == "publicManifestReachability" { print tolower($2); exit }'
+  )"
+  if [[ "$actual_status" != "$expected_status" ]]; then
+    failure "The preflight JSON public manifest boundary does not match the Markdown record."
+  fi
+
+  expected_status="$(boundary_status "Local handoff probe (manifest and bundle)")"
+  actual_status="$(
+    printf '%s\n' "$status_output" |
+      awk -F= '$1 == "localHandoffProbe" { print tolower($2); exit }'
+  )"
+  if [[ "$actual_status" != "$expected_status" ]]; then
+    failure "The preflight JSON local handoff boundary does not match the Markdown record."
+  fi
 }
 
 validate_boundary_status() {
@@ -380,6 +441,10 @@ if [[ -z "$RECORD_PATH" ]]; then
 elif [[ ! -f "$RECORD_PATH" ]]; then
   failure "Android preview evidence record does not exist."
 else
+  if [[ -z "$PREFLIGHT_PATH" ]]; then
+    PREFLIGHT_PATH="$(dirname "$RECORD_PATH")/android-preview-preflight.json"
+  fi
+  validate_preflight_json "$PREFLIGHT_PATH"
   validate_handoff_boundaries
   result="$(sed -nE 's/^\*\*Result:[[:space:]]*(PASS|BLOCKED|FAIL).*/\1/p' "$RECORD_PATH" | head -n 1)"
   case "$result" in
