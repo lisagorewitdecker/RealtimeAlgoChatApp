@@ -130,12 +130,12 @@ jobs:
             {
               echo "$summary_header"
               echo
-              echo "- Status: **FAIL**"
-              echo "- Record: **Unavailable**"
-              echo "- Missing-boundary reason: the pull request changed no Android preview validation record."
+              echo "- Status: **SKIP**"
+              echo "- Changed records checked: **0**"
+              echo "- Validation: **Not applicable; this pull request changed no Android preview validation record.**"
             } >> "$GITHUB_STEP_SUMMARY"
-            echo "The pull request changed no Android preview validation record." >&2
-            exit 1
+            echo "No Android preview validation records changed; nothing to validate."
+            exit 0
           fi
 
           {

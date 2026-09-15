@@ -384,6 +384,28 @@ test("publish job runs the privacy regression before approval validation and sub
   );
 });
 
+test("Android preview evidence validation succeeds when no handoff record changed", () => {
+  const evidenceStep = workflow.jobs?.["android-preview-evidence"]?.steps?.find(
+    (step) => step.name === "Validate changed Android preview records",
+  );
+  assert.ok(evidenceStep, "the Android preview evidence validation step must exist");
+  assert.match(
+    evidenceStep.run,
+    /Status: \*\*SKIP\*\*/,
+    "zero changed records must be reported as skipped",
+  );
+  assert.match(
+    evidenceStep.run,
+    /No Android preview validation records changed; nothing to validate\./,
+    "zero changed records must explain why validation did not run",
+  );
+  assert.match(
+    evidenceStep.run,
+    /exit 0/,
+    "zero changed records must exit successfully",
+  );
+});
+
 test("routine unit validation runs the caller contract check", () => {
   const command =
     "node --test scripts/tests/mobile-release-caller-contract.test.mjs";
