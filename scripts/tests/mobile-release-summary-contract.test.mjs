@@ -3068,8 +3068,8 @@ test("native evidence summaries link only the fixed uploaded report", () => {
   );
 });
 
-test("failed platform artifact downloads preserve the other platform report", () => {
-  const evidenceRoot = path.join(testRoot, "failed-platform-download");
+test("empty platform artifact downloads preserve the other platform report", () => {
+  const evidenceRoot = path.join(testRoot, "empty-platform-download");
   const androidRunDir = path.join(evidenceRoot, "android", "20260909T120000Z");
   mkdirSync(androidRunDir, { recursive: true });
   writeFileSync(
@@ -3079,7 +3079,7 @@ test("failed platform artifact downloads preserve the other platform report", ()
 
   const summaryPath = path.join(
     testRoot,
-    "failed-platform-download-summary.md",
+    "empty-platform-download-summary.md",
   );
   const iosArtifactUrl =
     "https://github.example/example/chat-app/actions/runs/123/artifacts/456";
@@ -3101,7 +3101,7 @@ test("failed platform artifact downloads preserve the other platform report", ()
         GITHUB_STEP_SUMMARY: summaryPath,
         NATIVE_IOS_EVIDENCE_ARTIFACT_URL: iosArtifactUrl,
         NATIVE_ANDROID_EVIDENCE_ARTIFACT_URL: androidArtifactUrl,
-        NATIVE_IOS_EVIDENCE_DOWNLOAD_RESULT: "failure",
+        NATIVE_IOS_EVIDENCE_DOWNLOAD_RESULT: "",
         NATIVE_ANDROID_EVIDENCE_DOWNLOAD_RESULT: "success",
       },
     },
@@ -3109,7 +3109,7 @@ test("failed platform artifact downloads preserve the other platform report", ()
   assert.notEqual(
     result.status,
     0,
-    "a failed platform artifact download must keep the release blocked",
+    "an explicitly empty platform artifact download result must keep the release blocked",
   );
 
   const summary = readFileSync(summaryPath, "utf8");
@@ -3119,10 +3119,10 @@ test("failed platform artifact downloads preserve the other platform report", ()
   const androidSection = summary.match(
     /## Android native large-text evidence[\s\S]*/,
   )?.[0];
-  assert.ok(iosSection, "the summary should include the failed iOS section");
+  assert.ok(iosSection, "the summary should include the empty-result iOS section");
   assert.ok(
     androidSection,
-    "the summary should include the available Android section",
+    "the summary should include the successful Android section",
   );
   assert.match(iosSection, /- Status: \*\*FAIL\*\*/);
   assert.match(iosSection, /- Artifact download: \*\*FAIL\*\*/);
@@ -3133,13 +3133,13 @@ test("failed platform artifact downloads preserve the other platform report", ()
   assert.match(
     iosSection,
     /- Recovery: \*\*Rerun the iOS native large-text job, or make the existing iOS artifact available, then rerun the mobile release gate\.\*\*/,
-    "the failed iOS download must include a fixed recovery action",
+    "the empty iOS download result must include a fixed recovery action",
   );
   assert.match(iosSection, /- Detailed evidence report: \*\*Unavailable\*\*/);
   assert.doesNotMatch(
     iosSection,
     new RegExp(iosArtifactUrl.replaceAll(".", "\\.")),
-    "the failed platform must not link an unavailable download",
+    "the empty-result platform must not link an unavailable download",
   );
   assert.match(androidSection, /- Artifact download: \*\*PASS\*\*/);
   assert.match(
