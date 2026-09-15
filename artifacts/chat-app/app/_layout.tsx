@@ -10,6 +10,7 @@ import { setAuthTokenGetter, setBaseUrl } from "@workspace/api-client-react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Stack, useRouter, useSegments } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
+import { StatusBar } from "expo-status-bar";
 import React, { useEffect } from "react";
 import { ActivityIndicator, Pressable, View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
@@ -302,37 +303,51 @@ function RootLayout() {
     }
   }, [fontsLoaded, fontError]);
 
+  // Every palette is dark, so the system bars must always use light content.
+  // Android draws its status and navigation bars over the app (edge-to-edge)
+  // and would otherwise follow the device theme, hiding dark icons on the dark
+  // background. Declared once here; no screen overrides it.
+  const statusBar = <StatusBar style="light" />;
+
   if (clerkConfiguration.status !== "ready") {
-    return <ClerkConfigurationScreen message={clerkConfiguration.message} />;
+    return (
+      <>
+        {statusBar}
+        <ClerkConfigurationScreen message={clerkConfiguration.message} />
+      </>
+    );
   }
 
   return (
-    <ClerkProvider
-      publishableKey={clerkConfiguration.publishableKey}
-      tokenCache={clerkTokenCache}
-    >
-      <ClerkLoaded>
-        <SafeAreaProvider>
-          <AccessibilityProvider>
-            <ErrorBoundary>
-              <QueryClientProvider client={queryClient}>
-                <AuthTokenBridge>
-                  <AppProvider>
-                    <SocketProvider>
-                      <GestureHandlerRootView style={{ flex: 1 }}>
-                        <KeyboardProvider>
-                          <RootLayoutNav />
-                        </KeyboardProvider>
-                      </GestureHandlerRootView>
-                    </SocketProvider>
-                  </AppProvider>
-                </AuthTokenBridge>
-              </QueryClientProvider>
-            </ErrorBoundary>
-          </AccessibilityProvider>
-        </SafeAreaProvider>
-      </ClerkLoaded>
-    </ClerkProvider>
+    <>
+      {statusBar}
+      <ClerkProvider
+        publishableKey={clerkConfiguration.publishableKey}
+        tokenCache={clerkTokenCache}
+      >
+        <ClerkLoaded>
+          <SafeAreaProvider>
+            <AccessibilityProvider>
+              <ErrorBoundary>
+                <QueryClientProvider client={queryClient}>
+                  <AuthTokenBridge>
+                    <AppProvider>
+                      <SocketProvider>
+                        <GestureHandlerRootView style={{ flex: 1 }}>
+                          <KeyboardProvider>
+                            <RootLayoutNav />
+                          </KeyboardProvider>
+                        </GestureHandlerRootView>
+                      </SocketProvider>
+                    </AppProvider>
+                  </AuthTokenBridge>
+                </QueryClientProvider>
+              </ErrorBoundary>
+            </AccessibilityProvider>
+          </SafeAreaProvider>
+        </ClerkLoaded>
+      </ClerkProvider>
+    </>
   );
 }
 

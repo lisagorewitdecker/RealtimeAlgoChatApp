@@ -799,6 +799,7 @@ export default function RoomScreen() {
 
   return (
     <KeyboardAvoidingView
+      testID="room-keyboard-avoiding-view"
       style={[styles.root, { backgroundColor: colors.background }]}
       behavior="padding"
       keyboardVerticalOffset={0}
@@ -1135,6 +1136,8 @@ const styles = StyleSheet.create({
   input: {
     flex: 1, minHeight: 44, maxHeight: 120, paddingHorizontal: 16,
     paddingVertical: 12, fontSize: 15, borderWidth: 1,
+    // Android centers multiline text vertically by default; iOS top-aligns.
+    textAlignVertical: "top",
   },
   sendBtn: { width: 44, height: 44, alignItems: "center", justifyContent: "center" },
 });

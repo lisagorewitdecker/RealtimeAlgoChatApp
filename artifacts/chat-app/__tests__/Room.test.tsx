@@ -1,6 +1,6 @@
 import React from "react";
 import { act, fireEvent, render } from "@testing-library/react-native";
-import { Alert } from "react-native";
+import { Alert, StyleSheet } from "react-native";
 import RoomScreen from "../app/room/[roomId]";
 
 const mockRouter = {
@@ -1396,5 +1396,38 @@ describe("room device-key registration ordering", () => {
     expect(view.getByTestId("message-live").props.children).toBe(
       "Arrived during recovery",
     );
+  });
+});
+
+describe("room composer layout", () => {
+  beforeEach(() => {
+    resetRoomMocks();
+  });
+
+  afterEach(async () => {
+    await act(async () => {
+      await Promise.resolve();
+    });
+  });
+
+  it("top-aligns multiline composer text and avoids the keyboard with padding on every platform", () => {
+    const view = render(<RoomScreen />);
+
+    act(() => {
+      mockHandlers.get("room-joined")?.({ messages: [], users: [] });
+    });
+
+    // Android centers multiline text vertically unless told otherwise; iOS
+    // always starts at the top of the box.
+    const input = view.getByTestId("room-composer-input");
+    expect(input.props.multiline).toBe(true);
+    expect(StyleSheet.flatten(input.props.style).textAlignVertical).toBe("top");
+
+    // Keyboard handling comes from react-native-keyboard-controller with the
+    // same padding strategy on both platforms and no header offset (the room
+    // header is part of the screen).
+    const avoidingView = view.getByTestId("room-keyboard-avoiding-view");
+    expect(avoidingView.props.behavior).toBe("padding");
+    expect(avoidingView.props.keyboardVerticalOffset).toBe(0);
   });
 });

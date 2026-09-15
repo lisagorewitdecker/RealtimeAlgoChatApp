@@ -1,5 +1,6 @@
 import React from "react";
-import { act, fireEvent, render, waitFor } from "@testing-library/react-native";
+import { act, fireEvent, render, waitFor, within } from "@testing-library/react-native";
+import { StyleSheet } from "react-native";
 import SignUpScreen from "../app/(auth)/sign-up";
 
 const mockCreate = jest.fn();
@@ -33,6 +34,24 @@ jest.mock("expo-router", () => {
   return {
     Link: ({ children }: { children: unknown }) =>
       mockReact.createElement(RN.Text, null, children),
+  };
+});
+
+jest.mock("react-native-safe-area-context", () => ({
+  useSafeAreaInsets: () => ({ top: 24, bottom: 12, left: 0, right: 0 }),
+}));
+
+jest.mock("@/components/KeyboardAwareScrollViewCompat", () => {
+  const RN = require("react-native");
+  const mockReact = require("react");
+  return {
+    KeyboardAwareScrollViewCompat: ({
+      children,
+      ...props
+    }: {
+      children: React.ReactNode;
+      [key: string]: unknown;
+    }) => mockReact.createElement(RN.ScrollView, props, children),
   };
 });
 
@@ -101,5 +120,39 @@ describe("email account signup", () => {
     expect(getByText("Join RealtimeAlgoChatApp Studio to chat, call, and build together.")).toBeTruthy();
     expect(queryByText("Join DevAlgoChat Studio to chat, call, and build together.")).toBeNull();
     expect(queryByText("Join DevStudio to chat, call, and build together.")).toBeNull();
+  });
+
+  it("keeps every field reachable above the keyboard with the shared keyboard-aware scroll wrapper", async () => {
+    const { getByTestId, getByLabelText, findByPlaceholderText } = render(<SignUpScreen />);
+
+    // Same wrapper and settings as sign-in: the on-screen keyboard (always
+    // visible on Android) scrolls the focused field into view instead of
+    // covering it, and taps on the buttons still land while it is open.
+    const scroll = getByTestId("sign-up-scroll");
+    expect(scroll.props.keyboardShouldPersistTaps).toBe("handled");
+    expect(scroll.props.keyboardDismissMode).toBe("interactive");
+    expect(scroll.props.bottomOffset).toBe(68);
+
+    const content = StyleSheet.flatten(scroll.props.contentContainerStyle);
+    expect(content.flexGrow).toBe(1);
+    expect(content.justifyContent).toBe("center");
+    expect(content.paddingHorizontal).toBe(28);
+    // Native safe-area insets (24 top / 12 bottom in this test) plus the
+    // screen's own 28pt padding, mirroring sign-in.
+    expect(content.paddingTop).toBe(52);
+    expect(content.paddingBottom).toBe(40);
+
+    const fields = within(scroll);
+    expect(fields.getByPlaceholderText("Email address")).toBeTruthy();
+    expect(fields.getByPlaceholderText("Password")).toBeTruthy();
+
+    // The verification step renders inside the same wrapper.
+    fireEvent.changeText(fields.getByPlaceholderText("Email address"), "ada@example.com");
+    fireEvent.changeText(fields.getByPlaceholderText("Password"), "correct horse battery staple");
+    await act(async () => {
+      fireEvent.press(getByLabelText("Create account"));
+    });
+    await findByPlaceholderText("Email verification code");
+    expect(within(getByTestId("sign-up-scroll")).getByPlaceholderText("Email verification code")).toBeTruthy();
   });
 });
