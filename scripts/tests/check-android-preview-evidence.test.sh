@@ -56,8 +56,35 @@ EOF
 blocked_output="$(bash "$CHECKER" "$blocked_record" 2>&1)"
 assert_contains "$blocked_output" "validation passed"
 
-default_output="$(bash "$CHECKER" 2>&1)"
-assert_contains "$default_output" "validation passed"
+# Default discovery must be exercised against an isolated repository layout:
+# the workspace's artifact-level test-results/ tree is gitignored, so a clean
+# checkout has no record there. The checker resolves its record root relative
+# to its own location, so a copy inside the fixture tree discovers the fixture
+# records and must pick the newest timestamped directory.
+discovery_root="$TEST_ROOT/default-discovery"
+discovery_android_root="$discovery_root/artifacts/chat-app/test-results/encrypted-room-recovery/android"
+mkdir -p "$discovery_root/scripts" \
+  "$discovery_android_root/20260101T000000Z" \
+  "$discovery_android_root/20260102T000000Z"
+cp "$CHECKER" "$discovery_root/scripts/"
+write_record "$discovery_android_root/20260101T000000Z/validation-record.md" <<'EOF'
+# Older Android preview validation record
+
+**Result: PASS — physical Android preview handoff observed**
+EOF
+cp "$blocked_record" "$discovery_android_root/20260102T000000Z/validation-record.md"
+default_output="$(bash "$discovery_root/scripts/check-android-preview-evidence.sh" 2>&1)"
+assert_contains "$default_output" "validation passed: $discovery_android_root/20260102T000000Z/validation-record.md"
+
+empty_discovery_root="$TEST_ROOT/empty-discovery"
+mkdir -p "$empty_discovery_root/scripts" \
+  "$empty_discovery_root/artifacts/chat-app/test-results/encrypted-room-recovery/android"
+cp "$CHECKER" "$empty_discovery_root/scripts/"
+if missing_default_output="$(bash "$empty_discovery_root/scripts/check-android-preview-evidence.sh" 2>&1)"; then
+  printf 'Default discovery unexpectedly passed without any Android preview record.\n' >&2
+  exit 1
+fi
+assert_contains "$missing_default_output" "No Android preview evidence record was found under"
 
 non_latest_root="$TEST_ROOT/non-latest-record"
 non_latest_android_root="$non_latest_root/artifacts/chat-app/test-results/encrypted-room-recovery/android"
