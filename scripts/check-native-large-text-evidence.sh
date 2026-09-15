@@ -417,9 +417,18 @@ validate_platform() {
     local pass_fail_path="$run_dir/pass-fail-record.txt"
     report_duplicate_metadata_keys "$platform" "$pass_fail_path" "Pass/fail record" "pass/fail record"
 
-    if metadata_key_is_unambiguous "$pass_fail_path" status &&
-      [[ "$(metadata_value "$pass_fail_path" status | tr -d '\r' | sed 's/[[:space:]]*$//')" != "PASS" ]]; then
-      issue "$platform" "The pass/fail record at ${pass_fail_path} is not PASS. Failed or blocked runner output is not reviewed device evidence; complete the run before release review."
+    local status_declaration_count
+    local pass_fail_status
+    status_declaration_count="$(metadata_declaration_count "$pass_fail_path" status)"
+    if ((status_declaration_count == 0)); then
+      issue "$platform" "The pass/fail record at ${pass_fail_path} is missing a status=... declaration. Record status exactly once before release review."
+    elif ((status_declaration_count == 1)); then
+      pass_fail_status="$(trimmed_value "$pass_fail_path" status)"
+      if [[ -z "$pass_fail_status" ]]; then
+        issue "$platform" "The pass/fail record at ${pass_fail_path} has an empty status=... value. Record status exactly once before release review."
+      elif [[ "$pass_fail_status" != "PASS" ]]; then
+        issue "$platform" "The pass/fail record at ${pass_fail_path} is not PASS. Failed or blocked runner output is not reviewed device evidence; complete the run before release review."
+      fi
     fi
 
     local run_mode
