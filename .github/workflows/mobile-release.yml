@@ -880,7 +880,7 @@ echo "- Candidate build fingerprint: **Omitted from workflow summary**"
       - mobile-release-gate
     runs-on: ubuntu-latest
     environment:
-      name: mobile-store-submission
+      name: mobile-release
     steps:
       - name: Check out release candidate
         uses: actions/checkout@v4
@@ -941,7 +941,7 @@ echo "- Candidate build fingerprint: **Omitted from workflow summary**"
                       review.state === "approved" &&
                       review.environments?.some(
                         (environment) =>
-                          environment.name === "mobile-store-submission",
+                          environment.name === "mobile-release",
                       ),
                   );
                   if (!approval?.user?.login) process.exit(1);
@@ -950,7 +950,7 @@ echo "- Candidate build fingerprint: **Omitted from workflow summary**"
               '
           )"
           if [[ -z "$reviewer" || "$reviewer" == *$'\n'* || "$reviewer" == *$'\r'* ]]; then
-            echo "Could not verify the reviewer who approved the mobile-store-submission environment." >&2
+            echo "Could not verify the reviewer who approved the mobile-release environment." >&2
             exit 1
           fi
 
