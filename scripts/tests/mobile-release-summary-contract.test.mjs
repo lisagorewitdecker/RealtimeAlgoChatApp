@@ -28,10 +28,12 @@
  *      evidence text.
  *   8. A duplicate Android preflight field fails with the fixed redacted-schema
  *      message without exposing the duplicate value or raw artifact content.
- *   9. A failed artifact extraction clears partial platform output before its
+ *   9. A missing Android preflight validator produces a fixed dependency
+ *      diagnostic without running the checker or exposing evidence content.
+ *  10. A failed artifact extraction clears partial platform output before its
  *      retry, while a permanently missing artifact still reaches the fixed
  *      platform-specific blocking summary.
- *  10. A controlled hosted artifact outage recovers only after the retry
+ *  11. A controlled hosted artifact outage recovers only after the retry
  *      succeeds, while a failed retry still blocks native evidence.
  *
  * The static rules catch code paths no scenario exercises; the behavioral runs
@@ -1370,6 +1372,16 @@ test("Android preview evidence keeps its pull-request validation and privacy con
   );
   assert.match(
     validationStep.run,
+    /validator_directory="artifacts\/chat-app\/scripts"[\s\S]*validator_file="validate-preview-startup\.mjs"[\s\S]*validator_path="\$\{validator_directory\}\/\$\{validator_file\}"[\s\S]*if \[\[ ! -f "\$validator_path" \]\][\s\S]*validator_failure_reason=/,
+    "the Android job must check its delegated validator dependency before checking changed records",
+  );
+  assert.match(
+    validationStep.run,
+    /elif \[\[ -n "\$validator_failure_reason" \]\][\s\S]*reasons="\$validator_failure_reason"[\s\S]*else[\s\S]*validation_output="\$\(/,
+    "a missing delegated validator must produce a fixed reason without invoking the record checker",
+  );
+  assert.match(
+    validationStep.run,
     /record_url="\$\{GITHUB_SERVER_URL\}\/\$\{GITHUB_REPOSITORY\}\/blob\/\$\{GITHUB_SHA\}\/\$\{record_path\}"/,
     "each changed record must receive a stable GitHub record link",
   );
@@ -1414,7 +1426,11 @@ test("Android preview evidence keeps its pull-request validation and privacy con
   );
 
   function runAndroidPreviewJob(name, recordText, options = {}) {
-    const { sidecarOnly = false, changedPreflight = blockedPreflight } = options;
+    const {
+      sidecarOnly = false,
+      changedPreflight = blockedPreflight,
+      missingValidator = false,
+    } = options;
     const fixtureRoot = path.join(testRoot, `android-preview-${name}`);
     const recordDefinitions = Array.isArray(recordText)
       ? recordText
@@ -1437,6 +1453,14 @@ test("Android preview evidence keeps its pull-request validation and privacy con
       mkdirSync(path.dirname(record), { recursive: true });
     }
     mkdirSync(binDirectory, { recursive: true });
+    const validatorPath = path.join(
+      fixtureRoot,
+      "artifacts/chat-app/scripts/validate-preview-startup.mjs",
+    );
+    if (!missingValidator) {
+      mkdirSync(path.dirname(validatorPath), { recursive: true });
+      writeFileSync(validatorPath, "// contract fixture\n");
+    }
     if (sidecarOnly) {
       writeFileSync(recordPath, recordDefinitions[0].text);
       writeFileSync(preflightPath, blockedPreflight);
@@ -1461,6 +1485,7 @@ test("Android preview evidence keeps its pull-request validation and privacy con
       "add",
       "README.md",
       ...(sidecarOnly ? [recordPath, preflightPath] : []),
+      ...(!missingValidator ? [validatorPath] : []),
     ]);
     git(["commit", "--quiet", "-m", "base"]);
     const baseSha = spawnSync(gitPath, ["rev-parse", "HEAD"], {
@@ -1482,10 +1507,11 @@ test("Android preview evidence keeps its pull-request validation and privacy con
       encoding: "utf8",
     }).stdout.trim();
 
+    const pnpmCalledPath = path.join(fixtureRoot, "pnpm-called");
     writeStub(
       binDirectory,
       "pnpm",
-      'set -euo pipefail\nchecker_args=()\nfound_separator=0\nfor arg in "$@"; do\n  if [[ "$arg" == "--" ]]; then\n    found_separator=1\n    continue\n  fi\n  if ((found_separator)); then\n    checker_args+=("$arg")\n  fi\ndone\nexec bash "$ANDROID_PREVIEW_CHECKER" "${checker_args[@]}"',
+      `set -euo pipefail\ntouch ${shellQuote(pnpmCalledPath)}\nchecker_args=()\nfound_separator=0\nfor arg in "$@"; do\n  if [[ "$arg" == "--" ]]; then\n    found_separator=1\n    continue\n  fi\n  if ((found_separator)); then\n    checker_args+=("$arg")\n  fi\ndone\nexec bash "$ANDROID_PREVIEW_CHECKER" "\${checker_args[@]}"`,
     );
     writeFileSync(runnerPath, `#!${bashPath}\n${validationStep.run}\n`);
     chmodSync(runnerPath, 0o755);
@@ -1514,6 +1540,7 @@ test("Android preview evidence keeps its pull-request validation and privacy con
       recordPaths: recordPaths.map((record) => path.relative(fixtureRoot, record)),
       preflightPath: path.relative(fixtureRoot, preflightPath),
       summary: readFileSync(summaryPath, "utf8"),
+      checkerInvoked: existsSync(pnpmCalledPath),
     };
   }
 
@@ -1676,6 +1703,51 @@ test("Android preview evidence keeps its pull-request validation and privacy con
     sidecarOnly.summary,
     /The preflight JSON public manifest boundary does not match the Markdown record\./,
     "the matching Markdown record must be checked with a changed sidecar",
+  );
+
+  const missingValidator = runAndroidPreviewJob(
+    "missing-validator",
+    blockedRecord,
+    {
+      sidecarOnly: true,
+      changedPreflight: mismatchedPreflight,
+      missingValidator: true,
+    },
+  );
+  const missingValidatorFailure = [
+    missingValidator.result.stdout,
+    missingValidator.result.stderr,
+  ].join("\n");
+  const fixedValidatorDependencyMessage =
+    "The Android preview evidence check is missing its delegated validator dependency boundary: artifacts/chat-app/scripts/validate-preview-startup.mjs is not present in the checked-out commit. Restore that validator before changing the evidence record.";
+  assert.notEqual(
+    missingValidator.result.status,
+    0,
+    "a changed Android record must fail when its delegated validator is missing",
+  );
+  assert.match(
+    missingValidator.summary,
+    new RegExp(
+      fixedValidatorDependencyMessage.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
+    ),
+    "the summary must explain the missing delegated validator dependency",
+  );
+  assert.match(
+    missingValidatorFailure,
+    new RegExp(
+      fixedValidatorDependencyMessage.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
+    ),
+    "the missing delegated validator diagnostic must be surfaced by the job",
+  );
+  assert.equal(
+    missingValidator.checkerInvoked,
+    false,
+    "the job must report the missing delegated validator before invoking the checker",
+  );
+  assert.doesNotMatch(
+    missingValidatorFailure,
+    /Workspace curl returned HTTP 200|No physical phone was available/,
+    "the missing delegated validator diagnostic must not expose evidence text",
   );
 });
 
