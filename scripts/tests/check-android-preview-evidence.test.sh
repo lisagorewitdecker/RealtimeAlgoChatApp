@@ -175,6 +175,47 @@ cp "$blocked_preflight" "$discovery_android_root/20260102T000000Z/android-previe
 default_output="$(bash "$discovery_root/scripts/check-android-preview-evidence.sh" 2>&1)"
 assert_contains "$default_output" "validation passed: $discovery_android_root/20260102T000000Z/validation-record.md"
 
+# Repository handoff records are durable review evidence even though the
+# artifact-level test-results directory is ignored by default. Keep every
+# retained record on the current four-boundary and sidecar contract; a stale
+# record must not be silently exempted because a newer record exists.
+repository_android_root="$ROOT_DIR/artifacts/chat-app/test-results/encrypted-room-recovery/android"
+repository_records=()
+while IFS= read -r repository_record; do
+  repository_records+=("$repository_record")
+done < <(find "$repository_android_root" \
+  -mindepth 2 \
+  -maxdepth 2 \
+  -type f \
+  -name validation-record.md \
+  -print |
+  sort)
+if ((${#repository_records[@]} == 0)); then
+  printf 'No repository Android preview validation records were found.\n' >&2
+  exit 1
+fi
+for repository_record in "${repository_records[@]}"; do
+  if ! git -C "$ROOT_DIR" ls-files --error-unmatch -- "$repository_record" >/dev/null 2>&1; then
+    printf 'Repository Android preview validation record is not tracked: %s\n' \
+      "$repository_record" >&2
+    exit 1
+  fi
+  repository_preflight="${repository_record%/validation-record.md}/android-preview-preflight.json"
+  if [[ ! -f "$repository_preflight" ]]; then
+    printf 'Repository Android preview validation record is missing its preflight sidecar: %s\n' \
+      "$repository_preflight" >&2
+    exit 1
+  fi
+  if ! repository_output="$(
+    bash "$CHECKER" "$repository_record" "$repository_preflight" 2>&1
+  )"; then
+    printf 'Repository Android preview validation record failed the current checker: %s\n%s\n' \
+      "$repository_record" "$repository_output" >&2
+    exit 1
+  fi
+  assert_contains "$repository_output" "validation passed"
+done
+
 empty_discovery_root="$TEST_ROOT/empty-discovery"
 mkdir -p "$empty_discovery_root/scripts" \
   "$empty_discovery_root/artifacts/chat-app/test-results/encrypted-room-recovery/android"
