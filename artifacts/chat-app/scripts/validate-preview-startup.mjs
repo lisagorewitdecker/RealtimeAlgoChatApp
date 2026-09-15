@@ -69,6 +69,7 @@ const STARTUP_FAILURES = [
   /(?:error|failed|unable|cannot).{0,80}(?:react native )?devtools/i,
   /(?:react native )?devtools.{0,80}(?:error|failed|unable|cannot|could not|couldn't)/i,
 ];
+const STARTUP_TEST_FIXTURE = "missing-runtime-library";
 const MISSING_LIBRARY = new RegExp(
   String.raw`error while loading shared libraries:\s*([A-Za-z0-9._+@/-]{1,128})\s*:\s*cannot open shared object file`,
   "i",
@@ -609,7 +610,19 @@ async function validateLivePreview(
 ) {
   const port = await findFreePort();
   const output = [];
-  const child = spawn("pnpm", ["run", "dev"], {
+  const startupCommand =
+    process.env.PREVIEW_STARTUP_TEST_FIXTURE === STARTUP_TEST_FIXTURE
+      ? {
+          command: process.execPath,
+          args: [
+            resolve(
+              import.meta.dirname,
+              "preview-startup-runtime-library-fixture.mjs",
+            ),
+          ],
+        }
+      : { command: "pnpm", args: ["run", "dev"] };
+  const child = spawn(startupCommand.command, startupCommand.args, {
     cwd: resolve(import.meta.dirname, ".."),
     env: {
       ...process.env,
