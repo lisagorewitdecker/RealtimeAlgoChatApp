@@ -213,6 +213,35 @@ test("startup failures append only the bounded diagnosis to the CI summary", () 
   }
 });
 
+test("CI summaries name the malformed selected preview setting without its value", () => {
+  const temporaryDirectory = mkdtempSync(
+    join(tmpdir(), "chat-preview-malformed-setting-summary-"),
+  );
+  const summaryPath = join(temporaryDirectory, "summary.md");
+  const malformedValue = "https://[preview-setting-secret";
+
+  try {
+    const result = runNodeScript([validatorPath], {
+      GITHUB_STEP_SUMMARY: summaryPath,
+      PREVIEW_PUBLIC_URL: malformedValue,
+      REPLIT_EXPO_DEV_DOMAIN: "fallback-preview.example.test",
+      PREVIEW_PUBLIC_TIMEOUT_MS: "25",
+      PREVIEW_STARTUP_TIMEOUT_MS: "2000",
+      PREVIEW_STARTUP_TEST_FIXTURE: "handoff-server",
+    });
+
+    assert.equal(result.status, 1);
+    const summary = readFileSync(summaryPath, "utf8");
+    assert.match(
+      summary,
+      /Public Expo preview manifest URL configuration from PREVIEW_PUBLIC_URL is invalid/,
+    );
+    assert.ok(!summary.includes(malformedValue));
+  } finally {
+    rmSync(temporaryDirectory, { recursive: true, force: true });
+  }
+});
+
 test("startup summaries redact private URLs and credentials from recognized failures", () => {
   const temporaryDirectory = mkdtempSync(
     join(tmpdir(), "chat-preview-startup-private-summary-"),

@@ -213,13 +213,15 @@ function sanitizeStartupSummaryDiagnostic(value) {
       /\b(?:api[_-]?key|credential|password|passwd|secret|token)\s*(?:[=:]\s*|\s+)\S+/gi,
       "[redacted credential]",
     )
-    .replace(/[`*_]/g, "")
+    .replace(/[`*]/g, "")
     .slice(0, MAX_STARTUP_SUMMARY_LENGTH);
 }
 
 function formatStartupFailureSummary(error) {
   const message = error instanceof Error ? error.message : String(error);
-  const startupFailure = message.startsWith("Expo preview startup error:")
+  const startupFailure =
+    message.startsWith("Expo preview startup error:") ||
+    message.startsWith("Public Expo preview manifest URL ")
     ? message
     : formatStartupFailure(message);
   const diagnostic = startupFailure
