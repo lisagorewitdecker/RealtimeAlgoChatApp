@@ -468,8 +468,8 @@ jobs:
               echo "## iOS native branding"
               echo
               echo "- Status: **FAIL**"
-              echo "- Candidate build ID: \`${IOS_BUILD_ID}\`"
-              echo "- Candidate build fingerprint (SHA-256): \`$(printf '%s' "$IOS_BUILD_ID" | shasum -a 256 | awk '{print $1}')\`"
+echo "- Candidate build: **Omitted from workflow summary**"
+echo "- Candidate build fingerprint: **Omitted from workflow summary**"
               echo "- Native label: \`Unavailable\`"
               echo "- Permission copy: **UNAVAILABLE** (native metadata was not inspected)"
               echo "- Detailed report: [native-branding-check.md](${report_url})"
