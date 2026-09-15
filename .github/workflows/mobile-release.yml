@@ -1198,7 +1198,15 @@ jobs:
 
   idle-profile-registration:
     name: Idle profile registration
-    if: ${{ github.event_name != 'pull_request' }}
+    if: >-
+      ${{
+        github.event_name != 'pull_request' &&
+        (
+          github.event_name == 'workflow_call' ||
+          (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/mobile-v')) ||
+          (github.event_name == 'workflow_dispatch' && inputs.publish == true)
+        )
+      }}
     runs-on: ubuntu-latest
     environment:
       name: mobile-release
@@ -1374,6 +1382,7 @@ jobs:
           IOS_RESULT: ${{ needs.native-ios.result }}
           ANDROID_RESULT: ${{ needs.native-android.result }}
           IDLE_PROFILE_RESULT: ${{ needs.idle-profile-registration.result }}
+          REQUIRE_IDLE_PROFILE: ${{ github.event_name == 'workflow_call' || (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/mobile-v')) || (github.event_name == 'workflow_dispatch' && inputs.publish == true) }}
           SUMMARY_REGRESSION_RESULT: ${{ needs.native-evidence-summary-regression.result }}
           EVIDENCE_RESULT: ${{ steps.evidence-completeness.outcome }}
         run: |
@@ -1404,7 +1413,7 @@ jobs:
             }
             '
           )"
-          if [[ "$EVIDENCE_RESULT" != "success" || "$IOS_RESULT" != "success" || "$ANDROID_RESULT" != "success" || "$IDLE_PROFILE_RESULT" != "success" || "$SUMMARY_REGRESSION_RESULT" != "success" ]]; then
+          if [[ "$EVIDENCE_RESULT" != "success" || "$IOS_RESULT" != "success" || "$ANDROID_RESULT" != "success" || "$SUMMARY_REGRESSION_RESULT" != "success" || ( "$REQUIRE_IDLE_PROFILE" == "true" && "$IDLE_PROFILE_RESULT" != "success" ) ]]; then
             echo "Mobile release blocked: evidence=$EVIDENCE_RESULT iOS=$IOS_RESULT Android=$ANDROID_RESULT idle-profile=$IDLE_PROFILE_RESULT summary-regression=$SUMMARY_REGRESSION_RESULT. Supported Node.js range from package.json engines.node: ${supported_node_range} (must be a valid semver range)." >&2
             exit 1
           fi
