@@ -48,6 +48,7 @@
 - [Release-run preconditions live on GitHub](physical-device-evidence.md) — audit environment/secrets/vars/runners/runs by name via the GitHub connection and diff `origin/development`; as of 2026-09-14 none existed and there is no EAS project.
 - [Stale node_modules after merge](physical-device-evidence.md) — Jest "Cannot find module '@babel/generator'" means node_modules lags the lockfile; reinstall frozen and offline.
 - [Preview device debugging](preview-device-debugging.md) — in-container probes bypass the public edge; use the opt-in Metro request log and check the live manifest date first.
+- [Preview timeout test configuration](preview-timeout-test-configuration.md) — pass plain decimal timeout environment values because Number() rejects numeric separators and otherwise uses the default.
 - [Room key hydration](room-key-hydration.md) — key-load promises must always settle; storage read failures become retryable load failures, never a hang or key replacement.
 - [Job summary untrusted text](job-summary-untrusted-text.md) — render PR-body text and contract findings in backtick-safe code spans in GitHub job summaries; never as raw Markdown.
 - [Task merges land on the checked-out branch](branch-divergence-from-task-merges.md) — the platform rebases then squashes; consolidate from each task's own commits in a worktree, then `merge -s ours` the stale branch.

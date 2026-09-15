@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import {
+  closeSync,
   mkdtempSync,
+  openSync,
   readFileSync,
   rmSync,
   writeFileSync,
@@ -23,6 +26,10 @@ import {
 const previewEnvironment = {
   PREVIEW_PUBLIC_URL: "https://preview.example.test/expo",
 };
+const validatorPath = join(
+  import.meta.dirname,
+  "validate-preview-startup.mjs",
+);
 
 function mockFetch(response) {
   const originalFetch = globalThis.fetch;
@@ -221,6 +228,112 @@ test(
       assert.equal(request.options.signal.aborted, true);
     } finally {
       globalThis.fetch = originalFetch;
+    }
+  },
+);
+
+test(
+  "CLI saves a redacted failed public boundary when the public probe times out",
+  { timeout: 5_000 },
+  () => {
+    const directory = mkdtempSync(
+      join(tmpdir(), "preview-handoff-timeout-cli-"),
+    );
+    const outputPath = join(directory, "android-preview-preflight.json");
+    const stdoutPath = join(directory, "validator.stdout.log");
+    const stderrPath = join(directory, "validator.stderr.log");
+    const preloadPath = join(directory, "stall-public-fetch.mjs");
+    writeFileSync(
+      preloadPath,
+      `const originalFetch = globalThis.fetch;
+globalThis.fetch = async (url, options = {}) => {
+  if (String(url).startsWith("https://public-preview.test/")) {
+    await new Promise((resolve, reject) => {
+      const signal = options.signal;
+      if (!signal) {
+        reject(new Error("test fetch requires an abort signal"));
+        return;
+      }
+      if (signal.aborted) {
+        reject(new Error("request aborted by deadline"));
+        return;
+      }
+      signal.addEventListener(
+        "abort",
+        () => reject(new Error("request aborted by deadline")),
+        { once: true },
+      );
+    });
+  }
+  return originalFetch(url, options);
+};
+`,
+      "utf8",
+    );
+
+    try {
+      const stdout = openSync(stdoutPath, "w");
+      const stderr = openSync(stderrPath, "w");
+      let result;
+      try {
+        result = spawnSync(
+          process.execPath,
+          [
+            validatorPath,
+            "--platform",
+            "android",
+            "--record-output",
+            outputPath,
+          ],
+          {
+            env: {
+              ...process.env,
+              NODE_OPTIONS: [
+                process.env.NODE_OPTIONS,
+                `--import ${preloadPath}`,
+              ]
+                .filter(Boolean)
+                .join(" "),
+              PREVIEW_PUBLIC_URL:
+                "https://public-preview.test/private-path?token=private-secret",
+              PREVIEW_PUBLIC_TIMEOUT_MS: "25",
+              PREVIEW_STARTUP_TIMEOUT_MS: "2000",
+              PREVIEW_STARTUP_TEST_FIXTURE: "handoff-server",
+            },
+            stdio: ["ignore", stdout, stderr],
+          },
+        );
+      } finally {
+        closeSync(stdout);
+        closeSync(stderr);
+      }
+      const output =
+        readFileSync(stdoutPath, "utf8") + readFileSync(stderrPath, "utf8");
+
+      assert.notEqual(result.status, 0, output);
+      const record = JSON.parse(readFileSync(outputPath, "utf8"));
+      assert.doesNotThrow(() => validateHandoffPreflightRecord(record));
+      assert.equal(
+        record.boundaries.publicManifestReachability.status,
+        "FAIL",
+      );
+      assert.equal(record.boundaries.localHandoffProbe.status, "NOT_RUN");
+      assert.equal(record.boundaries.expoGoLaunch.status, "NOT_ASSESSED");
+      assert.equal(
+        record.boundaries.serverNativeRequestEvidence.status,
+        "NOT_ASSESSED",
+      );
+      assert.match(output, /public_manifest_reachability=FAIL/);
+      assert.match(
+        output,
+        /Restart or repair the managed Chat App\/Expo workflow/,
+      );
+      assert.doesNotMatch(
+        output,
+        /public-preview\.test|private-path|private-secret|token=/i,
+      );
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
     }
   },
 );

@@ -75,6 +75,7 @@ const STARTUP_FAILURES = [
   /(?:react native )?devtools.{0,80}(?:error|failed|unable|cannot|could not|couldn't)/i,
 ];
 const STARTUP_TEST_FIXTURES = new Set([
+  "handoff-server",
   "missing-runtime-library",
   "missing-runtime-library-dyld",
   "missing-runtime-library-windows",
