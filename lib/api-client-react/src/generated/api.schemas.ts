@@ -142,3 +142,5 @@ export interface RoomResponse {
 export type UnauthorizedResponse = {
   error: string;
 };
+
+// Temporary stale generated-client probe for task 449
