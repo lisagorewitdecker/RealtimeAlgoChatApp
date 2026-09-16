@@ -536,30 +536,25 @@ function isEvidenceVerificationRequest(cliOptions, env) {
   );
 }
 
-function canFallbackToRemoteVerification(error, cliOptions, env) {
+function shouldRunRemoteVerification(cliOptions, env) {
   return (
     !cliOptions.has("evidence-path") &&
     !cliOptions.has("trigger-path") &&
     !env.SENTRY_TRIGGER_PATH &&
-    hasRemoteVerificationInputs(env) &&
-    error &&
-    typeof error === "object" &&
-    "code" in error &&
-    error.code === "ENOENT"
+    Boolean(env.SENTRY_EVIDENCE_PATH) &&
+    hasRemoteVerificationInputs(env)
   );
 }
 
 async function runCli(argv = process.argv.slice(2), env = process.env) {
   const cliOptions = parseArgs(argv);
+  if (shouldRunRemoteVerification(cliOptions, env)) {
+    await main(env);
+    return;
+  }
   if (isEvidenceVerificationRequest(cliOptions, env)) {
-    try {
-      await runEvidenceVerification(cliOptions, env);
-      return;
-    } catch (error) {
-      if (!canFallbackToRemoteVerification(error, cliOptions, env)) {
-        throw error;
-      }
-    }
+    await runEvidenceVerification(cliOptions, env);
+    return;
   }
   await main(env);
 }
