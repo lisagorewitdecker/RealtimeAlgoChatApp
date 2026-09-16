@@ -100,7 +100,7 @@ declare module "tweetnacl" {
   }
 
   const nacl: NaclModule;
-  export = nacl;
+  export default nacl;
 }
 
 declare module "tweetnacl-util" {
