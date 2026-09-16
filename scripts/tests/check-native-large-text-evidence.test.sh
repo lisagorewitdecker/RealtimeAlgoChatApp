@@ -195,9 +195,7 @@ assert_contains "$blocked_output" "[android] Only runner-check.txt is present"
 assert_contains "$blocked_output" "blocked runner diagnostics, not reviewed device evidence; do not record a review decision for it"
 
 blocked_summary_path="$TEST_ROOT/blocked-summary.md"
-if blocked_summary_output="$(
-  GITHUB_STEP_SUMMARY="$blocked_summary_path" bash "$CHECKER" "$blocked_root" 2>&1
-)"; then
+if GITHUB_STEP_SUMMARY="$blocked_summary_path" bash "$CHECKER" "$blocked_root" >/dev/null 2>&1; then
   echo "blocked summary case unexpectedly passed" >&2
   exit 1
 fi
@@ -252,7 +250,6 @@ if missing_android_output="$(
   echo "missing Android evidence case unexpectedly passed" >&2
   exit 1
 fi
-missing_android_summary="$(cat "$missing_android_summary_path")"
 missing_android_section="$(
   awk '
     /^## Android native large-text evidence$/ { collecting=1 }
@@ -364,7 +361,7 @@ summary_root="$TEST_ROOT/summary"
 write_valid_run "$summary_root" ios
 write_valid_run "$summary_root" android
 summary_path="$TEST_ROOT/summary.md"
-summary_output="$(GITHUB_STEP_SUMMARY="$summary_path" bash "$CHECKER" "$summary_root" 2>&1)"
+GITHUB_STEP_SUMMARY="$summary_path" bash "$CHECKER" "$summary_root" >/dev/null 2>&1
 summary="$(cat "$summary_path")"
 assert_contains "$summary" "## iOS native large-text evidence"
 assert_contains "$summary" "## Android native large-text evidence"
@@ -384,13 +381,10 @@ rm "$summary_failure_root/android/20260909T120000Z/runner-metadata.txt"
 : > "$summary_failure_root/ios/20260909T120000Z/call-surface/call-1.png"
 rm "$summary_failure_root/ios/20260909T120000Z/screenshots/screen-11.png"
 summary_failure_path="$TEST_ROOT/summary-failure.md"
-if summary_failure_output="$(
-  GITHUB_STEP_SUMMARY="$summary_failure_path" bash "$CHECKER" "$summary_failure_root" 2>&1
-)"; then
+if GITHUB_STEP_SUMMARY="$summary_failure_path" bash "$CHECKER" "$summary_failure_root" >/dev/null 2>&1; then
   echo "summary failure case unexpectedly passed" >&2
   exit 1
 fi
-summary_failure="$(cat "$summary_failure_path")"
 ios_summary="$(
   awk '
     /^## iOS native large-text evidence$/ { collecting=1 }
