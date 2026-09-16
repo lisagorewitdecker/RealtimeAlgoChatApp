@@ -130,6 +130,49 @@ const scriptContracts = {
   },
 };
 
+/**
+ * Inventory of JSON readers that consume release evidence. The source scan
+ * below intentionally discovers JSON.parse calls in release-check scripts
+ * rather than trusting this list alone: adding a reader without adding the
+ * shared duplicate-key check must fail this contract.
+ */
+const releaseEvidenceReaderContracts = {
+  "artifacts/chat-app/scripts/validate-branding.mjs": {
+    name: "native branding metadata",
+    argument: "source",
+    scannerCall: "findDuplicateJsonObjectKeys(source)",
+    duplicateFailure: /Native \$\{platformLabel\(platform\)\} metadata contains duplicate fields/,
+  },
+  "artifacts/chat-app/scripts/validate-preview-startup.mjs": {
+    name: "preview handoff sidecar",
+    argument: "source",
+    scannerCall: "findDuplicateJsonObjectKeys(source)",
+    duplicateFailure: /Preview handoff preflight JSON contains duplicate fields/,
+  },
+  "scripts/check-native-large-text-evidence.sh": {
+    name: "native large-text Sentry evidence",
+    argument: "rawEvidence",
+    scannerCall: "findDuplicateJsonObjectKeys(rawEvidence)",
+    duplicateFailure: /throw new Error\("duplicate JSON field\(s\)"\)/,
+  },
+};
+
+const releaseEvidenceSourceDirectories = [
+  path.join(workspaceRoot, "artifacts/chat-app/scripts"),
+  path.join(workspaceRoot, "scripts"),
+];
+
+const nonEvidenceJsonParseArguments = {
+  "artifacts/chat-app/scripts/validate-branding.mjs": new Set([
+    "appMetadataSource",
+  ]),
+  "artifacts/chat-app/scripts/validate-preview-startup.mjs": new Set([
+    "body",
+    "manifestBody",
+  ]),
+  "scripts/validate-mockup-clean.mjs": new Set(["listOutput"]),
+};
+
 const actionExpressionPattern = /\$\{\{([\s\S]*?)\}\}/g;
 const secretExpressionPattern = /\bsecrets\s*[.[]|\bgithub\.token\b/;
 const xtracePattern =
@@ -255,6 +298,40 @@ function assertNoProblems(problems, heading) {
     0,
     [heading, ...problems.map((problem) => `  - ${problem}`)].join("\n"),
   );
+}
+
+function discoverReleaseEvidenceJsonParses() {
+  const parsePattern = /\bJSON\.parse\(\s*([A-Za-z_$][\w$]*)\s*\)/g;
+  const discovered = [];
+
+  for (const directory of releaseEvidenceSourceDirectories) {
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      if (
+        !entry.isFile() ||
+        !/\.(?:mjs|sh)$/.test(entry.name) ||
+        entry.name.endsWith(".test.mjs")
+      ) {
+        continue;
+      }
+
+      const filePath = path.join(directory, entry.name);
+      const relativePath = path.relative(workspaceRoot, filePath);
+      if (relativePath === "scripts/find-duplicate-json-object-keys.mjs") {
+        continue;
+      }
+
+      const ignoredArguments =
+        nonEvidenceJsonParseArguments[relativePath] ?? new Set();
+      const source = readFileSync(filePath, "utf8");
+      for (const [, argument] of source.matchAll(parsePattern)) {
+        if (!ignoredArguments.has(argument)) {
+          discovered.push(`${relativePath}::${argument}`);
+        }
+      }
+    }
+  }
+
+  return discovered.sort();
 }
 
 // ---------------------------------------------------------------------------
@@ -1308,6 +1385,50 @@ test("every summary-writing script the release workflow invokes has a contract",
       "Add a contract (static rules plus a sentinel run) for a new summary writer, or remove an entry that no longer writes a summary.",
     ].join("\n"),
   );
+});
+
+test("every release JSON evidence reader rejects duplicate fields with fixed diagnostics", () => {
+  const inventory = Object.entries(releaseEvidenceReaderContracts)
+    .map(([relativePath, contract]) => `${relativePath}::${contract.argument}`)
+    .sort();
+  const discovered = discoverReleaseEvidenceJsonParses();
+
+  assert.deepEqual(
+    discovered,
+    inventory,
+    [
+      "The release evidence JSON reader inventory must cover every JSON.parse call in release-check scripts.",
+      `  discovered: ${JSON.stringify(discovered)}`,
+      `  inventory:  ${JSON.stringify(inventory)}`,
+      "Add the reader to the inventory and make it use findDuplicateJsonObjectKeys before JSON.parse.",
+    ].join("\n"),
+  );
+
+  for (const [relativePath, contract] of Object.entries(
+    releaseEvidenceReaderContracts,
+  )) {
+    const source = scriptSource(relativePath);
+    const scannerIndex = source.indexOf(contract.scannerCall);
+    const parseIndex = source.indexOf(`JSON.parse(${contract.argument})`);
+
+    assert.ok(
+      scannerIndex >= 0,
+      `${contract.name} must use the shared duplicate-key scanner.`,
+    );
+    assert.ok(
+      parseIndex >= 0,
+      `${contract.name} must parse its evidence source with JSON.parse.`,
+    );
+    assert.ok(
+      scannerIndex < parseIndex,
+      `${contract.name} must scan for duplicate fields before JSON.parse applies last-value-wins semantics.`,
+    );
+    assert.match(
+      source,
+      contract.duplicateFailure,
+      `${contract.name} must keep duplicate-field failures fixed and redacted.`,
+    );
+  }
 });
 
 test("Android preview evidence keeps its pull-request validation and privacy contract", () => {
