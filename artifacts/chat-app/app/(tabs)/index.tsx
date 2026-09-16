@@ -14,10 +14,11 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import RoomCard from "@/components/RoomCard";
-import { PRODUCT_NAME } from "@/constants/branding";
+import { PRODUCT_SHORT_NAME } from "@/constants/branding";
 import { useApp } from "@/contexts/AppContext";
 import { ScaledText as Text } from "@/components/ScaledText";
 import { useColors } from "@/hooks/useColors";
+import { useTabBarContentInset } from "@/hooks/useTabBarContentInset";
 
 interface Room {
   id: string;
@@ -83,6 +84,13 @@ export default function ChatsScreen() {
 
   const topPad =
     Platform.OS === "web" ? 67 : insets.top;
+  // The tab bar overlays the bottom of this screen (see-through, but whatever
+  // scrolls under it is dimmed and out of reach), so the end of the list
+  // reserves the bar's measured height instead of a constant that a taller
+  // bar would outgrow. The breathing room beyond the
+  // bar keeps the spacing the list had while it reserved a flat 90pt over the
+  // safe-area inset: 41pt past the 49pt native bar, 6pt past the 84pt web bar.
+  const listBottomInset = useTabBarContentInset(Platform.OS === "web" ? 6 : 41);
 
   return (
     <View style={[styles.root, { backgroundColor: colors.background }]}>
@@ -98,7 +106,7 @@ export default function ChatsScreen() {
       >
         <View style={styles.headerCopy}>
           <Text style={[styles.title, { color: colors.foreground }]}>
-            {PRODUCT_NAME}
+            {PRODUCT_SHORT_NAME}
           </Text>
           <Text
             accessibilityRole="header"
@@ -142,12 +150,13 @@ export default function ChatsScreen() {
         </View>
       ) : (
         <FlatList
+          testID="chats-list"
           data={rooms}
           keyExtractor={(r) => r.id}
           renderItem={({ item }) => (
             <RoomCard room={item} onPress={() => handleJoin(item)} />
           )}
-          contentContainerStyle={{ paddingTop: 16, paddingBottom: insets.bottom + 90 }}
+          contentContainerStyle={{ paddingTop: 16, paddingBottom: listBottomInset }}
           refreshControl={
             <RefreshControl
               refreshing={refreshing}
@@ -181,8 +190,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20, paddingBottom: 14, borderBottomWidth: 1,
   },
   headerCopy: { flex: 1, minWidth: 0 },
-  title: { fontSize: 28, fontWeight: "800" as const, flexShrink: 1, lineHeight: 34 },
-  greeting: { fontSize: 20, fontWeight: "600" as const, marginTop: 4 },
+  title: { fontSize: 30, fontWeight: "800" as const, flexShrink: 1, lineHeight: 36 },
+  greeting: { fontSize: 24, fontWeight: "600" as const, marginTop: 4 },
   subtitle: { fontSize: 13, marginTop: 2 },
   newBtn: { width: 44, height: 44, alignItems: "center", justifyContent: "center" },
   center: { flex: 1, alignItems: "center", justifyContent: "center", gap: 12 },

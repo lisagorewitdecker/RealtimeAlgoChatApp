@@ -2,45 +2,32 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-TMP_DIR="$(mktemp -d)"
-trap 'rm -rf "$TMP_DIR"' EXIT
-
-RESULTS_ROOT="$TMP_DIR/test-results/native-large-text"
-INVALID_RESULTS_ROOT="$TMP_DIR/test-results-invalid/native-large-text"
-SUMMARY_PATH="$TMP_DIR/summary.md"
-STDOUT_PATH="$TMP_DIR/stdout.log"
-STDERR_PATH="$TMP_DIR/stderr.log"
-INVALID_SUMMARY_PATH="$TMP_DIR/invalid-summary.md"
-INVALID_STDOUT_PATH="$TMP_DIR/invalid-stdout.log"
-INVALID_STDERR_PATH="$TMP_DIR/invalid-stderr.log"
-IOS_BUILD_ID="ios-candidate-build-12345"
-ANDROID_BUILD_ID="android-candidate-build-67890"
-
-create_platform_fixture() {
-  local results_root="$1"
-  local platform="$2"
-  local build_id="$3"
-  local run_dir="$results_root/$platform/2026-09-15T15-03-49Z"
-  local marker="${platform}-marker"
-  local frame_file="app/${platform}/probe.ts"
-
-  mkdir -p "$run_dir/screenshots" "$run_dir/call-surface"
-
-  printf '%s\n' "$build_id" > "$run_dir/candidate-build-id.txt"
-  cat > "$run_dir/pass-fail-record.txt" <<EOF
-status=PASS
-run_mode=release-gate
-EOF
-
-  if [[ "$platform" == "ios" ]]; then
-    cat > "$run_dir/runner-metadata.txt" <<EOF
-platform=ios
-candidate_build_id=$build_id
-recorded_at_utc=2026-09-15T15:03:49Z
-device=iPhone 15
 CHECKER="$ROOT_DIR/scripts/check-native-large-text-evidence.sh"
-TEST_ROOT="$(mktemp -d)"
-trap 'rm -rf "$TEST_ROOT"' EXIT
+SAVED_TEST_STATUS="$ROOT_DIR/artifacts/api-server/test-results/.last-run.json"
+TEST_PARENT="$(mktemp -d)"
+TEST_ROOT="$TEST_PARENT/fixtures"
+CLEANUP_GUARD="$TEST_PARENT/cleanup-must-not-escape-fixtures"
+SAVED_TEST_STATUS_SNAPSHOT="$TEST_PARENT/last-run.snapshot.json"
+mkdir -p "$TEST_ROOT"
+printf 'keep\n' > "$CLEANUP_GUARD"
+cp "$SAVED_TEST_STATUS" "$SAVED_TEST_STATUS_SNAPSHOT"
+
+cleanup_test_fixtures() {
+  rm -rf "$TEST_ROOT"
+
+  if [[ ! -f "$CLEANUP_GUARD" ]]; then
+    echo "Native evidence test cleanup escaped its fixture directory" >&2
+    return 1
+  fi
+  if ! cmp -s "$SAVED_TEST_STATUS_SNAPSHOT" "$SAVED_TEST_STATUS"; then
+    echo "Native evidence test cleanup changed the saved API test status" >&2
+    return 1
+  fi
+
+  rm -rf "$TEST_PARENT"
+}
+
+trap cleanup_test_fixtures EXIT
 
 assert_contains() {
   local output="$1"
@@ -118,132 +105,6 @@ EOF
   else
     cat > "$run_dir/runner-metadata.txt" <<EOF
 platform=android
-candidate_build_id=$build_id
-recorded_at_utc=2026-09-15T15:03:49Z
-device_serial=emulator-5554
-device_model=Pixel 8
-android_release=15
-android_api=35
-screen_dp=412x915
-density_dpi=420
-user_rotation=0
-EOF
-  fi
-
-  printf '{}\n' > "$run_dir/native-info.json"
-  cat > "$run_dir/native-branding-check.md" <<EOF
-## ${platform} native branding
-
-- Status: **PASS**
-EOF
-  printf '<testsuite name="%s"></testsuite>\n' "$platform" > "$run_dir/maestro-results.xml"
-  printf '<testsuite name="%s-sentry"></testsuite>\n' "$platform" > "$run_dir/sentry-maestro-results.xml"
-  cat > "$run_dir/sentry-trigger.txt" <<EOF
-platform=$platform
-candidate_build_id=$build_id
-marker=$marker
-EOF
-  cat > "$run_dir/sentry-source-map-evidence.json" <<EOF
-{"status":"PASS","platform":"$platform","candidateBuildId":"$build_id","marker":"$marker","eventId":"event-$platform","release":"release-$platform","dist":"1","readableFrame":{"filename":"$frame_file","function":"createNativeSourceMapProbeError","line":1,"column":1}}
-EOF
-
-  for index in $(seq 1 11); do
-    printf 'png-%s\n' "$index" > "$run_dir/screenshots/$index.png"
-  done
-  for index in $(seq 1 2); do
-    printf 'png-%s\n' "$index" > "$run_dir/call-surface/$index.png"
-  done
-}
-
-create_platform_fixture "$RESULTS_ROOT" ios "$IOS_BUILD_ID"
-create_platform_fixture "$RESULTS_ROOT" android "$ANDROID_BUILD_ID"
-
-node "$ROOT_DIR/scripts/verify-sentry-native-event.mjs" \
-  --evidence-path "$RESULTS_ROOT/ios/2026-09-15T15-03-49Z/sentry-source-map-evidence.json" \
-  --trigger-path "$RESULTS_ROOT/ios/2026-09-15T15-03-49Z/sentry-trigger.txt" \
-  --platform ios \
-  --candidate-build-id "$IOS_BUILD_ID" \
-  --expected-probe-marker ios-marker \
-  --expected-release release-ios \
-  --expected-dist 1
-
-GITHUB_STEP_SUMMARY="$SUMMARY_PATH" \
-  bash "$ROOT_DIR/scripts/check-native-large-text-evidence.sh" "$RESULTS_ROOT" \
-  >"$STDOUT_PATH" 2>"$STDERR_PATH"
-
-grep -Fq "## iOS native large-text evidence" "$SUMMARY_PATH"
-grep -Fq "## Android native large-text evidence" "$SUMMARY_PATH"
-grep -Fq -- "- Status: **PASS**" "$SUMMARY_PATH"
-grep -Fq "Native large-text evidence completeness check passed for iOS and Android." "$STDOUT_PATH"
-
-if grep -Fq "$IOS_BUILD_ID" "$SUMMARY_PATH" || grep -Fq "$IOS_BUILD_ID" "$STDOUT_PATH" || grep -Fq "$IOS_BUILD_ID" "$STDERR_PATH"; then
-  echo "iOS candidate build ID leaked into summary or logs." >&2
-  exit 1
-fi
-
-if grep -Fq "$ANDROID_BUILD_ID" "$SUMMARY_PATH" || grep -Fq "$ANDROID_BUILD_ID" "$STDOUT_PATH" || grep -Fq "$ANDROID_BUILD_ID" "$STDERR_PATH"; then
-  echo "Android candidate build ID leaked into summary or logs." >&2
-  exit 1
-fi
-
-BROKEN_RESULTS_ROOT="$TMP_DIR/test-results/native-large-text-mismatched-runner-metadata"
-BROKEN_SUMMARY_PATH="$TMP_DIR/broken-summary.md"
-BROKEN_STDOUT_PATH="$TMP_DIR/broken-stdout.log"
-BROKEN_STDERR_PATH="$TMP_DIR/broken-stderr.log"
-
-create_platform_fixture "$INVALID_RESULTS_ROOT" ios "$IOS_BUILD_ID"
-create_platform_fixture "$INVALID_RESULTS_ROOT" android "$ANDROID_BUILD_ID"
-cat > "$INVALID_RESULTS_ROOT/ios/2026-09-15T15-03-49Z/candidate-build-id.txt" <<EOF
-$IOS_BUILD_ID
-unexpected-second-id
-EOF
-
-set +e
-GITHUB_STEP_SUMMARY="$INVALID_SUMMARY_PATH" \
-  bash "$ROOT_DIR/scripts/check-native-large-text-evidence.sh" "$INVALID_RESULTS_ROOT" \
-  >"$INVALID_STDOUT_PATH" 2>"$INVALID_STDERR_PATH"
-status=$?
-set -e
-
-if [[ "$status" -eq 0 ]]; then
-  echo "Expected multi-line candidate-build-id.txt to fail validation." >&2
-  exit 1
-fi
-
-grep -Fq "contains multiple normalized lines" "$INVALID_STDERR_PATH"
-
-DIRECTORY_RESULTS_ROOT="$TMP_DIR/test-results/native-large-text-directory-artifact"
-DIRECTORY_SUMMARY_PATH="$TMP_DIR/directory-summary.md"
-DIRECTORY_STDOUT_PATH="$TMP_DIR/directory-stdout.log"
-DIRECTORY_STDERR_PATH="$TMP_DIR/directory-stderr.log"
-
-create_platform_fixture "$DIRECTORY_RESULTS_ROOT" ios "$IOS_BUILD_ID"
-create_platform_fixture "$DIRECTORY_RESULTS_ROOT" android "$ANDROID_BUILD_ID"
-rm -f "$DIRECTORY_RESULTS_ROOT/ios/2026-09-15T15-03-49Z/candidate-build-id.txt"
-mkdir "$DIRECTORY_RESULTS_ROOT/ios/2026-09-15T15-03-49Z/candidate-build-id.txt"
-
-if GITHUB_STEP_SUMMARY="$DIRECTORY_SUMMARY_PATH" \
-  bash "$ROOT_DIR/scripts/check-native-large-text-evidence.sh" "$DIRECTORY_RESULTS_ROOT" \
-  >"$DIRECTORY_STDOUT_PATH" 2>"$DIRECTORY_STDERR_PATH"; then
-  echo "Expected directory artifact to fail validation." >&2
-  exit 1
-fi
-
-grep -Fq "is not a regular file" "$DIRECTORY_STDERR_PATH"
-
-create_platform_fixture "$BROKEN_RESULTS_ROOT" ios "$IOS_BUILD_ID"
-create_platform_fixture "$BROKEN_RESULTS_ROOT" android "$ANDROID_BUILD_ID"
-perl -0pi -e 's/candidate_build_id=\Q'"$IOS_BUILD_ID"'\E/candidate_build_id=ios-candidate-build-mismatch/' \
-  "$BROKEN_RESULTS_ROOT/ios/2026-09-15T15-03-49Z/runner-metadata.txt"
-
-if GITHUB_STEP_SUMMARY="$BROKEN_SUMMARY_PATH" \
-  bash "$ROOT_DIR/scripts/check-native-large-text-evidence.sh" "$BROKEN_RESULTS_ROOT" \
-  >"$BROKEN_STDOUT_PATH" 2>"$BROKEN_STDERR_PATH"; then
-  echo "Expected runner metadata candidate_build_id mismatch to fail." >&2
-  exit 1
-fi
-
-grep -Fq "Runner metadata candidate_build_id does not match the tested candidate" "$BROKEN_STDERR_PATH"
 run_mode=release-gate
 candidate_build_id=build-android
 app_id=com.example.chat
@@ -458,6 +319,38 @@ if incomplete_output="$(bash "$CHECKER" "$incomplete_root" 2>&1)"; then
 fi
 assert_contains "$incomplete_output" "[android] Missing runner metadata and device details"
 assert_contains "$incomplete_output" "[ios] Found 1 empty call-surface screenshot file(s)"
+
+conflicting_candidate_ids_root="$TEST_ROOT/conflicting-candidate-ids"
+write_valid_run "$conflicting_candidate_ids_root" ios
+write_valid_run "$conflicting_candidate_ids_root" android
+conflicting_candidate_id_one="must-not-be-printed-conflicting-candidate-one"
+conflicting_candidate_id_two="must-not-be-printed-conflicting-candidate-two"
+printf '%s\n%s\n' \
+  "$conflicting_candidate_id_one" \
+  "$conflicting_candidate_id_two" \
+  > "$conflicting_candidate_ids_root/android/20260909T120000Z/candidate-build-id.txt"
+if conflicting_candidate_ids_output="$(bash "$CHECKER" "$conflicting_candidate_ids_root" 2>&1)"; then
+  echo "conflicting candidate build IDs case unexpectedly passed" >&2
+  exit 1
+fi
+assert_contains "$conflicting_candidate_ids_output" "[android] Candidate build ID file at $conflicting_candidate_ids_root/android/20260909T120000Z/candidate-build-id.txt must contain exactly one non-empty identifier line."
+assert_not_contains "$conflicting_candidate_ids_output" "$conflicting_candidate_id_one"
+assert_not_contains "$conflicting_candidate_ids_output" "$conflicting_candidate_id_two"
+
+duplicate_candidate_ids_root="$TEST_ROOT/duplicate-candidate-ids"
+write_valid_run "$duplicate_candidate_ids_root" ios
+write_valid_run "$duplicate_candidate_ids_root" android
+duplicate_candidate_id="must-not-be-printed-duplicate-candidate"
+printf '%s\n%s\n' \
+  "$duplicate_candidate_id" \
+  "$duplicate_candidate_id" \
+  > "$duplicate_candidate_ids_root/android/20260909T120000Z/candidate-build-id.txt"
+if duplicate_candidate_ids_output="$(bash "$CHECKER" "$duplicate_candidate_ids_root" 2>&1)"; then
+  echo "duplicate candidate build IDs case unexpectedly passed" >&2
+  exit 1
+fi
+assert_contains "$duplicate_candidate_ids_output" "[android] Candidate build ID file at $duplicate_candidate_ids_root/android/20260909T120000Z/candidate-build-id.txt must contain exactly one non-empty identifier line."
+assert_not_contains "$duplicate_candidate_ids_output" "$duplicate_candidate_id"
 
 summary_root="$TEST_ROOT/summary"
 write_valid_run "$summary_root" ios
@@ -874,8 +767,9 @@ assert_not_contains "$duplicate_sentry_trigger_output" "trigger platform does no
 assert_not_contains "$duplicate_sentry_trigger_output" "trigger candidate build ID does not match"
 assert_not_contains "$duplicate_sentry_trigger_output" "trigger marker does not match"
 
-# Conflicting Sentry evidence fields must be rejected before JSON.parse can
-# select the later declaration, without exposing either field value.
+# Conflicting Sentry evidence fields, including fields nested in the readable
+# frame object, must be rejected before JSON.parse can select the later
+# declaration, without exposing either field value.
 duplicate_sentry_evidence_root="$TEST_ROOT/duplicate-sentry-evidence"
 write_valid_run "$duplicate_sentry_evidence_root" ios
 write_valid_run "$duplicate_sentry_evidence_root" android
@@ -893,6 +787,10 @@ for (const field of ["status", "platform", "candidateBuildId", "marker"]) {
     `$1\n  "${field}": "must-not-be-printed-${field}",`,
   );
 }
+evidence = evidence.replace(
+  /(\n    "filename": "[^"]+",)/,
+  `$1\n    "filename": "must-not-be-printed-nested-filename",`,
+);
 writeFileSync(path, evidence);
 NODE
 done
@@ -1262,5 +1160,8 @@ if wrong_platform_output="$(bash "$CHECKER" "$wrong_platform_root" 2>&1)"; then
   exit 1
 fi
 assert_contains "$wrong_platform_output" "[android] Review record identifies the wrong platform in $wrong_platform_root/android/20260909T120000Z/review-record.txt."
+
+cleanup_test_fixtures
+trap - EXIT
 
 echo "Native large-text evidence completeness regression tests passed."

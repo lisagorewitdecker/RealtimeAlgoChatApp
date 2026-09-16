@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import {
+  closeSync,
+  existsSync,
   mkdtempSync,
+  openSync,
   readFileSync,
   rmSync,
   writeFileSync,
@@ -13,6 +17,8 @@ import test from "node:test";
 import {
   createHandoffPreflightRecord,
   formatHandoffPreflight,
+  getPublicPreviewManifestUrl,
+  parsePreviewTimeout,
   requestLocalHandoffProbe,
   requestPublicPreviewManifest,
   readAndValidateHandoffPreflight,
@@ -23,6 +29,56 @@ import {
 const previewEnvironment = {
   PREVIEW_PUBLIC_URL: "https://preview.example.test/expo",
 };
+const validatorPath = join(
+  import.meta.dirname,
+  "validate-preview-startup.mjs",
+);
+
+test("uses defaults only when preview timeout environment values are absent", () => {
+  assert.equal(
+    parsePreviewTimeout("PREVIEW_STARTUP_TIMEOUT_MS", undefined, 30_000),
+    30_000,
+  );
+  assert.equal(
+    parsePreviewTimeout("PREVIEW_HANDOFF_TIMEOUT_MS", null, 60_000),
+    60_000,
+  );
+  assert.equal(
+    parsePreviewTimeout("PREVIEW_PUBLIC_TIMEOUT_MS", undefined, 15_000),
+    15_000,
+  );
+});
+
+test("accepts positive finite preview timeout values", () => {
+  for (const [name, value] of [
+    ["PREVIEW_STARTUP_TIMEOUT_MS", "1000"],
+    ["PREVIEW_HANDOFF_TIMEOUT_MS", "40"],
+    ["PREVIEW_PUBLIC_TIMEOUT_MS", "25.5"],
+  ]) {
+    assert.equal(parsePreviewTimeout(name, value, 999), Number(value));
+  }
+});
+
+test("rejects malformed and non-positive preview timeout values", () => {
+  for (const name of [
+    "PREVIEW_STARTUP_TIMEOUT_MS",
+    "PREVIEW_HANDOFF_TIMEOUT_MS",
+    "PREVIEW_PUBLIC_TIMEOUT_MS",
+  ]) {
+    for (const value of ["", "not-a-number", "2_000", "0", "-1", "Infinity"]) {
+      assert.throws(
+        () => parsePreviewTimeout(name, value, 999),
+        (error) => {
+          assert.equal(
+            error.message,
+            `${name} must be a positive finite number of milliseconds.`,
+          );
+          return true;
+        },
+      );
+    }
+  }
+});
 
 function mockFetch(response) {
   const originalFetch = globalThis.fetch;
@@ -40,6 +96,142 @@ function mockFetch(response) {
       globalThis.fetch = originalFetch;
     },
   };
+}
+
+function runLiveMetroTimeoutFixture(fixtureName, expectedResource) {
+  const directory = mkdtempSync(join(tmpdir(), "preview-live-timeout-"));
+  const preloadPath = join(directory, "mock-public-preview.mjs");
+  writeFileSync(
+    preloadPath,
+    `const originalFetch = globalThis.fetch;
+globalThis.fetch = async (url, options = {}) => {
+  if (String(url).startsWith("https://public-preview.test/")) {
+    return new Response(
+      JSON.stringify({
+        launchAsset: {
+          url: "https://public-preview.test/_expo/static/js/bundle",
+        },
+      }),
+      { status: 200 },
+    );
+  }
+  return originalFetch(url, options);
+};
+`,
+    "utf8",
+  );
+
+  try {
+    const startedAt = Date.now();
+    const result = spawnSync(process.execPath, [validatorPath], {
+      env: {
+        ...process.env,
+        NODE_OPTIONS: [
+          process.env.NODE_OPTIONS,
+          `--import ${preloadPath}`,
+        ]
+          .filter(Boolean)
+          .join(" "),
+        PREVIEW_PUBLIC_URL: "https://public-preview.test/expo",
+        PREVIEW_PUBLIC_TIMEOUT_MS: "100",
+        PREVIEW_HANDOFF_TIMEOUT_MS: "40",
+        PREVIEW_STARTUP_TIMEOUT_MS: "1000",
+        PREVIEW_STARTUP_TEST_FIXTURE: fixtureName,
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+      timeout: 4_000,
+    });
+    const output =
+      result.stdout.toString() + result.stderr.toString();
+
+    assert.notEqual(
+      result.error?.code,
+      "ETIMEDOUT",
+      `${fixtureName} left the handoff command running indefinitely`,
+    );
+    assert.notEqual(result.status, 0, output);
+    assert.ok(
+      Date.now() - startedAt < 3_000,
+      `${fixtureName} exceeded the bounded recovery window`,
+    );
+    assert.match(output, /public_manifest_reachability=PASS/);
+    assert.match(output, /local_handoff_probe=FAIL/);
+    assert.match(output, expectedResource);
+    assert.match(output, /40ms configured local handoff deadline/);
+    assert.match(output, /request aborted by deadline/);
+    assert.match(
+      output,
+      /Restart or repair the managed Chat App\/Expo workflow/,
+    );
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+}
+
+function runMalformedPreviewConfigurationCli(setting, value) {
+  const directory = mkdtempSync(join(tmpdir(), "preview-malformed-config-cli-"));
+  const markerPath = join(directory, "unexpected-public-request.marker");
+  const preloadPath = join(directory, "reject-public-request.mjs");
+
+  writeFileSync(
+    preloadPath,
+    `import { appendFileSync } from "node:fs";
+const markerPath = ${JSON.stringify(markerPath)};
+globalThis.fetch = async () => {
+  appendFileSync(markerPath, "public request attempted\\n");
+  throw new Error("public request should not be attempted");
+};
+`,
+    "utf8",
+  );
+
+  try {
+    const environment = {
+      ...process.env,
+      NODE_OPTIONS: [
+        process.env.NODE_OPTIONS,
+        `--import ${preloadPath}`,
+      ]
+        .filter(Boolean)
+        .join(" "),
+      PREVIEW_PUBLIC_TIMEOUT_MS: "1000",
+      PREVIEW_HANDOFF_TIMEOUT_MS: "1000",
+      PREVIEW_STARTUP_TIMEOUT_MS: "1000",
+      PREVIEW_STARTUP_TEST_FIXTURE: "handoff-server",
+    };
+    delete environment.PREVIEW_PUBLIC_URL;
+    delete environment.REPLIT_EXPO_DEV_DOMAIN;
+    environment[setting] = value;
+
+    const result = spawnSync(process.execPath, [validatorPath], {
+      env: environment,
+      stdio: ["ignore", "pipe", "pipe"],
+      timeout: 5_000,
+    });
+    const output =
+      result.stdout.toString() + result.stderr.toString();
+
+    assert.notEqual(
+      result.error?.code,
+      "ETIMEDOUT",
+      `${setting} left the preview validation command running indefinitely`,
+    );
+    assert.notEqual(result.status, 0, output);
+    assert.match(
+      output,
+      new RegExp(
+        `Public Expo preview manifest URL configuration from ${setting} is invalid`,
+      ),
+    );
+    assert.match(output, new RegExp(`\\b${setting}\\b`));
+    assert.equal(
+      existsSync(markerPath),
+      false,
+      `${setting} attempted a public request before reporting its malformed configuration`,
+    );
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 }
 
 test("accepts a public HTTP 200 manifest and sends the Android Expo header", async () => {
@@ -225,6 +417,346 @@ test(
   },
 );
 
+test(
+  "CLI saves a redacted failed public boundary when the public probe times out",
+  { timeout: 5_000 },
+  () => {
+    const directory = mkdtempSync(
+      join(tmpdir(), "preview-handoff-timeout-cli-"),
+    );
+    const outputPath = join(directory, "android-preview-preflight.json");
+    const stdoutPath = join(directory, "validator.stdout.log");
+    const stderrPath = join(directory, "validator.stderr.log");
+    const preloadPath = join(directory, "stall-public-fetch.mjs");
+    writeFileSync(
+      preloadPath,
+      `const originalFetch = globalThis.fetch;
+globalThis.fetch = async (url, options = {}) => {
+  if (String(url).startsWith("https://public-preview.test/")) {
+    await new Promise((resolve, reject) => {
+      const signal = options.signal;
+      if (!signal) {
+        reject(new Error("test fetch requires an abort signal"));
+        return;
+      }
+      if (signal.aborted) {
+        reject(new Error("request aborted by deadline"));
+        return;
+      }
+      signal.addEventListener(
+        "abort",
+        () => reject(new Error("request aborted by deadline")),
+        { once: true },
+      );
+    });
+  }
+  return originalFetch(url, options);
+};
+`,
+      "utf8",
+    );
+
+    try {
+      const stdout = openSync(stdoutPath, "w");
+      const stderr = openSync(stderrPath, "w");
+      let result;
+      try {
+        result = spawnSync(
+          process.execPath,
+          [
+            validatorPath,
+            "--platform",
+            "android",
+            "--record-output",
+            outputPath,
+          ],
+          {
+            env: {
+              ...process.env,
+              NODE_OPTIONS: [
+                process.env.NODE_OPTIONS,
+                `--import ${preloadPath}`,
+              ]
+                .filter(Boolean)
+                .join(" "),
+              PREVIEW_PUBLIC_URL:
+                "https://public-preview.test/private-path?token=private-secret",
+              PREVIEW_PUBLIC_TIMEOUT_MS: "25",
+              PREVIEW_STARTUP_TIMEOUT_MS: "2000",
+              PREVIEW_STARTUP_TEST_FIXTURE: "handoff-server",
+            },
+            stdio: ["ignore", stdout, stderr],
+          },
+        );
+      } finally {
+        closeSync(stdout);
+        closeSync(stderr);
+      }
+      const output =
+        readFileSync(stdoutPath, "utf8") + readFileSync(stderrPath, "utf8");
+
+      assert.notEqual(result.status, 0, output);
+      const record = JSON.parse(readFileSync(outputPath, "utf8"));
+      assert.doesNotThrow(() => validateHandoffPreflightRecord(record));
+      assert.equal(
+        record.boundaries.publicManifestReachability.status,
+        "FAIL",
+      );
+      assert.equal(record.boundaries.localHandoffProbe.status, "NOT_RUN");
+      assert.equal(record.boundaries.expoGoLaunch.status, "NOT_ASSESSED");
+      assert.equal(
+        record.boundaries.serverNativeRequestEvidence.status,
+        "NOT_ASSESSED",
+      );
+      assert.match(output, /public_manifest_reachability=FAIL/);
+      assert.match(
+        output,
+        /Restart or repair the managed Chat App\/Expo workflow/,
+      );
+      assert.doesNotMatch(
+        output,
+        /public-preview\.test|private-path|private-secret|token=/i,
+      );
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
+  "CLI saves a redacted failed local boundary when the local bundle probe times out",
+  { timeout: 5_000 },
+  () => {
+    const directory = mkdtempSync(
+      join(tmpdir(), "preview-handoff-local-timeout-cli-"),
+    );
+    const outputPath = join(directory, "android-preview-preflight.json");
+    const stdoutPath = join(directory, "validator.stdout.log");
+    const stderrPath = join(directory, "validator.stderr.log");
+    const preloadPath = join(directory, "stall-local-bundle-fetch.mjs");
+    writeFileSync(
+      preloadPath,
+      `const originalFetch = globalThis.fetch;
+globalThis.fetch = async (url, options = {}) => {
+  const requestUrl = new URL(String(url));
+  if (requestUrl.origin === "https://public-preview.test") {
+    return new Response(
+      JSON.stringify({
+        launchAsset: {
+          url: "https://public-preview.test/_expo/static/js/bundle",
+        },
+      }),
+      { status: 200 },
+    );
+  }
+  if (
+    requestUrl.hostname === "127.0.0.1" &&
+    requestUrl.pathname === "/_expo/static/js/bundle"
+  ) {
+    await new Promise((resolve, reject) => {
+      const signal = options.signal;
+      if (!signal) {
+        reject(new Error("test fetch requires an abort signal"));
+        return;
+      }
+      if (signal.aborted) {
+        reject(new Error("request aborted by deadline"));
+        return;
+      }
+      signal.addEventListener(
+        "abort",
+        () => reject(new Error("request aborted by deadline")),
+        { once: true },
+      );
+    });
+  }
+  return originalFetch(url, options);
+};
+`,
+      "utf8",
+    );
+
+    try {
+      const stdout = openSync(stdoutPath, "w");
+      const stderr = openSync(stderrPath, "w");
+      let result;
+      try {
+        result = spawnSync(
+          process.execPath,
+          [
+            validatorPath,
+            "--platform",
+            "android",
+            "--record-output",
+            outputPath,
+          ],
+          {
+            env: {
+              ...process.env,
+              NODE_OPTIONS: [
+                process.env.NODE_OPTIONS,
+                `--import ${preloadPath}`,
+              ]
+                .filter(Boolean)
+                .join(" "),
+              PREVIEW_PUBLIC_URL:
+                "https://public-preview.test/private-path?token=private-secret",
+              PREVIEW_PUBLIC_TIMEOUT_MS: "200",
+              PREVIEW_HANDOFF_TIMEOUT_MS: "100",
+              PREVIEW_STARTUP_TIMEOUT_MS: "2000",
+              PREVIEW_STARTUP_TEST_FIXTURE: "handoff-server",
+            },
+            stdio: ["ignore", stdout, stderr],
+          },
+        );
+      } finally {
+        closeSync(stdout);
+        closeSync(stderr);
+      }
+      const output =
+        readFileSync(stdoutPath, "utf8") + readFileSync(stderrPath, "utf8");
+
+      assert.notEqual(result.status, 0, output);
+      const record = JSON.parse(readFileSync(outputPath, "utf8"));
+      assert.doesNotThrow(() => validateHandoffPreflightRecord(record));
+      assert.equal(
+        record.boundaries.publicManifestReachability.status,
+        "PASS",
+      );
+      assert.equal(record.boundaries.localHandoffProbe.status, "FAIL");
+      assert.equal(record.boundaries.expoGoLaunch.status, "NOT_ASSESSED");
+      assert.equal(
+        record.boundaries.serverNativeRequestEvidence.status,
+        "NOT_ASSESSED",
+      );
+      assert.equal(
+        record.boundaries.localHandoffProbe.evidence,
+        "Local manifest/bundle probe failed — no successful probe result was recorded",
+      );
+      assert.match(output, /public_manifest_reachability=PASS/);
+      assert.match(output, /local_handoff_probe=FAIL/);
+      assert.match(
+        output,
+        /Restart or repair the managed Chat App\/Expo workflow/,
+      );
+      assert.doesNotMatch(
+        output,
+        /127\.0\.0\.1|public-preview\.test|private-path|private-secret|token=|_expo\/static\/js\/bundle/i,
+      );
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
+  "aborts a stalled local manifest request at its deadline with recovery guidance",
+  { timeout: 1_000 },
+  async () => {
+    const originalFetch = globalThis.fetch;
+    let request;
+    globalThis.fetch = async (url, options) => {
+      request = { url, options };
+      return new Promise((resolve, reject) => {
+        options.signal.addEventListener(
+          "abort",
+          () => reject(new Error("fetch aborted")),
+          { once: true },
+        );
+      });
+    };
+
+    try {
+      await assert.rejects(
+        requestLocalHandoffProbe(4_321, 25),
+        (error) => {
+          assert.match(error.message, /manifest request did not complete/);
+          assert.match(error.message, /aborted by deadline/i);
+          assert.match(
+            error.message,
+            /Restart or repair the managed Chat App\/Expo workflow/,
+          );
+          return true;
+        },
+      );
+      assert.equal(request.options.signal.aborted, true);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  },
+);
+
+test(
+  "aborts a stalled local bundle request at its deadline with recovery guidance",
+  { timeout: 1_000 },
+  async () => {
+    const originalFetch = globalThis.fetch;
+    let request;
+    let requestCount = 0;
+    globalThis.fetch = async (url, options) => {
+      requestCount += 1;
+      request = { url, options };
+      if (requestCount === 1) {
+        return new Response(
+          JSON.stringify({
+            launchAsset: {
+              url: "https://preview.example.test/_expo/static/js/bundle",
+            },
+          }),
+          { status: 200 },
+        );
+      }
+      return new Promise((resolve, reject) => {
+        options.signal.addEventListener(
+          "abort",
+          () => reject(new Error("fetch aborted")),
+          { once: true },
+        );
+      });
+    };
+
+    try {
+      await assert.rejects(
+        requestLocalHandoffProbe(4_321, 25),
+        (error) => {
+          assert.match(error.message, /manifest HTTP 200/);
+          assert.match(error.message, /bundle request did not complete/);
+          assert.match(error.message, /aborted by deadline/i);
+          assert.match(
+            error.message,
+            /Restart or repair the managed Chat App\/Expo workflow/,
+          );
+          return true;
+        },
+      );
+      assert.equal(requestCount, 2);
+      assert.equal(request.options.signal.aborted, true);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  },
+);
+
+test(
+  "live Metro manifest timeout exits with the timed-out resource and recovery guidance",
+  { timeout: 5_000 },
+  () =>
+    runLiveMetroTimeoutFixture(
+      "handoff-server-stall-manifest",
+      /manifest request did not complete/,
+    ),
+);
+
+test(
+  "live Metro bundle timeout exits with the timed-out resource and recovery guidance",
+  { timeout: 5_000 },
+  () =>
+    runLiveMetroTimeoutFixture(
+      "handoff-server-stall-bundle",
+      /bundle request did not complete/,
+    ),
+);
+
 test("reports missing public preview configuration before making a request", async () => {
   const fetchMock = mockFetch(new Response("{}"));
 
@@ -236,6 +768,48 @@ test("reports missing public preview configuration before making a request", asy
     assert.equal(fetchMock.request, undefined);
   } finally {
     fetchMock.restore();
+  }
+});
+
+test("falls back to REPLIT_EXPO_DEV_DOMAIN when PREVIEW_PUBLIC_URL is null", () => {
+  const url = getPublicPreviewManifestUrl({
+    PREVIEW_PUBLIC_URL: null,
+    REPLIT_EXPO_DEV_DOMAIN: "preview.example.test/expo",
+  });
+
+  assert.equal(String(url), "https://preview.example.test/expo/");
+});
+
+test("falls back to REPLIT_EXPO_DEV_DOMAIN when PREVIEW_PUBLIC_URL is undefined", () => {
+  const url = getPublicPreviewManifestUrl({
+    PREVIEW_PUBLIC_URL: undefined,
+    REPLIT_EXPO_DEV_DOMAIN: "preview.example.test/expo",
+  });
+
+  assert.equal(String(url), "https://preview.example.test/expo/");
+});
+
+test("reports missing configuration when PREVIEW_PUBLIC_URL is empty", () => {
+  assert.throws(
+    () =>
+      getPublicPreviewManifestUrl({
+        PREVIEW_PUBLIC_URL: "",
+        REPLIT_EXPO_DEV_DOMAIN: "preview.example.test/expo",
+      }),
+    /Public Expo preview manifest URL is not configured.*REPLIT_EXPO_DEV_DOMAIN or PREVIEW_PUBLIC_URL/,
+  );
+});
+
+test("reports malformed fallback configuration from REPLIT_EXPO_DEV_DOMAIN for nullish PREVIEW_PUBLIC_URL", () => {
+  for (const previewPublicUrl of [null, undefined]) {
+    assert.throws(
+      () =>
+        getPublicPreviewManifestUrl({
+          PREVIEW_PUBLIC_URL: previewPublicUrl,
+          REPLIT_EXPO_DEV_DOMAIN: "https://[invalid",
+        }),
+      /Public Expo preview manifest URL configuration from REPLIT_EXPO_DEV_DOMAIN is invalid/,
+    );
   }
 });
 
@@ -301,6 +875,20 @@ test("rejects malformed REPLIT_EXPO_DEV_DOMAIN configuration before making a req
   } finally {
     fetchMock.restore();
   }
+});
+
+test("CLI rejects malformed PREVIEW_PUBLIC_URL before making a public request", () => {
+  runMalformedPreviewConfigurationCli(
+    "PREVIEW_PUBLIC_URL",
+    "https://[invalid",
+  );
+});
+
+test("CLI rejects malformed REPLIT_EXPO_DEV_DOMAIN before making a public request", () => {
+  runMalformedPreviewConfigurationCli(
+    "REPLIT_EXPO_DEV_DOMAIN",
+    "https://[invalid",
+  );
 });
 
 test("reports the malformed higher-precedence preview setting when both are configured", async () => {
@@ -561,6 +1149,11 @@ test("rejects duplicate top-level, boundary, and status fields before schema val
       "status",
       `{"schema":"${record.schema}","platform":"android","boundaries":{"publicManifestReachability":{"status":"PASS","status":"FAIL","evidence":"public manifest HTTP 200 (128 bytes)"},"localHandoffProbe":${JSON.stringify(record.boundaries.localHandoffProbe)},"expoGoLaunch":${JSON.stringify(record.boundaries.expoGoLaunch)},"serverNativeRequestEvidence":${JSON.stringify(record.boundaries.serverNativeRequestEvidence)}}}`,
       "duplicate-status-sentinel",
+    ],
+    [
+      "nested",
+      `{"schema":"${record.schema}","platform":"android","boundaries":{"publicManifestReachability":{"status":"PASS","evidence":"public manifest HTTP 200 (128 bytes)","details":{"note":"safe","note":"duplicate-nested-sentinel"}},"localHandoffProbe":${JSON.stringify(record.boundaries.localHandoffProbe)},"expoGoLaunch":${JSON.stringify(record.boundaries.expoGoLaunch)},"serverNativeRequestEvidence":${JSON.stringify(record.boundaries.serverNativeRequestEvidence)}}}`,
+      "duplicate-nested-sentinel",
     ],
   ];
 

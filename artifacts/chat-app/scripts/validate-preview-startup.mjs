@@ -3,6 +3,7 @@ import { appendFile, readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { spawn } from "node:child_process";
 import { setTimeout as delay } from "node:timers/promises";
+import { findDuplicateJsonObjectKeys } from "../../../scripts/find-duplicate-json-object-keys.mjs";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 const DEFAULT_HANDOFF_TIMEOUT_MS = 60_000;
@@ -74,7 +75,18 @@ const STARTUP_FAILURES = [
   /(?:error|failed|unable|cannot).{0,80}(?:react native )?devtools/i,
   /(?:react native )?devtools.{0,80}(?:error|failed|unable|cannot|could not|couldn't)/i,
 ];
+const UNRECOGNIZED_LOADER_FAILURES = [
+  /(?:react native )?devtools.{0,120}(?:launcher|loader|binary).{0,120}(?:exited|terminated|error|failed|unable|cannot|could not|status)/i,
+  /(?:launcher|loader).{0,120}(?:react native )?devtools.{0,120}(?:exited|terminated|error|failed|unable|cannot|could not|status)/i,
+];
+export const LOADER_COMPATIBILITY_MAINTENANCE_MESSAGE =
+  "Expo preview loader wording changed. Update STARTUP_FAILURES and " +
+  "MISSING_LIBRARY_PATTERNS, then refresh the versioned loader samples " +
+  "before relying on this diagnostic.";
 const STARTUP_TEST_FIXTURES = new Set([
+  "handoff-server",
+  "handoff-server-stall-manifest",
+  "handoff-server-stall-bundle",
   "missing-runtime-library",
   "missing-runtime-library-dyld",
   "missing-runtime-library-windows",
@@ -93,6 +105,15 @@ function findStartupFailure(output) {
   return (
     lines.find((line) =>
       STARTUP_FAILURES.some((pattern) => pattern.test(line)),
+    ) ?? null
+  );
+}
+
+function findUnrecognizedLoaderFailure(output) {
+  const lines = output.split(/\r?\n/);
+  return (
+    lines.find((line) =>
+      UNRECOGNIZED_LOADER_FAILURES.some((pattern) => pattern.test(line)),
     ) ?? null
   );
 }
@@ -143,33 +164,44 @@ function compactStartupLibraryPath(path) {
 
 function formatStartupFailure(output) {
   const failure = findStartupFailure(output);
-  if (!failure) return null;
+  if (failure) {
+    const fullFailureDetail = sanitizeStartupDiagnostic(
+      failure,
+      MAX_STARTUP_FAILURE_LINE_LENGTH,
+    );
+    const missingLibrary = findMissingLibrary(output);
+    const libraryDetail =
+      missingLibrary &&
+      (!fullFailureDetail.includes(missingLibrary) ||
+        missingLibrary.length > MAX_STARTUP_LIBRARY_DETAIL_LENGTH)
+        ? ` (missing runtime library: ${compactStartupLibraryPath(missingLibrary)})`
+        : "";
 
-  const fullFailureDetail = sanitizeStartupDiagnostic(
-    failure,
-    MAX_STARTUP_FAILURE_LINE_LENGTH,
-  );
-  const missingLibrary = findMissingLibrary(output);
-  const libraryDetail =
-    missingLibrary &&
-    (!fullFailureDetail.includes(missingLibrary) ||
-      missingLibrary.length > MAX_STARTUP_LIBRARY_DETAIL_LENGTH)
-      ? ` (missing runtime library: ${compactStartupLibraryPath(missingLibrary)})`
-      : "";
+    const failureLength = Math.min(
+      fullFailureDetail.length,
+      Math.max(
+        0,
+        MAX_STARTUP_DIAGNOSTIC_LENGTH -
+          STARTUP_DIAGNOSTIC_PREFIX.length -
+          libraryDetail.length,
+      ),
+    );
+    const failureDetail = fullFailureDetail.slice(0, failureLength);
 
-  const failureLength = Math.min(
-    fullFailureDetail.length,
-    Math.max(
-      0,
-      MAX_STARTUP_DIAGNOSTIC_LENGTH -
-        STARTUP_DIAGNOSTIC_PREFIX.length -
-        libraryDetail.length,
-    ),
-  );
-  const failureDetail = fullFailureDetail.slice(0, failureLength);
+    return `${STARTUP_DIAGNOSTIC_PREFIX}${sanitizeStartupDiagnostic(
+      `${failureDetail}${libraryDetail}`,
+      MAX_STARTUP_DIAGNOSTIC_LENGTH - STARTUP_DIAGNOSTIC_PREFIX.length,
+    )}`;
+  }
+
+  const unrecognizedLoaderFailure = findUnrecognizedLoaderFailure(output);
+  if (!unrecognizedLoaderFailure) return null;
 
   return `${STARTUP_DIAGNOSTIC_PREFIX}${sanitizeStartupDiagnostic(
-    `${failureDetail}${libraryDetail}`,
+    `${LOADER_COMPATIBILITY_MAINTENANCE_MESSAGE} Observed: ${sanitizeStartupDiagnostic(
+      unrecognizedLoaderFailure,
+      MAX_STARTUP_FAILURE_LINE_LENGTH,
+    )}`,
     MAX_STARTUP_DIAGNOSTIC_LENGTH - STARTUP_DIAGNOSTIC_PREFIX.length,
   )}`;
 }
@@ -185,13 +217,15 @@ function sanitizeStartupSummaryDiagnostic(value) {
       /\b(?:api[_-]?key|credential|password|passwd|secret|token)\s*(?:[=:]\s*|\s+)\S+/gi,
       "[redacted credential]",
     )
-    .replace(/[`*_]/g, "")
+    .replace(/[`*]/g, "")
     .slice(0, MAX_STARTUP_SUMMARY_LENGTH);
 }
 
 function formatStartupFailureSummary(error) {
   const message = error instanceof Error ? error.message : String(error);
-  const startupFailure = message.startsWith("Expo preview startup error:")
+  const startupFailure =
+    message.startsWith("Expo preview startup error:") ||
+    message.startsWith("Public Expo preview manifest URL ")
     ? message
     : formatStartupFailure(message);
   const diagnostic = startupFailure
@@ -252,106 +286,6 @@ function hasExactKeys(value, expectedKeys) {
 
 function invalidHandoffRecord(message) {
   throw new Error(`Preview handoff preflight JSON ${message}.`);
-}
-
-function findDuplicateJsonObjectKeys(source) {
-  let index = 0;
-  const duplicates = new Set();
-
-  function skipWhitespace() {
-    while (/\s/.test(source[index] ?? "")) index += 1;
-  }
-
-  function readString() {
-    if (source[index] !== '"') return null;
-    const start = index;
-    index += 1;
-    while (index < source.length) {
-      if (source[index] === "\\") {
-        index += 2;
-      } else if (source[index] === '"') {
-        index += 1;
-        try {
-          return JSON.parse(source.slice(start, index));
-        } catch {
-          return null;
-        }
-      } else {
-        index += 1;
-      }
-    }
-    return null;
-  }
-
-  function scanValue() {
-    skipWhitespace();
-    if (source[index] === "{") return scanObject();
-    if (source[index] === "[") return scanArray();
-    if (source[index] === '"') return readString() !== null;
-
-    const start = index;
-    while (index < source.length && !/[,\]}]/.test(source[index])) {
-      index += 1;
-    }
-    return index > start;
-  }
-
-  function scanObject() {
-    if (source[index] !== "{") return false;
-    const seenKeys = new Set();
-    index += 1;
-    skipWhitespace();
-    if (source[index] === "}") {
-      index += 1;
-      return true;
-    }
-
-    while (index < source.length) {
-      skipWhitespace();
-      const key = readString();
-      if (key === null) return false;
-      if (seenKeys.has(key)) duplicates.add(key);
-      else seenKeys.add(key);
-      skipWhitespace();
-      if (source[index] !== ":") return false;
-      index += 1;
-      if (!scanValue()) return false;
-      skipWhitespace();
-      if (source[index] === "}") {
-        index += 1;
-        return true;
-      }
-      if (source[index] !== ",") return false;
-      index += 1;
-    }
-    return false;
-  }
-
-  function scanArray() {
-    if (source[index] !== "[") return false;
-    index += 1;
-    skipWhitespace();
-    if (source[index] === "]") {
-      index += 1;
-      return true;
-    }
-
-    while (index < source.length) {
-      if (!scanValue()) return false;
-      skipWhitespace();
-      if (source[index] === "]") {
-        index += 1;
-        return true;
-      }
-      if (source[index] !== ",") return false;
-      index += 1;
-    }
-    return false;
-  }
-
-  if (!scanValue()) return [];
-  skipWhitespace();
-  return index === source.length ? [...duplicates] : [];
 }
 
 export function validateHandoffPreflightRecord(record) {
@@ -579,8 +513,13 @@ export async function requestPublicPreviewManifest(
   let response;
   let body;
   try {
-    response = await fetchWithDeadline(url, { headers }, deadline);
-    body = await response.text();
+    ({ response, body } = await requestWithDeadline(
+      url,
+      { headers },
+      deadline,
+      (manifestResponse) => manifestResponse.text(),
+      `${timeoutMs}ms configured public preview deadline`,
+    ));
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
     throw new Error(
@@ -634,16 +573,48 @@ function localBundleUrl(port, launchAssetUrl) {
   return `http://127.0.0.1:${port}${parsedUrl.pathname}${parsedUrl.search}`;
 }
 
-async function fetchWithDeadline(url, options, deadline) {
+async function requestWithDeadline(
+  url,
+  options,
+  deadline,
+  readBody,
+  deadlineDescription = "configured request deadline",
+) {
   const remainingMs = deadline - Date.now();
   if (remainingMs <= 0) {
-    throw new Error("request deadline exceeded");
+    throw new Error("request deadline exceeded before request started");
   }
 
   const controller = new AbortController();
-  const abortTimer = setTimeout(() => controller.abort(), remainingMs);
+  let deadlineAbortError;
+  const abortPromise = new Promise((resolve, reject) => {
+    controller.signal.addEventListener(
+      "abort",
+      () =>
+        reject(
+          deadlineAbortError ??
+            new Error(`request aborted (${deadlineDescription})`),
+        ),
+      { once: true },
+    );
+  });
+  const abortTimer = setTimeout(() => {
+    deadlineAbortError = new Error(
+      `request aborted by deadline (${deadlineDescription})`,
+    );
+    controller.abort(deadlineAbortError);
+  }, remainingMs);
+
   try {
-    return await fetch(url, { ...options, signal: controller.signal });
+    const response = await Promise.race([
+      fetch(url, { ...options, signal: controller.signal }),
+      abortPromise,
+    ]);
+    const body = await Promise.race([readBody(response), abortPromise]);
+    return { response, body };
+  } catch (error) {
+    if (deadlineAbortError) throw deadlineAbortError;
+    throw error;
   } finally {
     clearTimeout(abortTimer);
   }
@@ -675,12 +646,15 @@ export async function requestLocalHandoffProbe(
     };
 
     try {
-      const manifestResponse = await fetchWithDeadline(
+      const manifestRequest = await requestWithDeadline(
         `http://127.0.0.1:${port}/`,
         { headers },
         deadline,
+        (response) => response.text(),
+        `${timeoutMs}ms configured local handoff deadline`,
       );
-      const manifestBody = await manifestResponse.text();
+      const { response: manifestResponse, body: manifestBody } =
+        manifestRequest;
       outcome.manifest = formatRequestOutcome(
         "manifest",
         manifestResponse,
@@ -703,12 +677,14 @@ export async function requestLocalHandoffProbe(
         throw new Error("manifest did not provide a launch asset URL");
       }
 
-      const bundleResponse = await fetchWithDeadline(
+      const bundleRequest = await requestWithDeadline(
         localBundleUrl(port, launchAssetUrl),
         { headers },
         deadline,
+        (response) => response.arrayBuffer(),
+        `${timeoutMs}ms configured local handoff deadline`,
       );
-      const bundleBody = await bundleResponse.arrayBuffer();
+      const { response: bundleResponse, body: bundleBody } = bundleRequest;
       outcome.bundle = formatRequestOutcome(
         "bundle",
         bundleResponse,
@@ -730,6 +706,7 @@ export async function requestLocalHandoffProbe(
           outcome.manifest ?? "manifest request did not complete",
           outcome.bundle ?? "bundle request did not complete",
           error instanceof Error ? error.message : String(error),
+          publicPreviewRecoveryMessage(),
         ].join(" "),
       );
       if (Date.now() >= deadline) break;
@@ -779,6 +756,19 @@ async function findFreePort() {
   });
 }
 
+export function parsePreviewTimeout(name, value, defaultValue) {
+  if (value == null) return defaultValue;
+
+  const timeoutMs = Number(value);
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+    throw new Error(
+      `${name} must be a positive finite number of milliseconds.`,
+    );
+  }
+
+  return timeoutMs;
+}
+
 function parseArgs(argv) {
   const platformIndex = argv.indexOf("--platform");
   const logFileIndex = argv.indexOf("--log-file");
@@ -806,14 +796,21 @@ function parseArgs(argv) {
     platform,
     logFile: logFileIndex === -1 ? null : argv[logFileIndex + 1],
     recordOutput,
-    timeoutMs:
-      Number(process.env.PREVIEW_STARTUP_TIMEOUT_MS) || DEFAULT_TIMEOUT_MS,
-    handoffTimeoutMs:
-      Number(process.env.PREVIEW_HANDOFF_TIMEOUT_MS) ||
+    timeoutMs: parsePreviewTimeout(
+      "PREVIEW_STARTUP_TIMEOUT_MS",
+      process.env.PREVIEW_STARTUP_TIMEOUT_MS,
+      DEFAULT_TIMEOUT_MS,
+    ),
+    handoffTimeoutMs: parsePreviewTimeout(
+      "PREVIEW_HANDOFF_TIMEOUT_MS",
+      process.env.PREVIEW_HANDOFF_TIMEOUT_MS,
       DEFAULT_HANDOFF_TIMEOUT_MS,
-    publicPreviewTimeoutMs:
-      Number(process.env.PREVIEW_PUBLIC_TIMEOUT_MS) ||
+    ),
+    publicPreviewTimeoutMs: parsePreviewTimeout(
+      "PREVIEW_PUBLIC_TIMEOUT_MS",
+      process.env.PREVIEW_PUBLIC_TIMEOUT_MS,
       DEFAULT_PUBLIC_PREVIEW_TIMEOUT_MS,
+    ),
   };
 }
 
@@ -878,15 +875,18 @@ async function validateLivePreview(
     if (stopRequested) return;
     stopRequested = true;
     const processGroupId = child.pid;
-    if (child.exitCode === null) {
-      if (process.platform === "win32" || !processGroupId) {
-        child.kill("SIGTERM");
-      } else {
-        try {
-          process.kill(-processGroupId, "SIGTERM");
-        } catch (error) {
-          if (error.code !== "ESRCH") throw error;
-        }
+    if (child.exitCode !== null) return;
+    child.once("close", () => {
+      clearTimeout(closeTimer);
+      closeTimer = undefined;
+    });
+    if (process.platform === "win32" || !processGroupId) {
+      child.kill("SIGTERM");
+    } else {
+      try {
+        process.kill(-processGroupId, "SIGTERM");
+      } catch (error) {
+        if (error.code !== "ESRCH") throw error;
       }
     }
     closeTimer = setTimeout(() => {
@@ -898,6 +898,7 @@ async function validateLivePreview(
         if (error.code !== "ESRCH") throw error;
       }
     }, 2_000);
+    closeTimer.unref();
   };
 
   return new Promise((resolveResult, rejectResult) => {

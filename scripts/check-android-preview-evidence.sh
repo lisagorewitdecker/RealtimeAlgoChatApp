@@ -247,32 +247,50 @@ is_supported_image_file() {
 screenshot_contains_forbidden_text() {
   local image_path="$1"
   local pattern="$2"
-  strings -a -n 4 "$image_path" 2>/dev/null |
+  local ocr_text="$3"
+
+  if strings -a -n 4 "$image_path" 2>/dev/null |
+    LC_ALL=C grep -Eiq -- "$pattern"; then
+    return 0
+  fi
+
+  printf '%s\n' "$ocr_text" |
     LC_ALL=C grep -Eiq -- "$pattern"
 }
 
 validate_screenshot_redaction() {
   local screenshot_file="$1"
-  local category
+  local screenshot_path="$2"
+  local ocr_text
 
-  if screenshot_contains_forbidden_text "$screenshot_file" \
-    '[[:alnum:]][[:alnum:]._%+-]*@[[:alnum:].-]+\.[[:alpha:]]{2,}|(account|user(name)?|member|profile)[[:space:]_-]*(id|email|name)?[[:space:]]*[:=]'; then
-    failure "The PASS record's screenshot contains forbidden account identifier content; replace it with a reviewed redacted capture."
+  if ! command -v tesseract >/dev/null 2>&1 ||
+    ! ocr_text="$(tesseract "$screenshot_file" stdout --psm 11 -l eng 2>/dev/null)"; then
+    failure "The PASS record's screenshot pixel inspection could not run for ${screenshot_path}."
+    return
   fi
 
   if screenshot_contains_forbidden_text "$screenshot_file" \
-    'message[[:space:]_-]*(body|content|text)?[[:space:]]*[:=]|plaintext[[:space:]_-]*(body|content|text)?[[:space:]]*[:=]|conversation[[:space:]_-]*(body|content|text)?[[:space:]]*[:=]'; then
-    failure "The PASS record's screenshot contains forbidden message content; replace it with a reviewed redacted capture."
+    '[[:alnum:]][[:alnum:]._%+-]*@[[:alnum:].-]+\.[[:alpha:]]{2,}|(account|user(name)?|member|profile)[[:space:]_-]*(id|email|name)?[[:space:]]*[:=]' \
+    "$ocr_text"; then
+    failure "The PASS record's screenshot contains forbidden account identifier content in ${screenshot_path}; replace it with a reviewed redacted capture."
   fi
 
   if screenshot_contains_forbidden_text "$screenshot_file" \
-    'bearer[[:space:]]+[A-Za-z0-9._~+/-]{8,}|(^|[^[:alpha:]])(auth|access|refresh|session|api)?[_-]?token[[:space:]]*(value)?[[:space:]]*[:=]'; then
-    failure "The PASS record's screenshot contains forbidden token content; replace it with a reviewed redacted capture."
+    'message[[:space:]_-]*(body|content|text)?[[:space:]]*[:=]|plaintext[[:space:]_-]*(body|content|text)?[[:space:]]*[:=]|conversation[[:space:]_-]*(body|content|text)?[[:space:]]*[:=]' \
+    "$ocr_text"; then
+    failure "The PASS record's screenshot contains forbidden message content in ${screenshot_path}; replace it with a reviewed redacted capture."
   fi
 
   if screenshot_contains_forbidden_text "$screenshot_file" \
-    '(https?|wss?|exp)://|(^|[^[:alpha:]])(host|hostname|origin)[[:space:]]*[:=]|localhost([:/]|$)|[[:alnum:].-]+\.(replit\.dev|repl\.co|replit\.app)([^[:alnum:].-]|$)'; then
-    failure "The PASS record's screenshot contains forbidden host details; replace it with a reviewed redacted capture."
+    'bearer[[:space:]]+[A-Za-z0-9._~+/-]{8,}|(^|[^[:alpha:]])(auth|access|refresh|session|api)?[_-]?token[[:space:]]*(value)?[[:space:]]*[:=]' \
+    "$ocr_text"; then
+    failure "The PASS record's screenshot contains forbidden token content in ${screenshot_path}; replace it with a reviewed redacted capture."
+  fi
+
+  if screenshot_contains_forbidden_text "$screenshot_file" \
+    '(https?|wss?|exp)://|(^|[^[:alpha:]])(host|hostname|origin)[[:space:]]*[:=]|localhost([:/]|$)|[[:alnum:].-]+\.(replit\.dev|repl\.co|replit\.app)([^[:alnum:].-]|$)' \
+    "$ocr_text"; then
+    failure "The PASS record's screenshot contains forbidden host details in ${screenshot_path}; replace it with a reviewed redacted capture."
   fi
 }
 
@@ -380,7 +398,7 @@ validate_pass_record() {
       if [[ "$(boundary_status "Screenshot redaction review")" != "pass" ]]; then
         failure "PASS records with a screenshot require a separate Screenshot redaction review row marked PASS."
       fi
-      validate_screenshot_redaction "$screenshot_file"
+      validate_screenshot_redaction "$screenshot_file" "$screenshot_path"
     fi
   else
     phone_error="$(printf '%s' "$result_row" | awk -F'|' '

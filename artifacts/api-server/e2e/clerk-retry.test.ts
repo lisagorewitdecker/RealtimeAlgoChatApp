@@ -471,4 +471,62 @@ describe("key-reset recovery Playwright diagnostics", () => {
     },
     20_000,
   );
+
+  it(
+    "reports a cleanup-only timeout after recovery diagnostics succeed",
+    () => {
+      const outputDirectory = mkdtempSync(
+        join(tmpdir(), "recovery-cleanup-only-diagnostic-"),
+      );
+      const phase = recoveryPhases[0]!;
+      try {
+        const result = spawnSync(
+          "pnpm",
+          [
+            "exec",
+            "playwright",
+            "test",
+            "e2e/key-reset-recovery.spec.ts",
+            "--config",
+            "e2e/playwright.config.ts",
+            "--grep",
+            "reports stalled recovery phases",
+            "--output",
+            outputDirectory,
+          ],
+          {
+            cwd: apiServerDirectory,
+            encoding: "utf8",
+            env: {
+              ...process.env,
+              E2E_RECOVERY_DIAGNOSTIC_CONTRACT: "1",
+              E2E_RECOVERY_DIAGNOSTIC_PHASES: phase.phase,
+              E2E_RECOVERY_DIAGNOSTIC_PHASES_SUCCEED: "1",
+              E2E_RECOVERY_DIAGNOSTIC_CLEANUP: "database",
+            },
+            timeout: 15_000,
+          },
+        );
+        const report = `${result.stdout}\n${result.stderr}`;
+
+        expect(result.error).toBeUndefined();
+        expect(result.status).toBe(1);
+        expect(result.signal).toBeNull();
+        expect(report).toContain(
+          `[key-reset-recovery-e2e] diagnostic phase completed: ${phase.phase}`,
+        );
+        expect(report).toContain("Key-reset recovery E2E cleanup failed");
+        expect(report).toContain(
+          "Recovery room database cleanup timed out after 250ms",
+        );
+        expect(report).not.toContain("Recovery diagnostic phase failed");
+        expect(report).not.toContain(
+          "Key-reset recovery verification and cleanup both failed",
+        );
+      } finally {
+        rmSync(outputDirectory, { recursive: true, force: true });
+      }
+    },
+    20_000,
+  );
 });

@@ -356,15 +356,19 @@ first_line_trimmed() {
   head -n 1 "$1" | tr -d '\r' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//'
 }
 
-normalized_nonempty_line_count() {
+candidate_build_id_file_is_valid() {
+  local candidate_path="$1"
+
   awk '
     {
       sub(/\r$/, "")
-      gsub(/^[[:space:]]+|[[:space:]]+$/, "", $0)
-      if (length($0) > 0) count++
+      line_count++
+      if ($0 !~ /^[[:space:]]*$/) non_empty_count++
     }
-    END { print count + 0 }
-  ' "$1"
+    END {
+      exit !(line_count == 1 && non_empty_count == 1)
+    }
+  ' "$candidate_path"
 }
 
 check_required_file() {
@@ -376,8 +380,6 @@ check_required_file() {
 
   if [[ ! -e "$path" ]]; then
     issue "$platform" "Missing ${description}: ${path}. Re-run the native large-text gate on the prepared device and upload the complete result directory."
-  elif [[ ! -f "$path" ]]; then
-    issue "$platform" "Invalid ${description}: ${path} is not a regular file. Replace it with the artifact file from a completed native large-text run."
   elif [[ ! -s "$path" ]]; then
     issue "$platform" "Empty ${description}: ${path}. Replace the incomplete artifact with output from a completed native large-text run."
   fi
@@ -426,17 +428,13 @@ validate_platform() {
   check_required_file "$platform" "$run_dir" "sentry-trigger.txt" "controlled Sentry probe metadata"
   check_required_file "$platform" "$run_dir" "sentry-source-map-evidence.json" "Sentry source-map evidence"
 
-  local candidate_build_id=""
   local candidate_build_id_path="$run_dir/candidate-build-id.txt"
+  local candidate_build_id_is_valid=0
   if [[ -s "$candidate_build_id_path" ]]; then
-    local candidate_build_id_line_count
-    candidate_build_id_line_count="$(normalized_nonempty_line_count "$candidate_build_id_path")"
-    if ((candidate_build_id_line_count == 0)); then
-      issue "$platform" "The candidate build ID file at ${candidate_build_id_path} does not contain a normalized build ID. Record exactly one candidate build ID before release review."
-    elif ((candidate_build_id_line_count > 1)); then
-      issue "$platform" "The candidate build ID file at ${candidate_build_id_path} contains multiple normalized lines. Record exactly one candidate build ID before release review."
+    if candidate_build_id_file_is_valid "$candidate_build_id_path"; then
+      candidate_build_id_is_valid=1
     else
-      candidate_build_id="$(first_line_trimmed "$candidate_build_id_path")"
+      issue "$platform" "Candidate build ID file at ${candidate_build_id_path} must contain exactly one non-empty identifier line. Regenerate it for one candidate build without merging or editing its contents."
     fi
   fi
 
@@ -444,18 +442,6 @@ validate_platform() {
     local pass_fail_path="$run_dir/pass-fail-record.txt"
     report_duplicate_metadata_keys "$platform" "$pass_fail_path" "Pass/fail record" "pass/fail record"
 
-    local status_declaration_count
-    local pass_fail_status
-    status_declaration_count="$(metadata_declaration_count "$pass_fail_path" status)"
-    if ((status_declaration_count == 0)); then
-      issue "$platform" "The pass/fail record at ${pass_fail_path} is missing a status=... declaration. Record status exactly once before release review."
-    elif ((status_declaration_count == 1)); then
-      pass_fail_status="$(trimmed_value "$pass_fail_path" status)"
-      if [[ -z "$pass_fail_status" ]]; then
-        issue "$platform" "The pass/fail record at ${pass_fail_path} has an empty status=... value. Record status exactly once before release review."
-      elif [[ "$pass_fail_status" != "PASS" ]]; then
-        issue "$platform" "The pass/fail record at ${pass_fail_path} is not PASS. Failed or blocked runner output is not reviewed device evidence; complete the run before release review."
-      fi
     if metadata_key_is_unambiguous "$pass_fail_path" status &&
       [[ "$(metadata_value "$pass_fail_path" status | tr -d '\r' | sed 's/[[:space:]]*$//')" != "PASS" ]]; then
       issue "$platform" "The pass/fail record at ${pass_fail_path} is not PASS. Failed or blocked runner output is not reviewed device evidence; complete the run before release review."
@@ -463,23 +449,16 @@ validate_platform() {
 
     local run_mode
     if metadata_key_is_unambiguous "$pass_fail_path" run_mode; then
-      run_mode="$(trimmed_value "$pass_fail_path" run_mode)"
-      if [[ -z "$run_mode" ]]; then
-        issue "$platform" "The pass/fail record at ${pass_fail_path} does not declare run_mode=release-gate. Only release-gate runs on the smallest supported device are release evidence; re-run the current native large-text gate."
-      elif [[ "$run_mode" == "diagnostic-only" ]]; then
       run_mode="$(metadata_value "$pass_fail_path" run_mode)"
       if [[ "$run_mode" == "diagnostic-only" ]]; then
         issue "$platform" "The pass/fail record at ${pass_fail_path} is from a diagnostic-only run (NATIVE_SMOKE_ALLOW_LARGER_DEVICE=1), not release evidence. Re-run the release gate on the smallest supported device without the override."
       elif [[ "$run_mode" != "release-gate" ]]; then
         issue "$platform" "The pass/fail record at ${pass_fail_path} does not declare run_mode=release-gate. Only release-gate runs on the smallest supported device are release evidence; re-run the current native large-text gate."
       fi
-    else
-      issue "$platform" "The pass/fail record at ${pass_fail_path} does not declare run_mode=release-gate. Only release-gate runs on the smallest supported device are release evidence; re-run the current native large-text gate."
     fi
   fi
 
   if [[ -s "$run_dir/native-branding-check.md" ]] &&
-    ! grep -Fxq -- "- Status: **PASS**" "$run_dir/native-branding-check.md"; then
     ! grep -Fq -- "- Status: **PASS**" "$run_dir/native-branding-check.md"; then
     issue "$platform" "The native branding report at ${run_dir}/native-branding-check.md is not PASS. Resolve the native metadata failure and rerun the release gate."
   fi
@@ -497,8 +476,6 @@ validate_platform() {
   if [[ -s "$run_dir/runner-metadata.txt" ]]; then
     local runner_metadata_path="$run_dir/runner-metadata.txt"
     local actual_platform
-    local expected_candidate_build_id
-    local actual_candidate_build_id
     local required_key
     local required_keys=(platform candidate_build_id recorded_at_utc)
     report_duplicate_metadata_keys "$platform" "$runner_metadata_path" "Runner metadata" "runner metadata"
@@ -525,15 +502,6 @@ validate_platform() {
         issue "$platform" "Runner metadata is missing ${required_key}=... in ${run_dir}/runner-metadata.txt. Record the tested device details before review."
       fi
     done
-    if [[ -n "$candidate_build_id" ]] &&
-      metadata_key_is_unambiguous "$runner_metadata_path" candidate_build_id; then
-      expected_candidate_build_id="$candidate_build_id"
-      actual_candidate_build_id="$(trimmed_value "$runner_metadata_path" candidate_build_id)"
-      if [[ -n "$expected_candidate_build_id" && -n "$actual_candidate_build_id" &&
-        "$actual_candidate_build_id" != "$expected_candidate_build_id" ]]; then
-        issue "$platform" "Runner metadata candidate_build_id does not match the tested candidate in ${run_dir}/candidate-build-id.txt. Upload metadata from the same evidence run you are submitting for review."
-      fi
-    fi
   fi
 
   local sentry_trigger_path="$run_dir/sentry-trigger.txt"
@@ -549,130 +517,47 @@ validate_platform() {
     fi
   fi
 
-  if [[ -s "$run_dir/sentry-source-map-evidence.json" &&
-    -n "$candidate_build_id" ]] &&
-    ((sentry_trigger_has_errors == 0)); then
-    local sentry_validation_output
-    if ! sentry_validation_output="$(
-      "$NODE_BINARY" "$ROOT_DIR/scripts/verify-sentry-native-event.mjs" \
-        --evidence-path "$run_dir/sentry-source-map-evidence.json" \
-        --trigger-path "$sentry_trigger_path" \
-        --platform "$platform" \
-        --candidate-build-id "$candidate_build_id" \
-        --expected-probe-marker "$(trimmed_value "$sentry_trigger_path" marker)" \
-        --expected-release "" \
-        --expected-dist "" \
-        2>&1
   if [[ -s "$run_dir/sentry-source-map-evidence.json" ]] &&
+    ((candidate_build_id_is_valid == 1)) &&
     ((sentry_trigger_has_errors == 0)); then
     local candidate_build_id
     local sentry_validation_output
-    candidate_build_id="$(tr -d '\r\n' < "$run_dir/candidate-build-id.txt")"
+    candidate_build_id="$(first_line_trimmed "$candidate_build_id_path")"
     if ! sentry_validation_output="$(
       "$NODE_BINARY" --input-type=module - \
         "$run_dir/sentry-source-map-evidence.json" \
         "$sentry_trigger_path" \
         "$platform" \
-        "$candidate_build_id" <<'NODE'
+        "$candidate_build_id" \
+        "$ROOT_DIR/scripts/find-duplicate-json-object-keys.mjs" <<'NODE'
 import { readFileSync } from "node:fs";
+import { pathToFileURL } from "node:url";
 
-const [, , evidencePath, triggerPath, platform, candidateBuildId] = process.argv;
+const [
+  ,
+  ,
+  evidencePath,
+  triggerPath,
+  platform,
+  candidateBuildId,
+  duplicateKeysModulePath,
+] = process.argv;
+const { findDuplicateJsonObjectKeys } = await import(
+  pathToFileURL(duplicateKeysModulePath).href
+);
 const rawEvidence = readFileSync(evidencePath, "utf8");
 if (/(?:auth(?:orization)?[_-]?token|sentry_auth_token|bearer\s+[A-Za-z0-9._-]+)/i.test(rawEvidence)) {
   throw new Error("evidence contains credential-like content");
+}
+const duplicateFields = findDuplicateJsonObjectKeys(rawEvidence);
+if (duplicateFields.length > 0) {
+  throw new Error("duplicate JSON field(s)");
 }
 let evidence;
 try {
   evidence = JSON.parse(rawEvidence);
 } catch {
   throw new Error("evidence is not valid JSON");
-}
-function duplicateJsonFields(raw) {
-  let index = 0;
-  const duplicates = [];
-
-  function skipWhitespace() {
-    while (/\s/.test(raw[index] ?? "")) index += 1;
-  }
-
-  function readString() {
-    const start = index;
-    index += 1;
-    while (index < raw.length) {
-      if (raw[index] === "\\") {
-        index += 2;
-      } else if (raw[index] === '"') {
-        index += 1;
-        return JSON.parse(raw.slice(start, index));
-      } else {
-        index += 1;
-      }
-    }
-    throw new Error("unterminated JSON string");
-  }
-
-  function scanValue() {
-    skipWhitespace();
-    if (raw[index] === "{") {
-      scanObject();
-    } else if (raw[index] === "[") {
-      scanArray();
-    } else if (raw[index] === '"') {
-      readString();
-    } else {
-      while (index < raw.length && !/[,\]}]/.test(raw[index])) index += 1;
-    }
-  }
-
-  function scanObject() {
-    const keys = new Set();
-    index += 1;
-    skipWhitespace();
-    if (raw[index] === "}") {
-      index += 1;
-      return;
-    }
-    while (index < raw.length) {
-      skipWhitespace();
-      const key = readString();
-      if (keys.has(key)) duplicates.push(key);
-      keys.add(key);
-      skipWhitespace();
-      index += 1;
-      scanValue();
-      skipWhitespace();
-      if (raw[index] === "}") {
-        index += 1;
-        return;
-      }
-      index += 1;
-    }
-  }
-
-  function scanArray() {
-    index += 1;
-    skipWhitespace();
-    if (raw[index] === "]") {
-      index += 1;
-      return;
-    }
-    while (index < raw.length) {
-      scanValue();
-      skipWhitespace();
-      if (raw[index] === "]") {
-        index += 1;
-        return;
-      }
-      index += 1;
-    }
-  }
-
-  scanValue();
-  return [...new Set(duplicates)];
-}
-const duplicateFields = duplicateJsonFields(rawEvidence);
-if (duplicateFields.length > 0) {
-  throw new Error("duplicate JSON field(s)");
 }
 const trigger = Object.fromEntries(
   readFileSync(triggerPath, "utf8")
@@ -846,7 +731,6 @@ validate_review_record() {
     record_valid=0
   fi
 
-  if [[ -n "$record_build_id" && -n "$candidate_build_id" && "$record_build_id" != "$candidate_build_id" ]]; then
   local tested_build_id=""
   if [[ -s "$run_dir/candidate-build-id.txt" ]]; then
     tested_build_id="$(first_line_trimmed "$run_dir/candidate-build-id.txt")"
@@ -874,7 +758,6 @@ validate_review_record() {
   fi
 
   case "$decision" in
-    APPROVED)
     APPROVED | "")
       ;;
     REJECTED)

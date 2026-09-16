@@ -28,6 +28,8 @@ const diagnosticContract =
   process.env["E2E_RECOVERY_DIAGNOSTIC_CONTRACT"] === "1";
 const diagnosticCleanupOperation =
   process.env["E2E_RECOVERY_DIAGNOSTIC_CLEANUP"];
+const diagnosticPhasesSucceed =
+  process.env["E2E_RECOVERY_DIAGNOSTIC_PHASES_SUCCEED"] === "1";
 const CONTEXT_CLEANUP_TIMEOUT_MS = diagnosticContract ? 250 : 5_000;
 const EXTERNAL_CLEANUP_TIMEOUT_MS = diagnosticContract ? 250 : 10_000;
 
@@ -570,9 +572,17 @@ test("reports stalled recovery phases", async ({ browser }) => {
         page = await context.newPage();
         await test.step(
           diagnosticPhaseName,
-          () => diagnosticAction!(page!),
+          () =>
+            diagnosticPhasesSucceed
+              ? Promise.resolve()
+              : diagnosticAction!(page!),
           { timeout: 250 },
         );
+        if (diagnosticPhasesSucceed) {
+          console.info(
+            `[key-reset-recovery-e2e] diagnostic phase completed: ${diagnosticPhaseName}`,
+          );
+        }
       } catch (error) {
         phaseFailures.push(
           new AggregateError(

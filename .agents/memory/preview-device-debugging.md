@@ -67,3 +67,14 @@ console output is difficult to preserve as a timestamped handoff artifact.
 **How to apply:** filter the retained log for
 `platform=android client=Expo Go` (or the corresponding iOS platform), exclude
 `OPTIONS`, and copy only the redacted marker into the handoff record.
+
+Preview handoff deadlines must cover both response headers and manifest/bundle
+body reads; normalize deadline aborts into an explicit configured-deadline
+failure and include recovery guidance.
+
+**Why:** Metro can return headers and then stall while delivering a response
+body, which otherwise makes a local probe appear hung without identifying the
+request or the next recovery step.
+
+**How to apply:** use the bounded request helper for every local manifest and
+bundle read, and test stalled manifest and bundle paths independently.
