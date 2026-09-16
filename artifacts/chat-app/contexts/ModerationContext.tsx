@@ -26,6 +26,7 @@ interface ModerationContextValue {
     roomId: string,
     targetUserId: string,
     username: string,
+    permanent?: boolean,
   ) => Promise<boolean>;
 }
 
@@ -111,7 +112,9 @@ export function ModerationProvider({ children }: { children: React.ReactNode }) 
       roomId: string,
       targetUserId: string,
       username: string,
+      permanent?: boolean,
     ): Promise<boolean> => {
+      void permanent;
       const label = isAdmin ? "Permanently ban" : "Ban for 24 hours";
       return new Promise((resolve) => {
         Alert.alert(

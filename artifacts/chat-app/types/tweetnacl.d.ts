@@ -13,6 +13,7 @@ declare module "tweetnacl" {
     ): Uint8Array | null;
     keyLength: number;
     nonceLength: number;
+    overheadLength: number;
   }
 
   interface BoxFn {
@@ -29,10 +30,14 @@ declare module "tweetnacl" {
       secretKey: Uint8Array,
     ): Uint8Array | null;
     nonceLength: number;
+    publicKeyLength: number;
     secretKeyLength: number;
+    overheadLength: number;
+    seedLength: number;
     keyPair: {
       (): KeyPair;
       fromSecretKey(secretKey: Uint8Array): KeyPair;
+      fromSeed(seed: Uint8Array): KeyPair;
     };
   }
 
