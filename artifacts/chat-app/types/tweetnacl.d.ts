@@ -9,7 +9,7 @@ declare module "tweetnacl" {
     secretKey: Uint8Array;
   }
 
-  interface secretbox {
+  interface SecretBox {
     (msg: Uint8Array, nonce: Uint8Array, key: Uint8Array): Uint8Array;
     open(box: Uint8Array, nonce: Uint8Array, key: Uint8Array): Uint8Array | null;
     readonly keyLength: number;
@@ -17,7 +17,7 @@ declare module "tweetnacl" {
     readonly overheadLength: number;
   }
 
-  interface scalarMult {
+  interface ScalarMult {
     (n: Uint8Array, p: Uint8Array): Uint8Array;
     base(n: Uint8Array): Uint8Array;
     readonly scalarLength: number;
@@ -41,7 +41,7 @@ declare module "tweetnacl" {
     }
   }
 
-  interface box {
+  interface Box {
     (
       msg: Uint8Array,
       nonce: Uint8Array,
@@ -72,7 +72,7 @@ declare module "tweetnacl" {
     }
   }
 
-  interface sign {
+  interface Sign {
     (msg: Uint8Array, secretKey: Uint8Array): Uint8Array;
     open(signedMsg: Uint8Array, publicKey: Uint8Array): Uint8Array | null;
     detached: signProps.detached;
@@ -83,23 +83,23 @@ declare module "tweetnacl" {
     readonly signatureLength: number;
   }
 
-  interface hash {
+  interface Hash {
     (msg: Uint8Array): Uint8Array;
     readonly hashLength: number;
   }
 
-  interface nacl {
+  interface NaclModule {
     randomBytes(n: number): Uint8Array;
-    secretbox: secretbox;
-    scalarMult: scalarMult;
-    box: box;
-    sign: sign;
-    hash: hash;
+    secretbox: SecretBox;
+    scalarMult: ScalarMult;
+    box: Box;
+    sign: Sign;
+    hash: Hash;
     verify(x: Uint8Array, y: Uint8Array): boolean;
     setPRNG(fn: (x: Uint8Array, n: number) => void): void;
   }
 
-  const nacl: nacl;
+  const nacl: NaclModule;
   export default nacl;
 }
 
