@@ -95,7 +95,7 @@ vi.mock("../socket", () => ({
   kickRoomUser: mockKickRoomUser,
 }));
 
-import moderationRouter from "./moderation.js";
+import moderationRouter, { resetModerationHistoryRateLimits } from "./moderation.js";
 
 let server: Server;
 let baseUrl: string;
@@ -118,6 +118,7 @@ afterAll(async () => {
 });
 
 beforeEach(() => {
+  resetModerationHistoryRateLimits();
   mockGetAuth.mockReset().mockReturnValue({ userId: "admin-ada" });
   mockGetAccountAccess.mockReset().mockResolvedValue({ allowed: true });
   mockIsConfiguredAdmin
@@ -559,5 +560,21 @@ describe("moderation history", () => {
 
     expect(response.status).toBe(400);
     expect(mockListModerationActions).not.toHaveBeenCalled();
+  });
+
+  it("rate limits repeated moderation history requests", async () => {
+    for (let index = 0; index < 30; index += 1) {
+      const response = await fetch(`${baseUrl}/history`);
+      expect(response.status).toBe(200);
+    }
+
+    const response = await fetch(`${baseUrl}/history`);
+
+    expect(response.status).toBe(429);
+    expect(response.headers.get("retry-after")).toBe("60");
+    await expect(response.json()).resolves.toEqual({
+      error: "Too many moderation history requests. Please try again later.",
+    });
+    expect(mockListModerationActions).toHaveBeenCalledTimes(30);
   });
 });

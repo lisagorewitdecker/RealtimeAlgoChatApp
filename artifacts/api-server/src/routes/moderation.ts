@@ -16,6 +16,18 @@ import {
 } from "../socket";
 
 const router = Router();
+const MODERATION_HISTORY_WINDOW_MS = 60 * 1_000;
+const MODERATION_HISTORY_PER_USER_WINDOW = 30;
+const MODERATION_HISTORY_PER_IP_WINDOW = 120;
+const MODERATION_HISTORY_TRACKING_KEY_LIMIT = 10_000;
+
+interface ModerationHistoryWindow {
+  startedAt: number;
+  count: number;
+}
+
+const moderationHistoryByUser = new Map<string, ModerationHistoryWindow>();
+const moderationHistoryByIp = new Map<string, ModerationHistoryWindow>();
 
 function makeId() {
   return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -46,6 +58,13 @@ router.get("/history", async (req, res, next) => {
   if (!actorId) return;
   if (!isConfiguredAdmin(actorId)) {
     res.status(403).json({ error: "Administrator permission required." });
+    return;
+  }
+  if (!allowModerationHistoryLookup(actorId, req.ip)) {
+    res
+      .status(429)
+      .setHeader("Retry-After", String(MODERATION_HISTORY_WINDOW_MS / 1_000))
+      .json({ error: "Too many moderation history requests. Please try again later." });
     return;
   }
 
@@ -279,5 +298,91 @@ router.delete("/ban/:userId", async (req, res, next) => {
     next(error);
   }
 });
+
+function allowModerationHistoryLookup(
+  userId: string,
+  ip: string | undefined,
+): boolean {
+  const now = Date.now();
+  pruneModerationHistoryWindows(now);
+  const userWindow = incrementModerationHistoryWindow(
+    moderationHistoryByUser,
+    userId,
+    now,
+  );
+  const ipKey = ip || "unknown";
+  const ipWindow = incrementModerationHistoryWindow(
+    moderationHistoryByIp,
+    ipKey,
+    now,
+  );
+  const allowed =
+    userWindow.count <= MODERATION_HISTORY_PER_USER_WINDOW &&
+    ipWindow.count <= MODERATION_HISTORY_PER_IP_WINDOW;
+  if (allowed) return true;
+
+  decrementModerationHistoryWindow(moderationHistoryByUser, userId);
+  decrementModerationHistoryWindow(moderationHistoryByIp, ipKey);
+  return false;
+}
+
+function incrementModerationHistoryWindow(
+  windows: Map<string, ModerationHistoryWindow>,
+  key: string,
+  now: number,
+): ModerationHistoryWindow {
+  const current = windows.get(key);
+  if (!current || now - current.startedAt >= MODERATION_HISTORY_WINDOW_MS) {
+    const created = { startedAt: now, count: 1 };
+    windows.set(key, created);
+    return created;
+  }
+  current.count += 1;
+  return current;
+}
+
+function decrementModerationHistoryWindow(
+  windows: Map<string, ModerationHistoryWindow>,
+  key: string,
+): void {
+  const current = windows.get(key);
+  if (!current) return;
+  current.count -= 1;
+  if (current.count <= 0) windows.delete(key);
+}
+
+function pruneModerationHistoryWindows(now: number): void {
+  for (const windows of [moderationHistoryByUser, moderationHistoryByIp]) {
+    for (const [key, window] of windows) {
+      if (now - window.startedAt >= MODERATION_HISTORY_WINDOW_MS) {
+        windows.delete(key);
+      }
+    }
+    while (windows.size > MODERATION_HISTORY_TRACKING_KEY_LIMIT) {
+      const oldest = findOldestModerationHistoryKey(windows);
+      if (typeof oldest !== "string") break;
+      windows.delete(oldest);
+    }
+  }
+}
+
+function findOldestModerationHistoryKey(
+  windows: Map<string, ModerationHistoryWindow>,
+): string | undefined {
+  let oldestKey: string | undefined;
+  let oldestStartedAt = Number.POSITIVE_INFINITY;
+  for (const [key, window] of windows) {
+    if (window.startedAt < oldestStartedAt) {
+      oldestKey = key;
+      oldestStartedAt = window.startedAt;
+    }
+  }
+  return oldestKey;
+}
+
+export function resetModerationHistoryRateLimits(): void {
+  moderationHistoryByUser.clear();
+  moderationHistoryByIp.clear();
+}
 
 export default router;

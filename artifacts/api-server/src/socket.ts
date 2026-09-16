@@ -94,7 +94,6 @@ interface Room {
 
 const rooms = new Map<string, Room>();
 const DEFAULT_AVATAR_EMOJI = "🧑‍💻";
-const DEFAULT_USERNAME = "Member";
 const ASSISTANT_REQUEST_ID_PATTERN = /^[a-zA-Z0-9_-]{8,80}$/;
 
 type SessionPurpose = "chat" | RoomAccessPurpose;

@@ -155,6 +155,12 @@ const releaseEvidenceReaderContracts = {
     scannerCall: "findDuplicateJsonObjectKeys(rawEvidence)",
     duplicateFailure: /throw new Error\("duplicate JSON field\(s\)"\)/,
   },
+  "scripts/verify-sentry-native-event.mjs": {
+    name: "saved Sentry source-map evidence",
+    argument: "rawEvidence",
+    scannerCall: "findDuplicateJsonObjectKeys(rawEvidence)",
+    duplicateFailure: /throw new Error\("duplicate JSON field\(s\)"\)/,
+  },
 };
 
 const releaseEvidenceSourceDirectories = [

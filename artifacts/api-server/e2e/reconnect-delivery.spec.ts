@@ -147,7 +147,6 @@ test("a live reconnect replays each message once and preserves later server orde
 
     const memberJoinedRow = creator.page.getByText(/ joined$/, { exact: true });
     await expect(memberJoinedRow).toHaveCount(1);
-    const memberJoined = await memberJoinedRow.innerText();
     await sendMessage(creator.page, beforeReconnect);
     await expect(
       member.page.getByText(beforeReconnect, { exact: true }),
