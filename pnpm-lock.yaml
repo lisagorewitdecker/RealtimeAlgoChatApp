@@ -337,6 +337,9 @@ importers:
       '@react-native/metro-config':
         specifier: 0.86.3
         version: 0.86.3(@babel/core@7.29.7)
+      '@sentry/cli':
+        specifier: 2.58.4
+        version: 2.58.4
       '@stardazed/streams-text-encoding':
         specifier: ^1.0.2
         version: 1.0.2
