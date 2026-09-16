@@ -77,12 +77,12 @@ test("resolves relative evidence paths from the Chat App package root", () => {
   );
 });
 
-test("caps retained evidence and leaves console diagnostics unbounded", () => {
+test("keeps the newest evidence in a bounded rolling window", () => {
   assert.equal(MAX_REQUEST_EVIDENCE_LINES, 1_000);
-  const retainedLines = [];
+  const retainedContents = [];
   const appendEvidence = createEvidenceAppender(
-    (line) => {
-      retainedLines.push(line);
+    (contents) => {
+      retainedContents.push(contents);
       return true;
     },
     3,
@@ -94,17 +94,30 @@ test("caps retained evidence and leaves console diagnostics unbounded", () => {
     appendEvidence(line);
   }
 
-  assert.deepEqual(consoleLines, ["request 1", "request 2", "request 3", "request 4"]);
-  assert.deepEqual(retainedLines, [
-    "request 1\n",
-    "request 2\n",
-    "[dev-request] Evidence file truncated after 2 request lines; console output continues.\n",
+  assert.deepEqual(consoleLines, [
+    "request 1",
+    "request 2",
+    "request 3",
+    "request 4",
   ]);
-  assert.equal(appendEvidence("request 5"), false);
-  assert.equal(retainedLines.length, 3);
+  assert.deepEqual(retainedContents, [
+    "request 1\n",
+    "request 1\nrequest 2\n",
+    "[dev-request] Evidence file truncated after 2 request lines; console output continues.\n" +
+      "request 2\nrequest 3\n",
+    "[dev-request] Evidence file truncated after 2 request lines; console output continues.\n" +
+      "request 3\nrequest 4\n",
+  ]);
+  assert.equal(appendEvidence("request 5"), true);
+  assert.equal(
+    retainedContents.at(-1),
+    "[dev-request] Evidence file truncated after 2 request lines; console output continues.\n" +
+      "request 4\nrequest 5\n",
+  );
+  assert.equal(retainedContents.at(-1).trimEnd().split("\n").length, 3);
 });
 
-test("Metro middleware keeps console diagnostics unbounded and retains bounded evidence", async () => {
+test("Metro middleware keeps console diagnostics unbounded and retains newest evidence", async () => {
   const temporaryDirectory = await fs.mkdtemp(
     path.join(os.tmpdir(), "chat-app-metro-evidence-"),
   );
@@ -200,7 +213,7 @@ test("Metro middleware keeps console diagnostics unbounded and retains bounded e
     const result = JSON.parse(stdout);
     const retainedContent = await fs.readFile(evidencePath, "utf8");
     const retainedLines = retainedContent.split("\n");
-    const retainedRequestLines = retainedLines.slice(0, -2);
+    const retainedRequestLines = retainedLines.slice(1, -1);
 
     assert.equal(result.warnings.length, 0);
     assert.equal(
@@ -215,7 +228,7 @@ test("Metro middleware keeps console diagnostics unbounded and retains bounded e
       result.lastDiagnostic,
       /^\[dev-request\].*platform=android client=Expo Go .*resource=bundle$/,
     );
-    assert.equal(retainedLines.at(-2), REQUEST_EVIDENCE_TRUNCATION_NOTICE);
+    assert.equal(retainedLines[0], REQUEST_EVIDENCE_TRUNCATION_NOTICE);
     assert.equal(retainedLines.at(-1), "");
     assert.equal(
       retainedRequestLines.length,
