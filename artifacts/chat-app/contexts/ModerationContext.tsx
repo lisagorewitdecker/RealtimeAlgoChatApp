@@ -114,8 +114,8 @@ export function ModerationProvider({ children }: { children: React.ReactNode }) 
       username: string,
       permanent?: boolean,
     ): Promise<boolean> => {
-      void permanent;
-      const label = isAdmin ? "Permanently ban" : "Ban for 24 hours";
+      const banPermanently = isAdmin && permanent === true;
+      const label = banPermanently ? "Permanently ban" : "Ban for 24 hours";
       return new Promise((resolve) => {
         Alert.alert(
           "Ban user",
@@ -129,7 +129,7 @@ export function ModerationProvider({ children }: { children: React.ReactNode }) 
                 const ok = await modFetch(
                   `${encodeURIComponent(roomId)}/ban`,
                   "POST",
-                  { userId: targetUserId },
+                  { userId: targetUserId, permanent: banPermanently },
                   getToken,
                 );
                 resolve(ok);
