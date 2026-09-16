@@ -27,8 +27,10 @@ coverage
 # API Playwright error context is generated output; durable redacted evidence lives under test-results/.
 artifacts/api-server/test-results/banned-room-an-active-bann-8aa21-nd-sees-it-again-on-revisit-chromium/error-context.md
 # Keep the persistent native release-gate blocker and runner evidence auditable;
-# generated timestamped screenshots and test output remain ignored.
-!test-results/
+# generated timestamped screenshots and test output remain ignored. Only the
+# root test-results/ directory is re-included; artifact-level test-results/
+# directories (Playwright traces, screenshots) stay ignored.
+!/test-results/
 !test-results/native-large-text/
 test-results/native-large-text/*
 !test-results/native-large-text/physical-device-supplement.md

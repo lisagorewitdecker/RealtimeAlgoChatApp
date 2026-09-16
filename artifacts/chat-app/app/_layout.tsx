@@ -10,6 +10,7 @@ import { setAuthTokenGetter, setBaseUrl } from "@workspace/api-client-react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Stack, useRouter, useSegments } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
+import { StatusBar } from "expo-status-bar";
 import React, { useEffect } from "react";
 import { ActivityIndicator, Pressable, View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
@@ -21,6 +22,7 @@ import { AppFooter } from "@/components/AppFooter";
 import { ScaledText as Text } from "@/components/ScaledText";
 import { PRODUCT_NAME } from "@/constants/branding";
 import { AppProvider, useApp } from "@/contexts/AppContext";
+import { getClerkConfiguration } from "@/lib/clerkConfig";
 import { CryptoProvider } from "@/contexts/CryptoContext";
 import { SocketProvider } from "@/contexts/SocketContext";
 import { clerkTokenCache } from "@/lib/clerkTokenCache";
@@ -242,6 +244,39 @@ function RootLayoutNav() {
   );
 }
 
+function ClerkConfigurationScreen({ message }: { message: string }) {
+  useEffect(() => {
+    void SplashScreen.hideAsync();
+  }, []);
+
+  return (
+    <View
+      style={{
+        flex: 1,
+        alignItems: "center",
+        justifyContent: "center",
+        gap: 14,
+        padding: 28,
+        backgroundColor: "#0d0d1a",
+      }}
+    >
+      <Text
+        accessibilityRole="header"
+        {...{ role: "heading", "aria-level": 1 }}
+        style={{ color: "#f8fafc", fontSize: 24, fontWeight: "700", textAlign: "center" }}
+      >
+        Authentication setup needed
+      </Text>
+      <Text
+        accessibilityRole="alert"
+        style={{ color: "#c7d2fe", fontSize: 15, lineHeight: 22, textAlign: "center" }}
+      >
+        {message}
+      </Text>
+    </View>
+  );
+}
+
 function AuthTokenBridge({ children }: { children: React.ReactNode }) {
   const { getToken } = useAuth();
 
@@ -254,7 +289,7 @@ function AuthTokenBridge({ children }: { children: React.ReactNode }) {
 }
 
 function RootLayout() {
-  const publishableKey = process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY;
+  const clerkConfiguration = getClerkConfiguration();
   const [fontsLoaded, fontError] = useFonts({
     Inter_400Regular,
     Inter_500Medium,
@@ -268,34 +303,51 @@ function RootLayout() {
     }
   }, [fontsLoaded, fontError]);
 
-  if (!publishableKey) {
-    throw new Error("EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY is required.");
+  // Every palette is dark, so the system bars must always use light content.
+  // Android draws its status and navigation bars over the app (edge-to-edge)
+  // and would otherwise follow the device theme, hiding dark icons on the dark
+  // background. Declared once here; no screen overrides it.
+  const statusBar = <StatusBar style="light" />;
+
+  if (clerkConfiguration.status !== "ready") {
+    return (
+      <>
+        {statusBar}
+        <ClerkConfigurationScreen message={clerkConfiguration.message} />
+      </>
+    );
   }
 
   return (
-    <ClerkProvider publishableKey={publishableKey} tokenCache={clerkTokenCache}>
-      <ClerkLoaded>
-        <SafeAreaProvider>
-          <AccessibilityProvider>
-            <ErrorBoundary>
-              <QueryClientProvider client={queryClient}>
-                <AuthTokenBridge>
-                  <AppProvider>
-                    <SocketProvider>
-                      <GestureHandlerRootView style={{ flex: 1 }}>
-                        <KeyboardProvider>
-                          <RootLayoutNav />
-                        </KeyboardProvider>
-                      </GestureHandlerRootView>
-                    </SocketProvider>
-                  </AppProvider>
-                </AuthTokenBridge>
-              </QueryClientProvider>
-            </ErrorBoundary>
-          </AccessibilityProvider>
-        </SafeAreaProvider>
-      </ClerkLoaded>
-    </ClerkProvider>
+    <>
+      {statusBar}
+      <ClerkProvider
+        publishableKey={clerkConfiguration.publishableKey}
+        tokenCache={clerkTokenCache}
+      >
+        <ClerkLoaded>
+          <SafeAreaProvider>
+            <AccessibilityProvider>
+              <ErrorBoundary>
+                <QueryClientProvider client={queryClient}>
+                  <AuthTokenBridge>
+                    <AppProvider>
+                      <SocketProvider>
+                        <GestureHandlerRootView style={{ flex: 1 }}>
+                          <KeyboardProvider>
+                            <RootLayoutNav />
+                          </KeyboardProvider>
+                        </GestureHandlerRootView>
+                      </SocketProvider>
+                    </AppProvider>
+                  </AuthTokenBridge>
+                </QueryClientProvider>
+              </ErrorBoundary>
+            </AccessibilityProvider>
+          </SafeAreaProvider>
+        </ClerkLoaded>
+      </ClerkProvider>
+    </>
   );
 }
 

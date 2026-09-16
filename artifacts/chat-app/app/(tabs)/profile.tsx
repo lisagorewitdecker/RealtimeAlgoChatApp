@@ -4,13 +4,13 @@ import * as Haptics from "expo-haptics";
 import React, { useEffect, useRef, useState } from "react";
 import {
   Alert,
-  KeyboardAvoidingView,
   Platform,
   ScrollView,
   StyleSheet,
   TouchableOpacity,
   View,
 } from "react-native";
+import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AVATAR_EMOJIS, type AvatarEmoji } from "@/constants/avatarEmojis";
 import { PRODUCT_NAME } from "@/constants/branding";
@@ -21,6 +21,7 @@ import { DeviceEncryptionCard } from "@/components/DeviceEncryptionCard";
 import { ScaledText as Text } from "@/components/ScaledText";
 import { ScaledTextInput as TextInput } from "@/components/ScaledTextInput";
 import { useColors } from "@/hooks/useColors";
+import { useTabBarContentInset } from "@/hooks/useTabBarContentInset";
 import { getBuildIdentity } from "@/lib/buildIdentity";
 import { trackEvent } from "@/utils/analytics";
 
@@ -57,6 +58,9 @@ export default function ProfileScreen() {
   const buildIdentity = getBuildIdentity();
   const colors = useColors();
   const insets = useSafeAreaInsets();
+  // The tab bar overlays this screen (opaque on Android and web), so the end
+  // of the scroll content must clear its full height, not just the inset.
+  const bottomContentInset = useTabBarContentInset(24);
   const { username, avatarEmoji, userId, isAdmin, setUsername, setAvatarEmoji } = useApp();
   const {
     highContrast,
@@ -358,8 +362,10 @@ export default function ProfileScreen() {
 
   return (
     <KeyboardAvoidingView
+      testID="profile-keyboard-avoiding-view"
       style={[styles.root, { backgroundColor: colors.background }]}
-      behavior={Platform.OS === "ios" ? "padding" : "height"}
+      behavior="padding"
+      keyboardVerticalOffset={0}
     >
       <View
         style={[
@@ -399,7 +405,7 @@ export default function ProfileScreen() {
       <ScrollView
         testID="profile-scroll"
         style={styles.content}
-        contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
+        contentContainerStyle={{ paddingBottom: bottomContentInset }}
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >

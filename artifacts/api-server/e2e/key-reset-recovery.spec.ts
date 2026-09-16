@@ -26,6 +26,10 @@ const publishableKey = process.env["CLERK_PUBLISHABLE_KEY"];
 const secretKey = process.env["CLERK_SECRET_KEY"];
 const diagnosticContract =
   process.env["E2E_RECOVERY_DIAGNOSTIC_CONTRACT"] === "1";
+const diagnosticCleanupOperation =
+  process.env["E2E_RECOVERY_DIAGNOSTIC_CLEANUP"];
+const CONTEXT_CLEANUP_TIMEOUT_MS = diagnosticContract ? 250 : 5_000;
+const EXTERNAL_CLEANUP_TIMEOUT_MS = diagnosticContract ? 250 : 10_000;
 
 type DisposableUser = {
   id: string;
@@ -51,6 +55,59 @@ const PHASE_TIMEOUTS = {
   confirmReloadPersistence: 30_000,
   confirmRoomReentry: 30_000,
 } as const;
+
+const RECOVERY_PHASE_NAMES = {
+  signInAndCreateRoom: "sign in creator and create encrypted room",
+  signInAndJoinRoom: "sign in member and receive initial room key",
+  storeEncryptedHistory: "store encrypted history before key reset",
+  resetMemberKey: "reset member device key in a second session",
+  recoverFreshEnvelope: "recover a fresh room-key envelope after reset",
+  confirmDecryption: "decrypt history and a new message with recovered key",
+  confirmReloadPersistence: "reload room and reuse recovered key",
+  confirmRoomReentry: "leave and reopen room with recovered key",
+} as const;
+type RecoveryPhaseName =
+  (typeof RECOVERY_PHASE_NAMES)[keyof typeof RECOVERY_PHASE_NAMES];
+const diagnosticPhaseNames = (
+  process.env["E2E_RECOVERY_DIAGNOSTIC_PHASES"] ??
+  Object.values(RECOVERY_PHASE_NAMES).join(",")
+)
+  .split(",")
+  .map((phase) => phase.trim())
+  .filter(Boolean);
+
+async function withCleanupTimeout<T>(
+  label: string,
+  operation: PromiseLike<T>,
+  timeoutMs: number,
+): Promise<T> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      operation,
+      new Promise<never>((_, reject) => {
+        timeout = setTimeout(
+          () =>
+            reject(new Error(`${label} timed out after ${timeoutMs}ms`)),
+          timeoutMs,
+        );
+      }),
+    ]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
+}
+
+function closeContextWithTimeout(
+  context: BrowserContext,
+  timeoutMs = CONTEXT_CLEANUP_TIMEOUT_MS,
+): Promise<void> {
+  return withCleanupTimeout(
+    "Browser context cleanup",
+    context.close(),
+    timeoutMs,
+  );
+}
 
 async function createSignedInPage(
   browser: Browser,
@@ -175,7 +232,7 @@ test("a member recovers a live encrypted room after resetting their device key",
 
     let creator!: SignedInPage;
     await test.step(
-      "sign in creator and create encrypted room",
+      RECOVERY_PHASE_NAMES.signInAndCreateRoom,
       async () => {
         creator = await createSignedInPage(browser, users[0]!, contexts);
         await creator.page.getByTestId("new-room-button").click();
@@ -200,7 +257,7 @@ test("a member recovers a live encrypted room after resetting their device key",
       Awaited<ReturnType<typeof readMemberEnvelope>>
     >;
     await test.step(
-      "sign in member and receive initial room key",
+      RECOVERY_PHASE_NAMES.signInAndJoinRoom,
       async () => {
         member = await createSignedInPage(browser, users[1]!, contexts);
         await roomJoinButton(member.page, roomName).click();
@@ -219,7 +276,7 @@ test("a member recovers a live encrypted room after resetting their device key",
     );
 
     await test.step(
-      "store encrypted history before key reset",
+      RECOVERY_PHASE_NAMES.storeEncryptedHistory,
       async () => {
         await creator.page
           .getByTestId("room-composer-input")
@@ -234,7 +291,7 @@ test("a member recovers a live encrypted room after resetting their device key",
 
     let resetSession!: SignedInPage;
     await test.step(
-      "reset member device key in a second session",
+      RECOVERY_PHASE_NAMES.resetMemberKey,
       async () => {
         // Keep the first member session in the room so the reset session's
         // later join takes the explicit user-key-changed recovery path.
@@ -279,7 +336,7 @@ test("a member recovers a live encrypted room after resetting their device key",
     );
 
     await test.step(
-      "recover a fresh room-key envelope after reset",
+      RECOVERY_PHASE_NAMES.recoverFreshEnvelope,
       async () => {
         const recoveryRoomUrl = `${chatUrl}/room/${encodeURIComponent(roomId)}?roomName=${encodeURIComponent(roomName)}`;
         await resetSession.page.goto(recoveryRoomUrl);
@@ -300,7 +357,7 @@ test("a member recovers a live encrypted room after resetting their device key",
     );
 
     await test.step(
-      "decrypt history and a new message with recovered key",
+      RECOVERY_PHASE_NAMES.confirmDecryption,
       async () => {
         await expect(
           resetSession.page.getByText(historyMessage, { exact: true }),
@@ -323,7 +380,7 @@ test("a member recovers a live encrypted room after resetting their device key",
     );
 
     await test.step(
-      "reload room and reuse recovered key",
+      RECOVERY_PHASE_NAMES.confirmReloadPersistence,
       async () => {
         await resetSession.page.reload();
         await expect(
@@ -343,7 +400,7 @@ test("a member recovers a live encrypted room after resetting their device key",
     );
 
     await test.step(
-      "leave and reopen room with recovered key",
+      RECOVERY_PHASE_NAMES.confirmRoomReentry,
       async () => {
         await resetSession.page.getByTestId("room-back-button").click();
         const recoveredRoomCard = roomJoinButton(resetSession.page, roomName);
@@ -376,29 +433,43 @@ test("a member recovers a live encrypted room after resetting their device key",
     };
 
     collectCleanupErrors(
-      await Promise.allSettled(contexts.map((context) => context.close())),
+      await Promise.allSettled(
+        contexts.map((context) => closeContextWithTimeout(context)),
+      ),
     );
 
     const databaseCleanup: Promise<unknown>[] = [];
     if (roomId) {
       databaseCleanup.push(
-        db
-          .delete(roomKeyEnvelopesTable)
-          .where(eq(roomKeyEnvelopesTable.roomId, roomId)),
+        withCleanupTimeout(
+          "Recovery room-key envelope database cleanup",
+          db
+            .delete(roomKeyEnvelopesTable)
+            .where(eq(roomKeyEnvelopesTable.roomId, roomId)),
+          EXTERNAL_CLEANUP_TIMEOUT_MS,
+        ),
       );
     }
     databaseCleanup.push(
-      db
-        .delete(roomsTable)
-        .where(or(eq(roomsTable.id, roomId), eq(roomsTable.name, roomName))),
+      withCleanupTimeout(
+        "Recovery room database cleanup",
+        db
+          .delete(roomsTable)
+          .where(or(eq(roomsTable.id, roomId), eq(roomsTable.name, roomName))),
+        EXTERNAL_CLEANUP_TIMEOUT_MS,
+      ),
     );
     if (users.length > 0) {
       databaseCleanup.push(
-        db.delete(userProfilesTable).where(
-          inArray(
-            userProfilesTable.userId,
-            users.map((user) => user.id),
+        withCleanupTimeout(
+          "Recovery user-profile database cleanup",
+          db.delete(userProfilesTable).where(
+            inArray(
+              userProfilesTable.userId,
+              users.map((user) => user.id),
+            ),
           ),
+          EXTERNAL_CLEANUP_TIMEOUT_MS,
         ),
       );
     }
@@ -406,14 +477,26 @@ test("a member recovers a live encrypted room after resetting their device key",
 
     for (const userId of clerkUserIds) {
       try {
-        await withClerkRetry(`delete user ${userId}`, () =>
-          clerkClient.users.deleteUser(userId),
+        await withCleanupTimeout(
+          `Clerk user cleanup for ${userId}`,
+          withClerkRetry(`delete user ${userId}`, () =>
+            clerkClient.users.deleteUser(userId),
+          ),
+          EXTERNAL_CLEANUP_TIMEOUT_MS,
         );
       } catch (error) {
         cleanupErrors.push(error);
       }
     }
-    collectCleanupErrors(await Promise.allSettled([pool.end()]));
+    collectCleanupErrors(
+      await Promise.allSettled([
+        withCleanupTimeout(
+          "Recovery database pool shutdown",
+          pool.end(),
+          EXTERNAL_CLEANUP_TIMEOUT_MS,
+        ),
+      ]),
+    );
 
     throwTestAndCleanupFailures(
       testFailure,
@@ -424,33 +507,146 @@ test("a member recovers a live encrypted room after resetting their device key",
   }
 });
 
-test("reports a stalled recovery phase and preserves cleanup failures", async ({
-  browser,
-}) => {
+const diagnosticActions: Record<
+  RecoveryPhaseName,
+  (page: Page) => Promise<void>
+> = {
+  [RECOVERY_PHASE_NAMES.signInAndCreateRoom]: async (page: Page) => {
+    await page.route("**/*", () => new Promise<void>(() => {}));
+    await page.goto("http://recovery-diagnostic.invalid/");
+  },
+  [RECOVERY_PHASE_NAMES.signInAndJoinRoom]: async (page: Page) => {
+    await page.getByRole("button", { name: "Join diagnostic room" }).click();
+  },
+  [RECOVERY_PHASE_NAMES.storeEncryptedHistory]: async (page: Page) => {
+    await page.getByTestId("room-composer-input").fill("diagnostic history");
+  },
+  [RECOVERY_PHASE_NAMES.resetMemberKey]: async (page: Page) => {
+    await page.getByTestId("reset-device-key-button").click();
+  },
+  [RECOVERY_PHASE_NAMES.recoverFreshEnvelope]: async (page: Page) => {
+    await page.route("**/*", () => new Promise<void>(() => {}));
+    await page.goto("http://recovery-diagnostic.invalid/");
+  },
+  [RECOVERY_PHASE_NAMES.confirmDecryption]: async (page: Page) => {
+    await page.getByTestId("room-composer-input").fill("diagnostic");
+  },
+  [RECOVERY_PHASE_NAMES.confirmReloadPersistence]: async (page: Page) => {
+    let requestCount = 0;
+    await page.route("http://recovery-diagnostic.invalid/", async (route) => {
+      requestCount += 1;
+      if (requestCount === 1) {
+        await route.fulfill({ body: "recovery diagnostic" });
+        return;
+      }
+      await new Promise<void>(() => {});
+    });
+    await page.goto("http://recovery-diagnostic.invalid/");
+    await page.reload();
+  },
+  [RECOVERY_PHASE_NAMES.confirmRoomReentry]: async (page: Page) => {
+    await page.getByTestId("room-back-button").click();
+  },
+};
+
+test("reports stalled recovery phases", async ({ browser }) => {
   test.skip(!diagnosticContract, "Only run by the diagnostic contract test");
   test.setTimeout(10_000);
 
   let context: BrowserContext | undefined;
-  let testFailure: unknown;
+  const phaseFailures: unknown[] = [];
   try {
-    await test.step(
-      "sign in creator and create encrypted room",
-      async () => {
-        context = await browser.newContext();
-        const page = await context.newPage();
-        await page.route("**/*", () => new Promise<void>(() => {}));
-        await page.goto("http://recovery-diagnostic.invalid/");
-      },
-      { timeout: 250 },
-    );
-  } catch (error) {
-    testFailure = error;
+    context = await browser.newContext();
+    for (const diagnosticPhaseName of diagnosticPhaseNames) {
+      const diagnosticAction =
+        diagnosticActions[diagnosticPhaseName as RecoveryPhaseName];
+      expect(
+        diagnosticAction,
+        `Unknown recovery diagnostic phase: ${diagnosticPhaseName}`,
+      ).toBeDefined();
+
+      let page: Page | undefined;
+      try {
+        page = await context.newPage();
+        await test.step(
+          diagnosticPhaseName,
+          () => diagnosticAction!(page!),
+          { timeout: 250 },
+        );
+      } catch (error) {
+        phaseFailures.push(
+          new AggregateError(
+            [error],
+            `Recovery diagnostic phase failed: ${diagnosticPhaseName}`,
+          ),
+        );
+      } finally {
+        await page?.close();
+      }
+    }
   } finally {
     console.info("[key-reset-recovery-e2e] diagnostic cleanup executed");
-    await context?.close().catch(() => undefined);
+    const cleanupErrors: unknown[] = [];
+    if (context) {
+      if (diagnosticCleanupOperation === "browser") {
+        const realClose = context.close.bind(context);
+        context.close = () => new Promise<void>(() => {});
+        const result = await Promise.allSettled([
+          closeContextWithTimeout(context),
+        ]);
+        if (result[0]?.status === "rejected") {
+          cleanupErrors.push(result[0].reason);
+        }
+        context.close = realClose;
+      }
+      await context.close();
+    }
+    if (diagnosticCleanupOperation === "database") {
+      const result = await Promise.allSettled([
+        withCleanupTimeout(
+          "Recovery room database cleanup",
+          new Promise<void>(() => {}),
+          EXTERNAL_CLEANUP_TIMEOUT_MS,
+        ),
+      ]);
+      if (result[0]?.status === "rejected") {
+        cleanupErrors.push(result[0].reason);
+      }
+    }
+    if (diagnosticCleanupOperation === "clerk-user") {
+      const result = await Promise.allSettled([
+        withCleanupTimeout(
+          "Clerk user cleanup for diagnostic-user",
+          new Promise<void>(() => {}),
+          EXTERNAL_CLEANUP_TIMEOUT_MS,
+        ),
+      ]);
+      if (result[0]?.status === "rejected") {
+        cleanupErrors.push(result[0].reason);
+      }
+    }
+    if (diagnosticCleanupOperation === "pool") {
+      const result = await Promise.allSettled([
+        withCleanupTimeout(
+          "Recovery database pool shutdown",
+          new Promise<void>(() => {}),
+          EXTERNAL_CLEANUP_TIMEOUT_MS,
+        ),
+      ]);
+      if (result[0]?.status === "rejected") {
+        cleanupErrors.push(result[0].reason);
+      }
+    }
+    const testFailure =
+      phaseFailures.length > 0
+        ? new AggregateError(
+            phaseFailures,
+            "Recovery diagnostic phases failed",
+          )
+        : undefined;
     throwTestAndCleanupFailures(
       testFailure,
-      [new Error("diagnostic cleanup failed")],
+      cleanupErrors,
       "Key-reset recovery E2E cleanup failed",
       "Key-reset recovery verification and cleanup both failed",
     );

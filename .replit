@@ -1,4 +1,4 @@
-modules = ["nodejs-24", "python-base-3.13", "postgresql-16"]
+modules = ["nodejs-24", "python-base-3.13"]
 
 [deployment]
 router = "application"
@@ -12,65 +12,13 @@ env = { "CI" = "true" }
 runButton = "Project"
 
 [[workflows.workflow]]
-name = "artifacts/chat-app: expo"
-author = "agent"
-mode = "sequential"
-
-[workflows.workflow.metadata]
-outputType = "webview"
-artifactId = "artifacts/chat-app"
-
-[[workflows.workflow.tasks]]
-task = "shell.exec"
-args = "pnpm --filter @workspace/chat-app run dev"
-cwd = "./artifacts/chat-app"
-waitForPort = 21127
-ensurePreviewReachable = "/status"
-router = "expo-domain"
-
-[workflows.workflow.tasks.env]
-PORT = "21127"
-BASE_PATH = "/"
-
-[[workflows.workflow]]
-name = "artifacts/api-server: API Server"
-author = "agent"
-mode = "parallel"
-
-[workflows.workflow.metadata]
-outputType = "webview"
-artifactId = "3B4_FFSkEVBkAeYMFRJ2e"
-
-[[workflows.workflow.tasks]]
-task = "shell.exec"
-args = "pnpm --filter @workspace/api-server run dev"
-
-[[workflows.workflow]]
-name = "artifacts/mockup-sandbox: Component Preview Server"
-author = "agent"
-mode = "sequential"
-
-[workflows.workflow.metadata]
-outputType = "webview"
-artifactId = "XegfDyZt7HqfW2Bb8Ghoy"
-isCanvasWorkflow = true
-
-[[workflows.workflow.tasks]]
-task = "shell.exec"
-args = "pnpm --filter @workspace/mockup-sandbox run dev"
-cwd = "./artifacts/mockup-sandbox"
-waitForPort = 8081
-ensurePreviewReachable = "/"
-router = "path"
-
-[workflows.workflow.tasks.env]
-PORT = "8081"
-BASE_PATH = "/__mockup"
-
-[[workflows.workflow]]
 name = "Project"
 mode = "parallel"
 author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "chat-app-preview-startup"
 
 [[workflows.workflow.tasks]]
 task = "workflow.run"
@@ -108,16 +56,31 @@ args = "idle-profile-registration-e2e"
 task = "workflow.run"
 args = "reconnect-delivery-e2e"
 
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "playwright-clean-runtime"
+
 [[workflows.workflow]]
-name = "typecheck"
+name = "chat-app-preview-startup"
 author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm --filter @workspace/chat-app run validate:preview-startup"
 
 [workflows.workflow.metadata]
 isValidation = true
 
+[[workflows.workflow]]
+name = "typecheck"
+author = "agent"
+
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "flock -w 900 /tmp/replit-heavy-validation.lock pnpm run typecheck"
+
+[workflows.workflow.metadata]
+isValidation = true
 
 [[workflows.workflow]]
 name = "unit-tests"
@@ -134,45 +97,45 @@ isValidation = true
 name = "api-server-test"
 author = "agent"
 
-[workflows.workflow.metadata]
-isValidation = true
-
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "flock -w 900 /tmp/replit-heavy-validation.lock pnpm --filter @workspace/api-server run test"
+
+[workflows.workflow.metadata]
+isValidation = true
 
 [[workflows.workflow]]
 name = "chat-app-test"
 author = "agent"
 
-[workflows.workflow.metadata]
-isValidation = true
-
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "flock -w 900 /tmp/replit-heavy-validation.lock pnpm --filter @workspace/chat-app run test"
+
+[workflows.workflow.metadata]
+isValidation = true
 
 [[workflows.workflow]]
 name = "banned-room-e2e"
 author = "agent"
 
-[workflows.workflow.metadata]
-isValidation = true
-
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "E2E_CHAT_URL=https://$REPLIT_EXPO_DEV_DOMAIN E2E_API_URL=https://$REPLIT_DEV_DOMAIN flock -w 900 /tmp/replit-heavy-validation.lock pnpm --filter @workspace/api-server run test:e2e:banned-room"
+
+[workflows.workflow.metadata]
+isValidation = true
 
 [[workflows.workflow]]
 name = "mockup-clean-typecheck"
 author = "agent"
 
-[workflows.workflow.metadata]
-isValidation = true
-
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "flock -w 900 /tmp/replit-heavy-validation.lock pnpm run validate:mockup-clean"
+
+[workflows.workflow.metadata]
+isValidation = true
 
 [[workflows.workflow]]
 name = "key-reset-recovery-e2e"
@@ -207,6 +170,17 @@ args = "E2E_CHAT_URL=https://$REPLIT_EXPO_DEV_DOMAIN E2E_API_URL=https://$REPLIT
 [workflows.workflow.metadata]
 isValidation = true
 
+[[workflows.workflow]]
+name = "playwright-clean-runtime"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "flock -w 900 /tmp/replit-heavy-validation.lock pnpm --filter @workspace/api-server run test:browser:clean-runtime"
+
+[workflows.workflow.metadata]
+isValidation = true
+
 [agent]
 stack = "PNPM_WORKSPACE"
 expertMode = true
@@ -217,7 +191,7 @@ timeoutMs = 180000
 
 [nix]
 channel = "stable-25_05"
-packages = ["glib", "nss", "nspr", "atk", "at-spi2-atk", "dbus", "xorg.libX11", "xorg.libXcomposite", "xorg.libXdamage", "xorg.libXext", "xorg.libXfixes", "xorg.libXrandr", "mesa", "xorg.libxcb", "libxkbcommon", "alsa-lib", "at-spi2-core", "libgbm"]
+packages = ["glib", "nss", "nspr", "atk", "at-spi2-atk", "dbus", "xorg.libX11", "xorg.libXcomposite", "xorg.libXdamage", "xorg.libXext", "xorg.libXfixes", "xorg.libXrandr", "mesa", "xorg.libxcb", "libxkbcommon", "alsa-lib", "at-spi2-core", "libgbm", "cups", "expat", "libdrm", "pango", "cairo", "fontconfig", "freetype", "systemd", "gtk3"]
 
 [userenv]
 
@@ -225,7 +199,6 @@ packages = ["glib", "nss", "nspr", "atk", "at-spi2-atk", "dbus", "xorg.libX11", 
 ADMIN_USER_IDS = ""
 EXPO_PUBLIC_ADMIN_USER_IDS = ""
 
-[userenv.development]
 
 [objectStorage]
 defaultBucketID = "replit-objstore-6a255b4b-ad2d-4e4e-86dd-174ca70c17f1"

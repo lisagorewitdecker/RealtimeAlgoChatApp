@@ -1,9 +1,15 @@
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
+import { MAX_CLERK_RETRY_DELAY_MS } from "../src/lib/clerkRetry.js";
+import {
+  runtimeConfigFixtureVariable,
+  runtimeConfigPathVariable,
+} from "./playwright-runtime-config.mjs";
+import { requiredChromiumRuntimePackages } from "./playwright-runtime-packages.mjs";
 import {
   throwTestAndCleanupFailures,
   withClerkRetry,
@@ -61,6 +67,46 @@ describe("withClerkRetry", () => {
       }),
     ).resolves.toBe("session");
     expect(sleep).toHaveBeenCalledWith(3_000);
+  });
+
+  it.each([30, 31, 3_600, Number.MAX_SAFE_INTEGER])(
+    "caps numeric Clerk retry guidance of %s seconds at the shared ceiling",
+    async (retryAfter) => {
+      const operation = vi
+        .fn<() => Promise<string>>()
+        .mockRejectedValueOnce({ status: 429, retryAfter })
+        .mockResolvedValue("session");
+      const sleep = vi.fn<() => Promise<void>>().mockResolvedValue();
+
+      await expect(
+        withClerkRetry("create session", operation, {
+          attempts: 2,
+          baseDelayMs: 10,
+          sleep,
+        }),
+      ).resolves.toBe("session");
+      expect(operation).toHaveBeenCalledTimes(2);
+      expect(sleep.mock.calls).toEqual([[MAX_CLERK_RETRY_DELAY_MS]]);
+    },
+  );
+
+  it("keeps the attempt count when every retry hint exceeds the ceiling", async () => {
+    const failure = { status: 429, retryAfter: 3_600 };
+    const operation = vi.fn<() => Promise<string>>().mockRejectedValue(failure);
+    const sleep = vi.fn<() => Promise<void>>().mockResolvedValue();
+
+    await expect(
+      withClerkRetry("create session", operation, {
+        attempts: 3,
+        baseDelayMs: 10,
+        sleep,
+      }),
+    ).rejects.toBe(failure);
+    expect(operation).toHaveBeenCalledTimes(3);
+    expect(sleep.mock.calls).toEqual([
+      [MAX_CLERK_RETRY_DELAY_MS],
+      [MAX_CLERK_RETRY_DELAY_MS],
+    ]);
   });
 
   it.each(["later", Number.NaN, Number.POSITIVE_INFINITY, -1])(
@@ -186,10 +232,123 @@ describe("throwTestAndCleanupFailures", () => {
 });
 
 describe("key-reset recovery Playwright diagnostics", () => {
+  const apiServerDirectory = fileURLToPath(new URL("..", import.meta.url));
+  const recoveryPhases = [
+    {
+      phase: "sign in creator and create encrypted room",
+      action: "page.goto",
+    },
+    {
+      phase: "sign in member and receive initial room key",
+      action: "locator.click",
+    },
+    {
+      phase: "store encrypted history before key reset",
+      action: "locator.fill",
+    },
+    {
+      phase: "reset member device key in a second session",
+      action: "locator.click",
+    },
+    {
+      phase: "recover a fresh room-key envelope after reset",
+      action: "page.goto",
+    },
+    {
+      phase: "decrypt history and a new message with recovered key",
+      action: "locator.fill",
+    },
+    {
+      phase: "reload room and reuse recovered key",
+      action: "page.reload",
+    },
+    {
+      phase: "leave and reopen room with recovered key",
+      action: "locator.click",
+    },
+  ] as const;
+
+  it("reports a browser setup error before recovery diagnostics can be misleading", () => {
+    const emptyBrowserDirectory = mkdtempSync(
+      join(tmpdir(), "missing-playwright-browser-"),
+    );
+    try {
+      const result = spawnSync(
+        "node",
+        ["e2e/check-playwright-runtime.mjs"],
+        {
+          cwd: apiServerDirectory,
+          encoding: "utf8",
+          env: {
+            ...process.env,
+            PLAYWRIGHT_BROWSERS_PATH: emptyBrowserDirectory,
+          },
+          timeout: 10_000,
+        },
+      );
+      const report = `${result.stdout}\n${result.stderr}`;
+
+      expect(result.error).toBeUndefined();
+      expect(result.status).toBe(1);
+      expect(report).toContain("[api-server browser setup]");
+      expect(report).toContain("Chromium is not ready for API tests");
+      expect(report).not.toContain(
+        "Key-reset recovery verification and cleanup both failed",
+      );
+    } finally {
+      rmSync(emptyBrowserDirectory, { recursive: true, force: true });
+    }
+  });
+
+  it.each(requiredChromiumRuntimePackages)(
+    "reports the browser setup error when required runtime package %s is removed",
+    (removedPackage) => {
+      const runtimeDirectory = mkdtempSync(
+        join(tmpdir(), "incomplete-playwright-runtime-"),
+      );
+      const runtimeConfigPath = join(runtimeDirectory, ".replit");
+      try {
+        const remainingPackages = requiredChromiumRuntimePackages.filter(
+          (packageName) => packageName !== removedPackage,
+        );
+        writeFileSync(
+          runtimeConfigPath,
+          `[nix]\npackages = [${remainingPackages.map((name) => `"${name}"`).join(", ")}]\n`,
+        );
+        const result = spawnSync(
+          "node",
+          ["e2e/check-playwright-runtime.mjs"],
+          {
+            cwd: apiServerDirectory,
+            encoding: "utf8",
+            env: {
+              ...process.env,
+              // The fixture config path is honored only with its explicit
+              // opt-in; an inherited path alone stays inert.
+              [runtimeConfigFixtureVariable]: "1",
+              [runtimeConfigPathVariable]: runtimeConfigPath,
+            },
+            timeout: 10_000,
+          },
+        );
+        const report = `${result.stdout}\n${result.stderr}`;
+
+        expect(result.error).toBeUndefined();
+        expect(result.status).toBe(1);
+        expect(report).toContain("[api-server browser setup]");
+        expect(report).toContain("Chromium is not ready for API tests");
+        expect(report).toContain(
+          `Required Chromium runtime package "${removedPackage}"`,
+        );
+      } finally {
+        rmSync(runtimeDirectory, { recursive: true, force: true });
+      }
+    },
+  );
+
   it(
-    "reports the bounded phase, page action, and cleanup without hiding the original failure",
+    "reports every recovery phase and its underlying action without external services",
     () => {
-      const apiServerDirectory = fileURLToPath(new URL("..", import.meta.url));
       const outputDirectory = mkdtempSync(
         join(tmpdir(), "recovery-diagnostic-"),
       );
@@ -204,7 +363,7 @@ describe("key-reset recovery Playwright diagnostics", () => {
             "--config",
             "e2e/playwright.config.ts",
             "--grep",
-            "reports a stalled recovery phase",
+            "reports stalled recovery phases",
             "--output",
             outputDirectory,
           ],
@@ -214,6 +373,10 @@ describe("key-reset recovery Playwright diagnostics", () => {
             env: {
               ...process.env,
               E2E_RECOVERY_DIAGNOSTIC_CONTRACT: "1",
+              E2E_RECOVERY_DIAGNOSTIC_PHASES: recoveryPhases
+                 .map(({ phase }) => phase)
+                 .join(","),
+              E2E_RECOVERY_DIAGNOSTIC_CLEANUP: "database",
             },
             timeout: 15_000,
           },
@@ -222,15 +385,86 @@ describe("key-reset recovery Playwright diagnostics", () => {
 
         expect(result.error).toBeUndefined();
         expect(result.status).toBe(1);
-        expect(report).toContain("sign in creator and create encrypted room");
-        expect(report).toContain("page.goto");
+        expect(result.signal).toBeNull();
+        for (const { phase, action } of recoveryPhases) {
+          expect(report).toContain(phase);
+          expect(report).toContain(action);
+        }
         expect(report).toContain(
           "[key-reset-recovery-e2e] diagnostic cleanup executed",
         );
         expect(report).toContain(
           "Key-reset recovery verification and cleanup both failed",
         );
-        expect(report).toContain("diagnostic cleanup failed");
+        expect(report).toContain(
+          "Recovery room database cleanup timed out after 250ms",
+        );
+      } finally {
+        rmSync(outputDirectory, { recursive: true, force: true });
+      }
+    },
+    20_000,
+  );
+
+  it.each([
+    {
+      cleanup: "browser",
+      timeout: "Browser context cleanup timed out after 250ms",
+    },
+    {
+      cleanup: "clerk-user",
+      timeout:
+        "Clerk user cleanup for diagnostic-user timed out after 250ms",
+    },
+    {
+      cleanup: "pool",
+      timeout: "Recovery database pool shutdown timed out after 250ms",
+    },
+  ])(
+    "reports a stalled $cleanup cleanup without external services",
+    ({ cleanup, timeout }) => {
+      const outputDirectory = mkdtempSync(
+        join(tmpdir(), `recovery-${cleanup}-diagnostic-`),
+      );
+      const phase = recoveryPhases[0]!;
+      try {
+        const result = spawnSync(
+          "pnpm",
+          [
+            "exec",
+            "playwright",
+            "test",
+            "e2e/key-reset-recovery.spec.ts",
+            "--config",
+            "e2e/playwright.config.ts",
+            "--grep",
+            "reports stalled recovery phases",
+            "--output",
+            outputDirectory,
+          ],
+          {
+            cwd: apiServerDirectory,
+            encoding: "utf8",
+            env: {
+              ...process.env,
+              E2E_RECOVERY_DIAGNOSTIC_CONTRACT: "1",
+              E2E_RECOVERY_DIAGNOSTIC_PHASES: phase.phase,
+              E2E_RECOVERY_DIAGNOSTIC_CLEANUP: cleanup,
+            },
+            timeout: 15_000,
+          },
+        );
+        const report = `${result.stdout}\n${result.stderr}`;
+
+        expect(result.error).toBeUndefined();
+        expect(result.status).toBe(1);
+        expect(result.signal).toBeNull();
+        expect(report).toContain(phase.phase);
+        expect(report).toContain(phase.action);
+        expect(report).toContain(
+          "Key-reset recovery verification and cleanup both failed",
+        );
+        expect(report).toContain(timeout);
       } finally {
         rmSync(outputDirectory, { recursive: true, force: true });
       }

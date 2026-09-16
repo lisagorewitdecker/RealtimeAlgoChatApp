@@ -8,12 +8,12 @@ import React, { useCallback, useRef, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
-  KeyboardAvoidingView,
   Platform,
   StyleSheet,
   TouchableOpacity,
   View,
 } from "react-native";
+import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 import { useColors } from "@/hooks/useColors";
 import { useAccessibility } from "@/contexts/AccessibilityContext";
 import { ScaledText as Text } from "@/components/ScaledText";
@@ -227,9 +227,10 @@ export default function AiPanel({ roomId: _roomId }: Props) {
 
   return (
     <KeyboardAvoidingView
+      testID="ai-panel-keyboard-avoiding-view"
       style={[styles.root, { backgroundColor: colors.background }]}
-      behavior={Platform.OS === "ios" ? "padding" : "height"}
-      keyboardVerticalOffset={Platform.OS === "ios" ? 120 : 0}
+      behavior="padding"
+      keyboardVerticalOffset={0}
     >
       {/* Header */}
       <View
@@ -292,6 +293,7 @@ export default function AiPanel({ roomId: _roomId }: Props) {
         ]}
       >
         <TextInput
+          testID="ai-panel-input"
           style={[
             styles.input,
             {
@@ -398,6 +400,8 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     borderWidth: 1,
     borderRadius: 22,
+    // Android centers multiline text vertically by default; iOS top-aligns.
+    textAlignVertical: "top",
   },
   sendBtn: {
     width: 44,

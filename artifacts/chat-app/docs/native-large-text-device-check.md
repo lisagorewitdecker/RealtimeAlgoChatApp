@@ -254,8 +254,11 @@ stack as a release blocker.
 The iOS and Android jobs append the branding summary after uploading their
 artifact. It shows the check status, candidate build ID, native label, and
 permission-copy or permission-declaration result. If branding fails, the
-summary includes the mismatched field and links to the uploaded
-`native-branding-check.md` report; the report remains the detailed audit record.
+summary names the mismatched or unavailable field (or reports that the
+candidate metadata could not be inspected when the file is unreadable or not
+valid JSON) and links to the uploaded `native-branding-check.md` report; the
+report remains the detailed audit record. Parser details never reach the
+summary or the workflow log; inspect the uploaded `native-info.json` instead.
 
 Review `runner-metadata.txt`, `pass-fail-record.txt`, `maestro-results.xml`,
 `native-branding-check.md`, and all screenshots as described in

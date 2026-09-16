@@ -5,8 +5,17 @@ import {
   sandboxStatesTable,
   userProfilesTable,
 } from "@workspace/db";
-import { and, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
-
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  gt,
+  inArray,
+  isNull,
+  or,
+  sql,
+} from "drizzle-orm";
 export interface EncryptedPayload {
   ciphertext: string;
   nonce: string;
@@ -252,11 +261,50 @@ export async function loadEncryptedMessages(roomId: string) {
     })
     .from(messagesTable)
     .where(and(eq(messagesTable.roomId, roomId), isNull(messagesTable.deletedAt)))
-    .orderBy(desc(messagesTable.timestampMs))
+    .orderBy(desc(messagesTable.timestampMs), desc(messagesTable.id))
     .limit(80)
     .then((rows) => rows.reverse());
 }
 
+export async function loadEncryptedMessagesAfter(
+  roomId: string,
+  after: { id: string; timestamp: number },
+  limit: number,
+) {
+  const boundedLimit = Math.max(1, Math.min(limit, 80));
+  const rows = await db
+    .select({
+      id: messagesTable.id,
+      ciphertext: messagesTable.ciphertext,
+      nonce: messagesTable.nonce,
+      userId: messagesTable.userId,
+      username: messagesTable.username,
+      timestamp: messagesTable.timestampMs,
+      type: messagesTable.type,
+      systemContent: messagesTable.systemContent,
+    })
+    .from(messagesTable)
+    .where(
+      and(
+        eq(messagesTable.roomId, roomId),
+        isNull(messagesTable.deletedAt),
+        or(
+          gt(messagesTable.timestampMs, after.timestamp),
+          and(
+            eq(messagesTable.timestampMs, after.timestamp),
+            gt(messagesTable.id, after.id),
+          ),
+        ),
+      ),
+    )
+    .orderBy(asc(messagesTable.timestampMs), asc(messagesTable.id))
+    .limit(boundedLimit + 1);
+
+  return {
+    messages: rows.slice(0, boundedLimit),
+    hasMore: rows.length > boundedLimit,
+  };
+}
 export async function saveEncryptedMessage({
   id,
   roomId,

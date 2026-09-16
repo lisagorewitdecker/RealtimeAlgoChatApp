@@ -4,12 +4,12 @@ import { Link, useRouter } from "expo-router";
 import React, { useState } from "react";
 import {
   ActivityIndicator,
-  KeyboardAvoidingView,
   Platform,
   StyleSheet,
   TouchableOpacity,
   View,
 } from "react-native";
+import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { ScaledText as Text } from "@/components/ScaledText";
 import { ScaledTextInput as TextInput } from "@/components/ScaledTextInput";
@@ -80,8 +80,10 @@ export default function ForgotPasswordScreen() {
 
   return (
     <KeyboardAvoidingView
+      testID="forgot-password-keyboard-avoiding-view"
       style={[styles.root, { backgroundColor: colors.background }]}
-      behavior={Platform.OS === "ios" ? "padding" : "height"}
+      behavior="padding"
+      keyboardVerticalOffset={0}
     >
       <View
         style={[

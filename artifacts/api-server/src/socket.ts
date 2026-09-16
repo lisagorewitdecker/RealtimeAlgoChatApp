@@ -1,12 +1,19 @@
 import type { Server as HttpServer } from "node:http";
+import { randomUUID } from "node:crypto";
 import { verifyToken } from "@clerk/express";
 import {
   Server,
   Socket,
   type DefaultEventsMap,
+  type ExtendedError,
 } from "socket.io";
 import { logger } from "./lib/logger";
 import { getAccountProfile } from "./lib/accountProfile";
+import {
+  ACCOUNT_ACCESS_UNAVAILABLE_CODE,
+  ACCOUNT_ACCESS_UNAVAILABLE_MESSAGE,
+  AccountAccessUnavailableError,
+} from "./lib/accountAccessUnavailable";
 import { isAllowedOrigin } from "./lib/origins";
 import {
   verifyRoomAccessCapability,
@@ -21,8 +28,18 @@ import {
 import { and, eq, gt, isNull, or } from "drizzle-orm";
 import {
   getAnthropicRetryAfterSeconds,
+  getAssistantRateLimitCountdown,
   isAnthropicRateLimitError,
 } from "./lib/assistantErrors";
+import {
+  ASSISTANT_DISCLOSURE_FIELD,
+  ASSISTANT_DISCLOSURE_REQUIRED_MESSAGE,
+  ASSISTANT_REQUEST_COOLDOWN_MS,
+  ASSISTANT_TIMEOUT_MS,
+  MAX_ASSISTANT_CONTEXT_LENGTH,
+  MAX_ASSISTANT_FILE_LENGTH,
+  MAX_ASSISTANT_PROMPT_LENGTH,
+} from "./lib/assistantLimits";
 import { getAccountAccess, isConfiguredAdmin } from "./lib/accountAccess";
 import { streamSandboxAssistant } from "./lib/sandboxAssistant";
 import {
@@ -30,6 +47,7 @@ import {
   getPublicKeyRecord,
   getRoomEnvelope,
   loadEncryptedMessages,
+  loadEncryptedMessagesAfter,
   loadEncryptedSandboxState,
   saveEncryptedMessage,
   saveEncryptedSandboxState,
@@ -75,11 +93,7 @@ interface Room {
 const rooms = new Map<string, Room>();
 const DEFAULT_AVATAR_EMOJI = "🧑‍💻";
 const DEFAULT_USERNAME = "Member";
-const MAX_ASSISTANT_PROMPT_LENGTH = 2_000;
-const MAX_ASSISTANT_FILE_LENGTH = 12_000;
-const MAX_ASSISTANT_CONTEXT_LENGTH = 24_000;
-const ASSISTANT_TIMEOUT_MS = 45_000;
-const ASSISTANT_REQUEST_COOLDOWN_MS = 1_000;
+const ASSISTANT_REQUEST_ID_PATTERN = /^[a-zA-Z0-9_-]{8,80}$/;
 
 type SessionPurpose = "chat" | RoomAccessPurpose;
 
@@ -114,6 +128,21 @@ interface ActiveAssistantRequest {
   timeout: NodeJS.Timeout;
 }
 
+interface AssistantErrorPayload {
+  code:
+    | "DISCLOSURE_REQUIRED"
+    | "NOT_IN_ROOM"
+    | "INVALID_REQUEST"
+    | "REQUEST_IN_PROGRESS"
+    | "COOLDOWN";
+  message: string;
+  retryAfterSeconds?: number;
+}
+
+function formatCount(value: number): string {
+  return value.toLocaleString("en-US");
+}
+
 type AppSocket = Socket<
   DefaultEventsMap,
   DefaultEventsMap,
@@ -145,6 +174,8 @@ const ROOM_SOCKET_MAX = 64;
 const CALL_PARTICIPANTS_MAX = 16;
 const PENDING_SANDBOX_SAVES_MAX = 256;
 const PERSISTENCE_OPERATIONS_MAX = 256;
+
+const MESSAGE_RECOVERY_PAGE_SIZE = 80;
 let activeServer: AppServer | null = null;
 
 interface ConnectionLease {
@@ -270,15 +301,20 @@ function releaseConnection(
 }
 
 function rejectHandshake(
-  next: (error?: Error) => void,
+  next: (error?: ExtendedError) => void,
   registry: ConnectionRegistry,
   lease: ConnectionLease,
   message: string,
   reason: string,
+  data?: Record<string, unknown>,
 ): void {
   releaseConnection(registry, lease);
   recordSocketAuthFailure(reason);
-  next(new Error(message));
+  const error: ExtendedError = new Error(message);
+  // Socket.IO forwards `data` to the client alongside the message, so the
+  // `connect_error` handler can read structured hints such as a retry delay.
+  if (data) error.data = data;
+  next(error);
 }
 
 function getEventBudget(
@@ -502,13 +538,15 @@ function getEncryptedPayload(value: unknown, maxLength: number): EncryptedPayloa
   return { ciphertext, nonce };
 }
 
+function getAssistantRequestId(value: unknown): string | null {
+  return typeof value === "string" && ASSISTANT_REQUEST_ID_PATTERN.test(value)
+    ? value
+    : null;
+}
+
 function getAssistantRequest(value: unknown): AssistantRequest | null {
   const data = getRecord(value);
-  const requestId =
-    typeof data?.["requestId"] === "string" &&
-    /^[a-zA-Z0-9_-]{8,80}$/.test(data["requestId"])
-      ? data["requestId"]
-      : null;
+  const requestId = getAssistantRequestId(data?.["requestId"]);
   const prompt = getText(data?.["prompt"], MAX_ASSISTANT_PROMPT_LENGTH);
   const files = getRecord(data?.["files"]);
   const html = getSandboxFile(files?.["html"], MAX_ASSISTANT_FILE_LENGTH);
@@ -623,10 +661,11 @@ export function setupSocketIO(httpServer: HttpServer) {
   activeServer = io;
 
   io.use(async (socket: AppSocket, next) => {
-    // Wraps the whole handshake, not just the Clerk-token branch: an
-    // unexpected failure anywhere here (e.g. getAccountAccess/getAccountProfile
-    // hitting a down database) must still resolve `next()` and be reported,
-    // rather than leaving the middleware's promise to reject silently.
+    // Wraps the whole handshake, not just the Clerk-token branch: a failure
+    // anywhere here (getAccountAccess giving up on a throttled Clerk,
+    // getAccountProfile hitting a down database) must still resolve `next()`
+    // and be reported, rather than leaving the middleware's promise to
+    // reject silently.
     const lease = reserveConnection(
       connectionRegistry,
       getSocketIp(socket),
@@ -758,10 +797,35 @@ export function setupSocketIO(httpServer: HttpServer) {
       };
       next();
     } catch (error) {
+      if (error instanceof AccountAccessUnavailableError) {
+        // Clerk could not answer within the lookup's retry budget, on either
+        // the room-capability or the Clerk-token branch above. That is an
+        // upstream condition rather than a handler bug, so it is logged and
+        // counted toward the auth-failure rate alert instead of filed as a
+        // Sentry exception per handshake. The client gets the same retry
+        // hint the HTTP 503 carries in Retry-After, so it can reconnect
+        // deliberately instead of guessing.
+        logger.warn(
+          { err: error, retryAfterSeconds: error.retryAfterSeconds },
+          "Account access check failed during socket handshake",
+        );
+        rejectHandshake(
+          next,
+          connectionRegistry,
+          lease,
+          ACCOUNT_ACCESS_UNAVAILABLE_MESSAGE,
+          "account_access_unavailable",
+          {
+            code: ACCOUNT_ACCESS_UNAVAILABLE_CODE,
+            retryAfterSeconds: error.retryAfterSeconds,
+          },
+        );
+        return;
+      }
       // Reaching here means something other than an expected auth
-      // rejection broke (capability parsing, getAccountAccess/getAccountProfile
-      // throwing, etc.) -- a real bug or infra failure, so it gets a Sentry
-      // exception in addition to counting toward the auth-failure rate.
+      // rejection broke (capability parsing, getAccountProfile throwing,
+      // etc.) -- a real bug or infra failure, so it gets a Sentry exception
+      // in addition to counting toward the auth-failure rate.
       reportSocketHandlerError("connection-auth", error);
       releaseConnection(connectionRegistry, lease);
       recordSocketAuthFailure("unexpected_error");
@@ -829,6 +893,71 @@ function setupConnectedSocket(
         cancelled: true,
       });
     }
+  };
+
+  // Streams one already-validated, disclosure-acknowledged request. Only the
+  // prompt and the current sandbox files reach the model: never chat
+  // messages, the room key, or the capability token (none of which the
+  // handler even receives). Every exit path settles the client exactly once:
+  // "assistant-done" for completion or cancellation, "assistant-error" for a
+  // timeout, rate limit, or service failure.
+  const startAssistantRequest = (roomId: string, request: AssistantRequest) => {
+    const { requestId } = request;
+    const controller = new AbortController();
+    const isCurrent = () =>
+      activeAssistantRequests.get(socket.id)?.requestId === requestId;
+    const timeout = setTimeout(() => {
+      if (!isCurrent()) return;
+      activeAssistantRequests.delete(socket.id);
+      controller.abort();
+      socket.emit("assistant-error", {
+        requestId,
+        code: "TIMEOUT",
+        message: `The assistant did not finish within ${ASSISTANT_TIMEOUT_MS / 1000} seconds. Any partial answer is kept; please try again.`,
+      });
+    }, ASSISTANT_TIMEOUT_MS);
+    activeAssistantRequests.set(socket.id, { requestId, controller, timeout });
+
+    streamSandboxAssistant({
+      prompt: request.prompt,
+      files: request.files,
+      signal: controller.signal,
+      onText: (text) => {
+        if (!isCurrent()) return;
+        socket.emit("assistant-chunk", { requestId, text });
+      },
+    })
+      .then(() => finishAssistantRequest(requestId))
+      .catch((error: unknown) => {
+        // A cancelled, timed-out, left, or disconnected request was already
+        // settled by whoever aborted it.
+        if (!isCurrent()) return;
+        clearTimeout(timeout);
+        activeAssistantRequests.delete(socket.id);
+        if (isAnthropicRateLimitError(error)) {
+          const retryAfterSeconds = getAssistantRateLimitCountdown(
+            getAnthropicRetryAfterSeconds(error),
+          );
+          socket.emit("assistant-error", {
+            requestId,
+            code: "RATE_LIMITED",
+            retryAfterSeconds,
+            message: `The AI service is rate limited right now. You can ask again in ${retryAfterSeconds} seconds.`,
+          });
+          return;
+        }
+        reportSocketHandlerError("assistant-request", error, {
+          roomId,
+          userId: authenticatedUser.userId,
+          requestId,
+        });
+        socket.emit("assistant-error", {
+          requestId,
+          code: "SERVICE_ERROR",
+          message:
+            "The AI service could not answer right now. Please try again in a moment.",
+        });
+      });
   };
 
   let roomJoinInFlight = false;
@@ -978,10 +1107,22 @@ function setupConnectedSocket(
       socket.join(roomId);
       socket.data.roomId = roomId;
 
+      const replayAfterMessageId = getText(data?.["lastSeenMessageId"], 120);
+      const replayCursorIndex = replayAfterMessageId
+        ? room.messages.findIndex((message) => message.id === replayAfterMessageId)
+        : -1;
+      const replayGap = !!replayAfterMessageId && replayCursorIndex === -1;
+      const replayMessages =
+        replayAfterMessageId && replayCursorIndex >= 0
+          ? room.messages.slice(replayCursorIndex + 1)
+          : room.messages.slice(-80);
+
       socket.emit("room-joined", {
         roomId,
         roomName: room.name,
-        messages: room.messages.slice(-80),
+        messages: replayMessages,
+        replayAfterMessageId,
+        replayGap,
         users: getRoomMembers(io, room, authenticatedUser.purpose).map((member) => ({
           userId: member.userId,
           username: member.username,
@@ -1030,6 +1171,92 @@ function setupConnectedSocket(
     }
   });
 
+  let messageRecoveryInFlight = false;
+  socket.on("recover-messages", async (payload: unknown) => {
+    if (!consumeEventBudget(socket, eventBudgetRegistry, payload)) return;
+    if (messageRecoveryInFlight) return;
+    messageRecoveryInFlight = true;
+    const data = getRecord(payload);
+    const requestId = getText(data?.["requestId"], 100);
+    const roomId = getRoomId(data?.["roomId"]);
+    const afterMessageId = getText(data?.["afterMessageId"], 200);
+    const afterTimestamp = data?.["afterTimestamp"];
+    try {
+      if (
+        !requestId ||
+        !roomId ||
+        !afterMessageId ||
+        typeof afterTimestamp !== "number" ||
+        !Number.isSafeInteger(afterTimestamp) ||
+        afterTimestamp < 0 ||
+        socket.data.roomId !== roomId ||
+        !socket.rooms.has(roomId)
+      ) {
+        socket.emit("message-recovery-error", {
+          requestId,
+          code: "INVALID_RECOVERY_REQUEST",
+        });
+        return;
+      }
+      if (await hasActiveRoomBan(roomId, authenticatedUser.userId)) {
+        socket.emit("message-recovery-error", {
+          requestId,
+          code: "ROOM_BANNED",
+        });
+        return;
+      }
+      const page = await loadEncryptedMessagesAfter(
+        roomId,
+        { id: afterMessageId, timestamp: afterTimestamp },
+        MESSAGE_RECOVERY_PAGE_SIZE,
+      );
+      if (
+        socket.data.roomId !== roomId ||
+        !socket.rooms.has(roomId) ||
+        (await hasActiveRoomBan(roomId, authenticatedUser.userId))
+      ) {
+        socket.emit("message-recovery-error", {
+          requestId,
+          code: "ROOM_ACCESS_REVOKED",
+        });
+        return;
+      }
+      const messages = page.messages.map((message) => ({
+        id: message.id,
+        ciphertext: message.ciphertext ?? undefined,
+        nonce: message.nonce ?? undefined,
+        content: message.systemContent ?? undefined,
+        userId: message.userId,
+        username: message.username,
+        avatarEmoji: DEFAULT_AVATAR_EMOJI,
+        timestamp: Number(message.timestamp),
+        type: message.type,
+      }));
+      socket.emit("message-recovery-page", {
+        requestId,
+        messages,
+        hasMore: page.hasMore,
+        nextCursor: messages.at(-1)
+          ? {
+              id: messages.at(-1)!.id,
+              timestamp: messages.at(-1)!.timestamp,
+            }
+          : { id: afterMessageId, timestamp: afterTimestamp },
+      });
+    } catch (error) {
+      reportSocketHandlerError("recover-messages", error, {
+        roomId,
+        userId: authenticatedUser.userId,
+      });
+      socket.emit("message-recovery-error", {
+        requestId,
+        code: "RECOVERY_FAILED",
+      });
+    } finally {
+      messageRecoveryInFlight = false;
+    }
+  });
+
     socket.on("assistant-request", (payload: unknown) => {
     if (!consumeEventBudget(socket, eventBudgetRegistry, payload)) return;
       if (authenticatedUser.purpose !== "sandbox") {
@@ -1038,11 +1265,69 @@ function setupConnectedSocket(
         });
         return;
       }
-       const requestId = getRecord(payload)?.["requestId"];
-       socket.emit("assistant-error", {
-         requestId: typeof requestId === "string" ? requestId : undefined,
-         message: "The coding assistant is disabled for encrypted rooms.",
-       });
+      const data = getRecord(payload);
+      const requestId = getAssistantRequestId(data?.["requestId"]) ?? undefined;
+      const rejectAssistantRequest = (error: AssistantErrorPayload) => {
+        socket.emit("assistant-error", { requestId, ...error });
+      };
+
+      // Privacy gate first. The room is end-to-end encrypted and the model can
+      // only answer readable code, so a request is refused before anything
+      // else in it is inspected unless the user confirmed the disclosure
+      // notice on the client. Nothing below runs without it.
+      if (data?.[ASSISTANT_DISCLOSURE_FIELD] !== true) {
+        rejectAssistantRequest({
+          code: "DISCLOSURE_REQUIRED",
+          message: ASSISTANT_DISCLOSURE_REQUIRED_MESSAGE,
+        });
+        return;
+      }
+
+      const roomId = getRoomId(data?.["roomId"]);
+      const room = roomId ? getJoinedRoom(socket, roomId) : null;
+      if (!room) {
+        rejectAssistantRequest({
+          code: "NOT_IN_ROOM",
+          message: "Join the sandbox room before asking the assistant.",
+        });
+        return;
+      }
+
+      const request = getAssistantRequest(payload);
+      if (!request) {
+        rejectAssistantRequest({
+          code: "INVALID_REQUEST",
+          message: `Ask a question of up to ${formatCount(MAX_ASSISTANT_PROMPT_LENGTH)} characters, with each sandbox file under ${formatCount(MAX_ASSISTANT_FILE_LENGTH)} characters and ${formatCount(MAX_ASSISTANT_CONTEXT_LENGTH)} characters in total.`,
+        });
+        return;
+      }
+
+      if (activeAssistantRequests.has(socket.id)) {
+        rejectAssistantRequest({
+          code: "REQUEST_IN_PROGRESS",
+          message: "Wait for the current reply to finish, or stop it first.",
+        });
+        return;
+      }
+
+      const now = Date.now();
+      const lastRequestAt = lastAssistantRequestAt.get(socket.id);
+      const sinceLastRequest =
+        lastRequestAt === undefined ? Number.POSITIVE_INFINITY : now - lastRequestAt;
+      if (sinceLastRequest < ASSISTANT_REQUEST_COOLDOWN_MS) {
+        const retryAfterSeconds = Math.max(
+          1,
+          Math.ceil((ASSISTANT_REQUEST_COOLDOWN_MS - sinceLastRequest) / 1000),
+        );
+        rejectAssistantRequest({
+          code: "COOLDOWN",
+          retryAfterSeconds,
+          message: `Please wait ${retryAfterSeconds} second${retryAfterSeconds === 1 ? "" : "s"} before asking again.`,
+        });
+        return;
+      }
+      lastAssistantRequestAt.set(socket.id, now);
+      startAssistantRequest(room.id, request);
     });
 
     socket.on("assistant-cancel", (payload: unknown) => {
@@ -1062,7 +1347,7 @@ function setupConnectedSocket(
       abortAssistantRequest(true);
     });
 
-    socket.on("message", (payload: unknown) => {
+    socket.on("message", async (payload: unknown) => {
     if (!consumeEventBudget(socket, eventBudgetRegistry, payload)) return;
       if (authenticatedUser.purpose !== "chat") return;
       const data = getRecord(payload);
@@ -1078,7 +1363,7 @@ function setupConnectedSocket(
         return;
       }
       const msg: Message = {
-        id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        id: randomUUID(),
          ciphertext: encrypted.ciphertext,
          nonce: encrypted.nonce,
         userId: authenticatedUser.userId,
@@ -1087,22 +1372,30 @@ function setupConnectedSocket(
         timestamp: Date.now(),
         type: "text",
       };
-      room.messages.push(msg);
-      if (room.messages.length > 200) room.messages = room.messages.slice(-200);
-      emitRoomEvent(io, room, "message", msg);
-       void saveEncryptedMessage({
-         id: msg.id,
-         roomId: room.id,
-         userId: authenticatedUser.userId,
-         username: authenticatedUser.username,
-         ciphertext: encrypted.ciphertext,
-         nonce: encrypted.nonce,
-         timestamp: msg.timestamp,
-       }).catch((error) => {
+      try {
+        await saveEncryptedMessage({
+          id: msg.id,
+          roomId: room.id,
+          userId: authenticatedUser.userId,
+          username: authenticatedUser.username,
+          ciphertext: encrypted.ciphertext,
+          nonce: encrypted.nonce,
+          timestamp: msg.timestamp,
+        });
+        room.messages.push(msg);
+        if (room.messages.length > 200) room.messages = room.messages.slice(-200);
+        emitRoomEvent(io, room, "message", msg);
+      } catch (error) {
          reportSocketHandlerError("save-encrypted-message", error, {
            roomId: room.id,
          });
-       }).finally(() => releasePersistence(persistenceBudget));
+        socket.emit("error", {
+          code: "MESSAGE_NOT_SAVED",
+          message: "Unable to save this message. Please try again.",
+        });
+      } finally {
+        releasePersistence(persistenceBudget);
+      }
     });
 
     socket.on("sandbox-update", (payload: unknown) => {
@@ -1250,6 +1543,7 @@ function setupConnectedSocket(
       eventBudgetRegistry.byUser.delete(userId);
     }
     abortAssistantRequest();
+    lastAssistantRequestAt.delete(socket.id);
     if (socket.data.roomId) leaveRoom(socket, io, socket.data.roomId);
     logger.info({ sid: socket.id, reason }, "socket disconnected");
   });

@@ -11,11 +11,13 @@ import {
   useCrypto,
 } from "../contexts/CryptoContext";
 import { toSecureStoreKey } from "../lib/secureStorageKey";
+import { SECURE_STORE_KEY_PATTERN } from "../test-utils/secureStoreKeyRule";
 
 const mockSecureStore = new Map<string, string>();
 let mockRandomCounter = 0;
 let mockRoomKeyWriteFailure = false;
 let mockRoomKeyReadFailure = false;
+let mockDeviceKeyWriteFailure = false;
 let mockRoomKeyWriteRelease: (() => void) | null = null;
 let mockAuthUserId: string | null = "crypto-test-user";
 let mockGetToken: (() => Promise<string | null>) | null = null;
@@ -23,22 +25,21 @@ let mockGetToken: (() => Promise<string | null>) | null = null;
 // Storage keys as the native keychain/keystore receives them.
 // Prefixed with "mock" so the hoisted jest.mock factory below may reference it.
 const mockRoomKeyStoragePrefix = toSecureStoreKey("devstudio_roomkey:");
+const mockDeviceKeyStoragePrefix = toSecureStoreKey("devstudio_device_keypair_v1:");
 const roomKeyStorageKey = (userId: string, roomId: string) =>
   toSecureStoreKey(`devstudio_roomkey:${userId}:${roomId}`);
 const deviceKeypairStorageKey = (userId: string) =>
   toSecureStoreKey(`devstudio_device_keypair_v1:${userId}`);
+// Message of the native write failure simulated for the device identity.
+const mockDeviceKeyWriteError = "Keychain write failed (errSecInteractionNotAllowed)";
 
 jest.mock("expo-secure-store", () => {
   // Same validation as the real module on iOS and Android: the keychain and
   // keystore reject any other key name, which is exactly what broke room key
   // persistence on phones while web (localStorage) kept working.
-  const ensureValidKey = (key: string) => {
-    if (typeof key !== "string" || !/^[\w.-]+$/.test(key)) {
-      throw new Error(
-        'Invalid key provided to SecureStore. Keys must not be empty and contain only alphanumeric characters, ".", "-", and "_".',
-      );
-    }
-  };
+  const { ensureValidSecureStoreKey: ensureValidKey } = jest.requireActual(
+    "../test-utils/secureStoreKeyRule",
+  ) as typeof import("../test-utils/secureStoreKeyRule");
   return {
     getItemAsync: jest.fn(async (key: string) => {
       ensureValidKey(key);
@@ -49,6 +50,9 @@ jest.mock("expo-secure-store", () => {
     }),
     setItemAsync: jest.fn(async (key: string, value: string) => {
       ensureValidKey(key);
+      if (mockDeviceKeyWriteFailure && key.startsWith(mockDeviceKeyStoragePrefix)) {
+        throw new Error(mockDeviceKeyWriteError);
+      }
       if (key.startsWith(mockRoomKeyStoragePrefix) && mockRoomKeyWriteRelease) {
         await new Promise<void>((resolve) => {
           const release = mockRoomKeyWriteRelease;
@@ -113,6 +117,7 @@ describe("CryptoProvider", () => {
     mockRandomCounter = 0;
     mockRoomKeyWriteFailure = false;
     mockRoomKeyReadFailure = false;
+    mockDeviceKeyWriteFailure = false;
     mockRoomKeyWriteRelease = null;
     mockAuthUserId = "crypto-test-user";
     mockGetToken = null;
@@ -275,6 +280,66 @@ describe("CryptoProvider", () => {
 
     expect(cryptoValue?.getRoomKey("room-42")).toEqual(generatedKey);
     secondView.unmount();
+  });
+
+  it("saves and restores keys for account and room identifiers outside the secure-store alphabet", async () => {
+    // Room IDs derive from user-typed names and joined room IDs are typed
+    // directly, so apostrophes, slashes, spaces, colons, and non-ASCII text
+    // all reach storage. Every key the mock receives must still satisfy the
+    // native rule (the mock throws otherwise) and round-trip after a remount.
+    const oddUserId = "user_2abc:o'brien/déjà vu 🔐";
+    const oddRoomId = "ana's/design:team 🚀";
+    mockAuthUserId = oddUserId;
+
+    const firstView = await renderCryptoProvider();
+    const firstPublicKey = cryptoValue?.publicKeyB64;
+    expect(firstPublicKey).toBeTruthy();
+    let generatedKey: Uint8Array | undefined;
+    await act(async () => {
+      generatedKey = await cryptoValue?.generateRoomKey(oddRoomId);
+    });
+
+    expect(cryptoValue?.roomKeyPersistenceFailures.size).toBe(0);
+    expect(mockSecureStore.get(deviceKeypairStorageKey(oddUserId))).toBeTruthy();
+    expect(mockSecureStore.get(roomKeyStorageKey(oddUserId, oddRoomId))).toBe(
+      encodeBase64(generatedKey as Uint8Array),
+    );
+    expect(mockSecureStore.size).toBe(2);
+    for (const storedKey of mockSecureStore.keys()) {
+      expect(storedKey).toMatch(SECURE_STORE_KEY_PATTERN);
+    }
+
+    firstView.unmount();
+    const secondView = await renderCryptoProvider();
+
+    expect(cryptoValue?.publicKeyB64).toBe(firstPublicKey);
+    await act(async () => {
+      await cryptoValue?.loadRoomKey(oddRoomId);
+    });
+    expect(cryptoValue?.roomKeyPersistenceFailures.size).toBe(0);
+    expect(cryptoValue?.getRoomKey(oddRoomId)).toEqual(generatedKey);
+    expect(mockSecureStore.size).toBe(2);
+    secondView.unmount();
+  });
+
+  it("logs the real cause and keeps an in-memory identity when the device key cannot be saved", async () => {
+    const warnMock = jest.spyOn(console, "warn").mockImplementation();
+    try {
+      mockDeviceKeyWriteFailure = true;
+      const view = await renderCryptoProvider();
+
+      // The app still works for this launch, but nothing was persisted and
+      // the underlying error (not a generic "unavailable") is on record.
+      expect(cryptoValue?.publicKeyB64).toBeTruthy();
+      expect(mockSecureStore.has(deviceKeypairStorageKey("crypto-test-user"))).toBe(false);
+      expect(warnMock).toHaveBeenCalledWith(
+        "Device encryption identity could not be loaded from or saved to secure storage",
+        mockDeviceKeyWriteError,
+      );
+      view.unmount();
+    } finally {
+      warnMock.mockRestore();
+    }
   });
 
   it("settles a room key load when secure storage cannot be read and recovers on retry", async () => {
@@ -516,12 +581,23 @@ describe("CryptoProvider", () => {
     await renderCryptoProvider();
     mockRoomKeyWriteFailure = true;
 
-    await act(async () => {
-      await expect(cryptoValue?.generateRoomKey("room-42")).rejects.toMatchObject({
-        name: "RoomKeyPersistenceError",
-        roomId: "room-42",
+    const warnMock = jest.spyOn(console, "warn").mockImplementation();
+    try {
+      await act(async () => {
+        await expect(cryptoValue?.generateRoomKey("room-42")).rejects.toMatchObject({
+          name: "RoomKeyPersistenceError",
+          roomId: "room-42",
+        });
       });
-    });
+      // The retry UX is unchanged, and the underlying storage error is logged
+      // so a deterministic failure cannot hide behind the generic message.
+      expect(warnMock).toHaveBeenCalledWith(
+        "Room encryption key could not be saved to secure storage",
+        "Secure storage unavailable",
+      );
+    } finally {
+      warnMock.mockRestore();
+    }
 
     const inMemoryKey = cryptoValue?.getRoomKey("room-42");
     expect(inMemoryKey).toHaveLength(nacl.secretbox.keyLength);
