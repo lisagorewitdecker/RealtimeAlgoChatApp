@@ -50,6 +50,38 @@ const releaseCredentialSecrets = [
   "NATIVE_SMOKE_PASSWORD",
   "SENTRY_AUTH_TOKEN",
 ];
+const pinnedCheckoutAction =
+  "actions/checkout@11d5960a326750d5838078e36cf38b85af677262";
+const pinnedSetupNodeAction =
+  "actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020";
+const expectedPullRequestPaths = [
+  ".github/workflows/mobile-release.yml",
+  "scripts/check-android-preview-evidence.sh",
+  "scripts/check-ios-preview-evidence.sh",
+  "artifacts/chat-app/scripts/validate-preview-startup.mjs",
+  "artifacts/chat-app/test-results/encrypted-room-recovery/android/**/validation-record.md",
+  "artifacts/chat-app/test-results/encrypted-room-recovery/android/**/android-preview-preflight.json",
+  "artifacts/chat-app/test-results/encrypted-room-recovery/ios/**/validation-record.md",
+];
+
+function resolveWorkflowEnvExpression(value, workflowEnv, jobEnv, stepEnv) {
+  const match = String(value).trim().match(/^\$\{\{\s*env\.([A-Z0-9_]+)\s*\}\}$/);
+  if (!match) {
+    return value;
+  }
+
+  const [, name] = match;
+  if (stepEnv?.[name] !== undefined) {
+    return stepEnv[name];
+  }
+  if (jobEnv?.[name] !== undefined) {
+    return jobEnv[name];
+  }
+  if (workflowEnv?.[name] !== undefined) {
+    return workflowEnv[name];
+  }
+  return value;
+}
 
 function parseNodeVersion(value, description) {
   const text = String(value).trim();
@@ -201,7 +233,12 @@ function assertMobileReleaseNodeVersions(releaseWorkflow, nodeRange) {
       if (String(step.uses ?? "").startsWith("actions/setup-node@")) {
         configuredJobs.push({
           jobId,
-          configuredVersion: step.with?.["node-version"],
+          configuredVersion: resolveWorkflowEnvExpression(
+            step.with?.["node-version"],
+            releaseWorkflow.env,
+            job.env,
+            step.env,
+          ),
         });
       }
     }
@@ -598,6 +635,79 @@ test("blocked release diagnostics identify the supported Node range safely", () 
   );
 });
 
+test("workflow hardening pins actions, narrows pull requests, and bounds duplicate release work", () => {
+  assert.deepEqual(
+    workflow.on?.pull_request?.paths,
+    expectedPullRequestPaths,
+    "pull_request runs must be limited to the mobile release workflow and preview-evidence inputs",
+  );
+  assert.equal(
+    workflow.on?.pull_request?.["paths-ignore"],
+    undefined,
+    "the workflow should narrow pull requests with explicit paths instead of ignore rules",
+  );
+  assert.equal(
+    workflow.concurrency?.group,
+    "mobile-release-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref || github.run_id }}",
+    "duplicate mobile release runs must share a stable concurrency group",
+  );
+  assert.equal(
+    workflow.concurrency?.["cancel-in-progress"],
+    "${{ github.event_name == 'pull_request' }}",
+    "only pull request reruns should cancel earlier in-flight runs",
+  );
+  assert.equal(
+    workflow.defaults?.run?.shell,
+    "bash",
+    "release workflow run steps must default to bash",
+  );
+  assert.equal(
+    workflow.env?.RELEASE_NODE_VERSION,
+    24,
+    "release workflow must centralize its concrete Node version",
+  );
+
+  for (const [jobId, job] of Object.entries(workflow.jobs ?? {})) {
+    for (const step of job.steps ?? []) {
+      if (String(step.uses ?? "").startsWith("actions/checkout@")) {
+        assert.equal(
+          step.uses,
+          pinnedCheckoutAction,
+          `${jobId} must pin actions/checkout by commit SHA`,
+        );
+      }
+      if (String(step.uses ?? "").startsWith("actions/setup-node@")) {
+        assert.equal(
+          step.uses,
+          pinnedSetupNodeAction,
+          `${jobId} must pin actions/setup-node by commit SHA`,
+        );
+      }
+    }
+  }
+
+  assert.equal(
+    workflow.jobs?.["android-prerequisite-preflight"]?.["timeout-minutes"],
+    20,
+    "Android release runner preflight must not wait indefinitely on self-hosted infrastructure",
+  );
+  assert.equal(
+    workflow.jobs?.["native-ios"]?.["timeout-minutes"],
+    90,
+    "native-ios must have an explicit timeout",
+  );
+  assert.equal(
+    workflow.jobs?.["native-android"]?.["timeout-minutes"],
+    90,
+    "native-android must have an explicit timeout",
+  );
+  assert.equal(
+    workflow.jobs?.["mobile-publish"]?.["timeout-minutes"],
+    45,
+    "mobile-publish must have an explicit timeout",
+  );
+});
+
 test("publish job runs the evidence privacy and submission-boundary regression before approval validation and submission", () => {
   const publishSteps = workflow.jobs?.["mobile-publish"]?.steps ?? [];
   const privacyIndex = publishSteps.findIndex(
@@ -689,15 +799,15 @@ test("Android preview evidence runs for every pull request", () => {
     "mobile release workflow must support pull_request",
   );
   const pullRequest = workflow.on.pull_request ?? {};
-  assert.equal(
+  assert.deepEqual(
     pullRequest.paths,
-    undefined,
-    "the required Android preview evidence check must not use a pull_request paths filter",
+    expectedPullRequestPaths,
+    "the Android preview evidence check must use the shared preview-evidence path filter",
   );
   assert.equal(
     pullRequest["paths-ignore"],
     undefined,
-    "the required Android preview evidence check must not use a pull_request paths-ignore filter",
+    "the Android preview evidence check must not use pull_request paths-ignore rules",
   );
 
   const evidenceJob = workflow.jobs?.["android-preview-evidence"];
@@ -714,15 +824,15 @@ test("iOS preview evidence runs for every pull request", () => {
     "mobile release workflow must support pull_request",
   );
   const pullRequest = workflow.on.pull_request ?? {};
-  assert.equal(
+  assert.deepEqual(
     pullRequest.paths,
-    undefined,
-    "the required iOS preview evidence check must not use a pull_request paths filter",
+    expectedPullRequestPaths,
+    "the iOS preview evidence check must use the shared preview-evidence path filter",
   );
   assert.equal(
     pullRequest["paths-ignore"],
     undefined,
-    "the required iOS preview evidence check must not use a pull_request paths-ignore filter",
+    "the iOS preview evidence check must not use pull_request paths-ignore rules",
   );
 
   const evidenceJob = workflow.jobs?.["ios-preview-evidence"];

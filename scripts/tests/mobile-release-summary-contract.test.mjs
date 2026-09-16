@@ -85,6 +85,19 @@ const androidPreflightScript = "scripts/check-android-release-prerequisites.sh";
 const nativeEvidenceCheckerScript =
   "scripts/check-native-large-text-evidence.sh";
 const untrustedCheckerWrapperScript = "scripts/run-untrusted-checker.sh";
+const pinnedUploadArtifactAction =
+  "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02";
+const pinnedDownloadArtifactAction =
+  "actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093";
+const expectedPullRequestPaths = [
+  ".github/workflows/mobile-release.yml",
+  "scripts/check-android-preview-evidence.sh",
+  "scripts/check-ios-preview-evidence.sh",
+  "artifacts/chat-app/scripts/validate-preview-startup.mjs",
+  "artifacts/chat-app/test-results/encrypted-room-recovery/android/**/validation-record.md",
+  "artifacts/chat-app/test-results/encrypted-room-recovery/android/**/android-preview-preflight.json",
+  "artifacts/chat-app/test-results/encrypted-room-recovery/ios/**/validation-record.md",
+];
 
 /**
  * Inventory of every script invoked by the release workflow that writes
@@ -686,7 +699,7 @@ test("idle-profile registration check blocks release and reports its result", ()
     "${{ always() }}",
     "browser evidence upload must run even when the Playwright check fails",
   );
-  assert.equal(uploadStep.uses, "actions/upload-artifact@v4");
+  assert.equal(uploadStep.uses, pinnedUploadArtifactAction);
   assert.equal(
     uploadStep.with.name,
     "idle-profile-registration-browser-evidence",
@@ -927,12 +940,12 @@ test("native evidence downloads retry without exposing evidence contents", () =>
 
     assert.equal(
       download?.uses,
-      "actions/download-artifact@v4",
+      pinnedDownloadArtifactAction,
       `${jobId}: ${platform} must use the official artifact downloader`,
     );
     assert.equal(
       retry?.uses,
-      "actions/download-artifact@v4",
+      pinnedDownloadArtifactAction,
       `${jobId}: ${platform} retry must use the official artifact downloader`,
     );
     assert.equal(
@@ -1112,7 +1125,7 @@ test("publish requires candidate-bound approvals from the current run attempt", 
       `${jobId} evidence directory must be unique to the GitHub run attempt`,
     );
     const upload = workflow.jobs[jobId].steps.find(
-      (step) => step[`uses`] === "actions/upload-artifact@v4",
+      (step) => step[`uses`] === pinnedUploadArtifactAction,
     );
     assert.equal(
       upload?.with?.name,
@@ -1167,7 +1180,7 @@ test("publish requires candidate-bound approvals from the current run attempt", 
   for (const jobId of ["mobile-release-gate", "mobile-publish"]) {
     const downloads = workflow.jobs[jobId].steps.filter(
       (step) =>
-        step[`uses`] === "actions/download-artifact@v4" &&
+        step[`uses`] === pinnedDownloadArtifactAction &&
         step.id?.startsWith("download"),
     );
     assert.deepEqual(
@@ -1489,15 +1502,15 @@ test("Android preview evidence keeps its pull-request validation and privacy con
     "the release workflow must support pull_request",
   );
   const pullRequest = workflow.on.pull_request ?? {};
-  assert.equal(
+  assert.deepEqual(
     pullRequest.paths,
-    undefined,
-    "the required Android preview evidence check must not use a pull_request paths filter",
+    expectedPullRequestPaths,
+    "the Android preview evidence check must use the shared preview-evidence path filter",
   );
   assert.equal(
     pullRequest["paths-ignore"],
     undefined,
-    "the required Android preview evidence check must not use a pull_request paths-ignore filter",
+    "the Android preview evidence check must not use pull_request paths-ignore rules",
   );
 
   const validationStep = androidJob.steps.find(
@@ -3842,7 +3855,7 @@ test("partial native reruns keep each platform linked to its own artifact", () =
 
   const gateDownloads = workflow.jobs["mobile-release-gate"].steps.filter(
     (step) =>
-      step.uses === "actions/download-artifact@v4" &&
+      step.uses === pinnedDownloadArtifactAction &&
       step.id?.startsWith("download"),
   );
   assert.deepEqual(
