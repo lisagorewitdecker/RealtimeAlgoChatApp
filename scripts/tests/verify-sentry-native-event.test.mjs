@@ -257,3 +257,78 @@ test("rejects duplicate trigger metadata fields", async () => {
     /trigger metadata contains duplicate field\(s\)/,
   );
 });
+
+test("accepts trigger metadata values containing '='", async () => {
+  const tempDir = await mkdtemp(path.join(tmpdir(), "sentry-trigger-marker-"));
+  const evidencePath = path.join(tempDir, "sentry-source-map-evidence.json");
+  const triggerPath = path.join(tempDir, "sentry-trigger.txt");
+  const expectedWithEquals = {
+    ...expected,
+    marker: "run-1234=ios",
+  };
+
+  await writeFile(
+    evidencePath,
+    `${JSON.stringify(
+      validateNativeSentryEvent(
+        eventFixture({
+          tags: [
+            { key: "mobile_sentry_probe", value: expectedWithEquals.marker },
+            { key: "mobile_platform", value: expected.platform },
+            {
+              key: "mobile_candidate_build_id",
+              value: expected.candidateBuildId,
+            },
+          ],
+        }),
+        expectedWithEquals,
+      ),
+    )}\n`,
+  );
+  await writeFile(
+    triggerPath,
+    [
+      "platform=ios",
+      "candidate_build_id=build-ios",
+      `marker=${expectedWithEquals.marker}`,
+    ].join("\n"),
+  );
+
+  const evidence = verifyNativeSentryEvidence({
+    evidencePath,
+    triggerPath,
+    expectedPlatform: expected.platform,
+    expectedBuildId: expected.candidateBuildId,
+    expectedProbeMarker: expectedWithEquals.marker,
+    expectedRelease: expected.release,
+    expectedDist: expected.dist,
+  });
+
+  assert.equal(evidence.marker, expectedWithEquals.marker);
+});
+
+test("rejects trigger metadata with missing required fields", async () => {
+  const tempDir = await mkdtemp(path.join(tmpdir(), "sentry-trigger-missing-"));
+  const evidencePath = path.join(tempDir, "sentry-source-map-evidence.json");
+  const triggerPath = path.join(tempDir, "sentry-trigger.txt");
+
+  await writeFile(
+    evidencePath,
+    `${JSON.stringify(validateNativeSentryEvent(eventFixture(), expected))}\n`,
+  );
+  await writeFile(
+    triggerPath,
+    ["platform=ios", "candidate_build_id=build-ios"].join("\n"),
+  );
+
+  assert.throws(
+    () =>
+      verifyNativeSentryEvidence({
+        evidencePath,
+        triggerPath,
+        expectedPlatform: expected.platform,
+        expectedBuildId: expected.candidateBuildId,
+      }),
+    /trigger metadata is malformed/,
+  );
+});

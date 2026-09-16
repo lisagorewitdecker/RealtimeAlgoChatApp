@@ -143,10 +143,10 @@ function parseTrigger(triggerPath) {
     throw new Error("trigger metadata is empty");
   }
 
-  return Object.fromEntries(
+  const trigger = Object.fromEntries(
     lines.map((line) => {
       const separatorIndex = line.indexOf("=");
-      if (separatorIndex <= 0 || separatorIndex !== line.lastIndexOf("=")) {
+      if (separatorIndex <= 0) {
         throw new Error("trigger metadata is malformed");
       }
       const key = line.slice(0, separatorIndex);
@@ -161,6 +161,12 @@ function parseTrigger(triggerPath) {
       return [key, value];
     }),
   );
+
+  if (seenKeys.size !== EXPECTED_TRIGGER_KEYS.size) {
+    throw new Error("trigger metadata is malformed");
+  }
+
+  return trigger;
 }
 
 function escapeSentrySearchValue(value) {
