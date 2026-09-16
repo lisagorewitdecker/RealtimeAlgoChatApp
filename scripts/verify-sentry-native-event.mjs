@@ -341,6 +341,9 @@ export function verifyNativeSentryEvidence({
   } catch {
     throw new Error("evidence is not valid JSON");
   }
+  if (!evidence || typeof evidence !== "object" || Array.isArray(evidence)) {
+    throw new Error("evidence must be a JSON object");
+  }
 
   if (hasCredentialLikeContent(evidence)) {
     throw new Error("evidence contains credential-like content");

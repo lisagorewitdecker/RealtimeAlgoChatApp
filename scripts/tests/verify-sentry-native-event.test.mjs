@@ -424,3 +424,30 @@ test("rejects nested credential-bearing evidence fields", async () => {
     /evidence contains credential-like content/,
   );
 });
+
+test("rejects non-object saved evidence JSON", async () => {
+  const tempDir = await mkdtemp(path.join(tmpdir(), "sentry-evidence-primitive-"));
+  const evidencePath = path.join(tempDir, "sentry-source-map-evidence.json");
+  const triggerPath = path.join(tempDir, "sentry-trigger.txt");
+
+  await writeFile(evidencePath, '"not-an-object"\n');
+  await writeFile(
+    triggerPath,
+    [
+      "platform=ios",
+      "candidate_build_id=build-ios",
+      "marker=run-1234-ios",
+    ].join("\n"),
+  );
+
+  assert.throws(
+    () =>
+      verifyNativeSentryEvidence({
+        evidencePath,
+        triggerPath,
+        expectedPlatform: expected.platform,
+        expectedBuildId: expected.candidateBuildId,
+      }),
+    /evidence must be a JSON object/,
+  );
+});
