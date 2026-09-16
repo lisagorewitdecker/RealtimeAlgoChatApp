@@ -1,6 +1,6 @@
 import React from "react";
 import { act, render, waitFor } from "@testing-library/react-native";
-import nacl from "tweetnacl";
+import * as nacl from "tweetnacl";
 import {
   decodeBase64,
   encodeBase64,
