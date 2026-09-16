@@ -170,6 +170,15 @@ jobs:
         with:
           version: ${{ env.PNPM_VERSION }}
 
+      - name: Install screenshot OCR runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y tesseract-ocr tesseract-ocr-eng
+          command -v tesseract >/dev/null
+          tesseract --list-langs 2>/dev/null | grep -Fxq "eng"
+
       - name: Validate changed Android preview records
         env:
           ANDROID_PREVIEW_BASE_SHA: ${{ github.event.pull_request.base.sha }}

@@ -1472,6 +1472,27 @@ test("Android preview evidence keeps its pull-request validation and privacy con
     (step) => step.name === "Validate changed Android preview records",
   );
   assert.ok(validationStep, "the Android preview job must validate changed records");
+  const ocrStep = androidJob.steps.find(
+    (step) => step.name === "Install screenshot OCR runtime",
+  );
+  assert.ok(
+    ocrStep,
+    "the Android preview job must provision the screenshot OCR runtime",
+  );
+  assert.match(
+    ocrStep.run,
+    /sudo apt-get update[\s\S]*sudo apt-get install[\s\S]*tesseract-ocr[\s\S]*tesseract-ocr-eng/,
+    "the Android preview job must install Tesseract and its English language data",
+  );
+  assert.match(
+    ocrStep.run,
+    /command -v tesseract[\s\S]*tesseract --list-langs[\s\S]*grep -Fxq ["']eng["']/,
+    "the Android preview job must verify that Tesseract and English OCR data are available",
+  );
+  assert.ok(
+    androidJob.steps.indexOf(ocrStep) < androidJob.steps.indexOf(validationStep),
+    "the Android preview job must provision OCR before invoking the evidence checker",
+  );
   assert.match(
     validationStep.run,
     /git diff[\s\S]*\$\{ANDROID_PREVIEW_BASE_SHA\}\.\.\.\$\{ANDROID_PREVIEW_HEAD_SHA\}[\s\S]*artifacts\/chat-app\/test-results\/encrypted-room-recovery\/android\/\*\*\/validation-record\.md/,
