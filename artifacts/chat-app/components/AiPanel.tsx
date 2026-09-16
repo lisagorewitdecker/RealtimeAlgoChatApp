@@ -35,7 +35,7 @@ const BASE = process.env["EXPO_PUBLIC_DOMAIN"]
   ? `https://${process.env["EXPO_PUBLIC_DOMAIN"]}`
   : "http://localhost:5000";
 
-export default function AiPanel({ roomId: _roomId }: Props) {
+export default function AiPanel({ roomId }: Props) {
   const colors = useColors();
   const { reduceMotion } = useAccessibility();
   const { getToken } = useAuth();
@@ -92,7 +92,7 @@ export default function AiPanel({ roomId: _roomId }: Props) {
       const decoder = new TextDecoder();
       let accumulated = "";
 
-      while (true) {
+      for (;;) {
         const { done, value } = await reader.read();
         if (done) break;
 
@@ -119,13 +119,14 @@ export default function AiPanel({ roomId: _roomId }: Props) {
               );
             }
             if (data.done) break;
-          } catch (parseErr) {
+          } catch {
             // ignore malformed SSE line
           }
         }
       }
       trackEvent("ai_request_completed", {
         duration_ms: Date.now() - startedAt,
+        room_id_present: roomId.length > 0,
         prompt_length_bucket: textLengthBucket(content),
         response_length_bucket: textLengthBucket(accumulated),
       });
@@ -133,12 +134,14 @@ export default function AiPanel({ roomId: _roomId }: Props) {
       if ((err as Error).name === "AbortError") {
         trackEvent("ai_request_cancelled", {
           duration_ms: Date.now() - startedAt,
+          room_id_present: roomId.length > 0,
           prompt_length_bucket: textLengthBucket(content),
         });
         return;
       }
       trackEvent("ai_request_failed", {
         duration_ms: Date.now() - startedAt,
+        room_id_present: roomId.length > 0,
         failure_type:
           err instanceof Error && err.message.startsWith("Request failed")
             ? "http"
@@ -158,7 +161,7 @@ export default function AiPanel({ roomId: _roomId }: Props) {
       setLoading(false);
       abortRef.current = null;
     }
-  }, [input, loading, messages, getToken]);
+  }, [getToken, input, loading, messages, roomId]);
 
   const clearConversation = useCallback(() => {
     abortRef.current?.abort();

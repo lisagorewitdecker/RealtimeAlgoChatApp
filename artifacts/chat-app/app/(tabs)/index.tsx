@@ -55,7 +55,8 @@ export default function ChatsScreen() {
         const data = await res.json();
         setRooms(data.rooms ?? []);
       }
-    } catch (_) {
+    } catch {
+      setRooms([]);
     } finally {
       setLoading(false);
       setRefreshing(false);

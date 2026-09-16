@@ -9,7 +9,6 @@ import React, {
   createContext,
   useCallback,
   useContext,
-  useEffect,
   useState,
 } from "react";
 import { Alert } from "react-native";
@@ -113,7 +112,7 @@ export function ModerationProvider({ children }: { children: React.ReactNode }) 
       roomId: string,
       targetUserId: string,
       username: string,
-      _permanent?: boolean,
+      permanent?: boolean,
     ): Promise<boolean> => {
       const label = isAdmin ? "Permanently ban" : "Ban for 24 hours";
       return new Promise((resolve) => {
@@ -129,7 +128,7 @@ export function ModerationProvider({ children }: { children: React.ReactNode }) 
                 const ok = await modFetch(
                   `${encodeURIComponent(roomId)}/ban`,
                   "POST",
-                  { userId: targetUserId },
+                  { userId: targetUserId, permanent: isAdmin ? Boolean(permanent) : false },
                   getToken,
                 );
                 resolve(ok);
