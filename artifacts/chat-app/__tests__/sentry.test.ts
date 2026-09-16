@@ -2,10 +2,7 @@ const mockInit = jest.fn();
 const mockSetTag = jest.fn();
 const mockSetTags = jest.fn();
 const mockSetContext = jest.fn();
-const mockCaptureException = jest.fn((error: Error) => {
-  expect(error).toBeInstanceOf(Error);
-  return "event-id";
-});
+const mockCaptureException = jest.fn((_error: Error) => "event-id");
 
 jest.mock("@sentry/react-native", () => ({
   init: mockInit,

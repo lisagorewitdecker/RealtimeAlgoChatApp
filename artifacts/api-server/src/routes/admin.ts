@@ -8,8 +8,8 @@ import { Router } from "express";
 import type { Request, Response } from "express";
 import { requireAuth, type AuthRequest } from "../middlewares/requireAuth";
 import { db } from "@workspace/db";
-import { roomsTable, roomMembersTable, messagesTable } from "@workspace/db";
-import { eq, isNull, count, max } from "drizzle-orm";
+import { roomsTable, roomMembersTable, messagesTable, sandboxStatesTable, roomKeyEnvelopesTable, roomBansTable } from "@workspace/db";
+import { eq, and, isNull, or, gt, count, max } from "drizzle-orm";
 
 const router = Router();
 

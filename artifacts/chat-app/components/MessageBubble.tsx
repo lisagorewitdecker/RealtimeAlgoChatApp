@@ -3,6 +3,7 @@ import {
   StyleSheet,
   TouchableOpacity,
   View,
+  Platform,
 } from "react-native";
 import { useColors } from "@/hooks/useColors";
 import { ScaledText as Text } from "@/components/ScaledText";

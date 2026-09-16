@@ -12,6 +12,7 @@ import { getRooms } from "../socket";
 import { getRoomEnvelope } from "../lib/e2eePersistence";
 
 const router = Router();
+const DEFAULT_AVATAR_EMOJI = "🧑‍💻";
 const ROOM_DOCUMENT_WINDOW_MS = 60 * 1_000;
 const ROOM_DOCUMENTS_PER_USER_WINDOW = 30;
 const ROOM_DOCUMENTS_PER_IP_WINDOW = 120;

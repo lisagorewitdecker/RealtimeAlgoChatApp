@@ -87,10 +87,6 @@ const MISSING_LIBRARY_PATTERNS = [
   /library not loaded:\s*([^\r\n]+)/i,
   /cannot proceed because\s+(.+?)\s+was not found/i,
 ];
-// eslint-disable-next-line no-control-regex
-const ANSI_ESCAPE_SEQUENCE = new RegExp("\\u001b\\[[0-?]*[ -/]*[@-~]", "g");
-// eslint-disable-next-line no-control-regex
-const CONTROL_CHARACTERS = new RegExp("[\\u0000-\\u001f\\u007f]", "g");
 
 function findStartupFailure(output) {
   const lines = output.split(/\r?\n/);
@@ -103,8 +99,8 @@ function findStartupFailure(output) {
 
 function sanitizeStartupDiagnostic(value, maxLength) {
   return value
-    .replace(ANSI_ESCAPE_SEQUENCE, "")
-    .replace(CONTROL_CHARACTERS, " ")
+    .replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, "")
+    .replace(/[\u0000-\u001f\u007f]/g, " ")
     .replace(/\s+/g, " ")
     .trim()
     .slice(0, maxLength);
