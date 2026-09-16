@@ -102,6 +102,31 @@ test("API codegen workflow runs for the complete development pull-request event 
   );
 });
 
+test("API compatibility receives the current pull request description", () => {
+  assert.ok(
+    compatibilityStep,
+    "expected the API codegen workflow to contain the compatibility step",
+  );
+  assert.equal(
+    compatibilityStep.env?.API_BREAKING_CHANGE_PR_BODY,
+    "${{ github.event.pull_request.body }}",
+    "the compatibility command must receive the current pull request body so description edits refresh its decision",
+  );
+});
+
+test("root unit validation runs the API codegen workflow contract suite", () => {
+  const unitCommands = String(rootPackage.scripts?.["test:unit"] ?? "")
+    .split("&&")
+    .map((command) => command.trim());
+
+  assert.ok(
+    unitCommands.includes(
+      "node --test scripts/tests/api-codegen-workflow-contract.test.mjs",
+    ),
+    "the root test:unit script must run the API codegen workflow contract suite",
+  );
+});
+
 function createGeneratedClientFixture() {
   const fixtureRoot = mkdtempSync(
     path.join(tmpdir(), "api-codegen-workflow-fixture-"),
