@@ -1,6 +1,11 @@
 name: Native evidence summary regression
 
 on:
+  pull_request:
+    paths:
+      - .github/workflows/native-evidence-summary-regression.yml
+      - scripts/check-native-large-text-evidence.sh
+      - scripts/run-untrusted-checker.sh
   workflow_dispatch:
     inputs:
       reviewed_ref:
@@ -19,14 +24,14 @@ jobs:
       - name: Check out reviewed release revision
         uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.reviewed_ref }}
+          ref: ${{ github.event.pull_request.head.sha || inputs.reviewed_ref }}
           fetch-depth: 1
           persist-credentials: false
 
       - name: Verify unavailable iOS and Android summaries
         shell: bash
         env:
-          REVIEWED_REF: ${{ inputs.reviewed_ref }}
+          REVIEWED_REF: ${{ github.event.pull_request.head.sha || inputs.reviewed_ref }}
         run: |
           set -euo pipefail
           blocked_root="$(mktemp -d)"
