@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { db, roomBansTable, roomsTable } from "@workspace/db";
+import { db, messagesTable, roomBansTable, roomsTable } from "@workspace/db";
 import { and, eq, gt, isNull, or } from "drizzle-orm";
 import {
   isConfiguredAdmin,
@@ -8,7 +8,12 @@ import {
 import { normalizeAccountSearchQuery, searchAccounts } from "../lib/accountProfile";
 import { listModerationActions, recordModerationAction } from "../lib/moderationHistory";
 import { requireAuthorizedUser } from "../lib/requireAccountAccess";
-import { disconnectBannedUser, kickRoomMember, kickRoomUser } from "../socket";
+import {
+  broadcastMessageDeletion,
+  disconnectBannedUser,
+  kickRoomMember,
+  kickRoomUser,
+} from "../socket";
 
 const router = Router();
 
@@ -102,6 +107,53 @@ router.post("/:roomId/kick", async (req, res) => {
     return;
   }
   res.status(403).json({ error: "Room creator permission required." });
+});
+
+router.delete("/:roomId/messages/:messageId", async (req, res, next) => {
+  const actorId = await requireAuthorizedUser(req, res);
+  if (!actorId) return;
+  const roomId = req.params["roomId"];
+  const messageId = req.params["messageId"];
+  if (
+    typeof roomId !== "string" ||
+    !/^[a-zA-Z0-9_-]{3,64}$/.test(roomId) ||
+    typeof messageId !== "string" ||
+    !messageId.trim()
+  ) {
+    res.status(400).json({ error: "A valid room and message are required." });
+    return;
+  }
+
+  try {
+    const [room] = await db
+      .select({ createdBy: roomsTable.createdBy })
+      .from(roomsTable)
+      .where(eq(roomsTable.id, roomId))
+      .limit(1);
+    if (!room || (room.createdBy !== actorId && !isConfiguredAdmin(actorId))) {
+      res.status(403).json({ error: "Room creator or admin required" });
+      return;
+    }
+    const [deleted] = await db
+      .update(messagesTable)
+      .set({ deletedAt: new Date() })
+      .where(
+        and(
+          eq(messagesTable.id, messageId),
+          eq(messagesTable.roomId, roomId),
+          isNull(messagesTable.deletedAt),
+        ),
+      )
+      .returning({ id: messagesTable.id });
+    if (!deleted) {
+      res.status(404).json({ error: "Message not found." });
+      return;
+    }
+    broadcastMessageDeletion(roomId, deleted.id);
+    res.json({ ok: true });
+  } catch (error) {
+    next(error);
+  }
 });
 
 router.post("/:roomId/ban", async (req, res, next) => {

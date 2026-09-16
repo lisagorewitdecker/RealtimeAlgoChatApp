@@ -13,8 +13,10 @@ const mockKickRoomMember = vi.hoisted(() => vi.fn());
 const mockKickRoomUser = vi.hoisted(() => vi.fn());
 const mockListModerationActions = vi.hoisted(() => vi.fn());
 const mockRecordModerationAction = vi.hoisted(() => vi.fn());
+const mockBroadcastMessageDeletion = vi.hoisted(() => vi.fn());
 const mockDbLimit = vi.hoisted(() => vi.fn());
 const mockDbValues = vi.hoisted(() => vi.fn());
+const mockDbReturning = vi.hoisted(() => vi.fn());
 
 vi.mock("@workspace/db", () => ({
   db: {
@@ -28,6 +30,13 @@ vi.mock("@workspace/db", () => ({
     insert: vi.fn(() => ({
       values: mockDbValues,
     })),
+    update: vi.fn(() => ({
+      set: () => ({
+        where: () => ({
+          returning: mockDbReturning,
+        }),
+      }),
+    })),
   },
   roomsTable: {
     id: "rooms.id",
@@ -38,6 +47,11 @@ vi.mock("@workspace/db", () => ({
     roomId: "roomBans.roomId",
     userId: "roomBans.userId",
     expiresAt: "roomBans.expiresAt",
+  },
+  messagesTable: {
+    id: "messages.id",
+    roomId: "messages.roomId",
+    deletedAt: "messages.deletedAt",
   },
 }));
 
@@ -75,6 +89,7 @@ vi.mock("../lib/moderationHistory", () => ({
 }));
 
 vi.mock("../socket", () => ({
+  broadcastMessageDeletion: mockBroadcastMessageDeletion,
   disconnectBannedUser: mockDisconnectBannedUser,
   kickRoomMember: mockKickRoomMember,
   kickRoomUser: mockKickRoomUser,
@@ -116,6 +131,8 @@ beforeEach(() => {
   mockDbValues.mockReset().mockResolvedValue(undefined);
   mockListModerationActions.mockReset().mockResolvedValue({ entries: [], nextCursor: null });
   mockRecordModerationAction.mockReset().mockResolvedValue(undefined);
+  mockBroadcastMessageDeletion.mockReset();
+  mockDbReturning.mockReset().mockResolvedValue([]);
   mockSearchAccounts.mockReset().mockResolvedValue([
     {
       userId: "user-ben",
@@ -125,6 +142,74 @@ beforeEach(() => {
       banned: false,
     },
   ]);
+});
+
+describe("message deletion", () => {
+  it("soft-deletes a room message before broadcasting its tombstone", async () => {
+    mockGetAuth.mockReturnValue({ userId: "owner-ada" });
+    mockIsConfiguredAdmin.mockReturnValue(false);
+    mockDbLimit.mockResolvedValueOnce([{ createdBy: "owner-ada" }]);
+    mockDbReturning.mockResolvedValueOnce([{ id: "message-1" }]);
+
+    const response = await fetch(`${baseUrl}/room-123/messages/message-1`, {
+      method: "DELETE",
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ ok: true });
+    expect(mockDbReturning).toHaveBeenCalled();
+    expect(mockBroadcastMessageDeletion).toHaveBeenCalledWith(
+      "room-123",
+      "message-1",
+    );
+    expect(mockDbReturning.mock.invocationCallOrder[0]).toBeLessThan(
+      mockBroadcastMessageDeletion.mock.invocationCallOrder[0],
+    );
+  });
+
+  it("does not delete or broadcast when the actor does not own the room", async () => {
+    mockGetAuth.mockReturnValue({ userId: "user-ben" });
+    mockIsConfiguredAdmin.mockReturnValue(false);
+    mockDbLimit.mockResolvedValueOnce([{ createdBy: "owner-ada" }]);
+
+    const response = await fetch(`${baseUrl}/room-123/messages/message-1`, {
+      method: "DELETE",
+    });
+
+    expect(response.status).toBe(403);
+    expect(mockDbReturning).not.toHaveBeenCalled();
+    expect(mockBroadcastMessageDeletion).not.toHaveBeenCalled();
+  });
+
+  it("allows a configured admin to delete a message in another owner's room", async () => {
+    mockGetAuth.mockReturnValue({ userId: "admin-ada" });
+    mockDbLimit.mockResolvedValueOnce([{ createdBy: "owner-ada" }]);
+    mockDbReturning.mockResolvedValueOnce([{ id: "message-1" }]);
+
+    const response = await fetch(`${baseUrl}/room-123/messages/message-1`, {
+      method: "DELETE",
+    });
+
+    expect(response.status).toBe(200);
+    expect(mockBroadcastMessageDeletion).toHaveBeenCalledWith(
+      "room-123",
+      "message-1",
+    );
+  });
+
+  it("does not broadcast when the room-scoped active message update finds nothing", async () => {
+    mockGetAuth.mockReturnValue({ userId: "owner-ada" });
+    mockIsConfiguredAdmin.mockReturnValue(false);
+    mockDbLimit.mockResolvedValueOnce([{ createdBy: "owner-ada" }]);
+    mockDbReturning.mockResolvedValueOnce([]);
+
+    const response = await fetch(`${baseUrl}/room-123/messages/other-room-message`, {
+      method: "DELETE",
+    });
+
+    expect(response.status).toBe(404);
+    expect(mockBroadcastMessageDeletion).not.toHaveBeenCalled();
+  });
 });
 
 describe("room kicks", () => {

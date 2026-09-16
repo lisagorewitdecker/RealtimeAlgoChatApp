@@ -13,6 +13,7 @@ import {
   gt,
   inArray,
   isNull,
+  isNotNull,
   or,
   sql,
 } from "drizzle-orm";
@@ -304,6 +305,63 @@ export async function loadEncryptedMessagesAfter(
     messages: rows.slice(0, boundedLimit),
     hasMore: rows.length > boundedLimit,
   };
+}
+
+export async function loadDeletedMessageIdsAfter(
+  roomId: string,
+  after: { id: string; deletedAt: number },
+  limit: number,
+) {
+  const boundedLimit = Math.max(1, Math.min(limit, 80));
+  const deletedAt = new Date(after.deletedAt);
+  const rows = await db
+    .select({
+      id: messagesTable.id,
+      deletedAt: messagesTable.deletedAt,
+    })
+    .from(messagesTable)
+    .where(
+      and(
+        eq(messagesTable.roomId, roomId),
+        isNotNull(messagesTable.deletedAt),
+        or(
+          gt(messagesTable.deletedAt, deletedAt),
+          and(
+            eq(messagesTable.deletedAt, deletedAt),
+            gt(messagesTable.id, after.id),
+          ),
+        ),
+      ),
+    )
+    .orderBy(asc(messagesTable.deletedAt), asc(messagesTable.id))
+    .limit(boundedLimit + 1);
+
+  return {
+    tombstones: rows.slice(0, boundedLimit).map((row) => ({
+      id: row.id,
+      deletedAt: row.deletedAt!.getTime(),
+    })),
+    hasMore: rows.length > boundedLimit,
+  };
+}
+
+export async function keepActiveMessageIds(
+  roomId: string,
+  messageIds: string[],
+): Promise<Set<string>> {
+  if (messageIds.length === 0) return new Set();
+  const boundedIds = messageIds.slice(0, 80);
+  const rows = await db
+    .select({ id: messagesTable.id })
+    .from(messagesTable)
+    .where(
+      and(
+        eq(messagesTable.roomId, roomId),
+        inArray(messagesTable.id, boundedIds),
+        isNull(messagesTable.deletedAt),
+      ),
+    );
+  return new Set(rows.map((row) => row.id));
 }
 export async function saveEncryptedMessage({
   id,

@@ -45,6 +45,8 @@ import {
   getPublicKey,
   getPublicKeyRecord,
   getRoomEnvelope,
+  keepActiveMessageIds,
+  loadDeletedMessageIdsAfter,
   loadEncryptedMessages,
   loadEncryptedMessagesAfter,
   loadEncryptedSandboxState,
@@ -176,6 +178,7 @@ const PERSISTENCE_OPERATIONS_MAX = 256;
 
 const MESSAGE_RECOVERY_PAGE_SIZE = 80;
 let activeServer: AppServer | null = null;
+const roomHydrationGates = new Map<string, Promise<void>>();
 
 interface ConnectionLease {
   ip: string;
@@ -575,6 +578,16 @@ export function getRooms() {
   }));
 }
 
+export function broadcastMessageDeletion(roomId: string, messageId: string): void {
+  const io = activeServer;
+  if (!io) return;
+  const room = rooms.get(roomId);
+  if (room) {
+    room.messages = room.messages.filter((message) => message.id !== messageId);
+  }
+  io.to(roomId).emit("message-deleted", { roomId, messageId });
+}
+
 export function resetSocketRoomStateForTest(): void {
   if (process.env["NODE_ENV"] !== "test") {
     throw new Error("Socket room state can only be reset by tests.");
@@ -972,6 +985,9 @@ function setupConnectedSocket(
     if (!consumeEventBudget(socket, eventBudgetRegistry, payload)) return;
     if (roomJoinInFlight) return;
     roomJoinInFlight = true;
+    const roomHydrationRelease: { current?: () => void } = {};
+    let coldHydrationRoom: Room | null = null;
+    let coldHydrationVerified = false;
     try {
       const data = getRecord(payload);
       const roomId = getRoomId(data?.["roomId"]);
@@ -1008,7 +1024,26 @@ function setupConnectedSocket(
         leaveRoom(socket, io, currentRoomId);
       }
 
+      let coldHydrated = false;
+      const pendingHydration = roomHydrationGates.get(roomId);
+      if (pendingHydration) {
+        await pendingHydration;
+        if (!rooms.has(roomId)) {
+          throw new Error("Room hydration did not complete.");
+        }
+      }
       if (!rooms.has(roomId)) {
+        let releaseGate!: () => void;
+        const hydrationGate = new Promise<void>((resolve) => {
+          releaseGate = resolve;
+        });
+        roomHydrationGates.set(roomId, hydrationGate);
+        roomHydrationRelease.current = () => {
+          if (roomHydrationGates.get(roomId) === hydrationGate) {
+            roomHydrationGates.delete(roomId);
+          }
+          releaseGate();
+        };
         const requestedName = getText(data?.["roomName"], 60) ?? roomId;
         if (data?.["createIfMissing"] !== false) {
           await db
@@ -1062,10 +1097,14 @@ function setupConnectedSocket(
            sandboxState: persistedSandbox,
           createdAt: persistedRoom.createdAt.getTime(),
         });
+          coldHydrationRoom = rooms.get(roomId) ?? null;
+          coldHydrated = true;
       }
 
       const room = rooms.get(roomId);
-      if (!room) return;
+      if (!room) {
+        throw new Error("Room hydration did not complete.");
+      }
       const existingUser = room.users.get(authenticatedUser.userId);
       const isNewSocketInRoom = !existingUser?.socketIds.has(socket.id);
       if (isNewSocketInRoom && getRoomSocketCount(room) >= ROOM_SOCKET_MAX) {
@@ -1113,6 +1152,32 @@ function setupConnectedSocket(
       room.users.set(user.userId, user);
       socket.join(roomId);
       socket.data.roomId = roomId;
+
+      // A deletion can commit after cold hydration reads active rows but before
+      // this socket joins the room and can receive its live tombstone. Recheck
+      // the bounded hydrated window once delivery is attached. Deletions after
+      // this point are covered by the live event.
+      if (coldHydrated) {
+        if (room.messages.length > 0) {
+          const checkedMessageIds = room.messages
+            .filter((message) => message.type === "text")
+            .map((message) => message.id);
+          const checkedMessageIdSet = new Set(checkedMessageIds);
+          const activeMessageIds = await keepActiveMessageIds(
+            roomId,
+            checkedMessageIds,
+          );
+          room.messages = room.messages.filter(
+            (message) =>
+              message.type === "system" ||
+              !checkedMessageIdSet.has(message.id) ||
+              activeMessageIds.has(message.id),
+          );
+        }
+        coldHydrationVerified = true;
+        roomHydrationRelease.current?.();
+        roomHydrationRelease.current = undefined;
+      }
 
       const replayAfterMessageId = getText(data?.["lastSeenMessageId"], 120);
       const replayCursorIndex = replayAfterMessageId
@@ -1174,6 +1239,19 @@ function setupConnectedSocket(
       });
       socket.emit("error", { message: "Unable to join this room. Please try again." });
     } finally {
+      if (
+        roomHydrationRelease.current &&
+        !coldHydrationVerified &&
+        coldHydrationRoom &&
+        rooms.get(coldHydrationRoom.id) === coldHydrationRoom
+      ) {
+        rooms.delete(coldHydrationRoom.id);
+        socket.leave(coldHydrationRoom.id);
+        if (socket.data.roomId === coldHydrationRoom.id) {
+          delete socket.data.roomId;
+        }
+      }
+      roomHydrationRelease.current?.();
       roomJoinInFlight = false;
     }
   });
@@ -1188,6 +1266,14 @@ function setupConnectedSocket(
     const roomId = getRoomId(data?.["roomId"]);
     const afterMessageId = getText(data?.["afterMessageId"], 200);
     const afterTimestamp = data?.["afterTimestamp"];
+    const rawDeletedAfter = data?.["deletedAfter"];
+    const deletedAfter =
+      typeof rawDeletedAfter === "number" &&
+      Number.isSafeInteger(rawDeletedAfter) &&
+      rawDeletedAfter >= 0
+        ? rawDeletedAfter
+        : Date.now();
+    const deletedAfterId = getText(data?.["deletedAfterId"], 200) ?? "";
     try {
       if (
         !requestId ||
@@ -1212,11 +1298,18 @@ function setupConnectedSocket(
         });
         return;
       }
-      const page = await loadEncryptedMessagesAfter(
-        roomId,
-        { id: afterMessageId, timestamp: afterTimestamp },
-        MESSAGE_RECOVERY_PAGE_SIZE,
-      );
+      const [page, deletionPage] = await Promise.all([
+        loadEncryptedMessagesAfter(
+          roomId,
+          { id: afterMessageId, timestamp: afterTimestamp },
+          MESSAGE_RECOVERY_PAGE_SIZE,
+        ),
+        loadDeletedMessageIdsAfter(
+          roomId,
+          { id: deletedAfterId, deletedAt: deletedAfter },
+          MESSAGE_RECOVERY_PAGE_SIZE,
+        ),
+      ]);
       if (
         socket.data.roomId !== roomId ||
         !socket.rooms.has(roomId) ||
@@ -1242,13 +1335,18 @@ function setupConnectedSocket(
       socket.emit("message-recovery-page", {
         requestId,
         messages,
-        hasMore: page.hasMore,
+        deletedMessageIds: deletionPage.tombstones.map((item) => item.id),
+        hasMore: page.hasMore || deletionPage.hasMore,
         nextCursor: messages.at(-1)
           ? {
               id: messages.at(-1)!.id,
               timestamp: messages.at(-1)!.timestamp,
             }
           : { id: afterMessageId, timestamp: afterTimestamp },
+        nextDeletionCursor: deletionPage.tombstones.at(-1) ?? {
+          id: deletedAfterId,
+          deletedAt: deletedAfter,
+        },
       });
     } catch (error) {
       reportSocketHandlerError("recover-messages", error, {
