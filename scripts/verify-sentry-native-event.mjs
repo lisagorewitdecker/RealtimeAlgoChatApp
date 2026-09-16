@@ -305,7 +305,7 @@ export function verifyNativeSentryEvidence({
 
   const rawEvidence = readFileSync(evidencePath, "utf8");
   if (
-    /(?:auth(?:orization)?[_-]?token|sentry_auth_token|bearer\s+[A-Za-z0-9._-]+)/i.test(
+    /(?:\bauthorization[_-]?token\b|\bauth[_-]?token\b|\bsentry_auth_token\b|bearer\s+[A-Za-z0-9._-]+)/i.test(
       rawEvidence,
     )
   ) {

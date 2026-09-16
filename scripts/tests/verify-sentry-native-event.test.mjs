@@ -332,3 +332,35 @@ test("rejects trigger metadata with missing required fields", async () => {
     /trigger metadata is malformed/,
   );
 });
+
+test("allows non-credential authorization text in saved evidence", async () => {
+  const tempDir = await mkdtemp(path.join(tmpdir(), "sentry-evidence-authorization-"));
+  const evidencePath = path.join(tempDir, "sentry-source-map-evidence.json");
+  const triggerPath = path.join(tempDir, "sentry-trigger.txt");
+  const evidenceRecord = validateNativeSentryEvent(eventFixture(), expected);
+
+  await writeFile(
+    evidencePath,
+    `${JSON.stringify({ ...evidenceRecord, authorization: "reviewed" })}\n`,
+  );
+  await writeFile(
+    triggerPath,
+    [
+      "platform=ios",
+      "candidate_build_id=build-ios",
+      "marker=run-1234-ios",
+    ].join("\n"),
+  );
+
+  const verified = verifyNativeSentryEvidence({
+    evidencePath,
+    triggerPath,
+    expectedPlatform: expected.platform,
+    expectedBuildId: expected.candidateBuildId,
+    expectedProbeMarker: expected.marker,
+    expectedRelease: expected.release,
+    expectedDist: expected.dist,
+  });
+
+  assert.equal(verified.eventId, evidenceRecord.eventId);
+});
