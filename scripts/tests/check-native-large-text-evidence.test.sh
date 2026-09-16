@@ -621,15 +621,24 @@ candidate_build_id=build-android
 decision=REJECTED
 notes=The failing fixture included ${review_note_credential} and ${review_note_marker}.
 EOF
-if privacy_rejected_output="$(bash "$CHECKER" "$privacy_rejected_root" 2>&1)"; then
+privacy_rejected_summary_path="$TEST_ROOT/privacy-rejected-summary.md"
+if privacy_rejected_output="$(
+  GITHUB_STEP_SUMMARY="$privacy_rejected_summary_path" bash "$CHECKER" "$privacy_rejected_root" 2>&1
+)"; then
   echo "private rejected review case unexpectedly passed" >&2
   exit 1
 fi
+privacy_rejected_summary="$(cat "$privacy_rejected_summary_path")"
 assert_contains "$privacy_rejected_output" "[android] The review record at $privacy_rejected_root/android/20260909T120000Z/review-record.txt records a rejected decision."
 assert_contains "$privacy_rejected_output" "[android] Review notes were supplied but are omitted from automated release output."
 assert_contains "$privacy_rejected_output" "completeness check FAILED with 1 issue(s)"
 assert_not_contains "$privacy_rejected_output" "$review_note_credential"
 assert_not_contains "$privacy_rejected_output" "$review_note_marker"
+assert_contains "$privacy_rejected_summary" "## Android native large-text evidence"
+assert_contains "$privacy_rejected_summary" "- Status: **FAIL**"
+assert_contains "$privacy_rejected_summary" "Review notes were supplied but are omitted from automated release output."
+assert_not_contains "$privacy_rejected_summary" "$review_note_credential"
+assert_not_contains "$privacy_rejected_summary" "$review_note_marker"
 
 conflicting_notes_root="$TEST_ROOT/conflicting-notes"
 write_valid_run "$conflicting_notes_root" ios
