@@ -466,22 +466,25 @@ export async function verifyNativeSentryEvent({
   );
 }
 
-async function runEvidenceVerification(cliOptions, env = process.env) {
-  verifyNativeSentryEvidence({
-    evidencePath: cliOptions.get("evidence-path") ?? env.SENTRY_EVIDENCE_PATH,
+function resolveEvidenceVerificationInputs(cliOptions, env) {
+  const evidencePath = cliOptions.get("evidence-path") ?? env.SENTRY_EVIDENCE_PATH;
+  return {
+    evidencePath,
     triggerPath:
       cliOptions.get("trigger-path") ??
       env.SENTRY_TRIGGER_PATH ??
-      (cliOptions.get("evidence-path") ?? env.SENTRY_EVIDENCE_PATH
-        ? join(dirname(cliOptions.get("evidence-path") ?? env.SENTRY_EVIDENCE_PATH), "sentry-trigger.txt")
-        : undefined),
+      (evidencePath ? join(dirname(evidencePath), "sentry-trigger.txt") : undefined),
     expectedPlatform: cliOptions.get("platform") ?? env.SENTRY_EXPECTED_PLATFORM,
     expectedBuildId: cliOptions.get("candidate-build-id") ?? env.SENTRY_EXPECTED_BUILD_ID,
     expectedProbeMarker:
       cliOptions.get("expected-probe-marker") ?? env.SENTRY_PROBE_MARKER ?? "",
     expectedRelease: cliOptions.get("expected-release") ?? env.SENTRY_EXPECTED_RELEASE ?? "",
     expectedDist: cliOptions.get("expected-dist") ?? env.SENTRY_EXPECTED_DIST ?? "",
-  });
+  };
+}
+
+async function runEvidenceVerification(cliOptions, env = process.env) {
+  verifyNativeSentryEvidence(resolveEvidenceVerificationInputs(cliOptions, env));
 }
 
 async function main(env = process.env) {
@@ -532,13 +535,9 @@ function isEvidenceVerificationRequest(cliOptions, env) {
 }
 
 function canFallbackToRemoteVerification(error, cliOptions, env) {
-  const evidencePath = env.SENTRY_EVIDENCE_PATH;
-  const derivedTriggerPath = evidencePath
-    ? join(dirname(evidencePath), "sentry-trigger.txt")
-    : undefined;
+  const { evidencePath, triggerPath } = resolveEvidenceVerificationInputs(cliOptions, env);
   return (
     Boolean(evidencePath) &&
-    !cliOptions.has("evidence-path") &&
     !cliOptions.has("trigger-path") &&
     !env.SENTRY_TRIGGER_PATH &&
     hasRemoteVerificationInputs(env) &&
@@ -547,7 +546,7 @@ function canFallbackToRemoteVerification(error, cliOptions, env) {
     "code" in error &&
     error.code === "ENOENT" &&
     !existsSync(evidencePath) &&
-    (!derivedTriggerPath || !existsSync(derivedTriggerPath))
+    (!triggerPath || !existsSync(triggerPath))
   );
 }
 
