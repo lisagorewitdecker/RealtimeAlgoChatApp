@@ -266,6 +266,76 @@ test("startup failures append only the bounded diagnosis to the CI summary", () 
   }
 });
 
+test("CI summaries retain bounded long-path loader diagnostics and library identifiers", () => {
+  const temporaryDirectory = mkdtempSync(
+    join(tmpdir(), "chat-preview-long-loader-summary-"),
+  );
+  const longPathFixtures = [
+    {
+      fixture: "missing-runtime-library-long-path",
+      libraryIdentifier: "libgtk-3.so.0",
+    },
+    {
+      fixture: "missing-runtime-library-dyld-long-path",
+      libraryIdentifier: "libgtk-3.dylib",
+    },
+    {
+      fixture: "missing-runtime-library-windows-long-path",
+      libraryIdentifier: "libgtk-3-0.dll",
+    },
+  ];
+
+  try {
+    for (const {
+      fixture: fixtureName,
+      libraryIdentifier,
+    } of longPathFixtures) {
+      const logPath = join(temporaryDirectory, `${fixtureName}.log`);
+      const summaryPath = join(temporaryDirectory, `${fixtureName}.md`);
+      const unrelatedOutput =
+        `unrelated loader output for ${fixtureName} should not leak`;
+      writeFileSync(
+        logPath,
+        `${unrelatedOutput}\n${fixtureOutput[fixtureName]}${unrelatedOutput}\n`,
+        "utf8",
+      );
+
+      const result = runNodeScript(
+        [validatorPath, "--log-file", logPath],
+        { GITHUB_STEP_SUMMARY: summaryPath },
+      );
+
+      assert.equal(result.status, 1, fixtureName);
+      const summary = readFileSync(summaryPath, "utf8");
+      const diagnostic = summary.match(/\*\*Diagnosis:\*\* ([^\n]+)/)?.[1];
+      assert.ok(diagnostic, `${fixtureName} summary omitted its diagnosis`);
+      assert.ok(
+        diagnostic.length <= 512,
+        `${fixtureName} summary diagnostic exceeded the 512-character limit`,
+      );
+      assert.match(
+        diagnostic,
+        /Expo preview startup error: .*missing runtime library: .*libgtk-3/,
+        fixtureName,
+      );
+      assert.match(
+        diagnostic,
+        new RegExp(
+          fixtureName.includes("dyld")
+            ? "libgtk-3\\.dylib"
+            : fixtureName.includes("windows")
+              ? "libgtk-3-0\\.dll"
+              : "libgtk-3\\.so\\.0",
+        ),
+        `${fixtureName} lost its library identifier`,
+      );
+      assert.doesNotMatch(summary, new RegExp(unrelatedOutput));
+    }
+  } finally {
+    rmSync(temporaryDirectory, { recursive: true, force: true });
+  }
+});
+
 test("CI summaries name the malformed selected preview setting without its value", () => {
   const temporaryDirectory = mkdtempSync(
     join(tmpdir(), "chat-preview-malformed-setting-summary-"),
