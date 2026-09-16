@@ -383,3 +383,44 @@ test("allows non-credential authorization text in saved evidence", async () => {
 
   assert.equal(verified.eventId, evidenceRecord.eventId);
 });
+
+test("rejects nested credential-bearing evidence fields", async () => {
+  const tempDir = await mkdtemp(path.join(tmpdir(), "sentry-evidence-secret-"));
+  const evidencePath = path.join(tempDir, "sentry-source-map-evidence.json");
+  const triggerPath = path.join(tempDir, "sentry-trigger.txt");
+  const evidenceRecord = validateNativeSentryEvent(eventFixture(), expected);
+
+  await writeFile(
+    evidencePath,
+    `${JSON.stringify({
+      ...evidenceRecord,
+      request: {
+        headers: {
+          authorization_token: "secret-value",
+        },
+      },
+    })}\n`,
+  );
+  await writeFile(
+    triggerPath,
+    [
+      "platform=ios",
+      "candidate_build_id=build-ios",
+      "marker=run-1234-ios",
+    ].join("\n"),
+  );
+
+  assert.throws(
+    () =>
+      verifyNativeSentryEvidence({
+        evidencePath,
+        triggerPath,
+        expectedPlatform: expected.platform,
+        expectedBuildId: expected.candidateBuildId,
+        expectedProbeMarker: expected.marker,
+        expectedRelease: expected.release,
+        expectedDist: expected.dist,
+      }),
+    /evidence contains credential-like content/,
+  );
+});

@@ -9,6 +9,9 @@ const DEFAULT_ATTEMPTS = 18;
 const DEFAULT_INTERVAL_MS = 10_000;
 const EXPECTED_PROBE_FUNCTION = "createNativeSourceMapProbeError";
 const EXPECTED_TRIGGER_KEYS = new Set(["platform", "candidate_build_id", "marker"]);
+const CREDENTIAL_FIELD_PATTERN =
+  /^(?:authorization[_-]?token|auth[_-]?token|sentry_auth_token|access[_-]?token|refresh[_-]?token)$/i;
+const BEARER_TOKEN_PATTERN = /^bearer\s+[A-Za-z0-9._~+/-]{8,}$/i;
 
 function parseArgs(argv) {
   const options = new Map();
@@ -195,6 +198,27 @@ function normalizeSentryApiBaseUrl(apiBaseUrl) {
   return parsedUrl;
 }
 
+function hasCredentialLikeContent(value) {
+  if (typeof value === "string") {
+    return BEARER_TOKEN_PATTERN.test(value.trim());
+  }
+
+  if (Array.isArray(value)) {
+    return value.some((entry) => hasCredentialLikeContent(entry));
+  }
+
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  return Object.entries(value).some(([key, entryValue]) => {
+    if (CREDENTIAL_FIELD_PATTERN.test(key) && typeof entryValue === "string") {
+      return entryValue.trim().length > 0;
+    }
+    return hasCredentialLikeContent(entryValue);
+  });
+}
+
 function tagMap(event) {
   return new Map(
     (event.tags ?? []).map((tag) =>
@@ -307,12 +331,8 @@ export function verifyNativeSentryEvidence({
   }
 
   const rawEvidence = readFileSync(evidencePath, "utf8");
-  if (
-    /(?:\bauthorization[_-]?token\b|\bauth[_-]?token\b|\bsentry_auth_token\b|bearer\s+[A-Za-z0-9._-]+)/i.test(
-      rawEvidence,
-    )
-  ) {
-    throw new Error("evidence contains credential-like content");
+  if (duplicateJsonFields(rawEvidence).length > 0) {
+    throw new Error("duplicate JSON field(s)");
   }
 
   let evidence;
@@ -322,8 +342,8 @@ export function verifyNativeSentryEvidence({
     throw new Error("evidence is not valid JSON");
   }
 
-  if (duplicateJsonFields(rawEvidence).length > 0) {
-    throw new Error("duplicate JSON field(s)");
+  if (hasCredentialLikeContent(evidence)) {
+    throw new Error("evidence contains credential-like content");
   }
 
   const trigger = parseTrigger(triggerPath);
