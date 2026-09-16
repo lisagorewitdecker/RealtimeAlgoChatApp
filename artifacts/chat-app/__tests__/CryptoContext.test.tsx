@@ -301,6 +301,33 @@ describe("CryptoProvider", () => {
     expect(globalThis.localStorage?.length ?? 0).toBe(0);
   });
 
+  it("removes legacy cleartext web crypto entries instead of recovering them", async () => {
+    Platform.OS = "web";
+    mockAuthUserId = "web-crypto-test-user";
+    const legacySecretKey = new Uint8Array(nacl.box.secretKeyLength).fill(99);
+    const legacyPublicKey = encodeBase64(
+      nacl.box.keyPair.fromSecretKey(legacySecretKey).publicKey,
+    );
+    globalThis.localStorage?.setItem(
+      "devstudio_device_keypair_v1:web-crypto-test-user",
+      JSON.stringify({ secretKey: encodeBase64(legacySecretKey), registrationVersion: 3 }),
+    );
+    globalThis.localStorage?.setItem(
+      "devstudio_roomkey:web-crypto-test-user:room-42",
+      encodeBase64(new Uint8Array(nacl.secretbox.keyLength).fill(7)),
+    );
+
+    await renderCryptoProvider();
+
+    expect(cryptoValue?.publicKeyB64).not.toBe(legacyPublicKey);
+    expect(globalThis.localStorage?.getItem("devstudio_device_keypair_v1:web-crypto-test-user")).toBeFalsy();
+    expect(globalThis.localStorage?.getItem("devstudio_roomkey:web-crypto-test-user:room-42")).toBeFalsy();
+    await act(async () => {
+      await cryptoValue?.loadRoomKey("room-42");
+    });
+    expect(cryptoValue?.getRoomKey("room-42")).toBeNull();
+  });
+
   it("saves and restores keys for account and room identifiers outside the secure-store alphabet", async () => {
     // Room IDs derive from user-typed names and joined room IDs are typed
     // directly, so apostrophes, slashes, spaces, colons, and non-ASCII text

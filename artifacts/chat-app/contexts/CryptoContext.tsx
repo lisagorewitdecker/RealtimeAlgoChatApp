@@ -13,6 +13,10 @@ const deviceKeypairStorageKey = (userId: string) =>
   `devstudio_device_keypair_v1:${userId}`;
 const roomStorageKey = (userId: string, roomId: string) =>
   `devstudio_roomkey:${userId}:${roomId}`;
+const LEGACY_WEB_CRYPTO_STORAGE_PREFIXES = [
+  "devstudio_device_keypair_v1:",
+  "devstudio_roomkey:",
+] as const;
 const PUBLIC_KEY_SYNC_RETRY_DELAYS_MS = [250, 750, 2_000, 5_000] as const;
 export const DEVICE_KEY_REGISTRATION_SLOW_MS = 25_000;
 // A reset takes over the account's registration with compare-and-set writes.
@@ -24,6 +28,19 @@ const ROOM_KEY_SAVE_FAILURE_MESSAGE =
 const ROOM_KEY_LOAD_FAILURE_MESSAGE =
   "This device could not read its saved encryption keys. Make secure storage available, then retry.";
 const transientWebCryptoStorage = new Map<string, string>();
+
+function purgeLegacyWebCryptoStorage() {
+  if (Platform.OS !== "web" || typeof localStorage === "undefined") return;
+  for (let index = localStorage.length - 1; index >= 0; index -= 1) {
+    const key = localStorage.key(index);
+    if (
+      key &&
+      LEGACY_WEB_CRYPTO_STORAGE_PREFIXES.some((prefix) => key.startsWith(prefix))
+    ) {
+      localStorage.removeItem(key);
+    }
+  }
+}
 
 function waitForRetry(delayMs: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, delayMs));
@@ -48,14 +65,18 @@ function isRoomKey(candidate: Uint8Array): boolean {
 // Native secure storage rejects the ":" separators used in the logical keys
 // above, so they are encoded (see lib/secureStorageKey.ts). Web keeps the
 // logical key but only in memory for this JS session so device and room keys
-// are never persisted as cleartext in browser storage.
+// are never persisted as cleartext in browser storage; any legacy cleartext
+// entries are explicitly removed instead of being recovered into memory.
 async function getStored(key: string) {
-  return Platform.OS === "web"
-    ? transientWebCryptoStorage.get(key) ?? null
-    : SecureStore.getItemAsync(toSecureStoreKey(key));
+  if (Platform.OS === "web") {
+    purgeLegacyWebCryptoStorage();
+    return transientWebCryptoStorage.get(key) ?? null;
+  }
+  return SecureStore.getItemAsync(toSecureStoreKey(key));
 }
 async function setStored(key: string, value: string) {
   if (Platform.OS === "web") {
+    purgeLegacyWebCryptoStorage();
     transientWebCryptoStorage.set(key, value);
   } else {
     await SecureStore.setItemAsync(toSecureStoreKey(key), value);
