@@ -1,7 +1,7 @@
 import * as ExpoCrypto from "expo-crypto";
 import * as SecureStore from "expo-secure-store";
 import { useAuth } from "@clerk/expo";
-import * as nacl from "tweetnacl";
+import nacl from "tweetnacl";
 import { decodeBase64, decodeUTF8, encodeBase64 } from "tweetnacl-util";
 import React, { createContext, useCallback, useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Platform } from "react-native";
