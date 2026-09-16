@@ -307,11 +307,25 @@ function pruneModerationHistoryWindows(now: number): void {
       }
     }
     while (windows.size > MODERATION_HISTORY_TRACKING_KEY_LIMIT) {
-      const oldest = windows.keys().next().value;
+      const oldest = findOldestModerationHistoryKey(windows);
       if (typeof oldest !== "string") break;
       windows.delete(oldest);
     }
   }
+}
+
+function findOldestModerationHistoryKey(
+  windows: Map<string, ModerationHistoryWindow>,
+): string | undefined {
+  let oldestKey: string | undefined;
+  let oldestStartedAt = Number.POSITIVE_INFINITY;
+  for (const [key, window] of windows) {
+    if (window.startedAt < oldestStartedAt) {
+      oldestKey = key;
+      oldestStartedAt = window.startedAt;
+    }
+  }
+  return oldestKey;
 }
 
 export function resetModerationHistoryRateLimits(): void {
