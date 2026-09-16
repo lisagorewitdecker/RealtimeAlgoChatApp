@@ -18,6 +18,7 @@ import {
   clerkProxyMiddleware,
   getClerkProxyHost,
 } from "./middlewares/clerkProxyMiddleware";
+import { createIpRateLimit } from "./middlewares/rateLimit";
 import { Sentry } from "./lib/sentry";
 import healthRouter from "./routes/health";
 
@@ -30,6 +31,11 @@ const socketClientScript = join(
   "socket.io.js",
 );
 const cryptoClientScript = join(dirname(fileURLToPath(import.meta.url)), "crypto-client.js");
+const staticAssetRateLimit = createIpRateLimit({
+  scope: "api-static-assets",
+  windowMs: 60_000,
+  maxRequests: 240,
+});
 app.set("trust proxy", 1);
 
 app.use(
@@ -87,12 +93,12 @@ app.use(
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-app.get("/api/socket-client.js", (_req, res) => {
+app.get("/api/socket-client.js", staticAssetRateLimit, (_req, res) => {
   res
     .type("application/javascript")
     .sendFile(socketClientScript, { dotfiles: "allow" });
 });
-app.get("/api/crypto-client.js", (_req, res) => {
+app.get("/api/crypto-client.js", staticAssetRateLimit, (_req, res) => {
   res
     .type("application/javascript")
     .sendFile(cryptoClientScript, { dotfiles: "allow" });

@@ -7,11 +7,19 @@
 import { Router } from "express";
 import type { Request, Response } from "express";
 import { requireAuth, type AuthRequest } from "../middlewares/requireAuth";
+import { createIpRateLimit } from "../middlewares/rateLimit";
 import { db } from "@workspace/db";
 import { roomsTable, roomMembersTable, messagesTable } from "@workspace/db";
 import { eq, isNull, count, max } from "drizzle-orm";
 
 const router = Router();
+const adminRateLimit = createIpRateLimit({
+  scope: "admin-routes",
+  windowMs: 60_000,
+  maxRequests: 120,
+});
+
+router.use(adminRateLimit);
 
 function getAdminIds(): Set<string> {
   const raw = process.env["ADMIN_USER_IDS"] ?? "";

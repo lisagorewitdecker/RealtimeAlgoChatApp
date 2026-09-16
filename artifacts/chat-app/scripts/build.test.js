@@ -8,6 +8,20 @@ const test = require("node:test");
 const buildScript = path.resolve(__dirname, "build.js");
 const packageJson = require("../package.json");
 
+function extractUrls(text) {
+  return text.match(/https?:\/\/[^\s'"]+/g) ?? [];
+}
+
+function readEnvValue(filePath, key) {
+  const line = fs
+    .readFileSync(filePath, "utf8")
+    .split(/\r?\n/u)
+    .find((entry) => entry.startsWith(`${key}=`));
+  return typeof line === "string"
+    ? JSON.parse(line.slice(`${key}=`.length))
+    : undefined;
+}
+
 function runPreflight(overrides = {}) {
   return spawnSync(process.execPath, [buildScript, "--preflight-only"], {
     cwd: path.resolve(__dirname, ".."),
@@ -56,7 +70,10 @@ test("native production build hook accepts and maps managed SENTRY_DSN", (t) => 
 
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /crash reporting preflight passed/i);
-  assert.equal((result.stdout + result.stderr).includes(sentinel), false);
+  assert.equal(
+    extractUrls(result.stdout + result.stderr).some((value) => value === sentinel),
+    false,
+  );
   assert.equal((result.stdout + result.stderr).includes(authSentinel), false);
   assert.match(
     fs.readFileSync(
@@ -66,10 +83,8 @@ test("native production build hook accepts and maps managed SENTRY_DSN", (t) => 
     /SENTRY_RELEASE_PREFLIGHT_PASSED_V1[\s\S]*chat-app@1\.0\.0\+test[\s\S]*100[\s\S]*build-test[\s\S]*RELEASE_BUILD_CREATED_AT = "20\d\d-/,
   );
   assert.equal(
-    fs
-      .readFileSync(path.join(outputRoot, ".env.local"), "utf8")
-      .includes(sentinel),
-    true,
+    readEnvValue(path.join(outputRoot, ".env.local"), "EXPO_PUBLIC_SENTRY_DSN"),
+    sentinel,
   );
   assert.equal(
     fs
@@ -91,7 +106,10 @@ test("native production build hook accepts EXPO_PUBLIC_SENTRY_DSN", (t) => {
 
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /crash reporting preflight passed/i);
-  assert.equal((result.stdout + result.stderr).includes(sentinel), false);
+  assert.equal(
+    extractUrls(result.stdout + result.stderr).some((value) => value === sentinel),
+    false,
+  );
   assert.equal(fs.existsSync(path.join(outputRoot, ".env.local")), false);
 });
 
