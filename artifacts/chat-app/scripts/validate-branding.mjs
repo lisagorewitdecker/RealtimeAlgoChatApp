@@ -418,7 +418,6 @@ function nativePermissionSummary({
 export function formatNativeBrandingSummary({
   platform,
   buildId,
-  productName,
   status,
   metadata = {},
   expectedPermissionDescriptions,

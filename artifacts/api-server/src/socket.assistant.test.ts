@@ -149,8 +149,9 @@ describe("sandbox assistant disclosure gate", () => {
     const roomId = "assistant-gate";
     const client = await connectSandboxClient(roomId);
     const error = waitForEvent<AssistantErrorEvent>(client, "assistant-error");
-    const { disclosureAcknowledged: _omitted, ...withoutAcknowledgement } =
+    const { disclosureAcknowledged: omitted, ...withoutAcknowledgement } =
       acknowledgedRequest(roomId, "assistant-gate-request");
+    expect(omitted).toBe(true);
 
     client.emit("assistant-request", withoutAcknowledgement);
 
