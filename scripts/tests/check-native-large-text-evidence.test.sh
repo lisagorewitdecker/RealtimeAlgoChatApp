@@ -93,17 +93,18 @@ write_valid_run() {
   local root="$1"
   local platform="$2"
   local run_dir="$root/$platform/20260909T120000Z"
+  local build_id="${3:-build-$platform}"
   local index
 
   mkdir -p "$run_dir/screenshots" "$run_dir/call-surface"
-  printf 'build-%s\n' "$platform" > "$run_dir/candidate-build-id.txt"
+  printf '%s\n' "$build_id" > "$run_dir/candidate-build-id.txt"
   # Mirror every field the native large-text runner writes, so duplicate-field
   # coverage tracks the real producer rather than a minimal subset.
   if [[ "$platform" == "ios" ]]; then
     cat > "$run_dir/runner-metadata.txt" <<EOF
 platform=ios
 run_mode=release-gate
-candidate_build_id=build-ios
+candidate_build_id=$build_id
 app_id=com.example.chat
 device=iPhone SE (3rd generation)
 device_udid=00000000-0000-0000-0000-000000000000
@@ -113,7 +114,7 @@ EOF
     cat > "$run_dir/runner-metadata.txt" <<EOF
 platform=android
 run_mode=release-gate
-candidate_build_id=build-android
+candidate_build_id=$build_id
 app_id=com.example.chat
 device_serial=emulator-5554
 device_model=Smallest supported emulator
@@ -129,7 +130,7 @@ EOF
   cat > "$run_dir/pass-fail-record.txt" <<EOF
 platform=$platform
 run_mode=release-gate
-candidate_build_id=build-$platform
+candidate_build_id=$build_id
 status=PASS
 native_screenshot_count=11
 call_surface_screenshot_count=2
@@ -141,7 +142,7 @@ EOF
   printf '<testsuite tests="1" failures="0"></testsuite>\n' > "$run_dir/sentry-maestro-results.xml"
   cat > "$run_dir/sentry-trigger.txt" <<EOF
 platform=$platform
-candidate_build_id=build-$platform
+candidate_build_id=$build_id
 marker=run-1234-$platform
 EOF
   cat > "$run_dir/sentry-source-map-evidence.json" <<EOF
@@ -149,7 +150,7 @@ EOF
   "status": "PASS",
   "eventId": "0123456789abcdef0123456789abcdef",
   "platform": "$platform",
-  "candidateBuildId": "build-$platform",
+  "candidateBuildId": "$build_id",
   "marker": "run-1234-$platform",
   "release": "chat-app@1.0.0+abc123",
   "dist": "42",
@@ -1176,6 +1177,77 @@ if wrong_platform_output="$(bash "$CHECKER" "$wrong_platform_root" 2>&1)"; then
   exit 1
 fi
 assert_contains "$wrong_platform_output" "[android] Review record identifies the wrong platform in $wrong_platform_root/android/20260909T120000Z/review-record.txt."
+
+# A downloaded evidence artifact can be changed after the candidate approval is
+# recorded. The strict publish validation must block the submission boundary for
+# either platform, record a fixed blocked result, and keep candidate/reviewer
+# values out of its diagnostics and summary.
+for tampered_platform in ios android; do
+  tampered_root="$TEST_ROOT/tampered-$tampered_platform"
+  tampered_summary_path="$TEST_ROOT/tampered-$tampered_platform-summary.md"
+  submission_marker="$tampered_root/submission-command-ran"
+  blocked_result="$tampered_root/store-submission-result.txt"
+  private_candidate_id="candidate-$tampered_platform-private-sentinel"
+  private_reviewer="reviewer-$tampered_platform-private-sentinel"
+
+  write_valid_run "$tampered_root" ios "$private_candidate_id"
+  write_valid_run "$tampered_root" android "$private_candidate_id"
+  write_review_record \
+    "$tampered_root" \
+    ios \
+    APPROVED \
+    "2026-09-09T13:00:00Z" \
+    "$private_candidate_id" \
+    "$private_reviewer"
+  write_review_record \
+    "$tampered_root" \
+    android \
+    APPROVED \
+    "2026-09-09T13:00:00Z" \
+    "$private_candidate_id" \
+    "$private_reviewer"
+
+  tampered_run_dir="$tampered_root/$tampered_platform/20260909T120000Z"
+  cat > "$tampered_run_dir/pass-fail-record.txt" <<EOF
+platform=$tampered_platform
+run_mode=release-gate
+candidate_build_id=$private_candidate_id
+status=FAIL
+native_screenshot_count=11
+call_surface_screenshot_count=2
+recorded_at_utc=2026-09-09T12:30:00Z
+EOF
+
+  fake_store_submission() {
+    printf 'submitted\n' > "$submission_marker"
+  }
+
+  if validation_output="$(
+    GITHUB_STEP_SUMMARY="$tampered_summary_path" \
+      NATIVE_EVIDENCE_REQUIRE_APPROVAL=1 \
+      bash "$CHECKER" "$tampered_root" 2>&1
+  )"; then
+    fake_store_submission
+    echo "tampered $tampered_platform evidence unexpectedly passed strict validation" >&2
+    exit 1
+  else
+    printf 'status=BLOCKED\nreason=native-evidence-validation-failed\n' > "$blocked_result"
+  fi
+
+  if [[ -e "$submission_marker" ]]; then
+    echo "tampered $tampered_platform evidence reached the store submission command" >&2
+    exit 1
+  fi
+  assert_contains "$validation_output" "[$tampered_platform] The pass/fail record at"
+  assert_contains "$validation_output" "is not PASS."
+  assert_contains "$(cat "$blocked_result")" "status=BLOCKED"
+  assert_contains "$(cat "$blocked_result")" "reason=native-evidence-validation-failed"
+  assert_contains "$(cat "$tampered_summary_path")" "- Status: **FAIL**"
+  assert_not_contains "$validation_output" "$private_candidate_id"
+  assert_not_contains "$validation_output" "$private_reviewer"
+  assert_not_contains "$(cat "$tampered_summary_path")" "$private_candidate_id"
+  assert_not_contains "$(cat "$tampered_summary_path")" "$private_reviewer"
+done
 
 cleanup_test_fixtures
 trap - EXIT

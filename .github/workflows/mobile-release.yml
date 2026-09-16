@@ -1554,30 +1554,8 @@ jobs:
           name: native-large-text-android
           path: test-results/native-large-text/android
 
-      - name: Run native large-text evidence privacy regression
-        id: native-large-text-evidence-privacy
+      - name: Run native large-text evidence privacy and submission-boundary regression
         run: pnpm run test:native-large-text-evidence
-
-      - name: Summarize native large-text evidence privacy regression
-        if: ${{ always() }}
-        env:
-          PRIVACY_RESULT: ${{ steps.native-large-text-evidence-privacy.outcome }}
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          {
-            echo "## Native large-text evidence privacy"
-            echo
-            if [[ "$PRIVACY_RESULT" == "success" ]]; then
-              echo "- Status: **PASS**"
-              echo "- Check: native evidence fixture privacy regression passed."
-            else
-              echo "- Status: **BLOCKED**"
-              echo "- Check: release is blocked because the native evidence privacy regression failed."
-              echo '- Details: see the "Run native large-text evidence privacy regression" step log.'
-            fi
-          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Attach candidate-bound human approvals
         env:
