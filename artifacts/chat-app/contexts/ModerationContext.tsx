@@ -22,12 +22,7 @@ interface ModerationContextValue {
   setRoomCreator: (creatorId: string) => void;
   deleteMessage: (roomId: string, messageId: string) => Promise<boolean>;
   kickUser: (roomId: string, targetUserId: string, username: string) => Promise<boolean>;
-  banUser: (
-    roomId: string,
-    targetUserId: string,
-    username: string,
-    permanent?: boolean,
-  ) => Promise<boolean>;
+  banUser: (roomId: string, targetUserId: string, username: string) => Promise<boolean>;
 }
 
 const ModerationContext = createContext<ModerationContextValue | null>(null);
@@ -108,14 +103,8 @@ export function ModerationProvider({ children }: { children: React.ReactNode }) 
   );
 
   const banUser = useCallback(
-    async (
-      roomId: string,
-      targetUserId: string,
-      username: string,
-      permanent?: boolean,
-    ): Promise<boolean> => {
-      const banPermanently = isAdmin && permanent === true;
-      const label = banPermanently ? "Permanently ban" : "Ban for 24 hours";
+    async (roomId: string, targetUserId: string, username: string): Promise<boolean> => {
+      const label = isAdmin ? "Permanently ban" : "Ban for 24 hours";
       return new Promise((resolve) => {
         Alert.alert(
           "Ban user",
@@ -126,16 +115,10 @@ export function ModerationProvider({ children }: { children: React.ReactNode }) 
               text: label,
               style: "destructive",
               onPress: async () => {
-                const payload: { userId: string; permanent?: true } = {
-                  userId: targetUserId,
-                };
-                if (banPermanently) {
-                  payload.permanent = true;
-                }
                 const ok = await modFetch(
                   `${encodeURIComponent(roomId)}/ban`,
                   "POST",
-                  payload,
+                  { userId: targetUserId },
                   getToken,
                 );
                 resolve(ok);

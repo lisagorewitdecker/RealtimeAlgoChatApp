@@ -274,6 +274,7 @@ export default function ProfileScreen() {
   // Only re-fetch when admin status changes -- `getToken` from Clerk is not
   // guaranteed to be referentially stable across renders, so depending on it
   // here would cause a fetch loop instead of a one-time load.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (isAdmin) void fetchHistory();
   }, [isAdmin]);
