@@ -104,10 +104,10 @@ app.use("/api", router);
 Sentry.setupExpressErrorHandler(app);
 
 app.use(
-  (err: unknown, _req: Request, res: Response, _next: NextFunction) => {
+  (err: unknown, _req: Request, res: Response, next: NextFunction) => {
     logger.error({ err }, "Unhandled request error");
     if (res.headersSent) {
-      return;
+      return next(err);
     }
     res.status(500).json({ error: "Internal server error" });
   },
