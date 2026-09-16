@@ -152,7 +152,7 @@ export NATIVE_SMOKE_CALL_SCREENSHOT_DIR="$RESULTS_DIR/call-surface"
 mkdir -p "$NATIVE_SMOKE_SCREENSHOT_DIR" "$NATIVE_SMOKE_CALL_SCREENSHOT_DIR"
 if [[ -n "${NATIVE_SMOKE_BUILD_ID:-}" ]]; then
   printf '%s\n' "$NATIVE_SMOKE_BUILD_ID" > "$RESULTS_DIR/candidate-build-id.txt"
-  bash "$WRITE_REVIEW_RECORD_TEMPLATE" \
+  source "$WRITE_REVIEW_RECORD_TEMPLATE" \
     "$RESULTS_DIR/review-record.template.txt" \
     "$PLATFORM" \
     "$NATIVE_SMOKE_BUILD_ID"
