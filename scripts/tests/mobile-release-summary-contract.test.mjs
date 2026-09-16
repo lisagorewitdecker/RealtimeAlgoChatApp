@@ -128,6 +128,13 @@ const scriptContracts = {
     evidenceDirectoryVariable: null,
     requiresPrivateValues: false,
   },
+  "scripts/summarize-native-branding.sh": {
+    diagnosticFunction: "report_error",
+    diagnosticVariableAllowlist: ["PLATFORM"],
+    summaryFunction: "write_summary",
+    evidenceDirectoryVariable: null,
+    requiresPrivateValues: false,
+  },
 };
 
 /**
@@ -293,7 +300,7 @@ function classifySecretSource(source) {
 
 const allSteps = listSteps();
 const secretBearingEnv = collectSecretBearingEnv();
-const summarySteps = allSteps.filter(
+const directSummarySteps = allSteps.filter(
   ({ step }) =>
     typeof step.run === "string" && step.run.includes("GITHUB_STEP_SUMMARY"),
 );
@@ -522,6 +529,13 @@ const summaryWritingScripts = [...invokedScripts.keys()]
 function invokingSteps(relativePath) {
   return [...(invokedScripts.get(relativePath)?.invokedBy ?? [])];
 }
+
+const summarySteps = [
+  ...directSummarySteps,
+  ...invokingSteps("scripts/summarize-native-branding.sh").filter(
+    (candidate) => !directSummarySteps.includes(candidate),
+  ),
+];
 
 /** Private variable names a script receives from the workflow, by class. */
 function privateNamesFor(relativePath) {
@@ -1234,8 +1248,19 @@ test("publish requires candidate-bound approvals from the current run attempt", 
   assert.equal(
     workflow.permissions.actions,
     "read",
-    "the workflow needs read-only Actions access to verify environment reviews",
+    "pull-request jobs must retain read-only Actions access",
   );
+  for (const jobId of [
+    "native-ios",
+    "native-android",
+    "idle-profile-registration",
+  ]) {
+    assert.equal(
+      workflow.jobs[jobId].permissions.actions,
+      "write",
+      `${jobId} needs scoped Actions write access to replace its release artifact`,
+    );
+  }
   assert.equal(
     publishSteps[approvalIndex].env.GH_TOKEN,
     "${{ github.token }}",
@@ -2562,6 +2587,7 @@ function makeCommandDirectory(name, utilities) {
 
 const iosUtilityNames = [
   "awk",
+  "bash",
   "cat",
   "date",
   "dirname",

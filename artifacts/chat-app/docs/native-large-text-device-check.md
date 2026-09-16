@@ -71,6 +71,11 @@ It is available from **Actions → Mobile release accessibility gate**, and also
 runs for tags matching `mobile-v*`. The workflow has separate jobs for prepared
 smallest-size simulators:
 
+The GitHub `main` branch is the source of truth for this workflow. Before a
+release run, reconcile project changes with `main` and push the resulting
+`.github/workflows/mobile-release.yml`; do not run a release from a workspace
+copy or another branch that has not been synchronized with `main`.
+
 - The Android workflow first runs `scripts/check-android-release-prerequisites.sh`
   as a fast runner preflight. It reports
   `ANDROID_RELEASE_PREFLIGHT=BLOCKED` with each missing tool, secret, device, or
