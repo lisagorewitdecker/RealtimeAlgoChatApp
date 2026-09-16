@@ -1036,9 +1036,11 @@ malicious_duplicate_field_summary_path="$TEST_ROOT/malicious-duplicate-field-sum
 newline_field_name=$'native-newline-field\nforged-log-line'
 tab_field_name=$'native-tab-field\tforged-log-column'
 terminal_control_field_name=$'native-terminal-field\033[31m'
-printf '%s=first\n%s=second\n' "$newline_field_name" "$newline_field_name" >> "$malicious_duplicate_metadata_path"
-printf '%s=first\n%s=second\n' "$tab_field_name" "$tab_field_name" >> "$malicious_duplicate_metadata_path"
-printf '%s=first\n%s=second\n' "$terminal_control_field_name" "$terminal_control_field_name" >> "$malicious_duplicate_metadata_path"
+{
+  printf '%s=first\n%s=second\n' "$newline_field_name" "$newline_field_name"
+  printf '%s=first\n%s=second\n' "$tab_field_name" "$tab_field_name"
+  printf '%s=first\n%s=second\n' "$terminal_control_field_name" "$terminal_control_field_name"
+} >> "$malicious_duplicate_metadata_path"
 if malicious_duplicate_field_output="$(
   GITHUB_STEP_SUMMARY="$malicious_duplicate_field_summary_path" \
     bash "$CHECKER" "$malicious_duplicate_field_root" 2>&1
