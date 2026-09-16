@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { chmod, mkdir, writeFile } from "node:fs/promises";
 import path, { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -536,25 +536,37 @@ function isEvidenceVerificationRequest(cliOptions, env) {
   );
 }
 
-function shouldRunRemoteVerification(cliOptions, env) {
+function canFallbackToRemoteVerification(error, cliOptions, env) {
+  const evidencePath = env.SENTRY_EVIDENCE_PATH;
+  const derivedTriggerPath = evidencePath
+    ? join(dirname(evidencePath), "sentry-trigger.txt")
+    : undefined;
   return (
+    Boolean(evidencePath) &&
     !cliOptions.has("evidence-path") &&
     !cliOptions.has("trigger-path") &&
     !env.SENTRY_TRIGGER_PATH &&
-    Boolean(env.SENTRY_EVIDENCE_PATH) &&
-    hasRemoteVerificationInputs(env)
+    hasRemoteVerificationInputs(env) &&
+    error &&
+    typeof error === "object" &&
+    "code" in error &&
+    error.code === "ENOENT" &&
+    !existsSync(evidencePath) &&
+    (!derivedTriggerPath || !existsSync(derivedTriggerPath))
   );
 }
 
 async function runCli(argv = process.argv.slice(2), env = process.env) {
   const cliOptions = parseArgs(argv);
-  if (shouldRunRemoteVerification(cliOptions, env)) {
-    await main(env);
-    return;
-  }
   if (isEvidenceVerificationRequest(cliOptions, env)) {
-    await runEvidenceVerification(cliOptions, env);
-    return;
+    try {
+      await runEvidenceVerification(cliOptions, env);
+      return;
+    } catch (error) {
+      if (!canFallbackToRemoteVerification(error, cliOptions, env)) {
+        throw error;
+      }
+    }
   }
   await main(env);
 }
