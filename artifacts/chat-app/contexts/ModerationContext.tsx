@@ -26,7 +26,6 @@ interface ModerationContextValue {
     roomId: string,
     targetUserId: string,
     username: string,
-    permanent?: boolean,
   ) => Promise<boolean>;
 }
 
@@ -112,7 +111,6 @@ export function ModerationProvider({ children }: { children: React.ReactNode }) 
       roomId: string,
       targetUserId: string,
       username: string,
-      permanent?: boolean,
     ): Promise<boolean> => {
       const label = isAdmin ? "Permanently ban" : "Ban for 24 hours";
       return new Promise((resolve) => {
@@ -125,16 +123,10 @@ export function ModerationProvider({ children }: { children: React.ReactNode }) 
               text: label,
               style: "destructive",
               onPress: async () => {
-                const payload: { userId: string; permanent?: boolean } = {
-                  userId: targetUserId,
-                };
-                if (isAdmin && permanent !== undefined) {
-                  payload.permanent = Boolean(permanent);
-                }
                 const ok = await modFetch(
                   `${encodeURIComponent(roomId)}/ban`,
                   "POST",
-                  payload,
+                  { userId: targetUserId },
                   getToken,
                 );
                 resolve(ok);
