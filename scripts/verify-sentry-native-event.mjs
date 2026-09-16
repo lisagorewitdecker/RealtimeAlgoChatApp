@@ -519,32 +519,11 @@ async function main(env = process.env) {
 }
 
 function isEvidenceVerificationRequest(cliOptions, env) {
-  if (
-    [
-      "evidence-path",
-      "trigger-path",
-      "expected-probe-marker",
-      "expected-release",
-      "expected-dist",
-    ].some((key) => cliOptions.has(key))
-  ) {
+  if (cliOptions.has("evidence-path")) {
     return true;
   }
 
-  if (
-    !env.SENTRY_AUTH_TOKEN &&
-    env.SENTRY_EVIDENCE_PATH &&
-    env.SENTRY_EXPECTED_PLATFORM &&
-    env.SENTRY_EXPECTED_BUILD_ID
-  ) {
-    return true;
-  }
-
-  return (
-    !env.SENTRY_AUTH_TOKEN &&
-    cliOptions.has("platform") &&
-    cliOptions.has("candidate-build-id")
-  );
+  return !env.SENTRY_AUTH_TOKEN && Boolean(env.SENTRY_EVIDENCE_PATH);
 }
 
 async function runCli(argv = process.argv.slice(2), env = process.env) {
