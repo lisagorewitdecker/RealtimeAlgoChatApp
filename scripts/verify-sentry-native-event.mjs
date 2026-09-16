@@ -190,9 +190,10 @@ function normalizeSentryApiBaseUrl(apiBaseUrl) {
   if (parsedUrl.username || parsedUrl.password) {
     throw new Error("SENTRY_API_BASE_URL must not contain credentials.");
   }
-  if (parsedUrl.pathname !== "/" && parsedUrl.pathname !== "") {
+  if (!/^\/*$/.test(parsedUrl.pathname)) {
     throw new Error("SENTRY_API_BASE_URL must not include a path.");
   }
+  parsedUrl.pathname = "/";
   parsedUrl.search = "";
   parsedUrl.hash = "";
   return parsedUrl;

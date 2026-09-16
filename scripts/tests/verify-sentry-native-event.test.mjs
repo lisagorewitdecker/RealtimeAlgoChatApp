@@ -182,6 +182,30 @@ test("rejects a Sentry API base URL with a path", async () => {
   );
 });
 
+test("normalizes a Sentry API base URL with only repeated root slashes", async () => {
+  const capturedUrls = [];
+  await assert.rejects(
+    () =>
+      verifyNativeSentryEvent({
+        fetchImpl: async (url) => {
+          capturedUrls.push(new URL(url));
+          return Response.json([]);
+        },
+        apiBaseUrl: "https://sentry.example//",
+        token: "test-token",
+        organization: "test-org",
+        project: "test-project",
+        expected,
+        attempts: 1,
+        intervalMs: 0,
+      }),
+    /verification timeout/,
+  );
+
+  assert.equal(capturedUrls.length, 1);
+  assert.equal(capturedUrls[0].pathname, "/api/0/projects/test-org/test-project/events/");
+});
+
 test("quotes Sentry search values before requesting events", async () => {
   const capturedUrls = [];
   await assert.rejects(
