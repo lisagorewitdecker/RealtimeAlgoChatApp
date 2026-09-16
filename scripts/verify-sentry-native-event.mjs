@@ -519,12 +519,7 @@ async function main(env = process.env) {
 }
 
 function hasRemoteVerificationInputs(env) {
-  return [
-    env.SENTRY_AUTH_TOKEN,
-    env.SENTRY_PROBE_MARKER,
-    env.SENTRY_EXPECTED_RELEASE,
-    env.SENTRY_EXPECTED_DIST,
-  ].every((value) => typeof value === "string" && value.trim() !== "");
+  return typeof env.SENTRY_AUTH_TOKEN === "string" && env.SENTRY_AUTH_TOKEN.trim() !== "";
 }
 
 function isEvidenceVerificationRequest(cliOptions, env) {
