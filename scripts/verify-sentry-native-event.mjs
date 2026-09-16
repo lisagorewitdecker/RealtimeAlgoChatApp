@@ -541,8 +541,8 @@ function canFallbackToRemoteVerification(error, cliOptions, env) {
   const { evidencePath, triggerPath } = resolveEvidenceVerificationInputs(cliOptions, env);
   return (
     Boolean(evidencePath) &&
+    !cliOptions.has("evidence-path") &&
     !cliOptions.has("trigger-path") &&
-    !env.SENTRY_TRIGGER_PATH &&
     hasRemoteVerificationInputs(env) &&
     error &&
     typeof error === "object" &&
