@@ -100,6 +100,7 @@ declare module "tweetnacl" {
   }
 
   const nacl: NaclModule;
+  export default nacl;
   export = nacl;
 }
 
