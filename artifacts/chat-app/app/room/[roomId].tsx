@@ -698,6 +698,9 @@ export default function RoomScreen() {
       if (persisted) {
         setHasRoomKey(!!getRoomKey(roomId));
       }
+    } catch {
+      // The persistence failure remains in context so the warning stays visible
+      // and the user can retry again after secure storage becomes available.
     } finally {
       setRetryingRoomKey(false);
     }
