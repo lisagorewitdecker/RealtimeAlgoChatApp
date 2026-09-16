@@ -16,6 +16,10 @@ on:
         description: Approved Android candidate build ID (must match the tested build)
         required: false
         type: string
+      node_range_override:
+        description: Optional Node range fixture for validating the release guard
+        required: false
+        type: string
   push:
     tags:
       - "mobile-v*"
@@ -29,6 +33,10 @@ on:
       native_smoke_android_build_id:
         description: Non-secret EAS build ID of the Android candidate
         required: true
+        type: string
+      node_range_override:
+        description: Optional Node range fixture for validating the release guard
+        required: false
         type: string
     secrets:
       EAS_TOKEN:
@@ -74,6 +82,78 @@ env:
   NATIVE_SMOKE_ANDROID_BUILD_ID: ${{ inputs.native_smoke_android_build_id || vars.NATIVE_SMOKE_ANDROID_BUILD_ID }}
 
 jobs:
+  mobile-release-node-range:
+    name: Validate mobile release Node range
+    if: ${{ github.event_name != 'pull_request' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out release candidate
+        uses: actions/checkout@v4
+
+      - name: Read package.json Node range
+        id: read-node-range
+        env:
+          NODE_RANGE_OVERRIDE: ${{ inputs.node_range_override }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          node_range="${NODE_RANGE_OVERRIDE:-}"
+          if [[ -z "$node_range" ]]; then
+            node_range="$(
+              node --input-type=module -e '
+              import { readFileSync } from "node:fs";
+
+              try {
+                const packageJson = JSON.parse(readFileSync("package.json", "utf8"));
+                const configuredRange = packageJson?.engines?.node;
+                if (typeof configuredRange === "string" && configuredRange.trim() !== "") {
+                  process.stdout.write(configuredRange.trim());
+                }
+              } catch {
+                // The validation step below reports malformed package.json as an invalid range.
+              }
+              '
+            )"
+          fi
+          if [[ -z "$node_range" ]]; then
+            node_range="missing or non-string value"
+          fi
+          {
+            echo "node_range<<NODE_RANGE"
+            printf '%s\n' "$node_range"
+            echo "NODE_RANGE"
+          } >> "$GITHUB_OUTPUT"
+          echo "Validating package.json engines.node range: $(printf '%q' "$node_range")"
+
+      - name: Resolve configured Node range
+        id: resolve-node-range
+        continue-on-error: true
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ steps.read-node-range.outputs.node_range }}
+
+      - name: Reject invalid Node range before release checks
+        if: ${{ always() }}
+        env:
+          NODE_RANGE: ${{ steps.read-node-range.outputs.node_range }}
+          RESOLVE_RESULT: ${{ steps.resolve-node-range.outcome }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$RESOLVE_RESULT" != "success" ]]; then
+            {
+              echo "## Mobile release Node range"
+              echo
+              echo "- Status: **FAIL**"
+              echo "- Failure: release checks were not started."
+              echo "- package.json engines.node: \`$(printf '%s' "$NODE_RANGE" | sed 's/`/\\\\`/g')\`"
+              echo "- The configured Node range is unsupported; provide a valid semver range."
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "Mobile release blocked before release checks: package.json engines.node contains an unsupported range: $(printf '%q' "$NODE_RANGE")" >&2
+            exit 1
+          fi
+          echo "Mobile release Node range is valid: $(printf '%q' "$NODE_RANGE")"
+
   android-preview-evidence:
     # Keep this display name synchronized with the required check in the repository ruleset.
     name: Android preview evidence
@@ -373,6 +453,8 @@ jobs:
   native-evidence-summary-regression:
     name: Native evidence summary regression
     if: ${{ github.event_name != 'pull_request' }}
+    needs:
+      - mobile-release-node-range
     runs-on: ubuntu-latest
     steps:
       - name: Check out release candidate
@@ -673,6 +755,8 @@ jobs:
   native-ios:
     name: Native large-text smoke (iOS)
     if: ${{ github.event_name != 'pull_request' }}
+    needs:
+      - mobile-release-node-range
     outputs:
       native_evidence_artifact_url: ${{ steps.upload-ios-native-smoke.outputs.artifact-url }}
     runs-on:
@@ -945,6 +1029,8 @@ jobs:
   android-prerequisite-preflight:
     name: Android release runner preflight
     if: ${{ github.event_name != 'pull_request' }}
+    needs:
+      - mobile-release-node-range
     runs-on:
       - self-hosted
       - linux
@@ -971,6 +1057,7 @@ jobs:
     outputs:
       native_evidence_artifact_url: ${{ steps.upload-android-native-smoke.outputs.artifact-url }}
     needs:
+      - mobile-release-node-range
       - android-prerequisite-preflight
     runs-on:
       - self-hosted
@@ -1171,6 +1258,8 @@ jobs:
   idle-profile-registration:
     name: Idle profile registration
     if: ${{ github.event_name != 'pull_request' }}
+    needs:
+      - mobile-release-node-range
     runs-on: ubuntu-latest
     environment:
       name: mobile-release
@@ -1277,11 +1366,12 @@ jobs:
 
   mobile-release-gate:
     name: Mobile release gate
-    if: ${{ always() && github.event_name != 'pull_request' }}
+    if: ${{ always() && github.event_name != 'pull_request' && needs.mobile-release-node-range.result == 'success' }}
     outputs:
       ios_native_evidence_artifact_url: ${{ needs.native-ios.outputs.native_evidence_artifact_url }}
       android_native_evidence_artifact_url: ${{ needs.native-android.outputs.native_evidence_artifact_url }}
     needs:
+      - mobile-release-node-range
       - native-ios
       - native-android
       - idle-profile-registration

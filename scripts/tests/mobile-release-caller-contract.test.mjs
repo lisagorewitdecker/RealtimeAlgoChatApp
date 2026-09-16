@@ -194,6 +194,9 @@ function assertMobileReleaseNodeVersions(releaseWorkflow, nodeRange) {
   const malformedVersions = [];
   const mismatches = [];
   for (const [jobId, job] of Object.entries(releaseWorkflow.jobs ?? {})) {
+    if (jobId === "mobile-release-node-range") {
+      continue;
+    }
     for (const step of job.steps ?? []) {
       if (String(step.uses ?? "").startsWith("actions/setup-node@")) {
         configuredJobs.push({
@@ -272,6 +275,28 @@ test("documented caller passes every required build ID through with", () => {
   }
 });
 
+test("controlled Node range validation input is optional and stays outside secrets", () => {
+  const workflowDispatchInputs = workflow.on?.workflow_dispatch?.inputs ?? {};
+  const workflowCallInputs = workflow.on?.workflow_call?.inputs ?? {};
+  for (const inputs of [workflowDispatchInputs, workflowCallInputs]) {
+    assert.equal(
+      inputs.node_range_override?.required,
+      false,
+      "controlled Node range validation must be opt-in",
+    );
+    assert.equal(
+      inputs.node_range_override?.type,
+      "string",
+      "controlled Node range validation must accept an isolated string fixture",
+    );
+  }
+  assert.equal(
+    workflow.on.workflow_call.secrets?.node_range_override,
+    undefined,
+    "the controlled Node range fixture must not cross the reusable secrets boundary",
+  );
+});
+
 test("candidate build IDs do not cross the reusable secrets boundary", () => {
   const workflowSecrets = workflow.on.workflow_call.secrets ?? {};
   const callerJob = documentedCallerJob();
@@ -348,6 +373,73 @@ test("every mobile release setup-node value stays inside the declared Node range
   );
 
   assertMobileReleaseNodeVersions(workflow, nodeRange);
+});
+
+test("invalid Node range guard blocks release jobs before setup or publish work", () => {
+  const guard = workflow.jobs?.["mobile-release-node-range"];
+  assert.ok(guard, "mobile release must validate its Node range in a dedicated guard job");
+  assert.match(
+    guard.steps?.find((step) => step.name === "Read package.json Node range")?.run,
+    /NODE_RANGE_OVERRIDE/,
+    "the guard must support an isolated controlled range fixture",
+  );
+  const resolveStep = guard.steps?.find(
+    (step) => step.name === "Resolve configured Node range",
+  );
+  assert.equal(
+    resolveStep?.["continue-on-error"],
+    true,
+    "the resolver must continue so the guard can emit its actionable diagnostic",
+  );
+  assert.equal(
+    resolveStep?.with?.["node-version"],
+    "${{ steps.read-node-range.outputs.node_range }}",
+    "the resolver must validate the selected package or fixture range",
+  );
+  const rejectStep = guard.steps?.find(
+    (step) => step.name === "Reject invalid Node range before release checks",
+  );
+  assert.equal(
+    rejectStep?.if,
+    "${{ always() }}",
+    "the invalid-range diagnostic must run after a resolver failure",
+  );
+  assert.match(
+    rejectStep?.run,
+    /package\.json engines\.node contains an unsupported range/,
+    "the failure must identify package.json engines.node",
+  );
+  assert.match(
+    rejectStep?.run,
+    /NODE_RANGE/,
+    "the failure must include the offending range",
+  );
+  for (const [jobId, job] of Object.entries(workflow.jobs ?? {})) {
+    if (
+      jobId === "mobile-release-node-range" ||
+      jobId === "android-preview-evidence" ||
+      jobId === "ios-preview-evidence" ||
+      jobId === "mobile-publish"
+    ) {
+      continue;
+    }
+    if (job.if?.includes("github.event_name != 'pull_request'")) {
+      assert.ok(
+        (job.needs ?? []).includes("mobile-release-node-range"),
+        `${jobId} must wait for the Node range guard before release work`,
+      );
+    }
+  }
+  assert.match(
+    String(workflow.jobs?.["mobile-release-gate"]?.if),
+    /needs\.mobile-release-node-range\.result == 'success'/,
+    "the release gate must not start after the Node range guard fails",
+  );
+  assert.doesNotMatch(
+    rejectStep?.run,
+    /secrets\./,
+    "the invalid-range diagnostic must not read or expose release secrets",
+  );
 });
 
 test("out-of-range mobile release Node diagnostics identify every job and version", () => {
