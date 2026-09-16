@@ -161,6 +161,8 @@ mkdir -p "$discovery_root/scripts" \
   "$discovery_android_root/20260101T000000Z" \
   "$discovery_android_root/20260102T000000Z"
 cp "$CHECKER" "$discovery_root/scripts/"
+cp "$ROOT_DIR/scripts/find-duplicate-json-object-keys.mjs" \
+  "$discovery_root/scripts/"
 cp "$ROOT_DIR/artifacts/chat-app/scripts/validate-preview-startup.mjs" \
   "$discovery_root/artifacts/chat-app/scripts/"
 write_record "$discovery_android_root/20260101T000000Z/validation-record.md" <<'EOF'
@@ -172,6 +174,45 @@ cp "$blocked_record" "$discovery_android_root/20260102T000000Z/validation-record
 cp "$blocked_preflight" "$discovery_android_root/20260102T000000Z/android-preview-preflight.json"
 default_output="$(bash "$discovery_root/scripts/check-android-preview-evidence.sh" 2>&1)"
 assert_contains "$default_output" "validation passed: $discovery_android_root/20260102T000000Z/validation-record.md"
+
+# Repository handoff records are durable review evidence even though the
+# artifact-level test-results directory is ignored by default. Keep every
+# retained record on the current four-boundary and sidecar contract; a stale
+# record must not be silently exempted because a newer record exists.
+repository_android_root="$ROOT_DIR/artifacts/chat-app/test-results/encrypted-room-recovery/android"
+repository_records=()
+if [[ -d "$repository_android_root" ]]; then
+  while IFS= read -r repository_record; do
+    repository_records+=("$repository_record")
+  done < <(find "$repository_android_root" \
+    -mindepth 2 \
+    -maxdepth 2 \
+    -type f \
+    -name validation-record.md \
+    -print |
+    sort)
+  for repository_record in "${repository_records[@]}"; do
+    if ! git -C "$ROOT_DIR" ls-files --error-unmatch -- "$repository_record" >/dev/null 2>&1; then
+      printf 'Repository Android preview validation record is not tracked: %s\n' \
+        "$repository_record" >&2
+      exit 1
+    fi
+    repository_preflight="${repository_record%/validation-record.md}/android-preview-preflight.json"
+    if [[ ! -f "$repository_preflight" ]]; then
+      printf 'Repository Android preview validation record is missing its preflight sidecar: %s\n' \
+        "$repository_preflight" >&2
+      exit 1
+    fi
+    if ! repository_output="$(
+      bash "$CHECKER" "$repository_record" "$repository_preflight" 2>&1
+    )"; then
+      printf 'Repository Android preview validation record failed the current checker: %s\n%s\n' \
+        "$repository_record" "$repository_output" >&2
+      exit 1
+    fi
+    assert_contains "$repository_output" "validation passed"
+  done
+fi
 
 empty_discovery_root="$TEST_ROOT/empty-discovery"
 mkdir -p "$empty_discovery_root/scripts" \
@@ -409,21 +450,16 @@ assert_contains "$missing_review_output" "separate Screenshot redaction review r
 write_png_with_text() {
   local output_path="$1"
   local text="$2"
-  node - "$output_path" "$text" <<'NODE'
-const fs = require("node:fs");
-
-const [, , outputPath, text] = process.argv;
-const base = Buffer.from(
-  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
-  "base64",
-);
-const iend = base.subarray(base.length - 12);
-const textData = Buffer.from(`tEXt${text}`, "utf8");
-const length = Buffer.alloc(4);
-length.writeUInt32BE(textData.length);
-const textChunk = Buffer.concat([length, textData, Buffer.alloc(4)]);
-fs.writeFileSync(outputPath, Buffer.concat([base.subarray(0, base.length - 12), textChunk, iend]));
-NODE
+  magick \
+    -size 1600x160 \
+    -background white \
+    -fill black \
+    -font DejaVu-Sans \
+    -pointsize 28 \
+    -gravity West \
+    "label:${text}" \
+    -strip \
+    "$output_path"
 }
 
 declare -A forbidden_fixtures=(
@@ -437,6 +473,12 @@ for category in account message token host; do
   forbidden_screenshot="$(dirname "$forbidden_record")/screenshots/forbidden-${category}.png"
   mkdir -p "$(dirname "$forbidden_screenshot")"
   write_png_with_text "$forbidden_screenshot" "${forbidden_fixtures[$category]}"
+  if strings -a "$forbidden_screenshot" 2>/dev/null |
+    grep -Fq -- "${forbidden_fixtures[$category]}"; then
+    printf 'Forbidden %s fixture unexpectedly remained in image metadata; test would not prove pixel inspection.\n' \
+      "$category" >&2
+    exit 1
+  fi
   sed "s#screenshots/preview-launch.png#screenshots/forbidden-${category}.png#" \
     "$pass_record" >"$forbidden_record"
   if forbidden_output="$(bash "$CHECKER" "$forbidden_record" 2>&1)"; then

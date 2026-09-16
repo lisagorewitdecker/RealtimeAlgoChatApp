@@ -208,11 +208,12 @@ The check enforces these boundaries:
 - A `PASS` record must link to an existing, non-empty PNG, JPEG, or WebP
   redacted screenshot or include a non-placeholder **exact phone error**. A
   screenshot also requires a separate `Screenshot redaction review` row with
-  status `PASS`. The checker scans printable image metadata for account
-  identifiers, message fields, token markers, and host or URL details without
-  echoing matched content; a reviewer must still inspect text rendered in the
-  pixels. A missing, empty, truncated, or non-image screenshot path does not
-  count as evidence.
+  status `PASS`. The checker scans printable image metadata and OCR text
+  rendered in the image pixels for account identifiers, message fields, token
+  markers, and host or URL details without echoing matched content. The
+  reviewer must still inspect the saved image and confirm the redaction review;
+  a missing, empty, truncated, or non-image screenshot path does not count as
+  evidence.
 - A `BLOCKED` record is valid only when a boundary row explicitly identifies
   the unavailable physical phone, native request, or other missing device
   route. Public reachability may remain `PASS`, but it cannot change the

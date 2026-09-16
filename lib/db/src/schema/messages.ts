@@ -25,6 +25,9 @@ export const messagesTable = pgTable(
     index("messages_active_room_cursor_idx")
       .on(table.roomId, table.timestampMs, table.id)
       .where(sql`${table.deletedAt} is null`),
+    index("messages_deleted_room_cursor_idx")
+      .on(table.roomId, table.deletedAt, table.id)
+      .where(sql`${table.deletedAt} is not null`),
   ],
 );
 

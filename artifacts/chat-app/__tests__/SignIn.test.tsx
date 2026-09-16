@@ -223,6 +223,20 @@ describe("default sign in", () => {
     expect(getByText("Continue with Google").props.style.fontSize).toBeCloseTo(21);
   });
 
+  it("pads the form by the device's safe-area insets rather than the web constants", () => {
+    const { getByTestId } = render(<SignInScreen />);
+
+    // The web build hard-codes 67pt top / 34pt bottom because it has no safe
+    // area to read; both native platforms must use the insets (20 top / 16
+    // bottom in this test) plus the screen's own 28pt. This suite runs under
+    // the iOS and Android Jest projects, so the Android project proves the
+    // Android status bar and gesture area are honoured too.
+    const content = StyleSheet.flatten(getByTestId("sign-in-scroll").props.contentContainerStyle);
+    expect(content.paddingTop).toBe(20 + 28);
+    expect(content.paddingBottom).toBe(16 + 28);
+    expect(content.paddingHorizontal).toBe(28);
+  });
+
   it("keeps the greeting out of password reset variants", () => {
     const { getByLabelText, getByText, queryByText } = render(<SignInScreen />);
 

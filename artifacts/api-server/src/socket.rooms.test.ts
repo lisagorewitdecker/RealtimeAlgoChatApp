@@ -13,6 +13,8 @@ const mockGetPublicKeyRecord = vi.hoisted(() => vi.fn());
 const mockGetRoomEnvelope = vi.hoisted(() => vi.fn());
 const mockLoadEncryptedMessages = vi.hoisted(() => vi.fn());
 const mockLoadEncryptedMessagesAfter = vi.hoisted(() => vi.fn());
+const mockLoadDeletedMessageIdsAfter = vi.hoisted(() => vi.fn());
+const mockKeepActiveMessageIds = vi.hoisted(() => vi.fn());
 const mockLoadEncryptedSandboxState = vi.hoisted(() => vi.fn());
 const mockSaveEncryptedMessage = vi.hoisted(() => vi.fn());
 const mockSaveEncryptedSandboxState = vi.hoisted(() => vi.fn());
@@ -37,6 +39,8 @@ vi.mock("./lib/e2eePersistence", () => ({
   getRoomEnvelope: mockGetRoomEnvelope,
   loadEncryptedMessages: mockLoadEncryptedMessages,
   loadEncryptedMessagesAfter: mockLoadEncryptedMessagesAfter,
+  loadDeletedMessageIdsAfter: mockLoadDeletedMessageIdsAfter,
+  keepActiveMessageIds: mockKeepActiveMessageIds,
   loadEncryptedSandboxState: mockLoadEncryptedSandboxState,
   saveEncryptedMessage: mockSaveEncryptedMessage,
   saveEncryptedSandboxState: mockSaveEncryptedSandboxState,
@@ -84,6 +88,13 @@ beforeEach(async () => {
     messages: [],
     hasMore: false,
   });
+  mockLoadDeletedMessageIdsAfter.mockReset().mockResolvedValue({
+    tombstones: [],
+    hasMore: false,
+  });
+  mockKeepActiveMessageIds.mockReset().mockImplementation(
+    async (_roomId: string, ids: string[]) => new Set(ids),
+  );
   mockLoadEncryptedSandboxState.mockReset().mockResolvedValue(null);
   mockSaveEncryptedMessage.mockReset().mockResolvedValue(undefined);
   mockSaveEncryptedSandboxState.mockReset().mockResolvedValue(undefined);
@@ -641,6 +652,7 @@ describe("room Socket.IO lifecycle", () => {
       roomId,
       afterMessageId: "known-before-restart",
       afterTimestamp: 1,
+      deletedAfter: 0,
     });
     await expect(firstPage).resolves.toMatchObject({
       messages: [{ id: "missed-1" }],
@@ -657,6 +669,7 @@ describe("room Socket.IO lifecycle", () => {
       roomId,
       afterMessageId: "missed-1",
       afterTimestamp: 2,
+      deletedAfter: 0,
     });
     await expect(secondPage).resolves.toMatchObject({
       messages: [{ id: "missed-2" }],
@@ -674,6 +687,309 @@ describe("room Socket.IO lifecycle", () => {
       { id: "missed-1", timestamp: 2 },
       80,
     );
+  });
+
+  it("returns bounded deletion tombstones while recovering missed messages", async () => {
+    const roomId = `recovery-deletions-${Date.now()}`;
+    mockLoadDeletedMessageIdsAfter.mockResolvedValueOnce({
+      tombstones: [{ id: "deleted-while-offline", deletedAt: 25 }],
+      hasMore: true,
+    });
+    const client = createRoomClient("token-ben");
+    await waitForEvent(client, "connect");
+    const joined = waitForEvent(client, "room-joined");
+    client.emit("join-room", { roomId });
+    await joined;
+
+    const page = waitForEvent<{
+      deletedMessageIds: string[];
+      hasMore: boolean;
+      nextDeletionCursor: { id: string; deletedAt: number };
+    }>(client, "message-recovery-page");
+    client.emit("recover-messages", {
+      requestId: "deletion-page",
+      roomId,
+      afterMessageId: "known",
+      afterTimestamp: 10,
+      deletedAfter: 20,
+      deletedAfterId: "prior-deletion",
+    });
+
+    await expect(page).resolves.toMatchObject({
+      deletedMessageIds: ["deleted-while-offline"],
+      hasMore: true,
+      nextDeletionCursor: { id: "deleted-while-offline", deletedAt: 25 },
+    });
+    expect(mockLoadDeletedMessageIdsAfter).toHaveBeenCalledWith(
+      roomId,
+      { id: "prior-deletion", deletedAt: 20 },
+      80,
+    );
+  });
+
+  it("keeps legacy message recovery working without deletion cursor fields", async () => {
+    const roomId = `legacy-recovery-${Date.now()}`;
+    const client = createRoomClient("token-ben");
+    await waitForEvent(client, "connect");
+    const joined = waitForEvent(client, "room-joined");
+    client.emit("join-room", { roomId });
+    await joined;
+
+    const page = waitForEvent<{ messages: unknown[] }>(
+      client,
+      "message-recovery-page",
+    );
+    client.emit("recover-messages", {
+      requestId: "legacy-page",
+      roomId,
+      afterMessageId: "known",
+      afterTimestamp: 10,
+    });
+
+    await expect(page).resolves.toMatchObject({ messages: [] });
+    expect(mockLoadEncryptedMessagesAfter).toHaveBeenCalledWith(
+      roomId,
+      { id: "known", timestamp: 10 },
+      80,
+    );
+  });
+
+  it("removes rows deleted during cold room hydration before replaying them", async () => {
+    const roomId = `cold-delete-race-${Date.now()}`;
+    mockLoadEncryptedMessages.mockResolvedValueOnce([
+      {
+        id: "stale-hydrated-message",
+        ciphertext: "ciphertext",
+        nonce: "nonce",
+        userId: "user-ada",
+        username: "Ada",
+        timestamp: 10,
+        type: "text",
+        systemContent: null,
+      },
+    ]);
+    mockKeepActiveMessageIds.mockResolvedValueOnce(new Set());
+    const client = createRoomClient("token-ben");
+    await waitForEvent(client, "connect");
+    const joined = waitForEvent<{ messages: Array<{ id: string }> }>(
+      client,
+      "room-joined",
+    );
+    client.emit("join-room", { roomId });
+
+    await expect(joined).resolves.toMatchObject({ messages: [] });
+    expect(mockKeepActiveMessageIds).toHaveBeenCalledWith(roomId, [
+      "stale-hydrated-message",
+    ]);
+  });
+
+  it("preserves a message appended while cold hydration is being rechecked", async () => {
+    const roomId = `cold-recheck-append-${Date.now()}`;
+    mockLoadEncryptedMessages.mockResolvedValueOnce([
+      {
+        id: "checked-message",
+        ciphertext: "ciphertext",
+        nonce: "nonce",
+        userId: "user-ada",
+        username: "Ada",
+        timestamp: 10,
+        type: "text",
+        systemContent: null,
+      },
+    ]);
+    let resolveActiveIds!: (ids: Set<string>) => void;
+    mockKeepActiveMessageIds.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveActiveIds = resolve;
+      }),
+    );
+    const first = createRoomClient("token-ben");
+    await waitForEvent(first, "connect");
+    const firstJoined = waitForEvent(first, "room-joined");
+    first.emit("join-room", { roomId });
+    await waitFor(() => expect(mockKeepActiveMessageIds).toHaveBeenCalled());
+
+    const liveMessage = waitForEvent<{ id: string }>(first, "message");
+    first.emit("message", {
+      roomId,
+      ciphertext: "new-ciphertext",
+      nonce: "new-nonce",
+    });
+    const appended = await liveMessage;
+    resolveActiveIds(new Set(["checked-message"]));
+    await firstJoined;
+
+    const second = createRoomClient("token-cara");
+    await waitForEvent(second, "connect");
+    const secondJoined = waitForEvent<{ messages: Array<{ id: string }> }>(
+      second,
+      "room-joined",
+    );
+    second.emit("join-room", { roomId, createIfMissing: false });
+    const replay = await secondJoined;
+    expect(replay.messages.map((message) => message.id)).toEqual(
+      expect.arrayContaining(["checked-message", appended.id]),
+    );
+  });
+
+  it("holds concurrent reconnects until cold deletion reconciliation finishes", async () => {
+    const roomId = `cold-recheck-concurrent-${Date.now()}`;
+    mockLoadEncryptedMessages.mockResolvedValueOnce([
+      {
+        id: "deleted-before-attachment",
+        ciphertext: "ciphertext",
+        nonce: "nonce",
+        userId: "user-ada",
+        username: "Ada",
+        timestamp: 10,
+        type: "text",
+        systemContent: null,
+      },
+    ]);
+    let resolveActiveIds!: (ids: Set<string>) => void;
+    mockKeepActiveMessageIds.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveActiveIds = resolve;
+      }),
+    );
+    const first = createRoomClient("token-ben");
+    const second = createRoomClient("token-cara");
+    await Promise.all([
+      waitForEvent(first, "connect"),
+      waitForEvent(second, "connect"),
+    ]);
+    const firstJoined = waitForEvent<{ messages: Array<{ id: string }> }>(
+      first,
+      "room-joined",
+    );
+    const secondJoined = waitForEvent<{ messages: Array<{ id: string }> }>(
+      second,
+      "room-joined",
+    );
+    first.emit("join-room", { roomId });
+    await waitFor(() => expect(mockKeepActiveMessageIds).toHaveBeenCalled());
+    second.emit("join-room", { roomId, createIfMissing: false });
+
+    resolveActiveIds(new Set());
+    const [firstReplay, secondReplay] = await Promise.all([
+      firstJoined,
+      secondJoined,
+    ]);
+    expect(firstReplay.messages.some((message) => message.id === "deleted-before-attachment"))
+      .toBe(false);
+    expect(secondReplay.messages.some((message) => message.id === "deleted-before-attachment"))
+      .toBe(false);
+  });
+
+  it("assigns one hydration owner when reconnects start before database loading finishes", async () => {
+    const roomId = `cold-hydration-owner-${Date.now()}`;
+    let resolveLoadedMessages!: (
+      messages: Array<{
+        id: string;
+        ciphertext: string;
+        nonce: string;
+        userId: string;
+        username: string;
+        timestamp: number;
+        type: "text";
+        systemContent: null;
+      }>,
+    ) => void;
+    mockLoadEncryptedMessages.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveLoadedMessages = resolve;
+      }),
+    );
+    mockKeepActiveMessageIds.mockResolvedValueOnce(new Set());
+    const first = createRoomClient("token-ben");
+    const second = createRoomClient("token-cara");
+    await Promise.all([
+      waitForEvent(first, "connect"),
+      waitForEvent(second, "connect"),
+    ]);
+    const firstJoined = waitForEvent<{ messages: Array<{ id: string }> }>(
+      first,
+      "room-joined",
+    );
+    const secondJoined = waitForEvent<{ messages: Array<{ id: string }> }>(
+      second,
+      "room-joined",
+    );
+    first.emit("join-room", { roomId });
+    second.emit("join-room", { roomId, createIfMissing: false });
+    await waitFor(() => expect(mockLoadEncryptedMessages).toHaveBeenCalledTimes(1));
+
+    resolveLoadedMessages([
+      {
+        id: "deleted-during-load",
+        ciphertext: "ciphertext",
+        nonce: "nonce",
+        userId: "user-ada",
+        username: "Ada",
+        timestamp: 10,
+        type: "text",
+        systemContent: null,
+      },
+    ]);
+    const [firstReplay, secondReplay] = await Promise.all([
+      firstJoined,
+      secondJoined,
+    ]);
+
+    expect(mockLoadEncryptedMessages).toHaveBeenCalledTimes(1);
+    expect(firstReplay.messages.some((message) => message.id === "deleted-during-load"))
+      .toBe(false);
+    expect(secondReplay.messages.some((message) => message.id === "deleted-during-load"))
+      .toBe(false);
+  });
+
+  it("invalidates failed cold hydration before waking concurrent joins", async () => {
+    const roomId = `cold-hydration-failure-${Date.now()}`;
+    mockLoadEncryptedMessages.mockResolvedValueOnce([
+      {
+        id: "unverified-message",
+        ciphertext: "ciphertext",
+        nonce: "nonce",
+        userId: "user-ada",
+        username: "Ada",
+        timestamp: 10,
+        type: "text",
+        systemContent: null,
+      },
+    ]);
+    let rejectActiveIds!: (error: Error) => void;
+    mockKeepActiveMessageIds.mockReturnValueOnce(
+      new Promise((_resolve, reject) => {
+        rejectActiveIds = reject;
+      }),
+    );
+    const first = createRoomClient("token-ben");
+    const second = createRoomClient("token-cara");
+    await Promise.all([
+      waitForEvent(first, "connect"),
+      waitForEvent(second, "connect"),
+    ]);
+    const firstError = waitForEvent<{ message: string }>(first, "error");
+    const secondError = waitForEvent<{ message: string }>(second, "error");
+    first.emit("join-room", { roomId });
+    await waitFor(() => expect(mockKeepActiveMessageIds).toHaveBeenCalled());
+    second.emit("join-room", { roomId, createIfMissing: false });
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    rejectActiveIds(new Error("recheck failed"));
+
+    await expect(firstError).resolves.toMatchObject({
+      message: "Unable to join this room. Please try again.",
+    });
+    await expect(secondError).resolves.toMatchObject({
+      message: "Unable to join this room. Please try again.",
+    });
+
+    const retry = createRoomClient("token-dana");
+    await waitForEvent(retry, "connect");
+    const retryJoined = waitForEvent(retry, "room-joined");
+    retry.emit("join-room", { roomId, createIfMissing: false });
+    await expect(retryJoined).resolves.toMatchObject({ roomId });
+    expect(mockLoadEncryptedMessages).toHaveBeenCalledTimes(2);
   });
 
   it("does not deliver a recovery page after room access is revoked mid-read", async () => {
@@ -714,6 +1030,7 @@ describe("room Socket.IO lifecycle", () => {
       roomId,
       afterMessageId: "known",
       afterTimestamp: 1,
+      deletedAfter: 0,
     });
     await waitFor(() => expect(mockLoadEncryptedMessagesAfter).toHaveBeenCalled());
     client.emit("leave-room", { roomId });

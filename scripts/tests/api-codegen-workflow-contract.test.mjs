@@ -45,6 +45,7 @@ const compatibilityStep = steps.find(
   (step) => step.name === "Check API contract compatibility",
 );
 const generatedClientFixturePath = "lib/api-client-react/src/generated/api.ts";
+const pullRequestTrigger = workflow.on?.pull_request;
 
 function resolveRootPackageScript(command) {
   const match = String(command)
@@ -83,6 +84,23 @@ function resolveApiSpecPackageScript(command) {
   );
   return resolvedCommand;
 }
+
+test("API codegen workflow runs for the complete development pull-request event set", () => {
+  assert.ok(
+    pullRequestTrigger,
+    "the API codegen workflow must define a pull_request trigger",
+  );
+  assert.deepEqual(
+    pullRequestTrigger.branches,
+    ["development"],
+    "the API codegen workflow pull_request trigger must target the development base branch",
+  );
+  assert.deepEqual(
+    pullRequestTrigger.types,
+    ["opened", "synchronize", "reopened", "edited"],
+    "the API codegen workflow pull_request trigger must include opened, synchronize, reopened, and edited events",
+  );
+});
 
 function createGeneratedClientFixture() {
   const fixtureRoot = mkdtempSync(

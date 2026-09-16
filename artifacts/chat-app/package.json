@@ -10,33 +10,20 @@
     "preflight:release": "node scripts/build.js --preflight-only",
     "serve": "node server/serve.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "validate:preview-startup": "node scripts/validate-preview-startup.mjs",
-    "test": "jest --passWithNoTests --runInBand && pnpm run test:build-preflight && pnpm run test:branding && pnpm run test:preview-startup && pnpm run test:request-evidence",
+    "validate:preview-startup": "pnpm run test:preview-loader-compatibility && pnpm run test:preview-live-timeout && node scripts/validate-preview-startup.mjs",
+    "test": "jest --passWithNoTests --runInBand && pnpm run test:build-preflight && pnpm run test:branding && pnpm run test:sentry-upload-policy && pnpm run test:preview-startup && pnpm run test:request-evidence",
     "test:build-preflight": "node --test scripts/build.test.js",
-    "test:preview-preflight": "node --test scripts/validate-preview-startup.test.mjs scripts/validate-preview-startup-runtime-diagnostic.test.mjs",
+    "test:sentry-upload-policy": "node --test plugins/withSentryNativeUpload.test.mjs",
+    "test:preview-loader-compatibility": "node --test scripts/validate-preview-startup-runtime-diagnostic.test.mjs",
+    "test:preview-live-timeout": "node --test --test-name-pattern=\"live Metro\" scripts/validate-preview-startup.test.mjs",
+    "test:preview-preflight": "pnpm run test:preview-loader-compatibility && node --test scripts/validate-preview-startup.test.mjs",
     "test:branding": "node --test scripts/validate-branding.test.mjs",
-    "test:preview-startup": "node --test scripts/validate-preview-startup.test.mjs scripts/validate-preview-startup-runtime-diagnostic.test.mjs",
+    "test:preview-startup": "pnpm run test:preview-loader-compatibility && node --test scripts/validate-preview-startup.test.mjs",
     "test:request-evidence": "node --test scripts/metro-request-evidence.test.mjs",
     "validate:branding": "node scripts/validate-branding.mjs",
     "validate:branding:native": "node scripts/validate-branding.mjs --native",
     "test:native-large-text": "bash e2e/native-large-text/run.sh",
     "test:native-sentry": "bash e2e/sentry-source-map/run.sh"
-  },
-  "jest": {
-    "preset": "jest-expo",
-    "setupFiles": [
-      "<rootDir>/jest.setup.js"
-    ],
-    "moduleNameMapper": {
-      "^@/(.*)$": "<rootDir>/$1"
-    },
-    "testPathIgnorePatterns": [
-      "/node_modules/",
-      "<rootDir>/scripts/"
-    ],
-    "setupFilesAfterEnv": [
-      "<rootDir>/jest.setup-after-env.js"
-    ]
   },
   "devDependencies": {
     "@babel/core": "^7.29.7",
@@ -48,6 +35,7 @@
     "@react-native-async-storage/async-storage": "2.2.0",
     "@react-native/jest-preset": "0.86.3",
     "@react-native/metro-config": "0.86.3",
+    "@sentry/cli": "2.58.4",
     "@stardazed/streams-text-encoding": "^1.0.2",
     "@tanstack/react-query": "catalog:",
     "@testing-library/react-native": "^13.3.3",

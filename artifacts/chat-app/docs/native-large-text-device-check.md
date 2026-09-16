@@ -170,6 +170,8 @@ needs them and are never written to the repository or printed by the workflow.
 The candidate build IDs are recorded in each smoke result directory so the
 tested candidate can be audited by the publish job:
 
+#### Required reusable-workflow secrets
+
 - `EAS_TOKEN` — EAS authentication token used only by the publish job
 - `SENTRY_AUTH_TOKEN` — a masked Sentry token with release-upload and
   event-read access for organization `lisagorewitdecker-06`, project
@@ -179,11 +181,20 @@ tested candidate can be audited by the publish job:
 - `NATIVE_SMOKE_ANDROID_APP_ID`
 - `NATIVE_SMOKE_EMAIL`
 - `NATIVE_SMOKE_PASSWORD`
-- `NATIVE_SMOKE_DISPLAY_NAME` (optional)
 - `NATIVE_SMOKE_IOS_SENTRY_RELEASE`
 - `NATIVE_SMOKE_IOS_SENTRY_DIST`
 - `NATIVE_SMOKE_ANDROID_SENTRY_RELEASE`
 - `NATIVE_SMOKE_ANDROID_SENTRY_DIST`
+- `E2E_CHAT_URL` — browser-test target for the Chat App
+- `E2E_API_URL` — browser-test target for the API server
+- `CLERK_PUBLISHABLE_KEY` — Clerk publishable key used by the browser test target
+- `CLERK_SECRET_KEY` — Clerk secret key used by the API server during browser setup
+- `DATABASE_URL` — database connection used by the API server during browser setup
+
+#### Optional reusable-workflow secrets
+
+- `NATIVE_SMOKE_DISPLAY_NAME` — reusable display name for the smoke account; the
+  test flow can register the account without a preconfigured value
 
 Build each candidate with `SENTRY_DSN`, `SENTRY_AUTH_TOKEN`, `SENTRY_RELEASE`,
 and `SENTRY_DIST` in its EAS release environment. EAS supplies `EAS_BUILD_ID`;
