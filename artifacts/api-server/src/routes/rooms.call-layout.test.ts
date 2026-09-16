@@ -9,6 +9,16 @@ const viewports = [
   { name: "iphone-se", width: 375, height: 667 },
 ] as const;
 
+const stripScripts = (input: string): string => {
+  let sanitized = input;
+  let previous: string;
+  do {
+    previous = sanitized;
+    sanitized = sanitized.replace(/<script[\s\S]*?<\/script>/g, "");
+  } while (sanitized !== previous);
+  return sanitized;
+};
+
 describe("embedded call large-text layout", () => {
   let browser: Browser;
 
@@ -27,6 +37,15 @@ describe("embedded call large-text layout", () => {
         reducedMotion: "reduce",
         forcedColors: "active",
       });
+      const html = stripScripts(
+        buildCallHtml({
+          roomId: "native-layout-smoke",
+          userId: "user-layout-smoke",
+          username:
+            "A very long platform-specific display name for layout checking",
+          capability: "not-used-by-layout-test",
+        }),
+      );
       const html = buildCallHtml({
         roomId: "native-layout-smoke",
         userId: "user-layout-smoke",

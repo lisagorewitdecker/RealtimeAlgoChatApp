@@ -28,7 +28,7 @@ See the `pnpm-workspace` skill / `pnpm-workspace.yaml` for the full workspace la
 
 ## Running the app
 
-Each artifact has its own workflow that starts automatically in the Replit preview pane. To run things manually:
+The Replit Run button starts the `Project` workflow (defined in `.replit`), which runs `chat-app-preview-startup` and validation workflows in parallel. To run things manually:
 
 ```bash
 # Backend API + Socket.IO server
