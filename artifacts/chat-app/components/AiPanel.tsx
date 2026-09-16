@@ -36,6 +36,7 @@ const BASE = process.env["EXPO_PUBLIC_DOMAIN"]
   : "http://localhost:5000";
 
 export default function AiPanel({ roomId: _roomId }: Props) {
+  void _roomId;
   const colors = useColors();
   const { reduceMotion } = useAccessibility();
   const { getToken } = useAuth();
