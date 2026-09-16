@@ -1,4 +1,4 @@
-# RealtimeAlgoChatApp Studio
+# RealtimeAlgoChatApp
 
 RealtimeAlgoChatApp Studio is a real-time collaboration platform for developers, built around three modes in a single room: **Build** (collaborative code sandbox with an optional AI assistant), **Call** (voice/video), and **Ship** (chat and room coordination).
 
@@ -28,7 +28,7 @@ See the `pnpm-workspace` skill / `pnpm-workspace.yaml` for the full workspace la
 
 ## Running the app
 
-Each artifact has its own workflow that starts automatically in the Replit preview pane. To run things manually:
+Each artifact has its own workflow that starts automatically in the preview pane. To run things manually:
 
 ```bash
 # Backend API + Socket.IO server
