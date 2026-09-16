@@ -163,6 +163,32 @@ function documentedCallerJob() {
   return jobs[0];
 }
 
+function documentedCallerSecrets() {
+  const section = callerDocumentation.match(
+    /#### Required reusable-workflow secrets\n([\s\S]*?)\n#### Optional reusable-workflow secrets\n([\s\S]*?)\n\nBuild each candidate with/,
+  );
+  assert.ok(
+    section,
+    "the caller setup documentation must separate required and optional reusable-workflow secrets",
+  );
+
+  const parseSecretList = (list, classification) => {
+    const secrets = [...list.matchAll(/^- `([A-Z0-9_]+)`/gm)].map(
+      ([, secret]) => secret,
+    );
+    assert.ok(
+      secrets.length > 0,
+      `the caller setup documentation must list ${classification} reusable-workflow secrets`,
+    );
+    return secrets.sort();
+  };
+
+  return {
+    required: parseSecretList(section[1], "required"),
+    optional: parseSecretList(section[2], "optional"),
+  };
+}
+
 function assertMobileReleaseNodeVersions(releaseWorkflow, nodeRange) {
   const configuredJobs = [];
   const malformedVersions = [];
@@ -287,6 +313,30 @@ test("release credentials remain in the reusable workflow secrets contract", () 
       `${secret} has an unexpected workflow_call required setting`,
     );
   }
+});
+
+test("caller setup documentation lists every reusable workflow secret with its required setting", () => {
+  const workflowSecrets = workflow.on.workflow_call.secrets ?? {};
+  const documentedSecrets = documentedCallerSecrets();
+  const requiredSecrets = Object.entries(workflowSecrets)
+    .filter(([, contract]) => contract.required === true)
+    .map(([secret]) => secret)
+    .sort();
+  const optionalSecrets = Object.entries(workflowSecrets)
+    .filter(([, contract]) => contract.required !== true)
+    .map(([secret]) => secret)
+    .sort();
+
+  assert.deepEqual(
+    documentedSecrets.required,
+    requiredSecrets,
+    "the documented required secrets must exactly match required workflow_call secrets",
+  );
+  assert.deepEqual(
+    documentedSecrets.optional,
+    optionalSecrets,
+    "the documented optional secrets must exactly match optional workflow_call secrets",
+  );
 });
 
 test("every mobile release setup-node value stays inside the declared Node range", () => {
