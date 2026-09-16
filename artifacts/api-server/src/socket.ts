@@ -1,4 +1,5 @@
 import type { Server as HttpServer } from "node:http";
+import { randomUUID } from "node:crypto";
 import { verifyToken } from "@clerk/express";
 import {
   Server,
@@ -1468,7 +1469,7 @@ function setupConnectedSocket(
         return;
       }
       const msg: Message = {
-        id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        id: randomUUID(),
          ciphertext: encrypted.ciphertext,
          nonce: encrypted.nonce,
         userId: authenticatedUser.userId,
