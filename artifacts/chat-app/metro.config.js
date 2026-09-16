@@ -1,3 +1,5 @@
+/* jshint esversion: 6 */
+
 const fs = require("node:fs");
 const path = require("node:path");
 const { getSentryExpoConfig } = require("@sentry/react-native/metro");
