@@ -698,7 +698,9 @@ jobs:
           NATIVE_SMOKE_BUILD_ID: ${{ env.NATIVE_SMOKE_IOS_BUILD_ID }}
           NATIVE_SMOKE_IOS_DEVICE_UDID: ${{ env.NATIVE_SMOKE_IOS_DEVICE_UDID }}
           NATIVE_SMOKE_SUMMARY_DEFER: "1"
-        run: pnpm --filter @workspace/chat-app run test -- --runTestsByPath __tests__/Setup.test.tsx
+        run: |
+          pnpm --filter @workspace/chat-app run test -- --runTestsByPath __tests__/Setup.test.tsx
+          pnpm --filter @workspace/chat-app test:native-large-text ios
 
       - name: Send controlled iOS JavaScript error
         id: ios-sentry-trigger
@@ -1092,7 +1094,9 @@ jobs:
           NATIVE_SMOKE_PASSWORD: ${{ secrets.NATIVE_SMOKE_PASSWORD }}
           NATIVE_SMOKE_DISPLAY_NAME: ${{ secrets.NATIVE_SMOKE_DISPLAY_NAME }}
           NATIVE_SMOKE_BUILD_ID: ${{ env.NATIVE_SMOKE_ANDROID_BUILD_ID }}
-        run: pnpm --filter @workspace/chat-app run test -- --runTestsByPath __tests__/Setup.test.tsx
+        run: |
+          pnpm --filter @workspace/chat-app run test -- --runTestsByPath __tests__/Setup.test.tsx
+          pnpm --filter @workspace/chat-app test:native-large-text android
 
       - name: Send controlled Android JavaScript error
         id: android-sentry-trigger
