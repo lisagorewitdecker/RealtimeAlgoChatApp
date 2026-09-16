@@ -104,6 +104,29 @@ fi
 assert_contains "$invalid_schema_output" "does not satisfy the redacted schema"
 assert_not_contains "$invalid_schema_output" "$invalid_schema_sentinel"
 
+truncated_json_sentinel="ios-preview-truncated-preflight-sentinel"
+cat >"$json_contract_path" <<EOF
+{"schema":"ios-preview-handoff-preflight/v1","platform":"ios","boundaries":{"publicManifestReachability":{"status":"PASS","evidence":"public manifest HTTP 200 (128 bytes)"},"localHandoffProbe":{"status":"NOT_RUN","evidence":"$truncated_json_sentinel"
+EOF
+if truncated_json_output="$(bash "$CHECKER" "$json_contract_record" 2>&1)"; then
+  printf 'Truncated iOS preflight JSON unexpectedly passed.\n' >&2
+  exit 1
+fi
+assert_contains "$truncated_json_output" "does not satisfy the redacted schema"
+assert_not_contains "$truncated_json_output" "$truncated_json_sentinel"
+
+non_json_sentinel="ios-preview-non-json-preflight-sentinel"
+cat >"$json_contract_path" <<EOF
+$non_json_sentinel
+This is not a JSON preflight record.
+EOF
+if non_json_output="$(bash "$CHECKER" "$json_contract_record" 2>&1)"; then
+  printf 'Non-JSON iOS preflight content unexpectedly passed.\n' >&2
+  exit 1
+fi
+assert_contains "$non_json_output" "does not satisfy the redacted schema"
+assert_not_contains "$non_json_output" "$non_json_sentinel"
+
 cat >"$json_contract_path" <<'EOF'
 {"schema":"ios-preview-handoff-preflight/v1","platform":"ios","boundaries":{"publicManifestReachability":{"status":"GARBAGE","evidence":"public manifest HTTP 200 (128 bytes)"},"localHandoffProbe":{"status":"NOT_RUN","evidence":"Local manifest/bundle probe not run — no successful probe result was recorded"},"expoGoLaunch":{"status":"NOT_ASSESSED","evidence":"Requires a physical iPhone running stock Expo Go."},"serverNativeRequestEvidence":{"status":"NOT_ASSESSED","evidence":"Requires filtered Metro or API evidence from that physical Expo Go session."}}}
 EOF
