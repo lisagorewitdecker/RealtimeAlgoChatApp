@@ -163,6 +163,25 @@ test("rejects a credentialed Sentry API base URL", async () => {
   );
 });
 
+test("rejects a Sentry API base URL with a path", async () => {
+  await assert.rejects(
+    () =>
+      verifyNativeSentryEvent({
+        fetchImpl: async () => {
+          throw new Error("fetch should not run");
+        },
+        apiBaseUrl: "https://sentry.example/proxy/",
+        token: "test-token",
+        organization: "test-org",
+        project: "test-project",
+        expected,
+        attempts: 1,
+        intervalMs: 0,
+      }),
+    /SENTRY_API_BASE_URL must not include a path/,
+  );
+});
+
 test("quotes Sentry search values before requesting events", async () => {
   const capturedUrls = [];
   await assert.rejects(
