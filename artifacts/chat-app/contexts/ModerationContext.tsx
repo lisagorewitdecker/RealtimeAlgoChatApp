@@ -9,7 +9,6 @@ import React, {
   createContext,
   useCallback,
   useContext,
-  useEffect,
   useState,
 } from "react";
 import { Alert } from "react-native";
@@ -113,9 +112,10 @@ export function ModerationProvider({ children }: { children: React.ReactNode }) 
       roomId: string,
       targetUserId: string,
       username: string,
-      _permanent?: boolean,
+      permanent?: boolean,
     ): Promise<boolean> => {
-      const label = isAdmin ? "Permanently ban" : "Ban for 24 hours";
+      const banPermanently = isAdmin && permanent === true;
+      const label = banPermanently ? "Permanently ban" : "Ban for 24 hours";
       return new Promise((resolve) => {
         Alert.alert(
           "Ban user",
@@ -126,10 +126,16 @@ export function ModerationProvider({ children }: { children: React.ReactNode }) 
               text: label,
               style: "destructive",
               onPress: async () => {
+                const payload: { userId: string; permanent?: true } = {
+                  userId: targetUserId,
+                };
+                if (banPermanently) {
+                  payload.permanent = true;
+                }
                 const ok = await modFetch(
                   `${encodeURIComponent(roomId)}/ban`,
                   "POST",
-                  { userId: targetUserId },
+                  payload,
                   getToken,
                 );
                 resolve(ok);
