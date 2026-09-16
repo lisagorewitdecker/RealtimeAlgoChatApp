@@ -384,12 +384,11 @@ export function verifyNativeSentryEvidence({
 }
 
 async function sentryRequest(fetchImpl, url, token) {
-  const headers = {
-    Accept: "application/json",
-  };
-  headers["Author" + "ization"] = ["Bearer", token].join(" ");
   const response = await fetchImpl(url, {
-    headers,
+    headers: {
+      Accept: "application/json",
+      "Authorization": ["Bearer", token].join(" "),
+    },
   });
   if (!response.ok) {
     const error = new Error(
