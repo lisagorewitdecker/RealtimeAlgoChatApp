@@ -73,10 +73,17 @@ export const fixtureOutput = Object.freeze({
 if (fileURLToPath(import.meta.url) === process.argv[1]) {
   const fixtureName =
     process.env.PREVIEW_STARTUP_TEST_FIXTURE ?? "missing-runtime-library";
-  if (fixtureName === "handoff-server") {
+  if (
+    fixtureName === "handoff-server" ||
+    fixtureName === "handoff-server-stall-manifest" ||
+    fixtureName === "handoff-server-stall-bundle"
+  ) {
+    const stallManifest = fixtureName === "handoff-server-stall-manifest";
+    const stallBundle = fixtureName === "handoff-server-stall-bundle";
     const port = Number(process.env.PORT);
     const server = createServer((request, response) => {
       if (request.url === "/") {
+        if (stallManifest) return;
         response.setHeader("content-type", "application/json");
         response.end(
           JSON.stringify({
@@ -88,6 +95,7 @@ if (fileURLToPath(import.meta.url) === process.argv[1]) {
         return;
       }
 
+      if (stallBundle) return;
       response.setHeader("content-type", "application/javascript");
       response.end("console.log('preview validation fixture');");
     });

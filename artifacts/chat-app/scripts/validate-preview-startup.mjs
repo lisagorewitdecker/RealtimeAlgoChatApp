@@ -85,6 +85,8 @@ export const LOADER_COMPATIBILITY_MAINTENANCE_MESSAGE =
   "before relying on this diagnostic.";
 const STARTUP_TEST_FIXTURES = new Set([
   "handoff-server",
+  "handoff-server-stall-manifest",
+  "handoff-server-stall-bundle",
   "missing-runtime-library",
   "missing-runtime-library-dyld",
   "missing-runtime-library-windows",
@@ -514,6 +516,7 @@ export async function requestPublicPreviewManifest(
       { headers },
       deadline,
       (manifestResponse) => manifestResponse.text(),
+      `${timeoutMs}ms configured public preview deadline`,
     ));
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
@@ -568,7 +571,13 @@ function localBundleUrl(port, launchAssetUrl) {
   return `http://127.0.0.1:${port}${parsedUrl.pathname}${parsedUrl.search}`;
 }
 
-async function requestWithDeadline(url, options, deadline, readBody) {
+async function requestWithDeadline(
+  url,
+  options,
+  deadline,
+  readBody,
+  deadlineDescription = "configured request deadline",
+) {
   const remainingMs = deadline - Date.now();
   if (remainingMs <= 0) {
     throw new Error("request deadline exceeded before request started");
@@ -579,13 +588,17 @@ async function requestWithDeadline(url, options, deadline, readBody) {
   const abortPromise = new Promise((resolve, reject) => {
     controller.signal.addEventListener(
       "abort",
-      () => reject(deadlineAbortError ?? new Error("request aborted")),
+      () =>
+        reject(
+          deadlineAbortError ??
+            new Error(`request aborted (${deadlineDescription})`),
+        ),
       { once: true },
     );
   });
   const abortTimer = setTimeout(() => {
     deadlineAbortError = new Error(
-      "request aborted by deadline (configured request deadline)",
+      `request aborted by deadline (${deadlineDescription})`,
     );
     controller.abort(deadlineAbortError);
   }, remainingMs);
@@ -636,6 +649,7 @@ export async function requestLocalHandoffProbe(
         { headers },
         deadline,
         (response) => response.text(),
+        `${timeoutMs}ms configured local handoff deadline`,
       );
       const { response: manifestResponse, body: manifestBody } =
         manifestRequest;
@@ -666,6 +680,7 @@ export async function requestLocalHandoffProbe(
         { headers },
         deadline,
         (response) => response.arrayBuffer(),
+        `${timeoutMs}ms configured local handoff deadline`,
       );
       const { response: bundleResponse, body: bundleBody } = bundleRequest;
       outcome.bundle = formatRequestOutcome(
@@ -838,15 +853,18 @@ async function validateLivePreview(
     if (stopRequested) return;
     stopRequested = true;
     const processGroupId = child.pid;
-    if (child.exitCode === null) {
-      if (process.platform === "win32" || !processGroupId) {
-        child.kill("SIGTERM");
-      } else {
-        try {
-          process.kill(-processGroupId, "SIGTERM");
-        } catch (error) {
-          if (error.code !== "ESRCH") throw error;
-        }
+    if (child.exitCode !== null) return;
+    child.once("close", () => {
+      clearTimeout(closeTimer);
+      closeTimer = undefined;
+    });
+    if (process.platform === "win32" || !processGroupId) {
+      child.kill("SIGTERM");
+    } else {
+      try {
+        process.kill(-processGroupId, "SIGTERM");
+      } catch (error) {
+        if (error.code !== "ESRCH") throw error;
       }
     }
     closeTimer = setTimeout(() => {
@@ -858,6 +876,7 @@ async function validateLivePreview(
         if (error.code !== "ESRCH") throw error;
       }
     }, 2_000);
+    closeTimer.unref();
   };
 
   return new Promise((resolveResult, rejectResult) => {

@@ -50,6 +50,76 @@ function mockFetch(response) {
   };
 }
 
+function runLiveMetroTimeoutFixture(fixtureName, expectedResource) {
+  const directory = mkdtempSync(join(tmpdir(), "preview-live-timeout-"));
+  const preloadPath = join(directory, "mock-public-preview.mjs");
+  writeFileSync(
+    preloadPath,
+    `const originalFetch = globalThis.fetch;
+globalThis.fetch = async (url, options = {}) => {
+  if (String(url).startsWith("https://public-preview.test/")) {
+    return new Response(
+      JSON.stringify({
+        launchAsset: {
+          url: "https://public-preview.test/_expo/static/js/bundle",
+        },
+      }),
+      { status: 200 },
+    );
+  }
+  return originalFetch(url, options);
+};
+`,
+    "utf8",
+  );
+
+  try {
+    const startedAt = Date.now();
+    const result = spawnSync(process.execPath, [validatorPath], {
+      env: {
+        ...process.env,
+        NODE_OPTIONS: [
+          process.env.NODE_OPTIONS,
+          `--import ${preloadPath}`,
+        ]
+          .filter(Boolean)
+          .join(" "),
+        PREVIEW_PUBLIC_URL: "https://public-preview.test/expo",
+        PREVIEW_PUBLIC_TIMEOUT_MS: "100",
+        PREVIEW_HANDOFF_TIMEOUT_MS: "40",
+        PREVIEW_STARTUP_TIMEOUT_MS: "1000",
+        PREVIEW_STARTUP_TEST_FIXTURE: fixtureName,
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+      timeout: 4_000,
+    });
+    const output =
+      result.stdout.toString() + result.stderr.toString();
+
+    assert.notEqual(
+      result.error?.code,
+      "ETIMEDOUT",
+      `${fixtureName} left the handoff command running indefinitely`,
+    );
+    assert.notEqual(result.status, 0, output);
+    assert.ok(
+      Date.now() - startedAt < 3_000,
+      `${fixtureName} exceeded the bounded recovery window`,
+    );
+    assert.match(output, /public_manifest_reachability=PASS/);
+    assert.match(output, /local_handoff_probe=FAIL/);
+    assert.match(output, expectedResource);
+    assert.match(output, /40ms configured local handoff deadline/);
+    assert.match(output, /request aborted by deadline/);
+    assert.match(
+      output,
+      /Restart or repair the managed Chat App\/Expo workflow/,
+    );
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+}
+
 test("accepts a public HTTP 200 manifest and sends the Android Expo header", async () => {
   const fetchMock = mockFetch(
     new Response(
@@ -425,6 +495,26 @@ test(
       globalThis.fetch = originalFetch;
     }
   },
+);
+
+test(
+  "live Metro manifest timeout exits with the timed-out resource and recovery guidance",
+  { timeout: 5_000 },
+  () =>
+    runLiveMetroTimeoutFixture(
+      "handoff-server-stall-manifest",
+      /manifest request did not complete/,
+    ),
+);
+
+test(
+  "live Metro bundle timeout exits with the timed-out resource and recovery guidance",
+  { timeout: 5_000 },
+  () =>
+    runLiveMetroTimeoutFixture(
+      "handoff-server-stall-bundle",
+      /bundle request did not complete/,
+    ),
 );
 
 test("reports missing public preview configuration before making a request", async () => {
