@@ -56,7 +56,8 @@ export default function ChatsScreen() {
         setRooms(data.rooms ?? []);
       }
     } catch (_) {
-    } finally {
+      // Keep the last successful room list visible when a refresh fails.
+    }
       setLoading(false);
       setRefreshing(false);
     }
