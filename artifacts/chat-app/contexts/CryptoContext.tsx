@@ -23,6 +23,7 @@ const ROOM_KEY_SAVE_FAILURE_MESSAGE =
   "Keep this room open, make secure storage available, and retry before continuing.";
 const ROOM_KEY_LOAD_FAILURE_MESSAGE =
   "This device could not read its saved encryption keys. Make secure storage available, then retry.";
+const transientWebCryptoStorage = new Map<string, string>();
 
 function waitForRetry(delayMs: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, delayMs));
@@ -46,17 +47,16 @@ function isRoomKey(candidate: Uint8Array): boolean {
 
 // Native secure storage rejects the ":" separators used in the logical keys
 // above, so they are encoded (see lib/secureStorageKey.ts). Web keeps the
-// logical key because browser storage already holds data under it.
+// logical key but only in memory for this JS session so device and room keys
+// are never persisted as cleartext in browser storage.
 async function getStored(key: string) {
   return Platform.OS === "web"
-    ? globalThis.localStorage?.getItem(key) ?? null
+    ? transientWebCryptoStorage.get(key) ?? null
     : SecureStore.getItemAsync(toSecureStoreKey(key));
 }
 async function setStored(key: string, value: string) {
   if (Platform.OS === "web") {
-    const storage = globalThis.localStorage;
-    if (!storage) throw new Error("Browser storage is unavailable.");
-    storage.setItem(key, value);
+    transientWebCryptoStorage.set(key, value);
   } else {
     await SecureStore.setItemAsync(toSecureStoreKey(key), value);
   }
