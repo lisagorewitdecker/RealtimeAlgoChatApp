@@ -68,7 +68,8 @@ declare module "tweetnacl" {
     interface keyPair {
       (): SignKeyPair;
       fromSecretKey(secretKey: Uint8Array): SignKeyPair;
-      fromSeed(secretKey: Uint8Array): SignKeyPair;
+      // Runtime requires seed.length === sign.seedLength.
+      fromSeed(seed: Uint8Array): SignKeyPair;
     }
   }
 
