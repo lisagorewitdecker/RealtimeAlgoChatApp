@@ -14,7 +14,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import RoomCard from "@/components/RoomCard";
-import { PRODUCT_NAME } from "@/constants/branding";
+import { PRODUCT_SHORT_NAME } from "@/constants/branding";
 import { useApp } from "@/contexts/AppContext";
 import { ScaledText as Text } from "@/components/ScaledText";
 import { useColors } from "@/hooks/useColors";
@@ -105,7 +105,7 @@ export default function ChatsScreen() {
       >
         <View style={styles.headerCopy}>
           <Text style={[styles.title, { color: colors.foreground }]}>
-            {PRODUCT_NAME}
+            {PRODUCT_SHORT_NAME}
           </Text>
           <Text
             accessibilityRole="header"

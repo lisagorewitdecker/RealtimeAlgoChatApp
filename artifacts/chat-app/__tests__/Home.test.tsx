@@ -89,7 +89,7 @@ describe("home screen", () => {
       await Promise.resolve();
     });
 
-    expect(getByText("RealtimeAlgoChatApp Studio").props.style.fontSize).toBeCloseTo(39.2);
+    expect(getByText("RealtimeAlgoChatApp").props.style.fontSize).toBeCloseTo(39.2);
     expect(getByText("welcome back").props.style.fontSize).toBeCloseTo(28);
   });
 });
