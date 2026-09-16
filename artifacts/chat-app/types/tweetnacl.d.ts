@@ -1,15 +1,15 @@
 declare module "tweetnacl" {
-  export interface BoxKeyPair {
+  interface BoxKeyPair {
     publicKey: Uint8Array;
     secretKey: Uint8Array;
   }
 
-  export interface SignKeyPair {
+  interface SignKeyPair {
     publicKey: Uint8Array;
     secretKey: Uint8Array;
   }
 
-  export interface SecretBox {
+  interface SecretBox {
     (msg: Uint8Array, nonce: Uint8Array, key: Uint8Array): Uint8Array;
     open(box: Uint8Array, nonce: Uint8Array, key: Uint8Array): Uint8Array | null;
     readonly keyLength: number;
@@ -17,29 +17,31 @@ declare module "tweetnacl" {
     readonly overheadLength: number;
   }
 
-  export interface ScalarMult {
+  interface ScalarMult {
     (n: Uint8Array, p: Uint8Array): Uint8Array;
     base(n: Uint8Array): Uint8Array;
     readonly scalarLength: number;
     readonly groupElementLength: number;
   }
 
-  export interface BoxOpen {
-    (
-      msg: Uint8Array,
-      nonce: Uint8Array,
-      publicKey: Uint8Array,
-      secretKey: Uint8Array,
-    ): Uint8Array | null;
-    after(box: Uint8Array, nonce: Uint8Array, key: Uint8Array): Uint8Array | null;
+  namespace BoxProps {
+    interface Open {
+      (
+        box: Uint8Array,
+        nonce: Uint8Array,
+        publicKey: Uint8Array,
+        secretKey: Uint8Array,
+      ): Uint8Array | null;
+      after(box: Uint8Array, nonce: Uint8Array, key: Uint8Array): Uint8Array | null;
+    }
+
+    interface KeyPairFactory {
+      (): BoxKeyPair;
+      fromSecretKey(secretKey: Uint8Array): BoxKeyPair;
+    }
   }
 
-  export interface BoxKeyPairFactory {
-    (): BoxKeyPair;
-    fromSecretKey(secretKey: Uint8Array): BoxKeyPair;
-  }
-
-  export interface Box {
+  interface Box {
     (
       msg: Uint8Array,
       nonce: Uint8Array,
@@ -48,8 +50,8 @@ declare module "tweetnacl" {
     ): Uint8Array;
     before(publicKey: Uint8Array, secretKey: Uint8Array): Uint8Array;
     after(msg: Uint8Array, nonce: Uint8Array, key: Uint8Array): Uint8Array;
-    open: BoxOpen;
-    keyPair: BoxKeyPairFactory;
+    open: BoxProps.Open;
+    keyPair: BoxProps.KeyPairFactory;
     readonly publicKeyLength: number;
     readonly secretKeyLength: number;
     readonly sharedKeyLength: number;
@@ -57,34 +59,36 @@ declare module "tweetnacl" {
     readonly overheadLength: number;
   }
 
-  export interface DetachedSign {
-    (msg: Uint8Array, secretKey: Uint8Array): Uint8Array;
-    verify(msg: Uint8Array, sig: Uint8Array, publicKey: Uint8Array): boolean;
+  namespace SignProps {
+    interface Detached {
+      (msg: Uint8Array, secretKey: Uint8Array): Uint8Array;
+      verify(msg: Uint8Array, sig: Uint8Array, publicKey: Uint8Array): boolean;
+    }
+
+    interface KeyPairFactory {
+      (): SignKeyPair;
+      fromSecretKey(secretKey: Uint8Array): SignKeyPair;
+      fromSeed(seed: Uint8Array): SignKeyPair;
+    }
   }
 
-  export interface SignKeyPairFactory {
-    (): SignKeyPair;
-    fromSecretKey(secretKey: Uint8Array): SignKeyPair;
-    fromSeed(seed: Uint8Array): SignKeyPair;
-  }
-
-  export interface Sign {
+  interface Sign {
     (msg: Uint8Array, secretKey: Uint8Array): Uint8Array;
     open(signedMsg: Uint8Array, publicKey: Uint8Array): Uint8Array | null;
-    detached: DetachedSign;
-    keyPair: SignKeyPairFactory;
+    detached: SignProps.Detached;
+    keyPair: SignProps.KeyPairFactory;
     readonly publicKeyLength: number;
     readonly secretKeyLength: number;
     readonly seedLength: number;
     readonly signatureLength: number;
   }
 
-  export interface Hash {
+  interface Hash {
     (msg: Uint8Array): Uint8Array;
     readonly hashLength: number;
   }
 
-  export interface Nacl {
+  interface NaclModule {
     randomBytes(n: number): Uint8Array;
     secretbox: SecretBox;
     scalarMult: ScalarMult;
@@ -95,8 +99,8 @@ declare module "tweetnacl" {
     setPRNG(fn: (x: Uint8Array, n: number) => void): void;
   }
 
-  const nacl: Nacl;
-  export default nacl;
+  const nacl: NaclModule;
+  export = nacl;
 }
 
 declare module "tweetnacl-util" {
