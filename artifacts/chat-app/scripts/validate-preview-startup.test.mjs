@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import {
   closeSync,
+  existsSync,
   mkdtempSync,
   openSync,
   readFileSync,
@@ -161,6 +162,72 @@ globalThis.fetch = async (url, options = {}) => {
     assert.match(
       output,
       /Restart or repair the managed Chat App\/Expo workflow/,
+    );
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+}
+
+function runMalformedPreviewConfigurationCli(setting, value) {
+  const directory = mkdtempSync(join(tmpdir(), "preview-malformed-config-cli-"));
+  const markerPath = join(directory, "unexpected-public-request.marker");
+  const preloadPath = join(directory, "reject-public-request.mjs");
+
+  writeFileSync(
+    preloadPath,
+    `import { appendFileSync } from "node:fs";
+const markerPath = ${JSON.stringify(markerPath)};
+globalThis.fetch = async () => {
+  appendFileSync(markerPath, "public request attempted\\n");
+  throw new Error("public request should not be attempted");
+};
+`,
+    "utf8",
+  );
+
+  try {
+    const environment = {
+      ...process.env,
+      NODE_OPTIONS: [
+        process.env.NODE_OPTIONS,
+        `--import ${preloadPath}`,
+      ]
+        .filter(Boolean)
+        .join(" "),
+      PREVIEW_PUBLIC_TIMEOUT_MS: "1000",
+      PREVIEW_HANDOFF_TIMEOUT_MS: "1000",
+      PREVIEW_STARTUP_TIMEOUT_MS: "1000",
+      PREVIEW_STARTUP_TEST_FIXTURE: "handoff-server",
+    };
+    delete environment.PREVIEW_PUBLIC_URL;
+    delete environment.REPLIT_EXPO_DEV_DOMAIN;
+    environment[setting] = value;
+
+    const result = spawnSync(process.execPath, [validatorPath], {
+      env: environment,
+      stdio: ["ignore", "pipe", "pipe"],
+      timeout: 5_000,
+    });
+    const output =
+      result.stdout.toString() + result.stderr.toString();
+
+    assert.notEqual(
+      result.error?.code,
+      "ETIMEDOUT",
+      `${setting} left the preview validation command running indefinitely`,
+    );
+    assert.notEqual(result.status, 0, output);
+    assert.match(
+      output,
+      new RegExp(
+        `Public Expo preview manifest URL configuration from ${setting} is invalid`,
+      ),
+    );
+    assert.match(output, new RegExp(`\\b${setting}\\b`));
+    assert.equal(
+      existsSync(markerPath),
+      false,
+      `${setting} attempted a public request before reporting its malformed configuration`,
     );
   } finally {
     rmSync(directory, { recursive: true, force: true });
@@ -808,6 +875,20 @@ test("rejects malformed REPLIT_EXPO_DEV_DOMAIN configuration before making a req
   } finally {
     fetchMock.restore();
   }
+});
+
+test("CLI rejects malformed PREVIEW_PUBLIC_URL before making a public request", () => {
+  runMalformedPreviewConfigurationCli(
+    "PREVIEW_PUBLIC_URL",
+    "https://[invalid",
+  );
+});
+
+test("CLI rejects malformed REPLIT_EXPO_DEV_DOMAIN before making a public request", () => {
+  runMalformedPreviewConfigurationCli(
+    "REPLIT_EXPO_DEV_DOMAIN",
+    "https://[invalid",
+  );
 });
 
 test("reports the malformed higher-precedence preview setting when both are configured", async () => {
