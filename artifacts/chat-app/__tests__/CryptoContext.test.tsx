@@ -12,6 +12,7 @@ import {
 } from "../contexts/CryptoContext";
 import { toSecureStoreKey } from "../lib/secureStorageKey";
 import { SECURE_STORE_KEY_PATTERN } from "../test-utils/secureStoreKeyRule";
+import { Platform } from "react-native";
 
 const mockSecureStore = new Map<string, string>();
 let mockRandomCounter = 0;
@@ -32,6 +33,7 @@ const deviceKeypairStorageKey = (userId: string) =>
   toSecureStoreKey(`devstudio_device_keypair_v1:${userId}`);
 // Message of the native write failure simulated for the device identity.
 const mockDeviceKeyWriteError = "Keychain write failed (errSecInteractionNotAllowed)";
+const originalPlatform = Platform.OS;
 
 jest.mock("expo-secure-store", () => {
   // Same validation as the real module on iOS and Android: the keychain and
@@ -114,6 +116,7 @@ describe("CryptoProvider", () => {
   beforeEach(() => {
     mockSecureStore.clear();
     globalThis.localStorage?.clear();
+    Platform.OS = originalPlatform;
     mockRandomCounter = 0;
     mockRoomKeyWriteFailure = false;
     mockRoomKeyReadFailure = false;
@@ -280,6 +283,49 @@ describe("CryptoProvider", () => {
 
     expect(cryptoValue?.getRoomKey("room-42")).toEqual(generatedKey);
     secondView.unmount();
+  });
+
+  it("keeps web encryption keys out of localStorage while reusing them in memory", async () => {
+    Platform.OS = "web";
+    mockAuthUserId = "web-crypto-test-user";
+
+    const firstView = await renderCryptoProvider();
+    const firstPublicKey = cryptoValue?.publicKeyB64;
+    expect(firstPublicKey).toBeTruthy();
+    expect(globalThis.localStorage?.length ?? 0).toBe(0);
+
+    firstView.unmount();
+    await renderCryptoProvider();
+
+    expect(cryptoValue?.publicKeyB64).toBe(firstPublicKey);
+    expect(globalThis.localStorage?.length ?? 0).toBe(0);
+  });
+
+  it("removes legacy cleartext web crypto entries instead of recovering them", async () => {
+    Platform.OS = "web";
+    mockAuthUserId = "web-crypto-test-user";
+    const legacySecretKey = new Uint8Array(nacl.box.secretKeyLength).fill(99);
+    const legacyPublicKey = encodeBase64(
+      nacl.box.keyPair.fromSecretKey(legacySecretKey).publicKey,
+    );
+    globalThis.localStorage?.setItem(
+      "devstudio_device_keypair_v1:web-crypto-test-user",
+      JSON.stringify({ secretKey: encodeBase64(legacySecretKey), registrationVersion: 3 }),
+    );
+    globalThis.localStorage?.setItem(
+      "devstudio_roomkey:web-crypto-test-user:room-42",
+      encodeBase64(new Uint8Array(nacl.secretbox.keyLength).fill(7)),
+    );
+
+    await renderCryptoProvider();
+
+    expect(cryptoValue?.publicKeyB64).not.toBe(legacyPublicKey);
+    expect(globalThis.localStorage?.getItem("devstudio_device_keypair_v1:web-crypto-test-user")).toBeFalsy();
+    expect(globalThis.localStorage?.getItem("devstudio_roomkey:web-crypto-test-user:room-42")).toBeFalsy();
+    await act(async () => {
+      await cryptoValue?.loadRoomKey("room-42");
+    });
+    expect(cryptoValue?.getRoomKey("room-42")).toBeNull();
   });
 
   it("saves and restores keys for account and room identifiers outside the secure-store alphabet", async () => {
