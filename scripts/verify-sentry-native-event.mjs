@@ -141,8 +141,11 @@ function parseTrigger(triggerPath) {
   const seenKeys = new Set();
   const lines = readFileSync(triggerPath, "utf8")
     .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean);
+    .map((line) => line.trim());
+
+  if (lines.at(-1) === "") {
+    lines.pop();
+  }
 
   if (lines.length === 0) {
     throw new Error("trigger metadata is empty");
@@ -151,7 +154,11 @@ function parseTrigger(triggerPath) {
   const trigger = Object.fromEntries(
     lines.map((line) => {
       const separatorIndex = line.indexOf("=");
-      if (separatorIndex <= 0) {
+      if (
+        line.length === 0 ||
+        separatorIndex <= 0 ||
+        separatorIndex !== line.lastIndexOf("=")
+      ) {
         throw new Error("trigger metadata is malformed");
       }
       const key = line.slice(0, separatorIndex);
@@ -218,8 +225,17 @@ function hasCredentialLikeContent(value) {
   }
 
   return Object.entries(value).some(([key, entryValue]) => {
-    if (CREDENTIAL_FIELD_PATTERN.test(key) && typeof entryValue === "string") {
-      return entryValue.trim().length > 0;
+    if (CREDENTIAL_FIELD_PATTERN.test(key)) {
+      if (typeof entryValue === "string") {
+        return entryValue.trim().length > 0;
+      }
+      if (Array.isArray(entryValue)) {
+        return entryValue.length > 0;
+      }
+      if (entryValue && typeof entryValue === "object") {
+        return Object.keys(entryValue).length > 0;
+      }
+      return entryValue !== null && entryValue !== undefined;
     }
     return hasCredentialLikeContent(entryValue);
   });
@@ -383,7 +399,9 @@ export function verifyNativeSentryEvidence({
     typeof frame.function !== "string" ||
     !frame.function.includes(EXPECTED_PROBE_FUNCTION) ||
     !Number.isInteger(frame.line) ||
-    !Number.isInteger(frame.column)
+    frame.line <= 0 ||
+    !Number.isInteger(frame.column) ||
+    frame.column <= 0
   ) {
     throw new Error("readable source-mapped frame is missing");
   }
@@ -538,18 +556,19 @@ function isEvidenceVerificationRequest(cliOptions, env) {
 }
 
 function canFallbackToRemoteVerification(error, cliOptions, env) {
-  const { evidencePath, triggerPath } = resolveEvidenceVerificationInputs(cliOptions, env);
+  const cliEvidencePath = cliOptions.get("evidence-path");
+  const envEvidencePath = env.SENTRY_EVIDENCE_PATH;
+  const evidencePath = cliEvidencePath ?? envEvidencePath;
   return (
-    Boolean(evidencePath) &&
-    !cliOptions.has("evidence-path") &&
+    !cliEvidencePath &&
+    Boolean(envEvidencePath) &&
     !cliOptions.has("trigger-path") &&
     hasRemoteVerificationInputs(env) &&
     error &&
     typeof error === "object" &&
     "code" in error &&
     error.code === "ENOENT" &&
-    !existsSync(evidencePath) &&
-    (!triggerPath || !existsSync(triggerPath))
+    !existsSync(evidencePath)
   );
 }
 

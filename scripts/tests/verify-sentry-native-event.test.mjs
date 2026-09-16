@@ -307,53 +307,37 @@ test("rejects duplicate trigger metadata fields", async () => {
   );
 });
 
-test("accepts trigger metadata values containing '='", async () => {
+test("rejects trigger metadata values containing '='", async () => {
   const tempDir = await mkdtemp(path.join(tmpdir(), "sentry-trigger-marker-"));
   const evidencePath = path.join(tempDir, "sentry-source-map-evidence.json");
   const triggerPath = path.join(tempDir, "sentry-trigger.txt");
-  const expectedWithEquals = {
-    ...expected,
-    marker: "run-1234=ios",
-  };
 
   await writeFile(
     evidencePath,
-    `${JSON.stringify(
-      validateNativeSentryEvent(
-        eventFixture({
-          tags: [
-            { key: "mobile_sentry_probe", value: expectedWithEquals.marker },
-            { key: "mobile_platform", value: expected.platform },
-            {
-              key: "mobile_candidate_build_id",
-              value: expected.candidateBuildId,
-            },
-          ],
-        }),
-        expectedWithEquals,
-      ),
-    )}\n`,
+    `${JSON.stringify(validateNativeSentryEvent(eventFixture(), expected))}\n`,
   );
   await writeFile(
     triggerPath,
     [
       "platform=ios",
       "candidate_build_id=build-ios",
-      `marker=${expectedWithEquals.marker}`,
+      "marker=run-1234=ios",
     ].join("\n"),
   );
 
-  const evidence = verifyNativeSentryEvidence({
-    evidencePath,
-    triggerPath,
-    expectedPlatform: expected.platform,
-    expectedBuildId: expected.candidateBuildId,
-    expectedProbeMarker: expectedWithEquals.marker,
-    expectedRelease: expected.release,
-    expectedDist: expected.dist,
-  });
-
-  assert.equal(evidence.marker, expectedWithEquals.marker);
+  assert.throws(
+    () =>
+      verifyNativeSentryEvidence({
+        evidencePath,
+        triggerPath,
+        expectedPlatform: expected.platform,
+        expectedBuildId: expected.candidateBuildId,
+        expectedProbeMarker: expected.marker,
+        expectedRelease: expected.release,
+        expectedDist: expected.dist,
+      }),
+    /trigger metadata is malformed/,
+  );
 });
 
 test("rejects trigger metadata with missing required fields", async () => {
@@ -368,6 +352,32 @@ test("rejects trigger metadata with missing required fields", async () => {
   await writeFile(
     triggerPath,
     ["platform=ios", "candidate_build_id=build-ios"].join("\n"),
+  );
+
+  assert.throws(
+    () =>
+      verifyNativeSentryEvidence({
+        evidencePath,
+        triggerPath,
+        expectedPlatform: expected.platform,
+        expectedBuildId: expected.candidateBuildId,
+      }),
+    /trigger metadata is malformed/,
+  );
+});
+
+test("rejects trigger metadata containing an empty line", async () => {
+  const tempDir = await mkdtemp(path.join(tmpdir(), "sentry-trigger-empty-line-"));
+  const evidencePath = path.join(tempDir, "sentry-source-map-evidence.json");
+  const triggerPath = path.join(tempDir, "sentry-trigger.txt");
+
+  await writeFile(
+    evidencePath,
+    `${JSON.stringify(validateNativeSentryEvent(eventFixture(), expected))}\n`,
+  );
+  await writeFile(
+    triggerPath,
+    ["platform=ios", "", "candidate_build_id=build-ios", "marker=run-1234-ios"].join("\n"),
   );
 
   assert.throws(
@@ -427,6 +437,47 @@ test("rejects nested credential-bearing evidence fields", async () => {
       request: {
         headers: {
           authorization_token: "secret-value",
+        },
+      },
+    })}\n`,
+  );
+  await writeFile(
+    triggerPath,
+    [
+      "platform=ios",
+      "candidate_build_id=build-ios",
+      "marker=run-1234-ios",
+    ].join("\n"),
+  );
+
+  assert.throws(
+    () =>
+      verifyNativeSentryEvidence({
+        evidencePath,
+        triggerPath,
+        expectedPlatform: expected.platform,
+        expectedBuildId: expected.candidateBuildId,
+        expectedProbeMarker: expected.marker,
+        expectedRelease: expected.release,
+        expectedDist: expected.dist,
+      }),
+    /evidence contains credential-like content/,
+  );
+});
+
+test("rejects non-empty object values under credential-named evidence fields", async () => {
+  const tempDir = await mkdtemp(path.join(tmpdir(), "sentry-evidence-object-secret-"));
+  const evidencePath = path.join(tempDir, "sentry-source-map-evidence.json");
+  const triggerPath = path.join(tempDir, "sentry-trigger.txt");
+  const evidenceRecord = validateNativeSentryEvent(eventFixture(), expected);
+
+  await writeFile(
+    evidencePath,
+    `${JSON.stringify({
+      ...evidenceRecord,
+      request: {
+        authorization_token: {
+          value: "secret-value",
         },
       },
     })}\n`,
@@ -519,6 +570,94 @@ test("rejects credential-like token text embedded in evidence strings", async ()
   );
 });
 
+test("rejects credential-like token text embedded in parsed escaped evidence strings", async () => {
+  const tempDir = await mkdtemp(path.join(tmpdir(), "sentry-evidence-escaped-secret-"));
+  const evidencePath = path.join(tempDir, "sentry-source-map-evidence.json");
+  const triggerPath = path.join(tempDir, "sentry-trigger.txt");
+  const evidenceRecord = validateNativeSentryEvent(eventFixture(), expected);
+  const escapedDiagnostic = JSON.stringify(
+    "captured sentry_auth_token=secret-value during test",
+  ).replace("=", "\\u003d");
+
+  await writeFile(
+    evidencePath,
+    `{${[
+      `"status":"${evidenceRecord.status}"`,
+      `"eventId":"${evidenceRecord.eventId}"`,
+      `"platform":"${evidenceRecord.platform}"`,
+      `"candidateBuildId":"${evidenceRecord.candidateBuildId}"`,
+      `"marker":"${evidenceRecord.marker}"`,
+      `"release":"${evidenceRecord.release}"`,
+      `"dist":"${evidenceRecord.dist}"`,
+      `"readableFrame":${JSON.stringify(evidenceRecord.readableFrame)}`,
+      `"diagnostic":${escapedDiagnostic}`,
+    ].join(",")}}\n`,
+  );
+  await writeFile(
+    triggerPath,
+    [
+      "platform=ios",
+      "candidate_build_id=build-ios",
+      "marker=run-1234-ios",
+    ].join("\n"),
+  );
+
+  assert.throws(
+    () =>
+      verifyNativeSentryEvidence({
+        evidencePath,
+        triggerPath,
+        expectedPlatform: expected.platform,
+        expectedBuildId: expected.candidateBuildId,
+        expectedProbeMarker: expected.marker,
+        expectedRelease: expected.release,
+        expectedDist: expected.dist,
+      }),
+    /evidence contains credential-like content/,
+  );
+});
+
+test("rejects saved evidence with non-positive frame coordinates", async () => {
+  const tempDir = await mkdtemp(path.join(tmpdir(), "sentry-evidence-frame-"));
+  const evidencePath = path.join(tempDir, "sentry-source-map-evidence.json");
+  const triggerPath = path.join(tempDir, "sentry-trigger.txt");
+  const evidenceRecord = validateNativeSentryEvent(eventFixture(), expected);
+
+  await writeFile(
+    evidencePath,
+    `${JSON.stringify({
+      ...evidenceRecord,
+      readableFrame: {
+        ...evidenceRecord.readableFrame,
+        line: 0,
+        column: -1,
+      },
+    })}\n`,
+  );
+  await writeFile(
+    triggerPath,
+    [
+      "platform=ios",
+      "candidate_build_id=build-ios",
+      "marker=run-1234-ios",
+    ].join("\n"),
+  );
+
+  assert.throws(
+    () =>
+      verifyNativeSentryEvidence({
+        evidencePath,
+        triggerPath,
+        expectedPlatform: expected.platform,
+        expectedBuildId: expected.candidateBuildId,
+        expectedProbeMarker: expected.marker,
+        expectedRelease: expected.release,
+        expectedDist: expected.dist,
+      }),
+    /readable source-mapped frame is missing/,
+  );
+});
+
 test("cli uses evidence verification mode for environment-only inputs", async () => {
   const tempDir = await mkdtemp(path.join(tmpdir(), "sentry-cli-env-"));
   const evidencePath = path.join(tempDir, "sentry-source-map-evidence.json");
@@ -553,4 +692,67 @@ test("cli uses evidence verification mode for environment-only inputs", async ()
 
   assert.equal(stdout, "");
   assert.equal(stderr, "");
+});
+
+test("cli does not fall back to remote polling for an explicit missing evidence path", async () => {
+  const tempDir = await mkdtemp(path.join(tmpdir(), "sentry-cli-explicit-missing-"));
+  const evidencePath = path.join(tempDir, "missing-evidence.json");
+
+  await writeFile(
+    path.join(tempDir, "sentry-trigger.txt"),
+    [
+      "platform=ios",
+      "candidate_build_id=build-ios",
+      "marker=run-1234-ios",
+    ].join("\n"),
+  );
+
+  await assert.rejects(
+    () =>
+      execFileAsync(process.execPath, [scriptPath, "--evidence-path", evidencePath], {
+        env: {
+          ...process.env,
+          SENTRY_AUTH_TOKEN: "still-set",
+          SENTRY_API_BASE_URL: "http://sentry.example",
+          SENTRY_EXPECTED_PLATFORM: expected.platform,
+          SENTRY_EXPECTED_BUILD_ID: expected.candidateBuildId,
+          SENTRY_PROBE_MARKER: expected.marker,
+          SENTRY_EXPECTED_RELEASE: expected.release,
+          SENTRY_EXPECTED_DIST: expected.dist,
+        },
+      }),
+    /ENOENT/,
+  );
+});
+
+test("cli falls back to remote polling for a missing env evidence path even when the sibling trigger exists", async () => {
+  const tempDir = await mkdtemp(path.join(tmpdir(), "sentry-cli-env-missing-"));
+  const evidencePath = path.join(tempDir, "missing-evidence.json");
+
+  await writeFile(
+    path.join(tempDir, "sentry-trigger.txt"),
+    [
+      "platform=ios",
+      "candidate_build_id=build-ios",
+      "marker=run-1234-ios",
+    ].join("\n"),
+  );
+
+  await assert.rejects(
+    () =>
+      execFileAsync(process.execPath, [scriptPath], {
+        env: {
+          ...process.env,
+          SENTRY_AUTH_TOKEN: "still-set",
+          SENTRY_API_BASE_URL: "http://sentry.example",
+          SENTRY_EVIDENCE_PATH: evidencePath,
+          SENTRY_EXPECTED_PLATFORM: expected.platform,
+          SENTRY_EXPECTED_BUILD_ID: expected.candidateBuildId,
+          SENTRY_PROBE_MARKER: expected.marker,
+          SENTRY_EXPECTED_RELEASE: expected.release,
+          SENTRY_EXPECTED_DIST: expected.dist,
+        },
+      }),
+    /SENTRY_API_BASE_URL must use HTTPS/,
+  );
 });
