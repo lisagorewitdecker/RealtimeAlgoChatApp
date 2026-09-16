@@ -125,10 +125,16 @@ export function ModerationProvider({ children }: { children: React.ReactNode }) 
               text: label,
               style: "destructive",
               onPress: async () => {
+                const payload: { userId: string; permanent?: boolean } = {
+                  userId: targetUserId,
+                };
+                if (isAdmin && permanent !== undefined) {
+                  payload.permanent = Boolean(permanent);
+                }
                 const ok = await modFetch(
                   `${encodeURIComponent(roomId)}/ban`,
                   "POST",
-                  { userId: targetUserId, permanent: isAdmin ? Boolean(permanent) : false },
+                  payload,
                   getToken,
                 );
                 resolve(ok);

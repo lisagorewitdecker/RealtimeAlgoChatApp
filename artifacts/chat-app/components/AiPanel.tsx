@@ -35,7 +35,8 @@ const BASE = process.env["EXPO_PUBLIC_DOMAIN"]
   ? `https://${process.env["EXPO_PUBLIC_DOMAIN"]}`
   : "http://localhost:5000";
 
-export default function AiPanel({ roomId }: Props) {
+export default function AiPanel({ roomId: _roomId }: Props) {
+  void _roomId;
   const colors = useColors();
   const { reduceMotion } = useAccessibility();
   const { getToken } = useAuth();
@@ -126,7 +127,6 @@ export default function AiPanel({ roomId }: Props) {
       }
       trackEvent("ai_request_completed", {
         duration_ms: Date.now() - startedAt,
-        room_id_present: roomId.length > 0,
         prompt_length_bucket: textLengthBucket(content),
         response_length_bucket: textLengthBucket(accumulated),
       });
@@ -134,14 +134,12 @@ export default function AiPanel({ roomId }: Props) {
       if ((err as Error).name === "AbortError") {
         trackEvent("ai_request_cancelled", {
           duration_ms: Date.now() - startedAt,
-          room_id_present: roomId.length > 0,
           prompt_length_bucket: textLengthBucket(content),
         });
         return;
       }
       trackEvent("ai_request_failed", {
         duration_ms: Date.now() - startedAt,
-        room_id_present: roomId.length > 0,
         failure_type:
           err instanceof Error && err.message.startsWith("Request failed")
             ? "http"
@@ -161,7 +159,7 @@ export default function AiPanel({ roomId }: Props) {
       setLoading(false);
       abortRef.current = null;
     }
-  }, [getToken, input, loading, messages, roomId]);
+  }, [getToken, input, loading, messages]);
 
   const clearConversation = useCallback(() => {
     abortRef.current?.abort();
