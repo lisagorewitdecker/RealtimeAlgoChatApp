@@ -203,7 +203,10 @@ function normalizeSentryApiBaseUrl(apiBaseUrl) {
 
 function hasCredentialLikeContent(value) {
   if (typeof value === "string") {
-    return BEARER_TOKEN_PATTERN.test(value.trim());
+    return (
+      BEARER_TOKEN_PATTERN.test(value.trim()) ||
+      CREDENTIAL_TEXT_PATTERN.test(value)
+    );
   }
 
   if (Array.isArray(value)) {
