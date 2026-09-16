@@ -92,6 +92,21 @@ elif [[ ! -d "$SDK_ROOT" ]]; then
   record_failure "Android SDK directory does not exist: ${SDK_ROOT}"
 fi
 
+aapt2_ready=0
+if command -v aapt2 >/dev/null 2>&1; then
+  aapt2_ready=1
+elif [[ -n "$SDK_ROOT" && -d "$SDK_ROOT/build-tools" ]]; then
+  for aapt2_candidate in "$SDK_ROOT"/build-tools/*/aapt2; do
+    if [[ -x "$aapt2_candidate" ]]; then
+      aapt2_ready=1
+      break
+    fi
+  done
+fi
+if ((aapt2_ready == 0)); then
+  record_failure "Required Android SDK tool is missing: aapt2."
+fi
+
 for value in NATIVE_SMOKE_APP_ID NATIVE_SMOKE_BUILD_ID NATIVE_SMOKE_EMAIL NATIVE_SMOKE_PASSWORD; do
   check_environment_value "$value"
 done

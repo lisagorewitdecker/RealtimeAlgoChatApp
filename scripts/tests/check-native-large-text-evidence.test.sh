@@ -10,7 +10,13 @@ CLEANUP_GUARD="$TEST_PARENT/cleanup-must-not-escape-fixtures"
 SAVED_TEST_STATUS_SNAPSHOT="$TEST_PARENT/last-run.snapshot.json"
 mkdir -p "$TEST_ROOT"
 printf 'keep\n' > "$CLEANUP_GUARD"
-cp "$SAVED_TEST_STATUS" "$SAVED_TEST_STATUS_SNAPSHOT"
+# .last-run.json is gitignored Playwright output; it is absent until the first
+# local browser run, so only guard it when it exists.
+if [[ -f "$SAVED_TEST_STATUS" ]]; then
+  cp "$SAVED_TEST_STATUS" "$SAVED_TEST_STATUS_SNAPSHOT"
+else
+  printf 'saved-test-status-absent\n' > "$SAVED_TEST_STATUS_SNAPSHOT"
+fi
 
 cleanup_test_fixtures() {
   rm -rf "$TEST_ROOT"
@@ -19,7 +25,8 @@ cleanup_test_fixtures() {
     echo "Native evidence test cleanup escaped its fixture directory" >&2
     return 1
   fi
-  if ! cmp -s "$SAVED_TEST_STATUS_SNAPSHOT" "$SAVED_TEST_STATUS"; then
+  if [[ "$(cat "$SAVED_TEST_STATUS_SNAPSHOT")" != "saved-test-status-absent" ]] &&
+    ! cmp -s "$SAVED_TEST_STATUS_SNAPSHOT" "$SAVED_TEST_STATUS"; then
     echo "Native evidence test cleanup changed the saved API test status" >&2
     return 1
   fi

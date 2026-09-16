@@ -90,33 +90,192 @@ smallest-size simulators:
 - The Android evidence job repeats the final device checks because separate
   self-hosted jobs may be assigned to different runners.
 
-For a new Linux x86_64 runner, install the host prerequisites before running the
-bootstrap script: Java 17 or newer, pnpm `10.26.1`, and Maestro. On an Ubuntu
-runner, the host setup is typically:
+For a new Linux x86_64 runner, create the service account before any
+user-scoped SDK, AVD, or Maestro installation. Install the host prerequisites
+as root, but run the bootstrap as `actions` so its `$HOME` is the same home
+used by the emulator service:
 
 ```sh
+export RUNNER_USER=actions
+sudo useradd --create-home --shell /bin/bash "$RUNNER_USER" 2>/dev/null || true
+sudo usermod --append --groups kvm "$RUNNER_USER"
 sudo apt-get update
-sudo apt-get install -y curl unzip coreutils openjdk-17-jre-headless
-corepack enable
-corepack prepare pnpm@10.26.1 --activate
-curl -Ls https://get.maestro.mobile.dev | bash
+sudo apt-get install -y curl unzip coreutils git openjdk-17-jre-headless
+sudo corepack enable
+sudo corepack prepare pnpm@10.26.1 --activate
+sudo -u "$RUNNER_USER" -H bash -lc 'curl -Ls https://get.maestro.mobile.dev | bash'
+if [ ! -d /home/"$RUNNER_USER"/RealtimeAlgoChatApp/.git ]; then
+  sudo -u "$RUNNER_USER" -H git clone \
+    https://github.com/lisagorewitdecker/RealtimeAlgoChatApp.git \
+    /home/"$RUNNER_USER"/RealtimeAlgoChatApp
+fi
 ```
 
 Then provision the Android SDK and small portrait AVD, using a checksum obtained
-from the pinned Android command-line-tools release:
+from the pinned Android command-line-tools release. Replace the checksum
+placeholder with the published value before running this block:
 
 ```sh
-ANDROID_CMDLINE_TOOLS_SHA256=<release-checksum> \
-  ./scripts/provision-android-runner.sh --install-sdk
-./scripts/provision-android-runner.sh --start-emulator
-./scripts/provision-android-runner.sh
+sudo -u "$RUNNER_USER" -H bash -lc '
+  cd "$HOME/RealtimeAlgoChatApp"
+  ANDROID_CMDLINE_TOOLS_SHA256=REPLACE_WITH_RELEASE_CHECKSUM \
+    ./scripts/provision-android-runner.sh --install-sdk
+'
 ```
 
-The final command is a read-only readiness check. It must report `adb`,
-`sdkmanager`, `avdmanager`, `emulator`, Java, pnpm, and Maestro as available.
+The final readiness check below is read-only. It must report `adb`,
+`sdkmanager`, `avdmanager`, `emulator`, `aapt2`, Java, pnpm, and Maestro as
+available.
 For a physical-device supplement, use the same host-tool check but connect the
 representative phone over adb; the small-emulator size restriction applies to
 the automated gate, not to the separate physical-device review.
+
+### Registering and keeping the Linux runner online
+
+The SDK bootstrap does not register a GitHub Actions runner. Register the
+runner on the Linux host after the host and emulator checks pass. Keep the
+runner directory outside the application checkout:
+
+```sh
+sudo install --directory --owner="$RUNNER_USER" --group="$RUNNER_USER" /opt/actions-runner
+```
+
+Install the pinned GitHub runner release and verify its published digest before
+extracting it. The release asset and digest below are the pinned Linux x64
+runner used by this procedure; update both together when rotating the runner:
+
+```sh
+cd /opt/actions-runner
+RUNNER_VERSION=2.337.0
+RUNNER_ARCHIVE="actions-runner-linux-x64-${RUNNER_VERSION}.tar.gz"
+sudo -u "$RUNNER_USER" curl --fail --location --silent --show-error \
+  "https://github.com/actions/runner/releases/download/v${RUNNER_VERSION}/${RUNNER_ARCHIVE}" \
+  --output "$RUNNER_ARCHIVE"
+printf '%s  %s\n' \
+  70920811a4f8ad4328818682bca5c6469c1c942fab52448868071d0063816613 \
+  "$RUNNER_ARCHIVE" | sha256sum --check --status
+sudo -u "$RUNNER_USER" tar --extract --gzip --file "$RUNNER_ARCHIVE"
+sudo rm "$RUNNER_ARCHIVE"
+```
+
+Put the Android paths in the runner environment so the service sees the same
+tools as an interactive shell:
+
+```sh
+sudo tee /opt/actions-runner/.env >/dev/null <<'EOF'
+HOME=/home/actions
+ANDROID_SDK_ROOT=/home/actions/android-sdk
+ANDROID_HOME=/home/actions/android-sdk
+PATH=/home/actions/.maestro/bin:/home/actions/android-sdk/platform-tools:/home/actions/android-sdk/emulator:/home/actions/android-sdk/cmdline-tools/latest/bin:/home/actions/android-sdk/build-tools/35.0.0:/usr/local/bin:/usr/bin:/bin
+EOF
+sudo chown "$RUNNER_USER":"$RUNNER_USER" /opt/actions-runner/.env
+```
+
+Request a short-lived registration token with an authenticated GitHub CLI
+session, configure the exact labels expected by `mobile-release.yml`, then
+remove the token from the shell environment:
+
+```sh
+cd /opt/actions-runner
+RUNNER_TOKEN="$(gh api --method POST \
+  repos/lisagorewitdecker/RealtimeAlgoChatApp/actions/runners/registration-token \
+  --jq .token)"
+sudo -u "$RUNNER_USER" -H ./config.sh \
+  --unattended \
+  --url https://github.com/lisagorewitdecker/RealtimeAlgoChatApp \
+  --token "$RUNNER_TOKEN" \
+  --name android-release-linux \
+  --labels self-hosted,linux,android,smallest-simulator \
+  --work _work
+unset RUNNER_TOKEN
+sudo ./svc.sh install "$RUNNER_USER"
+```
+
+Keep the emulator available before the Actions service starts, and make the
+runner wait for Android boot completion. First install this root-owned wait
+helper:
+
+```sh
+sudo tee /usr/local/sbin/wait-for-android-native-emulator >/dev/null <<'EOF'
+#!/bin/sh
+set -eu
+adb=/home/actions/android-sdk/platform-tools/adb
+"$adb" wait-for-device
+while [ "$("$adb" shell getprop sys.boot_completed | tr -d '\r')" != "1" ]; do
+  sleep 2
+done
+"$adb" shell settings put system accelerometer_rotation 0
+"$adb" shell settings put system user_rotation 0
+EOF
+sudo chmod 0755 /usr/local/sbin/wait-for-android-native-emulator
+```
+
+Use this systemd unit. Its `ExecStartPost` does not finish until Android is
+booted, so a dependent runner service cannot accept a job against a starting
+emulator:
+
+```ini
+# /etc/systemd/system/android-native-emulator.service
+[Unit]
+Description=Android native release emulator
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=actions
+Environment=HOME=/home/actions
+Environment=ANDROID_HOME=/home/actions/android-sdk
+Environment=ANDROID_SDK_ROOT=/home/actions/android-sdk
+ExecStart=/home/actions/android-sdk/emulator/emulator @native-small-api35 -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect
+ExecStartPost=/usr/bin/timeout 120 /usr/local/sbin/wait-for-android-native-emulator
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Add an ordering drop-in to the service installed by `svc.sh`. The generated
+name is stable for this repository and runner name; if the runner package
+prints a different escaped name, use that name instead:
+
+```sh
+RUNNER_SERVICE=actions.runner.lisagorewitdecker-RealtimeAlgoChatApp.android-release-linux.service
+sudo mkdir --parents "/etc/systemd/system/${RUNNER_SERVICE}.d"
+sudo tee "/etc/systemd/system/${RUNNER_SERVICE}.d/10-android-emulator.conf" >/dev/null <<'EOF'
+[Unit]
+Requires=android-native-emulator.service
+After=android-native-emulator.service
+EOF
+```
+
+After writing the unit and drop-in, start the emulator first, then the runner,
+and run the final checks as the runner user:
+
+```sh
+sudo systemctl daemon-reload
+sudo systemctl enable --now android-native-emulator.service
+RUNNER_SERVICE=actions.runner.lisagorewitdecker-RealtimeAlgoChatApp.android-release-linux.service
+sudo systemctl is-active --quiet android-native-emulator.service
+emulator_processes="$(pgrep -fc '[a]ndroid-sdk/emulator/emulator @native-small-api35')"
+if [ "$emulator_processes" -ne 1 ]; then
+  printf 'Expected exactly one systemd-managed Android emulator, found %s.\n' \
+    "$emulator_processes" >&2
+  exit 1
+fi
+sudo systemctl enable --now "$RUNNER_SERVICE"
+sudo -u actions -H bash -lc 'cd "$HOME/RealtimeAlgoChatApp" && ./scripts/provision-android-runner.sh'
+gh api repos/lisagorewitdecker/RealtimeAlgoChatApp/actions/runners \
+  --jq '.runners[] | select(.name == "android-release-linux") |
+  {name, status, busy, labels: [.labels[].name]}'
+```
+
+The API result must show `status: "online"` and all four labels. The final
+release preflight must then report `ANDROID_RELEASE_PREFLIGHT=READY` after the
+candidate APK and `mobile-release` environment values have been supplied.
+Do not run untrusted pull-request code on this public-repository runner; keep
+approval required for outside contributors and rely on the workflow's
+non-pull-request condition for the native release jobs.
 
 Store the candidate build IDs as repository-level GitHub Actions
 **variables**:

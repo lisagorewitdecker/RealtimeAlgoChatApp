@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "hello": "tsx ./src/hello.ts",
-    "test:android-preflight": "bash ./tests/check-android-release-prerequisites.test.sh",
+    "test:android-preflight": "bash ./tests/check-android-release-prerequisites.test.sh && bash ./tests/check-android-runner-procedure.test.sh",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "devDependencies": {

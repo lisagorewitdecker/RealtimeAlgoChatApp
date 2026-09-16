@@ -2824,6 +2824,7 @@ function makeAndroidCommandDirectory(name, { appInstalled }) {
     "sdkmanager",
     "avdmanager",
     "emulator",
+    "aapt2",
     "pnpm",
     "maestro",
   ]) {
