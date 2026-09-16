@@ -5,12 +5,14 @@ description: Why branches diverge after task merges, how the platform rebases ta
 Platform task merges are committed onto whichever branch is checked out in the
 workspace at merge time. If the Git pane switches branches between merges (the
 iOS app does this easily), approved work ends up split across branches even
-though every merge succeeded.
+though every merge succeeded. On 2026-09-13, a Git-pane switch from
+`production` to a task branch and then through `development` to `main` split 32
+approved merges across three workspace branches.
 
-**Why:** In one session, merges landed on `production`, then on a task's own
-`subrepl-*` branch, then on a stale `main`, then on a local Dependabot tracking
-branch — the last checkout removed every workflow from `.replit`, produced a
-broken lockfile (two `@clerk/expo` specifiers) and failed post-merge setup.
+**Why:** A branch switch during the merge session placed otherwise successful
+task merges on different tips. Rejoining the branches required comparing each
+source tip's tree because the platform rebased task branches onto whichever
+branch was checked out and the resulting squash diffs included rebase noise.
 
 **How the platform merges (observed):** it rebases the task's source branch
 onto the current HEAD (`git rebase` semantics: everything since the merge-base
@@ -62,6 +64,8 @@ break the task merge-bases, so it is not an alternative.
   and index lines without files both happen.
 - The GitHub connection status alone does not reveal that `origin` holds an
   unrelated history; check `git merge-base` before any pull/push from the pane.
+  `origin` now points to the real GitHub repository, not a stale backup mirror;
+  fetch its live refs before relying on cached tracking refs.
 - Guard `cd` in chained shell commands (`cd dir || exit 1`). The container
   restarts under memory pressure and wipes `/tmp`, so a chained command whose
   `cd` fails falls through into the workspace checkout.
