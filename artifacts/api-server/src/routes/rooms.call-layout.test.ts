@@ -33,7 +33,8 @@ describe("embedded call large-text layout", () => {
         username:
           "A very long platform-specific display name for layout checking",
         capability: "not-used-by-layout-test",
-      }).replace(/<script[\s\S]*?<\/script>/g, "");
+        includeClientScripts: false,
+      });
 
       await page.setContent(html);
       await page.addStyleTag({
