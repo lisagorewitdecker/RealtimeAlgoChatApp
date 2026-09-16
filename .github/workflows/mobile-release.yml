@@ -698,7 +698,7 @@ jobs:
           NATIVE_SMOKE_BUILD_ID: ${{ env.NATIVE_SMOKE_IOS_BUILD_ID }}
           NATIVE_SMOKE_IOS_DEVICE_UDID: ${{ env.NATIVE_SMOKE_IOS_DEVICE_UDID }}
           NATIVE_SMOKE_SUMMARY_DEFER: "1"
-        run: pnpm --filter @workspace/chat-app run test -- --runTestsByPath __tests__/Setup.test.tsx
+        run: pnpm --filter @workspace/chat-app test:native-large-text ios
 
       - name: Send controlled iOS JavaScript error
         id: ios-sentry-trigger
@@ -792,7 +792,6 @@ jobs:
               printf -- '- %s\n' "${blockers[@]}"
             fi
           } >> "$GITHUB_STEP_SUMMARY"
-        run: pnpm --filter @workspace/chat-app test:native-large-text ios
 
       - name: Send controlled iOS JavaScript error
         id: ios-sentry-trigger
@@ -1093,7 +1092,7 @@ jobs:
           NATIVE_SMOKE_PASSWORD: ${{ secrets.NATIVE_SMOKE_PASSWORD }}
           NATIVE_SMOKE_DISPLAY_NAME: ${{ secrets.NATIVE_SMOKE_DISPLAY_NAME }}
           NATIVE_SMOKE_BUILD_ID: ${{ env.NATIVE_SMOKE_ANDROID_BUILD_ID }}
-        run: pnpm --filter @workspace/chat-app run test -- --runTestsByPath __tests__/Setup.test.tsx
+        run: pnpm --filter @workspace/chat-app test:native-large-text android
 
       - name: Send controlled Android JavaScript error
         id: android-sentry-trigger
@@ -1114,7 +1113,6 @@ jobs:
           SENTRY_PROBE_MARKER: native-${{ github.run_id }}-${{ github.run_attempt }}-android
           SENTRY_EVIDENCE_PATH: ${{ env.NATIVE_SMOKE_RESULTS_DIR }}/sentry-source-map-evidence.json
         run: node scripts/verify-sentry-native-event.mjs
-        run: pnpm --filter @workspace/chat-app test:native-large-text android
 
       - name: Send controlled Android JavaScript error
         id: android-sentry-trigger
@@ -1176,10 +1174,6 @@ jobs:
               echo "- Detailed report: [native-branding-check.md](${report_url})"
             } >> "$GITHUB_STEP_SUMMARY"
           fi
-
-  mobile-release-gate:
-    name: Mobile release gate
-    if: ${{ always() }}
 
   idle-profile-registration:
     name: Idle profile registration
