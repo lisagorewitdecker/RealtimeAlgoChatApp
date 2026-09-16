@@ -528,22 +528,38 @@ function hasRemoteVerificationInputs(env) {
 }
 
 function isEvidenceVerificationRequest(cliOptions, env) {
-  if (cliOptions.has("evidence-path") || cliOptions.has("trigger-path")) {
-    return true;
-  }
+  return (
+    cliOptions.has("evidence-path") ||
+    cliOptions.has("trigger-path") ||
+    Boolean(env.SENTRY_EVIDENCE_PATH) ||
+    Boolean(env.SENTRY_TRIGGER_PATH)
+  );
+}
 
-  if (env.SENTRY_TRIGGER_PATH) {
-    return true;
-  }
-
-  return Boolean(env.SENTRY_EVIDENCE_PATH) && !hasRemoteVerificationInputs(env);
+function canFallbackToRemoteVerification(error, cliOptions, env) {
+  return (
+    !cliOptions.has("evidence-path") &&
+    !cliOptions.has("trigger-path") &&
+    !env.SENTRY_TRIGGER_PATH &&
+    hasRemoteVerificationInputs(env) &&
+    error &&
+    typeof error === "object" &&
+    "code" in error &&
+    error.code === "ENOENT"
+  );
 }
 
 async function runCli(argv = process.argv.slice(2), env = process.env) {
   const cliOptions = parseArgs(argv);
   if (isEvidenceVerificationRequest(cliOptions, env)) {
-    await runEvidenceVerification(cliOptions, env);
-    return;
+    try {
+      await runEvidenceVerification(cliOptions, env);
+      return;
+    } catch (error) {
+      if (!canFallbackToRemoteVerification(error, cliOptions, env)) {
+        throw error;
+      }
+    }
   }
   await main(env);
 }
