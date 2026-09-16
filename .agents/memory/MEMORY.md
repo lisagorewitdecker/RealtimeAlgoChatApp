@@ -62,6 +62,7 @@
 - [GitHub PR template discovery](github-pr-template-discovery.md) — validate templates on the live default branch; a correct workspace copy does not populate GitHub’s new-PR form.
 - [pnpm drizzle-orm / OpenTelemetry duplication](pnpm-drizzle-otel-duplication.md) — otel-api-dependent packages beside drizzle-orm can fork type instances; converge peers, don't externalize otel.
 - [Hook rollback replacement](hook-rollback-replacement.md) — restore preserved hooks by atomic replacement; never remove the active hook before restoration succeeds.
+- [Shared hook transaction locks](shared-hook-transaction-locks.md) — publish, release, and reclaim cross-process hook locks with atomic renames; preserve prior registrations on rollback.
 - [Playwright runtime setup](playwright-runtime-setup.md) — declare Chromium libraries through Replit Nix and launch once before diagnostics so setup failures are unmistakable.
 - [Evidence metadata duplicate detection](evidence-duplicate-detection.md) — detect duplicate keys generically (no allowlists) and mirror the producer's full field set in fixtures.
 - [Task merge against an unrelated main](task-merge-unrelated-main.md) — a rebase replaying from "Initial commit" means main HEAD was transiently swapped; abandon and retry, never resolve.
