@@ -9,7 +9,9 @@ const buildScript = path.resolve(__dirname, "build.js");
 const packageJson = require("../package.json");
 
 function extractUrls(text) {
-  return text.match(/https?:\/\/[^\s'"]+/g) ?? [];
+  return (text.match(/https?:\/\/[^\s'"]+/g) ?? []).map((value) =>
+    value.replace(/[.,;:!?)}\]]+$/u, ""),
+  );
 }
 
 function readEnvValue(filePath, key) {
