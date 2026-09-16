@@ -575,6 +575,14 @@ export function getRooms() {
   }));
 }
 
+export function resetSocketRoomStateForTest(): void {
+  if (process.env["NODE_ENV"] !== "test") {
+    throw new Error("Socket room state can only be reset by tests.");
+  }
+  rooms.clear();
+  activeServer = null;
+}
+
 export async function kickRoomMember(
   roomId: string,
   actorId: string,
