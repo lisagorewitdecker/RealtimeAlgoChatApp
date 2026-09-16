@@ -6,18 +6,101 @@ RESULTS_ROOT="${1:-$ROOT_DIR/test-results/native-large-text}"
 FAILURE_COUNT=0
 REVIEW_PENDING_PLATFORMS=()
 REVIEW_DECISIONS=()
+declare -A SUMMARY_ISSUES=([ios]="" [android]="")
+declare -A SUMMARY_NOTICES=([ios]="" [android]="")
+declare -A SUMMARY_RUN_DIR=([ios]="" [android]="")
+declare -A SUMMARY_DOWNLOAD_STATUS=([ios]="" [android]="")
+declare -A SUMMARY_NATIVE_SCREENSHOT_COUNT=([ios]=0 [android]=0)
+declare -A SUMMARY_NATIVE_EMPTY_COUNT=([ios]=0 [android]=0)
+declare -A SUMMARY_CALL_SCREENSHOT_COUNT=([ios]=0 [android]=0)
+declare -A SUMMARY_CALL_EMPTY_COUNT=([ios]=0 [android]=0)
 REQUIRE_APPROVAL="${NATIVE_EVIDENCE_REQUIRE_APPROVAL:-0}"
+NODE_BINARY="${NATIVE_EVIDENCE_NODE_BINARY:-node}"
 UTC_TIMESTAMP_PATTERN='^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$'
 TEMPLATE_PLACEHOLDER_PATTERN='^<.*>$'
+NATIVE_EVIDENCE_REPORT_NAME="native-branding-check.md"
 
 if [[ "$REQUIRE_APPROVAL" != "0" && "$REQUIRE_APPROVAL" != "1" ]]; then
   echo "NATIVE_EVIDENCE_REQUIRE_APPROVAL must be 0 or 1." >&2
   exit 2
 fi
 
+record_summary_issue() {
+  local platform="$1"
+  shift
+  SUMMARY_ISSUES["$platform"]+="$*"$'\n'
+}
+
+record_summary_notice() {
+  local platform="$1"
+  shift
+  SUMMARY_NOTICES["$platform"]+="$*"$'\n'
+}
+
+summary_safe_text() {
+  local value="$1"
+  value="$(printf '%s' "$value" | LC_ALL=C tr '\000-\011\013-\037\177' ' ' | tr '\140' "'")"
+  printf '%s' "$value"
+}
+
+summary_artifact_url() {
+  local platform="$1"
+  local artifact_url=""
+  local download_result=""
+  local download_result_is_set=0
+
+  if [[ "$platform" == "ios" ]]; then
+    artifact_url="${NATIVE_IOS_EVIDENCE_ARTIFACT_URL:-}"
+    if [[ -v NATIVE_IOS_EVIDENCE_DOWNLOAD_RESULT ]]; then
+      download_result_is_set=1
+      download_result="${NATIVE_IOS_EVIDENCE_DOWNLOAD_RESULT}"
+    fi
+  else
+    artifact_url="${NATIVE_ANDROID_EVIDENCE_ARTIFACT_URL:-}"
+    if [[ -v NATIVE_ANDROID_EVIDENCE_DOWNLOAD_RESULT ]]; then
+      download_result_is_set=1
+      download_result="${NATIVE_ANDROID_EVIDENCE_DOWNLOAD_RESULT}"
+    fi
+  fi
+
+  if ((download_result_is_set)) && [[ "$download_result" != "success" ]]; then
+    return 0
+  fi
+
+  # The URL comes from actions/upload-artifact. Keep the link target limited
+  # to the GitHub artifact page shape so evidence or other runtime text cannot
+  # become Markdown link destinations.
+  if [[ "$artifact_url" =~ ^https://[A-Za-z0-9.-]+/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/actions/runs/[0-9]+/artifacts/[0-9]+$ ]]; then
+    printf '%s' "$artifact_url"
+  fi
+}
+
+record_download_status() {
+  local platform="$1"
+  local label="$2"
+  local download_result=""
+
+  if [[ "$platform" == "ios" ]]; then
+    [[ -v NATIVE_IOS_EVIDENCE_DOWNLOAD_RESULT ]] || return 0
+    download_result="${NATIVE_IOS_EVIDENCE_DOWNLOAD_RESULT}"
+  else
+    [[ -v NATIVE_ANDROID_EVIDENCE_DOWNLOAD_RESULT ]] || return 0
+    download_result="${NATIVE_ANDROID_EVIDENCE_DOWNLOAD_RESULT}"
+  fi
+
+  if [[ "$download_result" == "success" ]]; then
+    SUMMARY_DOWNLOAD_STATUS["$platform"]="PASS"
+    return 0
+  fi
+
+  SUMMARY_DOWNLOAD_STATUS["$platform"]="FAIL"
+  issue "$platform" "The ${label} native evidence artifact download did not complete. The downloaded ${label} evidence is unavailable; rerun the release gate after the artifact is available."
+}
+
 issue() {
   local platform="$1"
   shift
+  record_summary_issue "$platform" "$*"
   printf '[%s] %s\n' "$platform" "$*" >&2
   FAILURE_COUNT=$((FAILURE_COUNT + 1))
 }
@@ -25,6 +108,7 @@ issue() {
 notice() {
   local platform="$1"
   shift
+  record_summary_notice "$platform" "$*"
   printf '[%s] %s\n' "$platform" "$*" >&2
 }
 
@@ -32,6 +116,109 @@ metadata_value() {
   local metadata_path="$1"
   local key="$2"
   sed -n "s/^${key}=//p" "$metadata_path" | head -n 1
+}
+
+# Runner metadata and pass/fail records are machine-generated key=value files
+# that declare each field once. A repeated key means two runs' output were
+# merged or the file was edited, so the checker refuses to pick either value.
+metadata_declaration_count() {
+  local metadata_path="$1"
+  local key="$2"
+  awk -v key="$key" '
+    {
+      sub(/\r$/, "")
+      if (index($0, key "=") == 1) count++
+    }
+    END { print count + 0 }
+  ' "$metadata_path"
+}
+
+metadata_key_is_unambiguous() {
+  local metadata_path="$1"
+  local key="$2"
+  (($(metadata_declaration_count "$metadata_path" "$key") <= 1))
+}
+
+# Prints the declaration count for every duplicated key, in first-seen order.
+# Do not pass the key through the diagnostic boundary: metadata is untrusted
+# input, and control characters in a field name could reshape the release log.
+duplicate_metadata_keys() {
+  local metadata_path="$1"
+  awk '
+    {
+      sub(/\r$/, "")
+      separator = index($0, "=")
+      if (separator < 2) next
+      key = substr($0, 1, separator - 1)
+      count[key]++
+      if (count[key] == 2) order[++duplicates] = key
+    }
+    END {
+      for (i = 1; i <= duplicates; i++) print count[order[i]]
+    }
+  ' "$metadata_path"
+}
+
+report_duplicate_metadata_keys() {
+  local platform="$1"
+  local metadata_path="$2"
+  local file_label="$3"
+  local file_noun="$4"
+  local count
+
+  while IFS= read -r count; do
+    [[ -n "$count" ]] || continue
+    issue "$platform" "${file_label} contains a duplicate field (${count} declarations) in ${metadata_path}. Keep each ${file_noun} field to one declaration; regenerate it from a single completed run instead of merging or editing results."
+  done < <(duplicate_metadata_keys "$metadata_path")
+}
+
+# sentry-trigger.txt is produced by the controlled probe and must contain only
+# the three declarations consumed by the source-map evidence check. Report
+# structure and line numbers, but never include the line contents or values.
+sentry_trigger_metadata_errors() {
+  local metadata_path="$1"
+  awk '
+    {
+      line = $0
+      sub(/\r$/, "", line)
+      separator_count = gsub(/=/, "=", line)
+      if (line == "") {
+        printf "%d\tempty line\n", NR
+        next
+      }
+      if (separator_count != 1) {
+        printf "%d\texpected exactly one key=value declaration\n", NR
+        next
+      }
+
+      separator = index(line, "=")
+      key = substr(line, 1, separator - 1)
+      value = substr(line, separator + 1)
+      if (key == "" || value ~ /^[[:space:]]*$/) {
+        printf "%d\tkey and value must both be non-empty\n", NR
+        next
+      }
+      if (key ~ /[[:space:]]/) {
+        printf "%d\tkey must not contain whitespace\n", NR
+        next
+      }
+      if (key != "platform" && key != "candidate_build_id" && key != "marker") {
+        printf "%d\tunknown key/value declaration\n", NR
+      }
+    }
+  ' "$metadata_path"
+}
+
+report_sentry_trigger_metadata_errors() {
+  local platform="$1"
+  local metadata_path="$2"
+  local line_number
+  local reason
+
+  while IFS=$'\t' read -r line_number reason; do
+    [[ -n "$line_number" ]] || continue
+    issue "$platform" "Sentry trigger metadata line ${line_number} in ${metadata_path} is malformed: ${reason}. Regenerate it from a completed controlled Sentry probe without editing the metadata."
+  done < <(sentry_trigger_metadata_errors "$metadata_path")
 }
 
 # Hand-written review records may carry Windows line endings or stray spaces.
@@ -63,6 +250,52 @@ review_notes_declaration_count() {
     }
     END { print count + 0 }
   ' "$record_path"
+}
+
+review_field_declaration_count() {
+  local record_path="$1"
+  local key="$2"
+
+  awk -v key="$key" '
+    {
+      sub(/\r$/, "")
+      if (in_notes) {
+        if ($0 == delimiter) in_notes = 0
+        next
+      }
+      if ($0 ~ /^notes<</) {
+        delimiter = substr($0, length("notes<<") + 1)
+        if (delimiter != "") in_notes = 1
+        next
+      }
+      if (index($0, key "=") == 1) count++
+    }
+    END { print count + 0 }
+  ' "$record_path"
+}
+
+review_field_value() {
+  local record_path="$1"
+  local key="$2"
+
+  awk -v key="$key" '
+    {
+      sub(/\r$/, "")
+      if (in_notes) {
+        if ($0 == delimiter) in_notes = 0
+        next
+      }
+      if ($0 ~ /^notes<</) {
+        delimiter = substr($0, length("notes<<") + 1)
+        if (delimiter != "") in_notes = 1
+        next
+      }
+      if (index($0, key "=") == 1) {
+        print substr($0, length(key) + 2)
+        exit
+      }
+    }
+  ' "$record_path" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//'
 }
 
 review_notes() {
@@ -119,17 +352,19 @@ review_notes_block_is_closed() {
   ' "$record_path"
 }
 
-print_literal_evidence() {
-  local platform="$1"
-  local text="$2"
-
-  while IFS= read -r line || [[ -n "$line" ]]; do
-    printf '[%s]   | %s\n' "$platform" "$line" >&2
-  done <<<"$text"
-}
-
 first_line_trimmed() {
   head -n 1 "$1" | tr -d '\r' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//'
+}
+
+normalized_nonempty_line_count() {
+  awk '
+    {
+      sub(/\r$/, "")
+      gsub(/^[[:space:]]+|[[:space:]]+$/, "", $0)
+      if (length($0) > 0) count++
+    }
+    END { print count + 0 }
+  ' "$1"
 }
 
 check_required_file() {
@@ -141,6 +376,8 @@ check_required_file() {
 
   if [[ ! -e "$path" ]]; then
     issue "$platform" "Missing ${description}: ${path}. Re-run the native large-text gate on the prepared device and upload the complete result directory."
+  elif [[ ! -f "$path" ]]; then
+    issue "$platform" "Invalid ${description}: ${path} is not a regular file. Replace it with the artifact file from a completed native large-text run."
   elif [[ ! -s "$path" ]]; then
     issue "$platform" "Empty ${description}: ${path}. Replace the incomplete artifact with output from a completed native large-text run."
   fi
@@ -157,7 +394,7 @@ validate_platform() {
     return
   fi
 
-  mapfile -t run_dirs < <(find "$platform_dir" -mindepth 1 -maxdepth 1 -type d -print | sort)
+  mapfile -d '' -t run_dirs < <(find "$platform_dir" -mindepth 1 -maxdepth 1 -type d -print0 | sort -z)
   if ((${#run_dirs[@]} == 0)); then
     if [[ -s "$platform_dir/runner-check.txt" ]]; then
       issue "$platform" "Only runner-check.txt is present in ${platform_dir}. It is blocked runner diagnostics, not reviewed device evidence; do not record a review decision for it. Run on a prepared ${platform} runner and upload the timestamped result directory."
@@ -172,6 +409,12 @@ validate_platform() {
     return
   fi
   run_dir="${run_dirs[0]}"
+  local run_dir_name="${run_dir##*/}"
+  if [[ ! "$run_dir_name" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then
+    issue "$platform" "Evidence run directory name in ${platform_dir} is unsafe. Use the generated release run directory name."
+    return
+  fi
+  SUMMARY_RUN_DIR["$platform"]="$run_dir"
 
   check_required_file "$platform" "$run_dir" "candidate-build-id.txt" "candidate build ID"
   check_required_file "$platform" "$run_dir" "runner-metadata.txt" "runner metadata and device details"
@@ -183,22 +426,60 @@ validate_platform() {
   check_required_file "$platform" "$run_dir" "sentry-trigger.txt" "controlled Sentry probe metadata"
   check_required_file "$platform" "$run_dir" "sentry-source-map-evidence.json" "Sentry source-map evidence"
 
-  if [[ -s "$run_dir/pass-fail-record.txt" ]] &&
-    ! grep -Eq '^status=PASS[[:space:]]*$' "$run_dir/pass-fail-record.txt"; then
-    issue "$platform" "The pass/fail record at ${run_dir}/pass-fail-record.txt is not PASS. Failed or blocked runner output is not reviewed device evidence; complete the run before release review."
+  local candidate_build_id=""
+  local candidate_build_id_path="$run_dir/candidate-build-id.txt"
+  if [[ -s "$candidate_build_id_path" ]]; then
+    local candidate_build_id_line_count
+    candidate_build_id_line_count="$(normalized_nonempty_line_count "$candidate_build_id_path")"
+    if ((candidate_build_id_line_count == 0)); then
+      issue "$platform" "The candidate build ID file at ${candidate_build_id_path} does not contain a normalized build ID. Record exactly one candidate build ID before release review."
+    elif ((candidate_build_id_line_count > 1)); then
+      issue "$platform" "The candidate build ID file at ${candidate_build_id_path} contains multiple normalized lines. Record exactly one candidate build ID before release review."
+    else
+      candidate_build_id="$(first_line_trimmed "$candidate_build_id_path")"
+    fi
   fi
 
   if [[ -s "$run_dir/pass-fail-record.txt" ]]; then
+    local pass_fail_path="$run_dir/pass-fail-record.txt"
+    report_duplicate_metadata_keys "$platform" "$pass_fail_path" "Pass/fail record" "pass/fail record"
+
+    local status_declaration_count
+    local pass_fail_status
+    status_declaration_count="$(metadata_declaration_count "$pass_fail_path" status)"
+    if ((status_declaration_count == 0)); then
+      issue "$platform" "The pass/fail record at ${pass_fail_path} is missing a status=... declaration. Record status exactly once before release review."
+    elif ((status_declaration_count == 1)); then
+      pass_fail_status="$(trimmed_value "$pass_fail_path" status)"
+      if [[ -z "$pass_fail_status" ]]; then
+        issue "$platform" "The pass/fail record at ${pass_fail_path} has an empty status=... value. Record status exactly once before release review."
+      elif [[ "$pass_fail_status" != "PASS" ]]; then
+        issue "$platform" "The pass/fail record at ${pass_fail_path} is not PASS. Failed or blocked runner output is not reviewed device evidence; complete the run before release review."
+      fi
+    if metadata_key_is_unambiguous "$pass_fail_path" status &&
+      [[ "$(metadata_value "$pass_fail_path" status | tr -d '\r' | sed 's/[[:space:]]*$//')" != "PASS" ]]; then
+      issue "$platform" "The pass/fail record at ${pass_fail_path} is not PASS. Failed or blocked runner output is not reviewed device evidence; complete the run before release review."
+    fi
+
     local run_mode
-    run_mode="$(metadata_value "$run_dir/pass-fail-record.txt" run_mode)"
-    if [[ "$run_mode" == "diagnostic-only" ]]; then
-      issue "$platform" "The pass/fail record at ${run_dir}/pass-fail-record.txt is from a diagnostic-only run (NATIVE_SMOKE_ALLOW_LARGER_DEVICE=1), not release evidence. Re-run the release gate on the smallest supported device without the override."
-    elif [[ "$run_mode" != "release-gate" ]]; then
-      issue "$platform" "The pass/fail record at ${run_dir}/pass-fail-record.txt does not declare run_mode=release-gate. Only release-gate runs on the smallest supported device are release evidence; re-run the current native large-text gate."
+    if metadata_key_is_unambiguous "$pass_fail_path" run_mode; then
+      run_mode="$(trimmed_value "$pass_fail_path" run_mode)"
+      if [[ -z "$run_mode" ]]; then
+        issue "$platform" "The pass/fail record at ${pass_fail_path} does not declare run_mode=release-gate. Only release-gate runs on the smallest supported device are release evidence; re-run the current native large-text gate."
+      elif [[ "$run_mode" == "diagnostic-only" ]]; then
+      run_mode="$(metadata_value "$pass_fail_path" run_mode)"
+      if [[ "$run_mode" == "diagnostic-only" ]]; then
+        issue "$platform" "The pass/fail record at ${pass_fail_path} is from a diagnostic-only run (NATIVE_SMOKE_ALLOW_LARGER_DEVICE=1), not release evidence. Re-run the release gate on the smallest supported device without the override."
+      elif [[ "$run_mode" != "release-gate" ]]; then
+        issue "$platform" "The pass/fail record at ${pass_fail_path} does not declare run_mode=release-gate. Only release-gate runs on the smallest supported device are release evidence; re-run the current native large-text gate."
+      fi
+    else
+      issue "$platform" "The pass/fail record at ${pass_fail_path} does not declare run_mode=release-gate. Only release-gate runs on the smallest supported device are release evidence; re-run the current native large-text gate."
     fi
   fi
 
   if [[ -s "$run_dir/native-branding-check.md" ]] &&
+    ! grep -Fxq -- "- Status: **PASS**" "$run_dir/native-branding-check.md"; then
     ! grep -Fq -- "- Status: **PASS**" "$run_dir/native-branding-check.md"; then
     issue "$platform" "The native branding report at ${run_dir}/native-branding-check.md is not PASS. Resolve the native metadata failure and rerun the release gate."
   fi
@@ -214,15 +495,22 @@ validate_platform() {
   fi
 
   if [[ -s "$run_dir/runner-metadata.txt" ]]; then
+    local runner_metadata_path="$run_dir/runner-metadata.txt"
     local actual_platform
+    local expected_candidate_build_id
+    local actual_candidate_build_id
     local required_key
     local required_keys=(platform candidate_build_id recorded_at_utc)
-    actual_platform="$(metadata_value "$run_dir/runner-metadata.txt" platform)"
-    if [[ "$actual_platform" != "$platform" ]]; then
-      issue "$platform" "Runner metadata identifies platform '${actual_platform:-missing}', not '${platform}'. Upload metadata from the matching platform run."
+    report_duplicate_metadata_keys "$platform" "$runner_metadata_path" "Runner metadata" "runner metadata"
+    if metadata_key_is_unambiguous "$runner_metadata_path" platform; then
+      actual_platform="$(metadata_value "$runner_metadata_path" platform)"
+      if [[ "$actual_platform" != "$platform" ]]; then
+        issue "$platform" "Runner metadata identifies the wrong platform in ${runner_metadata_path}. Upload metadata from the matching platform run."
+      fi
     fi
     for required_key in "${required_keys[@]}"; do
-      if [[ -z "$(metadata_value "$run_dir/runner-metadata.txt" "$required_key")" ]]; then
+      if metadata_key_is_unambiguous "$runner_metadata_path" "$required_key" &&
+        [[ -z "$(metadata_value "$runner_metadata_path" "$required_key")" ]]; then
         issue "$platform" "Runner metadata is missing ${required_key}=... in ${run_dir}/runner-metadata.txt. Device details and run identity must be recorded before review."
       fi
     done
@@ -232,20 +520,58 @@ validate_platform() {
       required_keys=(device_serial device_model android_release android_api screen_dp density_dpi user_rotation)
     fi
     for required_key in "${required_keys[@]}"; do
-      if [[ -z "$(metadata_value "$run_dir/runner-metadata.txt" "$required_key")" ]]; then
+      if metadata_key_is_unambiguous "$runner_metadata_path" "$required_key" &&
+        [[ -z "$(metadata_value "$runner_metadata_path" "$required_key")" ]]; then
         issue "$platform" "Runner metadata is missing ${required_key}=... in ${run_dir}/runner-metadata.txt. Record the tested device details before review."
       fi
     done
+    if [[ -n "$candidate_build_id" ]] &&
+      metadata_key_is_unambiguous "$runner_metadata_path" candidate_build_id; then
+      expected_candidate_build_id="$candidate_build_id"
+      actual_candidate_build_id="$(trimmed_value "$runner_metadata_path" candidate_build_id)"
+      if [[ -n "$expected_candidate_build_id" && -n "$actual_candidate_build_id" &&
+        "$actual_candidate_build_id" != "$expected_candidate_build_id" ]]; then
+        issue "$platform" "Runner metadata candidate_build_id does not match the tested candidate in ${run_dir}/candidate-build-id.txt. Upload metadata from the same evidence run you are submitting for review."
+      fi
+    fi
   fi
 
-  if [[ -s "$run_dir/sentry-source-map-evidence.json" ]]; then
+  local sentry_trigger_path="$run_dir/sentry-trigger.txt"
+  local sentry_trigger_has_errors=0
+  if [[ -s "$sentry_trigger_path" ]]; then
+    if [[ -n "$(sentry_trigger_metadata_errors "$sentry_trigger_path")" ]]; then
+      sentry_trigger_has_errors=1
+      report_sentry_trigger_metadata_errors "$platform" "$sentry_trigger_path"
+    fi
+    if [[ -n "$(duplicate_metadata_keys "$sentry_trigger_path")" ]]; then
+      sentry_trigger_has_errors=1
+      report_duplicate_metadata_keys "$platform" "$sentry_trigger_path" "Sentry trigger metadata" "Sentry trigger metadata"
+    fi
+  fi
+
+  if [[ -s "$run_dir/sentry-source-map-evidence.json" &&
+    -n "$candidate_build_id" ]] &&
+    ((sentry_trigger_has_errors == 0)); then
+    local sentry_validation_output
+    if ! sentry_validation_output="$(
+      "$NODE_BINARY" "$ROOT_DIR/scripts/verify-sentry-native-event.mjs" \
+        --evidence-path "$run_dir/sentry-source-map-evidence.json" \
+        --trigger-path "$sentry_trigger_path" \
+        --platform "$platform" \
+        --candidate-build-id "$candidate_build_id" \
+        --expected-probe-marker "$(trimmed_value "$sentry_trigger_path" marker)" \
+        --expected-release "" \
+        --expected-dist "" \
+        2>&1
+  if [[ -s "$run_dir/sentry-source-map-evidence.json" ]] &&
+    ((sentry_trigger_has_errors == 0)); then
     local candidate_build_id
     local sentry_validation_output
     candidate_build_id="$(tr -d '\r\n' < "$run_dir/candidate-build-id.txt")"
     if ! sentry_validation_output="$(
-      node --input-type=module - \
+      "$NODE_BINARY" --input-type=module - \
         "$run_dir/sentry-source-map-evidence.json" \
-        "$run_dir/sentry-trigger.txt" \
+        "$sentry_trigger_path" \
         "$platform" \
         "$candidate_build_id" <<'NODE'
 import { readFileSync } from "node:fs";
@@ -255,7 +581,99 @@ const rawEvidence = readFileSync(evidencePath, "utf8");
 if (/(?:auth(?:orization)?[_-]?token|sentry_auth_token|bearer\s+[A-Za-z0-9._-]+)/i.test(rawEvidence)) {
   throw new Error("evidence contains credential-like content");
 }
-const evidence = JSON.parse(rawEvidence);
+let evidence;
+try {
+  evidence = JSON.parse(rawEvidence);
+} catch {
+  throw new Error("evidence is not valid JSON");
+}
+function duplicateJsonFields(raw) {
+  let index = 0;
+  const duplicates = [];
+
+  function skipWhitespace() {
+    while (/\s/.test(raw[index] ?? "")) index += 1;
+  }
+
+  function readString() {
+    const start = index;
+    index += 1;
+    while (index < raw.length) {
+      if (raw[index] === "\\") {
+        index += 2;
+      } else if (raw[index] === '"') {
+        index += 1;
+        return JSON.parse(raw.slice(start, index));
+      } else {
+        index += 1;
+      }
+    }
+    throw new Error("unterminated JSON string");
+  }
+
+  function scanValue() {
+    skipWhitespace();
+    if (raw[index] === "{") {
+      scanObject();
+    } else if (raw[index] === "[") {
+      scanArray();
+    } else if (raw[index] === '"') {
+      readString();
+    } else {
+      while (index < raw.length && !/[,\]}]/.test(raw[index])) index += 1;
+    }
+  }
+
+  function scanObject() {
+    const keys = new Set();
+    index += 1;
+    skipWhitespace();
+    if (raw[index] === "}") {
+      index += 1;
+      return;
+    }
+    while (index < raw.length) {
+      skipWhitespace();
+      const key = readString();
+      if (keys.has(key)) duplicates.push(key);
+      keys.add(key);
+      skipWhitespace();
+      index += 1;
+      scanValue();
+      skipWhitespace();
+      if (raw[index] === "}") {
+        index += 1;
+        return;
+      }
+      index += 1;
+    }
+  }
+
+  function scanArray() {
+    index += 1;
+    skipWhitespace();
+    if (raw[index] === "]") {
+      index += 1;
+      return;
+    }
+    while (index < raw.length) {
+      scanValue();
+      skipWhitespace();
+      if (raw[index] === "]") {
+        index += 1;
+        return;
+      }
+      index += 1;
+    }
+  }
+
+  scanValue();
+  return [...new Set(duplicates)];
+}
+const duplicateFields = duplicateJsonFields(rawEvidence);
+if (duplicateFields.length > 0) {
+  throw new Error("duplicate JSON field(s)");
+}
 const trigger = Object.fromEntries(
   readFileSync(triggerPath, "utf8")
     .trim()
@@ -311,6 +729,8 @@ NODE
     native_screenshot_count="$(find "$native_screenshot_dir" -type f -name '*.png' | wc -l | tr -d ' ')"
     native_empty_count="$(find "$native_screenshot_dir" -type f -name '*.png' -size 0c | wc -l | tr -d ' ')"
   fi
+  SUMMARY_NATIVE_SCREENSHOT_COUNT["$platform"]="$native_screenshot_count"
+  SUMMARY_NATIVE_EMPTY_COUNT["$platform"]="$native_empty_count"
   if ((native_screenshot_count < 11)); then
     issue "$platform" "Expected at least 11 native screenshots in ${native_screenshot_dir}, found ${native_screenshot_count}. Re-run the complete flow and upload every screen capture."
   fi
@@ -325,6 +745,8 @@ NODE
     call_screenshot_count="$(find "$call_screenshot_dir" -type f -name '*.png' | wc -l | tr -d ' ')"
     call_empty_count="$(find "$call_screenshot_dir" -type f -name '*.png' -size 0c | wc -l | tr -d ' ')"
   fi
+  SUMMARY_CALL_SCREENSHOT_COUNT["$platform"]="$call_screenshot_count"
+  SUMMARY_CALL_EMPTY_COUNT["$platform"]="$call_empty_count"
   if ((call_screenshot_count != 2)); then
     issue "$platform" "Expected exactly 2 call-surface screenshots in ${call_screenshot_dir}, found ${call_screenshot_count}. Capture both the embedded WebView and independent call layout."
   fi
@@ -361,15 +783,28 @@ validate_review_record() {
     return
   fi
 
-  local reviewer reviewed_at decision record_build_id record_platform approval_scope notes notes_declaration_count
-  reviewer="$(trimmed_value "$record_path" reviewer)"
-  reviewed_at="$(trimmed_value "$record_path" reviewed_at_utc)"
-  decision="$(trimmed_value "$record_path" decision)"
-  record_build_id="$(trimmed_value "$record_path" candidate_build_id)"
-  record_platform="$(trimmed_value "$record_path" platform)"
-  approval_scope="$(trimmed_value "$record_path" approval_scope)"
+  local reviewer="" reviewed_at="" decision="" record_build_id="" record_platform="" approval_scope=""
+  local notes notes_declaration_count declaration_count
+  local single_value_key
   notes_declaration_count="$(review_notes_declaration_count "$record_path")"
   notes=""
+
+  for single_value_key in platform reviewer reviewed_at_utc candidate_build_id decision approval_scope; do
+    declaration_count="$(review_field_declaration_count "$record_path" "$single_value_key")"
+    if ((declaration_count > 1)); then
+      issue "$platform" "Review record has ${declaration_count} ${single_value_key} declarations in ${record_path}. Declare ${single_value_key}=... at most once so the review record is unambiguous."
+      record_valid=0
+    elif ((declaration_count == 1)); then
+      case "$single_value_key" in
+        platform) record_platform="$(review_field_value "$record_path" "$single_value_key")" ;;
+        reviewer) reviewer="$(review_field_value "$record_path" "$single_value_key")" ;;
+        reviewed_at_utc) reviewed_at="$(review_field_value "$record_path" "$single_value_key")" ;;
+        candidate_build_id) record_build_id="$(review_field_value "$record_path" "$single_value_key")" ;;
+        decision) decision="$(review_field_value "$record_path" "$single_value_key")" ;;
+        approval_scope) approval_scope="$(review_field_value "$record_path" "$single_value_key")" ;;
+      esac
+    fi
+  done
 
   if ((notes_declaration_count > 1)); then
     issue "$platform" "Review record has ${notes_declaration_count} notes declarations in ${record_path}. Use exactly one notes=... line or one notes<<... block so the review finding is unambiguous."
@@ -384,7 +819,9 @@ validate_review_record() {
   fi
 
   for required_key in reviewer reviewed_at_utc candidate_build_id decision; do
-    value="$(trimmed_value "$record_path" "$required_key")"
+    declaration_count="$(review_field_declaration_count "$record_path" "$required_key")"
+    ((declaration_count > 1)) && continue
+    value="$(review_field_value "$record_path" "$required_key")"
     if [[ -z "$value" ]]; then
       issue "$platform" "Review record is missing ${required_key}=... in ${record_path}. Record who reviewed the evidence, when, which candidate build, and the decision."
       record_valid=0
@@ -395,26 +832,27 @@ validate_review_record() {
   done
 
   if [[ -n "$record_platform" && "$record_platform" != "$platform" ]]; then
-    issue "$platform" "Review record identifies platform '${record_platform}', not '${platform}', in ${record_path}. Each platform run needs its own review record."
+    issue "$platform" "Review record identifies the wrong platform in ${record_path}. Each platform run needs its own review record."
     record_valid=0
   fi
 
   if [[ -n "$approval_scope" && "$approval_scope" != "candidate" ]]; then
-    issue "$platform" "Review record approval_scope '${approval_scope}' in ${record_path} is not supported. Omit approval_scope for a per-run review or use approval_scope=candidate for a publish approval keyed to the candidate build ID."
+    issue "$platform" "Review record contains an unsupported approval_scope in ${record_path}. Omit approval_scope for a per-run review or use approval_scope=candidate for a publish approval keyed to the candidate build ID."
     record_valid=0
   fi
 
   if [[ -n "$reviewed_at" && ! "$reviewed_at" =~ $UTC_TIMESTAMP_PATTERN ]]; then
-    issue "$platform" "Review record reviewed_at_utc '${reviewed_at}' in ${record_path} is not a UTC timestamp such as 2026-09-10T14:05:00Z. Record the review time with: date -u +%Y-%m-%dT%H:%M:%SZ"
+    issue "$platform" "Review record reviewed_at_utc in ${record_path} is not a UTC timestamp such as 2026-09-10T14:05:00Z. Record the review time with: date -u +%Y-%m-%dT%H:%M:%SZ"
     record_valid=0
   fi
 
+  if [[ -n "$record_build_id" && -n "$candidate_build_id" && "$record_build_id" != "$candidate_build_id" ]]; then
   local tested_build_id=""
   if [[ -s "$run_dir/candidate-build-id.txt" ]]; then
     tested_build_id="$(first_line_trimmed "$run_dir/candidate-build-id.txt")"
   fi
   if [[ -n "$record_build_id" && -n "$tested_build_id" && "$record_build_id" != "$tested_build_id" ]]; then
-    issue "$platform" "Review record candidate_build_id '${record_build_id}' does not match the tested candidate '${tested_build_id}' in ${run_dir}/candidate-build-id.txt. A review covers one evidence set; do not reuse a review record from another build."
+    issue "$platform" "Review record candidate_build_id does not match the tested candidate in ${run_dir}/candidate-build-id.txt. A review covers one evidence set; do not reuse a review record from another build."
     record_valid=0
   fi
 
@@ -422,45 +860,139 @@ validate_review_record() {
   # time the evidence could have been produced. Fall back to the runner metadata
   # for runs that never wrote a completion time.
   local evidence_recorded_at=""
-  if [[ -s "$run_dir/pass-fail-record.txt" ]]; then
+  if [[ -s "$run_dir/pass-fail-record.txt" ]] &&
+    metadata_key_is_unambiguous "$run_dir/pass-fail-record.txt" recorded_at_utc; then
     evidence_recorded_at="$(trimmed_value "$run_dir/pass-fail-record.txt" recorded_at_utc)"
   fi
-  if [[ -z "$evidence_recorded_at" && -s "$run_dir/runner-metadata.txt" ]]; then
+  if [[ -z "$evidence_recorded_at" && -s "$run_dir/runner-metadata.txt" ]] &&
+    metadata_key_is_unambiguous "$run_dir/runner-metadata.txt" recorded_at_utc; then
     evidence_recorded_at="$(trimmed_value "$run_dir/runner-metadata.txt" recorded_at_utc)"
   fi
   if [[ "$reviewed_at" =~ $UTC_TIMESTAMP_PATTERN && "$evidence_recorded_at" =~ $UTC_TIMESTAMP_PATTERN && "$reviewed_at" < "$evidence_recorded_at" ]]; then
-    issue "$platform" "Review record reviewed_at_utc ${reviewed_at} predates the evidence recorded at ${evidence_recorded_at} in ${run_dir}. A review must happen after the run it covers; review this run and record a new decision."
+    issue "$platform" "Review record reviewed_at_utc predates the evidence recorded_at_utc in ${run_dir}. A review must happen after the run it covers; review this run and record a new decision."
     record_valid=0
   fi
 
   case "$decision" in
+    APPROVED)
     APPROVED | "")
       ;;
     REJECTED)
-      issue "$platform" "The review record at ${record_path} records decision=REJECTED by ${reviewer:-an unnamed reviewer} at ${reviewed_at:-an unrecorded time}. A rejected review blocks release; resolve the recorded findings, rerun the native large-text gate, and record a new review."
+      issue "$platform" "The review record at ${record_path} records a rejected decision. A rejected review blocks release; resolve the recorded findings, rerun the native large-text gate, and record a new review."
       if [[ -n "$notes" ]]; then
-        printf '[%s] Review notes (literal evidence):\n' "$platform" >&2
-        print_literal_evidence "$platform" "$notes"
+        notice "$platform" "Review notes were supplied but are omitted from automated release output."
       fi
       record_valid=0
       ;;
     *)
-      issue "$platform" "Review record decision '${decision}' in ${record_path} is not APPROVED or REJECTED. Record an explicit decision."
+      issue "$platform" "Review record contains an unsupported decision in ${record_path}. Record an explicit decision."
       record_valid=0
       ;;
   esac
 
   if ((record_valid)); then
-    REVIEW_DECISIONS+=("[${platform}] Review record: APPROVED by ${reviewer} at ${reviewed_at} for candidate ${record_build_id}.")
+    REVIEW_DECISIONS+=("[${platform}] Review record: APPROVED for the validated candidate.")
   fi
+}
+
+write_evidence_summary() {
+  [[ -n "${GITHUB_STEP_SUMMARY:-}" ]] || return 0
+
+  local platform
+  local label
+  local status
+  local run_dir
+  local native_screenshot_count
+  local native_empty_count
+  local call_screenshot_count
+  local call_empty_count
+  local finding
+  local safe_run_dir
+  local safe_finding
+  local evidence_artifact_url
+  local download_status
+
+  for platform in ios android; do
+    if [[ "$platform" == "ios" ]]; then
+      label="iOS"
+    else
+      label="Android"
+    fi
+
+    if [[ -n "${SUMMARY_ISSUES[$platform]}" ]]; then
+      status="FAIL"
+    else
+      status="PASS"
+    fi
+
+    run_dir="${SUMMARY_RUN_DIR[$platform]}"
+    native_screenshot_count="${SUMMARY_NATIVE_SCREENSHOT_COUNT[$platform]}"
+    native_empty_count="${SUMMARY_NATIVE_EMPTY_COUNT[$platform]}"
+    call_screenshot_count="${SUMMARY_CALL_SCREENSHOT_COUNT[$platform]}"
+    call_empty_count="${SUMMARY_CALL_EMPTY_COUNT[$platform]}"
+    safe_run_dir="$(summary_safe_text "$run_dir")"
+    evidence_artifact_url="$(summary_artifact_url "$platform")"
+    download_status="${SUMMARY_DOWNLOAD_STATUS[$platform]}"
+
+    {
+      echo "## ${label} native large-text evidence"
+      echo
+      echo "- Status: **${status}**"
+      if [[ -n "$download_status" ]]; then
+        echo "- Artifact download: **${download_status}**"
+      fi
+      if [[ -n "$run_dir" ]]; then
+        echo "- Validated run directory: \`${safe_run_dir}\`"
+        if [[ -n "$evidence_artifact_url" ]]; then
+          echo "- Detailed evidence report: [${NATIVE_EVIDENCE_REPORT_NAME}](${evidence_artifact_url})"
+        else
+          echo "- Detailed evidence report: **Unavailable**"
+        fi
+        echo "- Native screenshots: **${native_screenshot_count}** (minimum 11; empty: ${native_empty_count})"
+        echo "- Call-surface screenshots: **${call_screenshot_count}** (required 2; empty: ${call_empty_count})"
+      else
+        echo "- Validated run directory: **Unavailable**"
+        echo "- Detailed evidence report: **Unavailable**"
+      fi
+      if [[ "$download_status" == "FAIL" ]]; then
+        if [[ "$platform" == "ios" ]]; then
+          echo "- Recovery: **Rerun the iOS native large-text job, or make the existing iOS artifact available, then rerun the mobile release gate.**"
+        else
+          echo "- Recovery: **Rerun the Android native large-text job, or make the existing Android artifact available, then rerun the mobile release gate.**"
+        fi
+      fi
+      if [[ -n "${SUMMARY_ISSUES[$platform]}" ]]; then
+        echo
+        echo "### Blocking evidence findings"
+        while IFS= read -r finding; do
+          [[ -n "$finding" ]] || continue
+          safe_finding="$(summary_safe_text "$finding")"
+          printf -- '- `%s`\n' "$safe_finding"
+        done <<< "${SUMMARY_ISSUES[$platform]}"
+      fi
+      if [[ -n "${SUMMARY_NOTICES[$platform]}" ]]; then
+        echo
+        echo "### Review notices"
+        while IFS= read -r finding; do
+          [[ -n "$finding" ]] || continue
+          safe_finding="$(summary_safe_text "$finding")"
+          printf -- '- `%s`\n' "$safe_finding"
+        done <<< "${SUMMARY_NOTICES[$platform]}"
+      fi
+      echo
+    } >> "$GITHUB_STEP_SUMMARY"
+  done
 }
 
 echo "Checking native large-text evidence under ${RESULTS_ROOT}"
 if [[ "$REQUIRE_APPROVAL" == "1" ]]; then
   echo "Strict review mode enabled: both platform evidence sets require an APPROVED review record."
 fi
+record_download_status ios "iOS"
+record_download_status android "Android"
 validate_platform ios
 validate_platform android
+write_evidence_summary
 
 if ((FAILURE_COUNT > 0)); then
   echo "Native large-text evidence completeness check FAILED with ${FAILURE_COUNT} issue(s)." >&2

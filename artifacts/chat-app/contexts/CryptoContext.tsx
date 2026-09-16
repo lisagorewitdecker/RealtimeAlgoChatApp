@@ -276,13 +276,22 @@ export function CryptoProvider({ children }: { children: React.ReactNode }) {
             registration: "confirm",
           });
         }
-      } catch {
+      } catch (error) {
         const pair = nacl.box.keyPair();
         if (
           !cancelled &&
           identityRef.current.userId === userId &&
           identityRef.current.generation === generation
         ) {
+          // Keep the real cause visible: a deterministic failure here (for
+          // example a storage key name the keychain rejects) would otherwise
+          // look like "secure storage unavailable" while the device silently
+          // runs on a fresh in-memory identity after every launch. Stale
+          // generations (sign-out or account switch mid-load) stay quiet.
+          console.warn(
+            "Device encryption identity could not be loaded from or saved to secure storage",
+            error instanceof Error ? error.message : error,
+          );
           setKeypair({
             userId,
             ...pair,
@@ -567,7 +576,14 @@ export function CryptoProvider({ children }: { children: React.ReactNode }) {
         return next;
       });
       return "saved";
-    } catch {
+    } catch (error) {
+      // The retry UX below is the same for every cause; the log is what makes
+      // a deterministic failure (rejected key name, corrupt keychain entry)
+      // distinguishable from storage that is genuinely unavailable.
+      console.warn(
+        "Room encryption key could not be saved to secure storage",
+        error instanceof Error ? error.message : error,
+      );
       if (
         identityRef.current.userId === userId &&
         identityRef.current.generation === generation
@@ -800,7 +816,11 @@ export function CryptoProvider({ children }: { children: React.ReactNode }) {
             registrationVersion,
           }),
         );
-      } catch {
+      } catch (error) {
+        console.warn(
+          "Replacement device encryption identity could not be saved to secure storage",
+          error instanceof Error ? error.message : error,
+        );
         return { status: "storage_unavailable" };
       }
       if (

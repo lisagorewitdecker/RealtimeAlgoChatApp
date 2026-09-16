@@ -1,6 +1,6 @@
 import React from "react";
 import { act, fireEvent, render } from "@testing-library/react-native";
-import { Alert } from "react-native";
+import { Alert, StyleSheet } from "react-native";
 import RoomScreen from "../app/room/[roomId]";
 
 const mockRouter = {
@@ -211,6 +211,41 @@ describe("room ban handling", () => {
     expect(errorRegistrationOrder).toBeLessThan(joinOrder);
   });
 
+  it("rejoins with the saved message cursor after the socket reconnects", () => {
+    render(<RoomScreen />);
+    act(() => {
+      mockHandlers.get("room-joined")?.({
+        messages: [
+          {
+            id: "before-outage",
+            userId: "user-ada",
+            username: "Ada",
+            type: "text",
+            timestamp: 10,
+            ciphertext: "ciphertext",
+            nonce: "nonce",
+          },
+        ],
+        users: [],
+      });
+    });
+
+    act(() => {
+      mockHandlers.get("connect")?.();
+      mockHandlers.get("room-joined")?.({
+        messages: [],
+        users: [],
+      });
+    });
+
+    expect(socketEmits("join-room")).toHaveLength(2);
+    expect(socketEmits("recover-messages")[0]?.[1]).toMatchObject({
+      roomId: "room-42",
+      afterMessageId: "before-outage",
+      afterTimestamp: 10,
+    });
+  });
+
   it("shows room loading feedback until the server confirms the join", () => {
     const { getByTestId, getByText, queryByTestId } = render(<RoomScreen />);
 
@@ -342,18 +377,17 @@ describe("room ban handling", () => {
     act(() => {
       mockHandlers.get("connect")?.();
       mockHandlers.get("room-joined")?.({
-        messages: [
-          existingMessage,
-          joinedMessage,
-          existingMessage,
-          missedFirst,
-          missedSecond,
-        ],
+        messages: [missedFirst, missedSecond],
         users: [],
+        replayAfterMessageId: "joined",
+        replayGap: false,
       });
     });
 
     expect(socketEmits("join-room")).toHaveLength(2);
+    expect(socketEmits("join-room")[1]?.[1]).toEqual(
+      expect.objectContaining({ lastSeenMessageId: "joined" }),
+    );
     expect(view.getAllByTestId("message-existing")).toHaveLength(1);
     expect(view.getAllByTestId("message-joined")).toHaveLength(1);
     expect(
@@ -361,6 +395,25 @@ describe("room ban handling", () => {
         (message: { id: string }) => message.id,
       ),
     ).toEqual(["missed-second", "missed-first", "joined", "existing"]);
+  });
+
+  it("warns when retained reconnect history cannot reach the last visible message", () => {
+    const view = render(<RoomScreen />);
+    act(() => {
+      mockHandlers.get("room-joined")?.({
+        messages: [],
+        users: [],
+      });
+      mockHandlers.get("room-joined")?.({
+        messages: [],
+        users: [],
+        replayAfterMessageId: "expired-cursor",
+        replayGap: true,
+      });
+    });
+
+    expect(view.getByTestId("room-message-gap-warning")).toBeTruthy();
+    expect(view.getByText("Some messages could not be recovered")).toBeTruthy();
   });
 
   it("explains when device-key registration is taking unusually long", () => {
@@ -424,6 +477,60 @@ describe("room ban handling", () => {
       "nonce",
       "room-42",
     );
+  });
+
+  it("continues requesting persisted recovery pages until the missed range is complete", () => {
+    render(<RoomScreen />);
+    const knownMessage = {
+      id: "known-message",
+      userId: "user-ada",
+      username: "Ada",
+      type: "text",
+      timestamp: 1,
+      ciphertext: "known-ciphertext",
+      nonce: "known-nonce",
+    };
+
+    act(() => {
+      mockHandlers.get("room-joined")?.({
+        messages: [knownMessage],
+        users: [],
+      });
+      mockHandlers.get("room-joined")?.({
+        messages: [],
+        users: [],
+      });
+    });
+
+    const firstRecovery = socketEmits("recover-messages")[0];
+    expect(firstRecovery?.[1]).toMatchObject({
+      roomId: "room-42",
+      afterMessageId: "known-message",
+      afterTimestamp: 1,
+    });
+
+    act(() => {
+      mockHandlers.get("message-recovery-page")?.({
+        requestId: firstRecovery?.[1].requestId,
+        messages: [
+          {
+            ...knownMessage,
+            id: "missed-message",
+            timestamp: 2,
+            ciphertext: "missed-ciphertext",
+          },
+        ],
+        hasMore: true,
+        nextCursor: { id: "missed-message", timestamp: 2 },
+      });
+    });
+
+    expect(socketEmits("recover-messages")).toHaveLength(2);
+    expect(socketEmits("recover-messages")[1]?.[1]).toMatchObject({
+      roomId: "room-42",
+      afterMessageId: "missed-message",
+      afterTimestamp: 2,
+    });
   });
 
   it("lets a room creator confirm and ban another member", async () => {
@@ -1289,5 +1396,38 @@ describe("room device-key registration ordering", () => {
     expect(view.getByTestId("message-live").props.children).toBe(
       "Arrived during recovery",
     );
+  });
+});
+
+describe("room composer layout", () => {
+  beforeEach(() => {
+    resetRoomMocks();
+  });
+
+  afterEach(async () => {
+    await act(async () => {
+      await Promise.resolve();
+    });
+  });
+
+  it("top-aligns multiline composer text and avoids the keyboard with padding on every platform", () => {
+    const view = render(<RoomScreen />);
+
+    act(() => {
+      mockHandlers.get("room-joined")?.({ messages: [], users: [] });
+    });
+
+    // Android centers multiline text vertically unless told otherwise; iOS
+    // always starts at the top of the box.
+    const input = view.getByTestId("room-composer-input");
+    expect(input.props.multiline).toBe(true);
+    expect(StyleSheet.flatten(input.props.style).textAlignVertical).toBe("top");
+
+    // Keyboard handling comes from react-native-keyboard-controller with the
+    // same padding strategy on both platforms and no header offset (the room
+    // header is part of the screen).
+    const avoidingView = view.getByTestId("room-keyboard-avoiding-view");
+    expect(avoidingView.props.behavior).toBe("padding");
+    expect(avoidingView.props.keyboardVerticalOffset).toBe(0);
   });
 });

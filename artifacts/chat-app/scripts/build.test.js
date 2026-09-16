@@ -171,3 +171,10 @@ test("development entrypoint remains independent of the release preflight", () =
     /preflight:release|native-build-preflight/,
   );
 });
+
+test("development entrypoint preserves an explicit Expo key and falls back to the managed Vite key", () => {
+  assert.match(
+    packageJson.scripts.dev,
+    /EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY=.*EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY.*VITE_CLERK_PUBLISHABLE_KEY/,
+  );
+});

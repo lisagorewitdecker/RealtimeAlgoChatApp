@@ -1,5 +1,7 @@
 import React from "react";
 import { act, render } from "@testing-library/react-native";
+import { StatusBar as NativeStatusBar } from "react-native";
+import { StatusBar } from "expo-status-bar";
 import SetupScreen from "../app/setup";
 import RootLayout from "../app/_layout";
 
@@ -166,5 +168,95 @@ describe("entry-screen branding", () => {
       ),
     ).toBeTruthy();
     expect(view.queryByText(/DevAlgoChat|DevStudio|ChatSphere/)).toBeNull();
+  });
+
+  it("declares light system-bar content over the always-dark palette", async () => {
+    // Android draws the status bar over the app and follows the device theme
+    // unless told otherwise; on a light-themed device the clock and icons
+    // would be dark on the dark background. The root layout pins light
+    // content once for every screen.
+    const view = render(<RootLayout />);
+    await act(async () => {});
+
+    expect(view.UNSAFE_getByType(StatusBar).props.style).toBe("light");
+    expect(view.UNSAFE_getByType(NativeStatusBar).props.barStyle).toBe(
+      "light-content",
+    );
+  });
+
+  it("keeps light system-bar content on the Clerk configuration screen", async () => {
+    const previousKey = process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY;
+    const previousManagedKey = process.env.VITE_CLERK_PUBLISHABLE_KEY;
+    delete process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY;
+    delete process.env.VITE_CLERK_PUBLISHABLE_KEY;
+
+    try {
+      const view = render(<RootLayout />);
+      await act(async () => {});
+
+      expect(view.getByText("Authentication setup needed")).toBeTruthy();
+      expect(view.UNSAFE_getByType(StatusBar).props.style).toBe("light");
+    } finally {
+      if (previousKey === undefined) {
+        delete process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY;
+      } else {
+        process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY = previousKey;
+      }
+      if (previousManagedKey === undefined) {
+        delete process.env.VITE_CLERK_PUBLISHABLE_KEY;
+      } else {
+        process.env.VITE_CLERK_PUBLISHABLE_KEY = previousManagedKey;
+      }
+    }
+  });
+
+  it("renders an actionable state when Clerk configuration is missing", async () => {
+    const previousKey = process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY;
+    const previousManagedKey = process.env.VITE_CLERK_PUBLISHABLE_KEY;
+    delete process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY;
+    delete process.env.VITE_CLERK_PUBLISHABLE_KEY;
+
+    try {
+      const view = render(<RootLayout />);
+      await act(async () => {});
+
+      expect(view.getByText("Authentication setup needed")).toBeTruthy();
+      expect(
+        view.getByText(
+          "Authentication setup is incomplete. Ask the project owner to provide the managed Clerk publishable key, then reload the app.",
+        ),
+      ).toBeTruthy();
+    } finally {
+      if (previousKey === undefined) {
+        delete process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY;
+      } else {
+        process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY = previousKey;
+      }
+      if (previousManagedKey === undefined) {
+        delete process.env.VITE_CLERK_PUBLISHABLE_KEY;
+      } else {
+        process.env.VITE_CLERK_PUBLISHABLE_KEY = previousManagedKey;
+      }
+    }
+  });
+
+  it("renders an actionable state when Clerk configuration is malformed", async () => {
+    const previousKey = process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY;
+    process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY = "malformed-key";
+
+    try {
+      const view = render(<RootLayout />);
+      await act(async () => {});
+
+      expect(view.getByText("Authentication setup needed")).toBeTruthy();
+      expect(view.getByText(/Clerk publishable key is not valid/)).toBeTruthy();
+      expect(view.queryByText("malformed-key")).toBeNull();
+    } finally {
+      if (previousKey === undefined) {
+        delete process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY;
+      } else {
+        process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY = previousKey;
+      }
+    }
   });
 });

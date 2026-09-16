@@ -1,6 +1,6 @@
 import { useColorScheme } from "react-native";
 import colors from "@/constants/colors";
-import { useAccessibility } from "@/contexts/AccessibilityContext";
+import { useAccessibilityOptional } from "@/contexts/AccessibilityContext";
 
 /**
  * Returns the design tokens for the current color scheme, respecting
@@ -12,7 +12,7 @@ import { useAccessibility } from "@/contexts/AccessibilityContext";
  */
 export function useColors() {
   const scheme = useColorScheme();
-  const { highContrast } = useAccessibility();
+  const { highContrast } = useAccessibilityOptional();
 
   const palette = highContrast
     ? colors.highContrast

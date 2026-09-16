@@ -21,3 +21,12 @@ kept working from the previously installed tree. The durable fix was adding
 - The publish build runs a fresh `pnpm install` plus each artifact's `build`
   script; a stale local `node_modules` can hide the failure, so run the Chat
   App `build` script locally to reproduce publish-time bundling errors.
+- This workspace's pnpm install has no `.pnpm/node_modules` hoisted store, so
+  a dynamically required, undeclared module (worklets → `@babel/generator`)
+  resolves only through a package-extension link inside the package's store
+  directory or a root dependency. Both are in place now (confirmed 2026-09-14);
+  either alone is sufficient. Quick check without a full export: from
+  `artifacts/chat-app`, `require("react-native-worklets/plugin")` and resolve
+  `@babel/generator` with the plugin directory as the search path.
+- The local export writes under `artifacts/chat-app/static-build/`, which is
+  gitignored as a whole, so reproducing the publish build never dirties the tree.

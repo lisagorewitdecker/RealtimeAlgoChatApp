@@ -50,9 +50,11 @@ E2E_API_URL="https://${REPLIT_DEV_DOMAIN}" \
 pnpm --filter @workspace/api-server run test:e2e:idle-profile-registration
 ```
 
-The test script installs the Chromium revision pinned by `@playwright/test`
-before launching the browser, so a fresh workspace does not depend on a
-developer's existing Playwright cache.
+The test scripts install the Chromium revision pinned by `@playwright/test`
+and run a browser-runtime preflight before recovery diagnostics. The Chromium
+system libraries are declared in the Replit Nix package list. A missing browser
+or runtime library therefore fails as an API-server browser setup error instead
+of being reported as a recovery failure.
 
 Each test closes both browser contexts and deletes its unique room, database
 profiles, room-key envelopes, and Clerk users in `finally`. Cleanup failures

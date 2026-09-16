@@ -1,7 +1,9 @@
 import { toSecureStoreKey } from "../lib/secureStorageKey";
-
-// Mirrors the validation inside expo-secure-store's setItemAsync/getItemAsync.
-const SECURE_STORE_KEY_PATTERN = /^[\w.-]+$/;
+import {
+  INVALID_SECURE_STORE_KEY_MESSAGE,
+  SECURE_STORE_KEY_PATTERN,
+  ensureValidSecureStoreKey,
+} from "../test-utils/secureStoreKeyRule";
 
 describe("toSecureStoreKey", () => {
   it("leaves keys that secure storage already accepts unchanged", () => {
@@ -56,5 +58,43 @@ describe("toSecureStoreKey", () => {
 
   it("rejects empty keys instead of producing an invalid name", () => {
     expect(() => toSecureStoreKey("")).toThrow("must not be empty");
+  });
+});
+
+// The rule the test doubles enforce must be the rule of the installed module.
+// expo-secure-store validates key names in JavaScript before touching the
+// native module, so its verdict is observable here without a keychain.
+describe("expo-secure-store key rule", () => {
+  const realSecureStore = jest.requireActual(
+    "expo-secure-store",
+  ) as typeof import("expo-secure-store");
+
+  it("matches the installed module: logical keys are rejected before any native call", async () => {
+    for (const logicalKey of [
+      "devstudio_roomkey:user_2abc:room-42",
+      "devstudio_device_keypair_v1:user_2abc",
+      "",
+    ]) {
+      await expect(realSecureStore.setItemAsync(logicalKey, "value")).rejects.toThrow(
+        INVALID_SECURE_STORE_KEY_MESSAGE,
+      );
+      await expect(realSecureStore.getItemAsync(logicalKey)).rejects.toThrow(
+        INVALID_SECURE_STORE_KEY_MESSAGE,
+      );
+      expect(() => ensureValidSecureStoreKey(logicalKey)).toThrow(
+        INVALID_SECURE_STORE_KEY_MESSAGE,
+      );
+    }
+  });
+
+  it("matches the installed module: encoded keys pass its name validation", async () => {
+    const encodedKey = toSecureStoreKey("devstudio_roomkey:user_2abc:ana's/déjà 🚀");
+    expect(() => ensureValidSecureStoreKey(encodedKey)).not.toThrow();
+    // Past validation the call reaches the (absent) native module; whatever
+    // happens there, it must not be the key-name rejection.
+    const outcome = await realSecureStore
+      .setItemAsync(encodedKey, "value")
+      .then(() => "accepted", (error: unknown) => String(error));
+    expect(outcome).not.toContain("Invalid key provided to SecureStore");
   });
 });

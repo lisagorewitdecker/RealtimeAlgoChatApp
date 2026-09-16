@@ -65,7 +65,11 @@ function resolveMethod(input: RequestInfo | URL, explicitMethod?: string): strin
 // Use loose check for URL — some runtimes (e.g. React Native) polyfill URL
 // differently, so `instanceof URL` can fail.
 function isUrl(input: RequestInfo | URL): input is URL {
-  return typeof URL !== "undefined" && input instanceof URL;
+  return (
+    typeof input === "object" &&
+    input !== null &&
+    typeof (input as { href?: unknown }).href === "string"
+  );
 }
 
 function applyBaseUrl(input: RequestInfo | URL): RequestInfo | URL {
