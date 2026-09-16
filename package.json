@@ -23,6 +23,7 @@
     "test:android-preview-evidence": "bash scripts/tests/check-android-preview-evidence.test.sh",
     "validate:ios-preview-evidence": "bash scripts/check-ios-preview-evidence.sh",
     "test:ios-preview-evidence": "bash scripts/tests/check-ios-preview-evidence.test.sh",
+    "save:ios-preview-evidence": "pnpm --filter @workspace/chat-app run save:ios-preview-evidence",
     "validate:native-large-text-evidence": "bash scripts/check-native-large-text-evidence.sh",
     "test:native-large-text-evidence": "bash scripts/tests/check-native-large-text-evidence.test.sh",
     "validate:mockup-clean": "pnpm --filter @workspace/mockup-sandbox run typecheck:clean",
