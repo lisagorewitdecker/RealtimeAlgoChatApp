@@ -99,7 +99,9 @@ function findStartupFailure(output) {
 
 function sanitizeStartupDiagnostic(value, maxLength) {
   return value
+    // eslint-disable-next-line no-control-regex
     .replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, "")
+    // eslint-disable-next-line no-control-regex
     .replace(/[\u0000-\u001f\u007f]/g, " ")
     .replace(/\s+/g, " ")
     .trim()
