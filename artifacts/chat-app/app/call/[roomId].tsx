@@ -10,7 +10,6 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import WebView from "react-native-webview";
-import { useApp } from "@/contexts/AppContext";
 import { useCrypto } from "@/contexts/CryptoContext";
 import { ScaledText as Text } from "@/components/ScaledText";
 import { useColors } from "@/hooks/useColors";
