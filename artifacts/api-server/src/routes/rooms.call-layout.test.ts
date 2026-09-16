@@ -46,14 +46,6 @@ describe("embedded call large-text layout", () => {
           capability: "not-used-by-layout-test",
         }),
       );
-      const html = buildCallHtml({
-        roomId: "native-layout-smoke",
-        userId: "user-layout-smoke",
-        username:
-          "A very long platform-specific display name for layout checking",
-        capability: "not-used-by-layout-test",
-        includeClientScripts: false,
-      });
 
       await page.setContent(html);
       await page.addStyleTag({

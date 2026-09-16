@@ -598,10 +598,12 @@ test("blocked release diagnostics identify the supported Node range safely", () 
   );
 });
 
-test("publish job runs the privacy regression before approval validation and submission", () => {
+test("publish job runs the evidence privacy and submission-boundary regression before approval validation and submission", () => {
   const publishSteps = workflow.jobs?.["mobile-publish"]?.steps ?? [];
   const privacyIndex = publishSteps.findIndex(
-    (step) => step.name === "Run native large-text evidence privacy regression",
+    (step) =>
+      step.name ===
+      "Run native large-text evidence privacy and submission-boundary regression",
   );
   const approvalValidationIndex = publishSteps.findIndex(
     (step) => step.name === "Require approved iOS and Android evidence",

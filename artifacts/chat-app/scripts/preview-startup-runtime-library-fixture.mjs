@@ -31,6 +31,26 @@ export const CAPTURED_LOADER_SAMPLES = Object.freeze([
     name: "Windows loader with a long path",
     fixture: "missing-runtime-library-windows-long-path",
   }),
+  Object.freeze({
+    name: "Linux shared-library loader with spaces",
+    fixture: "missing-runtime-library-spaced",
+  }),
+  Object.freeze({
+    name: "macOS dyld loader with a quoted path",
+    fixture: "missing-runtime-library-dyld-quoted",
+  }),
+  Object.freeze({
+    name: "Windows loader with a quoted path",
+    fixture: "missing-runtime-library-windows-quoted",
+  }),
+  Object.freeze({
+    name: "macOS dyld loader with a quoted long path",
+    fixture: "missing-runtime-library-dyld-quoted-long-path",
+  }),
+  Object.freeze({
+    name: "Windows loader with a quoted long path",
+    fixture: "missing-runtime-library-windows-quoted-long-path",
+  }),
 ]);
 
 const longLinuxLibraryPath =
@@ -66,6 +86,28 @@ export const fixtureOutput = Object.freeze({
     `  Reason: tried: '${longDyldLibraryPath}' (no such file)\n`,
   "missing-runtime-library-windows-long-path":
     `Error: The code execution cannot proceed because ${longWindowsLibraryPath} ` +
+    "was not found. Reinstalling the program may fix this problem.\n",
+  "missing-runtime-library-spaced":
+    "Error: /opt/expo/react native devtools: error while loading shared " +
+    "libraries: /opt/expo/React Native DevTools/libgtk-3.so.0: cannot open " +
+    "shared object file: No such file or directory\n" +
+    "unrelated log text \u001b[31mshould not be included\u001b[0m\n",
+  "missing-runtime-library-dyld-quoted":
+    "dyld[12345]: Library not loaded: " +
+    "'/opt/homebrew/Library/Application Support/Expo/libgtk-3.dylib'\n" +
+    "  Referenced from: /opt/expo/react-native-devtools\n" +
+    "  unrelated log text should not be included\n",
+  "missing-runtime-library-windows-quoted":
+    'Error: The code execution cannot proceed because "C:\\Program Files\\' +
+    'Expo\\React Native DevTools\\libgtk-3-0.dll" was not found. ' +
+    "Reinstalling the program may fix this problem.\n" +
+    "unrelated log text should not be included\n",
+  "missing-runtime-library-dyld-quoted-long-path":
+    `dyld[12345]: Library not loaded: '${longDyldLibraryPath}'\n` +
+    "  Referenced from: /opt/expo/react-native-devtools\n" +
+    `  Reason: tried: '${longDyldLibraryPath}' (no such file)\n`,
+  "missing-runtime-library-windows-quoted-long-path":
+    `Error: The code execution cannot proceed because "${longWindowsLibraryPath}" ` +
     "was not found. Reinstalling the program may fix this problem.\n",
   "unsupported-loader-wording":
     "React Native DevTools launcher exited with status 127\n",

@@ -107,6 +107,42 @@ const fixtures = [
     detail: /missing runtime library: .*libgtk-3-0\.dll/,
     libraryIdentifier: "libgtk-3-0.dll",
   },
+  {
+    name: "Linux shared-library loader with spaces",
+    fixture: "missing-runtime-library-spaced",
+    detail:
+      /shared libraries: \/opt\/expo\/React Native DevTools\/libgtk-3\.so\.0/,
+    libraryIdentifier: "libgtk-3.so.0",
+    containsNoise: true,
+  },
+  {
+    name: "macOS dyld loader with a quoted path",
+    fixture: "missing-runtime-library-dyld-quoted",
+    detail:
+      /Library not loaded: '\/opt\/homebrew\/Library\/Application Support\/Expo\/libgtk-3\.dylib'/,
+    libraryIdentifier: "libgtk-3.dylib",
+    containsNoise: true,
+  },
+  {
+    name: "Windows loader with a quoted path",
+    fixture: "missing-runtime-library-windows-quoted",
+    detail:
+      /because "C:\\Program Files\\Expo\\React Native DevTools\\libgtk-3-0\.dll" was not found/,
+    libraryIdentifier: "libgtk-3-0.dll",
+    containsNoise: true,
+  },
+  {
+    name: "macOS dyld loader with a quoted long path",
+    fixture: "missing-runtime-library-dyld-quoted-long-path",
+    detail: /missing runtime library: .*libgtk-3\.dylib/,
+    libraryIdentifier: "libgtk-3.dylib",
+  },
+  {
+    name: "Windows loader with a quoted long path",
+    fixture: "missing-runtime-library-windows-quoted-long-path",
+    detail: /missing runtime library: .*libgtk-3-0\.dll/,
+    libraryIdentifier: "libgtk-3-0.dll",
+  },
 ];
 
 test("live and captured preview validation report the same diagnosis for every loader format", () => {
@@ -159,6 +195,13 @@ test("live and captured preview validation report the same diagnosis for every l
         capturedDiagnostic.length <= 512,
         `${fixtureCase.name} diagnostic exceeded the 512-character limit`,
       );
+      if (fixtureCase.containsNoise) {
+        assert.doesNotMatch(
+          capturedDiagnostic,
+          /unrelated log text|[\u0000-\u001f\u007f]/,
+          `${fixtureCase.name} included unrelated or control text`,
+        );
+      }
     }
   } finally {
     rmSync(temporaryDirectory, { recursive: true, force: true });
@@ -261,6 +304,76 @@ test("startup failures append only the bounded diagnosis to the CI summary", () 
     );
     assert.ok(summary.length <= 700, "summary exceeded its bounded size");
     assert.doesNotMatch(summary, /https?:\/\/|authorization|password|token/i);
+  } finally {
+    rmSync(temporaryDirectory, { recursive: true, force: true });
+  }
+});
+
+test("CI summaries retain bounded long-path loader diagnostics and library identifiers", () => {
+  const temporaryDirectory = mkdtempSync(
+    join(tmpdir(), "chat-preview-long-loader-summary-"),
+  );
+  const longPathFixtures = [
+    {
+      fixture: "missing-runtime-library-long-path",
+      libraryIdentifier: "libgtk-3.so.0",
+    },
+    {
+      fixture: "missing-runtime-library-dyld-long-path",
+      libraryIdentifier: "libgtk-3.dylib",
+    },
+    {
+      fixture: "missing-runtime-library-windows-long-path",
+      libraryIdentifier: "libgtk-3-0.dll",
+    },
+  ];
+
+  try {
+    for (const {
+      fixture: fixtureName,
+      libraryIdentifier,
+    } of longPathFixtures) {
+      const logPath = join(temporaryDirectory, `${fixtureName}.log`);
+      const summaryPath = join(temporaryDirectory, `${fixtureName}.md`);
+      const unrelatedOutput =
+        `unrelated loader output for ${fixtureName} should not leak`;
+      writeFileSync(
+        logPath,
+        `${unrelatedOutput}\n${fixtureOutput[fixtureName]}${unrelatedOutput}\n`,
+        "utf8",
+      );
+
+      const result = runNodeScript(
+        [validatorPath, "--log-file", logPath],
+        { GITHUB_STEP_SUMMARY: summaryPath },
+      );
+
+      assert.equal(result.status, 1, fixtureName);
+      const summary = readFileSync(summaryPath, "utf8");
+      const diagnostic = summary.match(/\*\*Diagnosis:\*\* ([^\n]+)/)?.[1];
+      assert.ok(diagnostic, `${fixtureName} summary omitted its diagnosis`);
+      assert.ok(
+        diagnostic.length <= 512,
+        `${fixtureName} summary diagnostic exceeded the 512-character limit`,
+      );
+      assert.match(
+        diagnostic,
+        /Expo preview startup error: .*missing runtime library: .*libgtk-3/,
+        fixtureName,
+      );
+      assert.match(
+        diagnostic,
+        new RegExp(
+          fixtureName.includes("dyld")
+            ? "libgtk-3\\.dylib"
+            : fixtureName.includes("windows")
+              ? "libgtk-3-0\\.dll"
+              : "libgtk-3\\.so\\.0",
+        ),
+        `${fixtureName} lost its library identifier`,
+      );
+      assert.doesNotMatch(summary, new RegExp(unrelatedOutput));
+    }
   } finally {
     rmSync(temporaryDirectory, { recursive: true, force: true });
   }

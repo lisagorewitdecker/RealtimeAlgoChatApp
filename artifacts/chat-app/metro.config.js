@@ -20,28 +20,27 @@ const requestLogEnabled =
   process.env.EXPO_DEV_REQUEST_LOG === "1" ||
   Boolean(process.env.EXPO_DEV_REQUEST_EVIDENCE_FILE);
 
-let requestEvidenceStream;
 let appendRequestEvidence;
 if (requestLogEnabled) {
   const configuredEvidencePath = process.env.EXPO_DEV_REQUEST_EVIDENCE_FILE;
   const evidencePath = resolveEvidencePath(configuredEvidencePath, __dirname);
   try {
     fs.mkdirSync(path.dirname(evidencePath), { recursive: true });
-    requestEvidenceStream = fs.createWriteStream(evidencePath, {
-      flags: "w",
-      encoding: "utf8",
-    });
-    requestEvidenceStream.on("error", (error) => {
-      console.warn(
-        `[dev-request] Redacted evidence file became unavailable; ` +
-          `continuing with console output (${error.code ?? "unknown error"}).`,
-      );
-      requestEvidenceStream = undefined;
-    });
-    appendRequestEvidence = createEvidenceAppender((line) => {
-      if (!requestEvidenceStream) return false;
-      requestEvidenceStream.write(line);
-      return true;
+    fs.writeFileSync(evidencePath, "", "utf8");
+    let requestEvidenceFileAvailable = true;
+    appendRequestEvidence = createEvidenceAppender((contents) => {
+      if (!requestEvidenceFileAvailable) return false;
+      try {
+        fs.writeFileSync(evidencePath, contents, "utf8");
+        return true;
+      } catch (error) {
+        requestEvidenceFileAvailable = false;
+        console.warn(
+          `[dev-request] Redacted evidence file became unavailable; ` +
+            `continuing with console output (${error.code ?? "unknown error"}).`,
+        );
+        return false;
+      }
     });
   } catch (error) {
     console.warn(

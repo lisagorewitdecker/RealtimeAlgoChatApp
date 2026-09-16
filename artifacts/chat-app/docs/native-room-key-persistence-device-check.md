@@ -23,15 +23,10 @@ published build is not a substitute.
 2. Set `EXPO_DEV_REQUEST_LOG=1` in the development environment and restart the
    managed Chat App/Expo workflow before the handoff. Metro writes a fresh,
    redacted request log to
-   `artifacts/chat-app/.expo/dev-request-evidence.log`. To retain the evidence
-   directly in the timestamped record instead, set
-   `EXPO_DEV_REQUEST_EVIDENCE_FILE` to
-   `test-results/encrypted-room-recovery/ios/<UTC timestamp>/logs/metro-request-evidence.txt`
-   before restarting. This path is relative to the Chat App package root used
-   by the managed workflow. The file's lines contain only status, timing,
-   `platform`, a client class, `user-agent=[redacted]`, and a coarse resource
-   class; they never contain a host, URL, query string, credentials, account
-   data, or message content. After Metro is ready, run:
+   `artifacts/chat-app/.expo/dev-request-evidence.log`. The file's lines contain
+   only status, timing, `platform`, a client class, `user-agent=[redacted]`, and
+   a coarse resource class; they never contain a host, URL, query string,
+   credentials, account data, or message content. After Metro is ready, run:
 
    ```sh
    pnpm --filter @workspace/chat-app run validate:preview-startup -- \
@@ -53,15 +48,26 @@ published build is not a substitute.
    landing screen, and captures a redacted screenshot. Treat the phone launch
    as observed only when both the iPhone screen and filtered server-side native
    request evidence are available. A native request has no browser `OPTIONS`
-   preflight. Filter the retained file to the native iOS marker before adding
-   it to the record:
+   preflight. After the phone session, create the timestamped handoff directory
+   and save the retained Metro file plus its filtered native iOS evidence with
+   one command:
 
    ```sh
-   grep 'platform=ios client=Expo Go' \
-     artifacts/chat-app/test-results/encrypted-room-recovery/ios/<UTC timestamp>/logs/metro-request-evidence.txt \
-     | grep -v ' OPTIONS ' \
-     > artifacts/chat-app/test-results/encrypted-room-recovery/ios/<UTC timestamp>/logs/native-ios-request-evidence.txt
+   pnpm run save:ios-preview-evidence -- \
+     --timestamp "$(date -u +%Y%m%dT%H%M%SZ)"
    ```
+
+   The command reads the retained `.expo/dev-request-evidence.log` by default,
+   or the path in `EXPO_DEV_REQUEST_EVIDENCE_FILE`; `--source <path>` can
+   override either. Use `--handoff-dir
+   artifacts/chat-app/test-results/encrypted-room-recovery/ios/<UTC timestamp>`
+   when the timestamp directory already exists. It creates the `logs/`
+   directory, copies only lines that match the redacted Metro contract into
+   `metro-request-evidence.txt`, and writes
+   `native-ios-request-evidence.txt` with only `platform=ios client=Expo Go`
+   requests, excluding `OPTIONS`. Missing or non-redacted source evidence
+   fails before anything is saved. Do not set a handoff path outside the iOS
+   evidence directory.
 
    Reference `logs/native-ios-request-evidence.txt` in the
    **Server-side native request evidence** row. Copy only the marker

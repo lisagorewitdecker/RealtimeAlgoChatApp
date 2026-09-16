@@ -19,9 +19,10 @@
 set -euo pipefail
 
 SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-$HOME/android-sdk}}"
+ANDROID_BUILD_TOOLS_VERSION="${ANDROID_BUILD_TOOLS_VERSION:-35.0.0}"
 export ANDROID_SDK_ROOT="$SDK_ROOT"
 export ANDROID_HOME="$SDK_ROOT"
-export PATH="$SDK_ROOT/platform-tools:$SDK_ROOT/emulator:$SDK_ROOT/cmdline-tools/latest/bin:$PATH"
+export PATH="$HOME/.maestro/bin:$SDK_ROOT/platform-tools:$SDK_ROOT/emulator:$SDK_ROOT/cmdline-tools/latest/bin:$SDK_ROOT/build-tools/$ANDROID_BUILD_TOOLS_VERSION:$PATH"
 
 AVD_NAME="${ANDROID_NATIVE_AVD_NAME:-native-small-api35}"
 ANDROID_API_LEVEL="${ANDROID_NATIVE_API_LEVEL:-35}"
@@ -38,7 +39,8 @@ Usage: provision-android-runner.sh [options]
 
 Options:
   --install-sdk         Download pinned Android command-line tools and install
-                        platform-tools, emulator, API 35, and the small AVD.
+                        platform-tools, emulator, API 35, aapt2, and the small
+                        AVD.
                         Requires ANDROID_CMDLINE_TOOLS_SHA256.
   --install-candidate   Install NATIVE_SMOKE_APK_PATH on the connected device.
   --start-emulator      Boot the configured native-small-api35 AVD.
@@ -120,7 +122,7 @@ if ((INSTALL_SDK)); then
     "platform-tools" \
     "emulator" \
     "platforms;android-${ANDROID_API_LEVEL}" \
-    "build-tools;35.0.0" \
+    "build-tools;${ANDROID_BUILD_TOOLS_VERSION}" \
     "$SYSTEM_IMAGE"
 
   require_command adb
@@ -166,6 +168,8 @@ if ((START_EMULATOR)); then
     exit 2
   fi
 fi
+
+require_command aapt2
 
 if ((START_EMULATOR)); then
   require_command nohup

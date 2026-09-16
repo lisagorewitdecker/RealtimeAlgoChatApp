@@ -93,11 +93,28 @@ const STARTUP_TEST_FIXTURES = new Set([
   "missing-runtime-library-long-path",
   "missing-runtime-library-dyld-long-path",
   "missing-runtime-library-windows-long-path",
+  "missing-runtime-library-spaced",
+  "missing-runtime-library-dyld-quoted",
+  "missing-runtime-library-windows-quoted",
+  "missing-runtime-library-dyld-quoted-long-path",
+  "missing-runtime-library-windows-quoted-long-path",
 ]);
+const MISSING_LIBRARY_PATH = String.raw`[A-Za-z0-9._+~ /\\:-]`;
+const MISSING_LIBRARY_CAPTURE = String.raw`(?:(["'])([^"'\u0000-\u001f\u007f]+)\1|(${MISSING_LIBRARY_PATH}+?))`;
+const MISSING_LIBRARY_DYLD_CAPTURE = String.raw`(?:(["'])([^"'\u0000-\u001f\u007f]+)\1|(${MISSING_LIBRARY_PATH}+))`;
 const MISSING_LIBRARY_PATTERNS = [
-  /error while loading shared libraries:\s*(.+?)\s*:\s*cannot open shared object file/i,
-  /library not loaded:\s*([^\r\n]+)/i,
-  /cannot proceed because\s+(.+?)\s+was not found/i,
+  new RegExp(
+    String.raw`error while loading shared libraries:\s*${MISSING_LIBRARY_CAPTURE}\s*:\s*cannot open shared object file`,
+    "i",
+  ),
+  new RegExp(
+    String.raw`library not loaded:\s*${MISSING_LIBRARY_DYLD_CAPTURE}`,
+    "i",
+  ),
+  new RegExp(
+    String.raw`cannot proceed because\s+${MISSING_LIBRARY_CAPTURE}\s+was not found`,
+    "i",
+  ),
 ];
 
 function findStartupFailure(output) {
@@ -130,12 +147,12 @@ function sanitizeStartupDiagnostic(value, maxLength) {
 }
 
 function findMissingLibrary(output) {
-  for (const pattern of MISSING_LIBRARY_PATTERNS) {
-    const rawMissingLibrary = output.match(pattern)?.[1];
-    const missingLibrary = rawMissingLibrary
-      ?.trim()
-      .replace(/^(['"])(.*)\1$/, "$2");
-    if (missingLibrary) return missingLibrary;
+  for (const line of output.split(/\r?\n/)) {
+    for (const pattern of MISSING_LIBRARY_PATTERNS) {
+      const match = line.match(pattern);
+      const missingLibrary = (match?.[2] ?? match?.[3])?.trim();
+      if (missingLibrary) return missingLibrary;
+    }
   }
   return null;
 }

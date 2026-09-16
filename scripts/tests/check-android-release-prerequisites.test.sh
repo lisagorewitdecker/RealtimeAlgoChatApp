@@ -33,7 +33,7 @@ make_runner_commands() {
   local directory="$1"
   local java_version="$2"
   "$MKDIR_BIN" -p "$directory"
-  for command in sdkmanager avdmanager emulator pnpm maestro; do
+  for command in sdkmanager avdmanager emulator pnpm maestro aapt2; do
     printf '#!%s\nexit 0\n' "$BASH_BIN" >"$directory/$command"
     chmod +x "$directory/$command"
   done
@@ -259,6 +259,7 @@ missing_output="$(
   run_case missing-prerequisites 2 "$missing_utilities"
 )"
 assert_contains "$missing_output" "Required command is missing: sdkmanager"
+assert_contains "$missing_output" "Required Android SDK tool is missing: aapt2."
 assert_contains "$missing_output" "Required release value is missing: NATIVE_SMOKE_APP_ID"
 assert_not_contains "$missing_output" "secret-value-must-not-print"
 

@@ -61,12 +61,12 @@ function resolveEvidencePath(configuredPath, packageRoot) {
     : path.join(packageRoot, ".expo", "dev-request-evidence.log");
 }
 
-function createEvidenceAppender(writeLine, maxLines = MAX_REQUEST_EVIDENCE_LINES) {
+function createEvidenceAppender(writeContents, maxLines = MAX_REQUEST_EVIDENCE_LINES) {
   if (!Number.isInteger(maxLines) || maxLines < 2) {
     throw new RangeError("maxLines must be an integer greater than one");
   }
 
-  let retainedLines = 0;
+  const retainedRequestLines = [];
   let truncated = false;
   const truncationNotice =
     maxLines === MAX_REQUEST_EVIDENCE_LINES
@@ -76,16 +76,20 @@ function createEvidenceAppender(writeLine, maxLines = MAX_REQUEST_EVIDENCE_LINES
         } request lines; console output continues.`;
 
   return (evidence) => {
-    if (truncated) return false;
-
-    if (retainedLines === maxLines - 1) {
-      if (!writeLine(`${truncationNotice}\n`)) return false;
+    if (retainedRequestLines.length === maxLines - 1) {
       truncated = true;
-      return false;
     }
 
-    if (!writeLine(`${evidence}\n`)) return false;
-    retainedLines += 1;
+    retainedRequestLines.push(evidence);
+    if (retainedRequestLines.length > maxLines - 1) {
+      retainedRequestLines.shift();
+    }
+
+    const contents =
+      (truncated ? `${truncationNotice}\n` : "") +
+      retainedRequestLines.map((line) => `${line}\n`).join("");
+    if (!writeContents(contents)) return false;
+
     return true;
   };
 }
