@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { chmod, mkdir, writeFile } from "node:fs/promises";
 import path, { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -523,7 +523,7 @@ function isEvidenceVerificationRequest(cliOptions, env) {
     return true;
   }
 
-  return !env.SENTRY_AUTH_TOKEN && Boolean(env.SENTRY_EVIDENCE_PATH);
+  return Boolean(env.SENTRY_EVIDENCE_PATH) && existsSync(env.SENTRY_EVIDENCE_PATH);
 }
 
 async function runCli(argv = process.argv.slice(2), env = process.env) {

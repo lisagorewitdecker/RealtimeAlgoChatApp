@@ -540,7 +540,7 @@ test("cli uses evidence verification mode for environment-only inputs", async ()
   const { stdout, stderr } = await execFileAsync(process.execPath, [scriptPath], {
     env: {
       ...process.env,
-      SENTRY_AUTH_TOKEN: "",
+      SENTRY_AUTH_TOKEN: "still-set",
       SENTRY_EVIDENCE_PATH: evidencePath,
       SENTRY_TRIGGER_PATH: triggerPath,
       SENTRY_EXPECTED_PLATFORM: expected.platform,
