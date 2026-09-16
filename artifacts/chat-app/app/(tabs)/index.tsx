@@ -57,7 +57,7 @@ export default function ChatsScreen() {
       }
     } catch (_) {
       // Keep the last successful room list visible when a refresh fails.
-    }
+    } finally {
       setLoading(false);
       setRefreshing(false);
     }
