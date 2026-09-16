@@ -96,6 +96,10 @@ test("a live reconnect replays each message once and preserves later server orde
   const beforeReconnect = `Before reconnect ${suffix}`;
   const afterReconnectFirst = `After reconnect first ${suffix}`;
   const afterReconnectSecond = `After reconnect second ${suffix}`;
+  const longGapMessages = Array.from(
+    { length: 81 },
+    (_, index) => `Long gap ${String(index + 1).padStart(2, "0")} ${suffix}`,
+  );
   const clerkClient = createClerkClient({ publishableKey, secretKey });
   const users: DisposableUser[] = [];
   const contexts: BrowserContext[] = [];
@@ -153,8 +157,13 @@ test("a live reconnect replays each message once and preserves later server orde
     await expect(creator.page.getByTestId("room-participant-count")).toHaveText(
       "1 person",
     );
-    await sendMessage(creator.page, afterReconnectFirst);
-    await sendMessage(creator.page, afterReconnectSecond);
+    for (const content of [
+      afterReconnectFirst,
+      ...longGapMessages,
+      afterReconnectSecond,
+    ]) {
+      await sendMessage(creator.page, content);
+    }
     await member.context.setOffline(false);
     await expect(creator.page.getByTestId("room-participant-count")).toHaveText(
       "2 people",
@@ -162,24 +171,27 @@ test("a live reconnect replays each message once and preserves later server orde
     );
     await expect(member.page.getByTestId("room-key-waiting")).toBeHidden();
 
-    // room-joined replays the server's existing history into the still-mounted
-    // Room screen. Previously visible text and system IDs must remain singletons.
-    await expect(
-      member.page.getByText(beforeReconnect, { exact: true }),
-    ).toHaveCount(1);
-    await expect(member.page.getByText(memberJoined, { exact: true })).toHaveCount(1);
-
-    const first = member.page.getByText(afterReconnectFirst, { exact: true });
+    // The logical list count covers the existing two rows, the disconnect
+    // system row, and all 83 missed text messages. This verifies full replay
+    // and deduplication without relying on virtualized off-screen DOM rows.
+    await expect(member.page.getByTestId("room-message-list")).toHaveAttribute(
+      "aria-label",
+      "86 messages",
+    );
     const second = member.page.getByText(afterReconnectSecond, { exact: true });
-    await expect(first).toHaveCount(1);
     await expect(second).toHaveCount(1);
+    const lastLongGapMessage = member.page.getByText(longGapMessages.at(-1)!, {
+      exact: true,
+    });
+    await expect(lastLongGapMessage).toHaveCount(1);
+    await expect(member.page.getByTestId("room-message-gap-warning")).toHaveCount(0);
     await expect
       .poll(async () => {
-        const [firstBox, secondBox] = await Promise.all([
-          first.boundingBox(),
+        const [lastGapBox, secondBox] = await Promise.all([
+          lastLongGapMessage.boundingBox(),
           second.boundingBox(),
         ]);
-        return firstBox && secondBox ? firstBox.y < secondBox.y : false;
+        return lastGapBox && secondBox ? lastGapBox.y < secondBox.y : false;
       })
       .toBe(true);
   } catch (error) {

@@ -6,7 +6,7 @@
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "chat-app",
-    "userInterfaceStyle": "automatic",
+    "userInterfaceStyle": "dark",
     "ios": {
       "supportsTablet": false,
       "infoPlist": {
@@ -47,7 +47,8 @@
           "backgroundColor": "#0D0D1A"
         }
       ],
-      "expo-web-browser"
+      "expo-web-browser",
+      "@sentry/react-native"
     ],
     "experiments": {
       "typedRoutes": true,

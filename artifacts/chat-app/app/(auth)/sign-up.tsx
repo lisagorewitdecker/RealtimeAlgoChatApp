@@ -3,8 +3,10 @@ import { useSignUp } from "@clerk/expo/legacy";
 import * as WebBrowser from "expo-web-browser";
 import { Link } from "expo-router";
 import React, { useCallback, useState } from "react";
-import { ActivityIndicator, StyleSheet, TouchableOpacity, View } from "react-native";
+import { ActivityIndicator, Platform, StyleSheet, TouchableOpacity, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { PRODUCT_NAME } from "@/constants/branding";
+import { KeyboardAwareScrollViewCompat } from "@/components/KeyboardAwareScrollViewCompat";
 import { ScaledText as Text } from "@/components/ScaledText";
 import { ScaledTextInput as TextInput } from "@/components/ScaledTextInput";
 import { useColors } from "@/hooks/useColors";
@@ -19,6 +21,7 @@ function clerkError(error: unknown) {
 
 export default function SignUpScreen() {
   const colors = useColors();
+  const insets = useSafeAreaInsets();
   const { signUp, setActive, isLoaded } = useSignUp();
   const { startOAuthFlow } = useOAuth({ strategy: "oauth_google" });
   const { startOAuthFlow: startXOAuthFlow } = useOAuth({ strategy: "oauth_x" });
@@ -92,7 +95,20 @@ export default function SignUpScreen() {
   }
 
   return (
-    <View style={[styles.root, { backgroundColor: colors.background }]}>
+    <KeyboardAwareScrollViewCompat
+      testID="sign-up-scroll"
+      style={{ backgroundColor: colors.background }}
+      contentContainerStyle={[
+        styles.root,
+        {
+          paddingTop: (Platform.OS === "web" ? 67 : insets.top) + 28,
+          paddingBottom: (Platform.OS === "web" ? 34 : insets.bottom) + 28,
+        },
+      ]}
+      bottomOffset={68}
+      keyboardDismissMode="interactive"
+      keyboardShouldPersistTaps="handled"
+    >
       <View style={styles.card}>
         <Text style={[styles.title, { color: colors.foreground }]}>{awaitingCode ? "Verify your email" : "Create your account"}</Text>
         <Text style={[styles.subtitle, { color: colors.mutedForeground }]}>{awaitingCode ? "Enter the code sent to your email address." : `Join ${PRODUCT_NAME} to chat, call, and build together.`}</Text>
@@ -102,8 +118,8 @@ export default function SignUpScreen() {
         {!awaitingCode ? <><TouchableOpacity accessibilityRole="button" accessibilityLabel="Continue with Google" disabled={loading} onPress={signUpWithGoogle} style={[styles.oauth, { borderColor: colors.border, borderRadius: colors.radius }]}><Text style={[styles.oauthText, { color: colors.foreground }]}>Continue with Google</Text></TouchableOpacity><TouchableOpacity accessibilityRole="button" accessibilityLabel="Continue with X" disabled={loading} onPress={signUpWithX} style={[styles.oauth, { borderColor: colors.border, borderRadius: colors.radius }]}><Text style={[styles.oauthText, { color: colors.foreground }]}>Continue with X</Text></TouchableOpacity></> : null}
         <Text style={[styles.linkText, { color: colors.mutedForeground }]}>Already have an account? <Link href={"/(auth)/sign-in" as never} style={{ color: colors.primary }}>Sign in</Link></Text>
       </View>
-    </View>
+    </KeyboardAwareScrollViewCompat>
   );
 }
 
-const styles = StyleSheet.create({ root: { flex: 1, justifyContent: "center", padding: 28 }, card: { gap: 14 }, title: { fontSize: 28, fontWeight: "700", flexShrink: 1, lineHeight: 34 }, subtitle: { fontSize: 15, marginBottom: 12, flexShrink: 1 }, input: { height: 52, borderWidth: 1, paddingHorizontal: 15, fontSize: 16 }, button: { height: 52, alignItems: "center", justifyContent: "center", marginTop: 4 }, buttonText: { fontSize: 16, fontWeight: "700" }, oauth: { height: 52, alignItems: "center", justifyContent: "center", borderWidth: 1 }, oauthText: { fontSize: 15, fontWeight: "600" }, error: { fontSize: 13, lineHeight: 18 }, linkText: { fontSize: 14, textAlign: "center", marginTop: 8 } });
+const styles = StyleSheet.create({ root: { flexGrow: 1, justifyContent: "center", paddingHorizontal: 28 }, card: { gap: 14 }, title: { fontSize: 28, fontWeight: "700", flexShrink: 1, lineHeight: 34 }, subtitle: { fontSize: 15, marginBottom: 12, flexShrink: 1 }, input: { height: 52, borderWidth: 1, paddingHorizontal: 15, fontSize: 16 }, button: { height: 52, alignItems: "center", justifyContent: "center", marginTop: 4 }, buttonText: { fontSize: 16, fontWeight: "700" }, oauth: { height: 52, alignItems: "center", justifyContent: "center", borderWidth: 1 }, oauthText: { fontSize: 15, fontWeight: "600" }, error: { fontSize: 13, lineHeight: 18 }, linkText: { fontSize: 14, textAlign: "center", marginTop: 8 } });

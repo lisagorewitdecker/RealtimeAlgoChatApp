@@ -2,6 +2,7 @@
 - [Clerk Expo startup](clerk-expo-startup.md) — map the managed publishable key into Expo’s public environment and never block the root UI on font loading.
 - [Expo SDK maturity exceptions](expo-sdk-maturity-exceptions.md) — keep the package-age policy enabled and allowlist only same-day official Expo dependency-chain packages.
 - [Expo preview CORS](expo-preview-cors.md) — API browser allowlists must include the Expo preview origin, not only the main development domain.
+- [Expo preview DevTools GTK runtime](expo-preview-devtools-gtk.md) — SDK 57’s optional DevTools binary needs Nix `gtk3` so Metro startup stays free of a misleading loader error.
 - [Sandbox release validation](sandbox-release-validation.md) — test the generated editor and the mobile WebView host independently at their delivery boundaries.
 - [Post-merge setup timing](post-merge-setup-timing.md) — dependency reconciliation can exceed the default setup timeout; keep the configured allowance realistic.
 - [Account access policy](account-access-policy.md) — Clerk-owned bans and verified email checks apply at every server entry point, including room capabilities.
@@ -14,6 +15,7 @@
 - [React Native heading semantics](rn-heading-semantics.md) — pair native header semantics with web role and aria-level because RN 0.81 omits accessibilityLevel from Text typings.
 - [Static-server SAST taint](static-server-sast-taint.md) — request-time filesystem reads remain flagged despite boundary checks; serve only startup-indexed assets.
 - [Publish metadata merge state](publish-metadata-merge-state.md) — valid manifests can still be uncommittable; verify the Git index and frozen lockfile before publishing.
+- [Publish lockfile validity](publish-lockfile-validity.md) — a malformed lockfile makes fresh publish installs resolve a different toolchain than local node_modules.
 - [Expo canvas iframe refresh](expo-canvas-iframe-refresh.md) — after fixing a render crash, restart Expo and remount the canvas artifact frame to clear its retained error state.
 - [Clerk synthetic browser sessions](clerk-synthetic-browser-sessions.md) — backend-created test users may require a client-trust email code before browser sessions activate.
 - [React Native Web confirmations](react-native-web-confirmations.md) — Alert button callbacks are not reliable on web; use the browser confirm result for destructive actions.
@@ -23,7 +25,7 @@
 - [Cryptocurrency boundary](cryptocurrency-boundary.md) — do not add cryptocurrency payments or wallet features; preserve cryptographic E2EE separately.
 - [Validation workflow concurrency](validation-workflow-concurrency.md) — completion validation launches every check at once; heavy commands stay behind the shared flock prefix.
 - [Artifact cold-start readiness](artifact-startup-after-pnpm-pruning.md) — open the port before async asset preloading; bypassing the package manager alone is insufficient.
-- [Mobile release browser validation](mobile-release-browser-validation.md) — proxied E2E flows need a healthy, freshly served Expo frontend and API pair.
+- [Mobile release browser validation](mobile-release-browser-validation.md) — proxied E2E flows need a fresh Expo/API pair; the API dev server is a one-shot build, so restart it after any rebase.
 - [Node preload worker inheritance](node-preload-worker-inheritance.md) — `--import` preloads also run in worker threads; guard process-wide initialization to the main thread.
 - [Node preload paths](node-preload-paths.md) — hosted monorepo artifact commands run from the workspace root; make entrypoint and `--import` paths root-relative.
 - [React Native async act](react-native-async-act.md) — flush provider effects with a separate async act after render; nesting render in async act can unmount RNTL trees.
@@ -36,20 +38,39 @@
 - [Expo Sentry wizard fallback](expo-sentry-wizard.md) — non-TTY wizard runs can exit after the banner without changes; verify diffs and honor Expo's SDK-compatible package range.
 - [Generated-client check backup safety](generated-check-backup-safety.md) — keep the backup when restoration is incomplete; simulate disk failures via read-only paths (skipped as root).
 - [Native gate diagnostic runs](native-gate-diagnostic-runs.md) — any device override marks the whole run diagnostic-only; CI refuses it loudly; evidence requires run_mode=release-gate.
-- [Volatile tracked test results](volatile-tracked-test-results.md) — a committed Playwright run marker under artifacts/api-server can change during unrelated work; restore it before completing.
+- [Volatile tracked test results](volatile-tracked-test-results.md) — artifact-level test-results/ is Playwright output and now gitignored; never re-include it or keep durable evidence inside outputDir.
 - [Native evidence review record](native-evidence-review-record.md) — a missing human review is reported, not fatal (the CI gate runs before anyone can review); rejected or mismatched records fail.
+- [Native evidence diagnostic privacy](native-evidence-diagnostic-privacy.md) — release failures name fields and artifact paths without echoing parsed fixture values or parser snippets.
 - [Candidate-bound release evidence](candidate-bound-release-evidence.md) — checks for prebuilt mobile candidates must verify evidence inside each binary, not current release-time secrets.
 - [Expo Go native modules & preview 502s](expo-go-native-modules.md) — gate native SDK init outside Expo Go; orphan `expo start` blocks the port prompt; Go home screen = dropped launch.
 - [Expo Go secure-store keys](expo-go-native-modules.md) — expo-secure-store rejects `:` in key names on phones only; encode keys and keep the Jest mock enforcing the real pattern.
 - [Physical-device evidence tasks](physical-device-evidence.md) — no phones are reachable here; probe once, file a BLOCKED record per the docs procedure, then ask the user for device access.
+- [Release-run preconditions live on GitHub](physical-device-evidence.md) — audit environment/secrets/vars/runners/runs by name via the GitHub connection and diff `origin/development`; as of 2026-09-14 none existed and there is no EAS project.
 - [Stale node_modules after merge](physical-device-evidence.md) — Jest "Cannot find module '@babel/generator'" means node_modules lags the lockfile; reinstall frozen and offline.
 - [Preview device debugging](preview-device-debugging.md) — in-container probes bypass the public edge; use the opt-in Metro request log and check the live manifest date first.
 - [Room key hydration](room-key-hydration.md) — key-load promises must always settle; storage read failures become retryable load failures, never a hang or key replacement.
 - [Job summary untrusted text](job-summary-untrusted-text.md) — render PR-body text and contract findings in backtick-safe code spans in GitHub job summaries; never as raw Markdown.
-- [Task merges land on the checked-out branch](branch-divergence-from-task-merges.md) — reunify development/production with a no-ff merge then fast-forward; never use stale `origin/*` refs.
+- [Task merges land on the checked-out branch](branch-divergence-from-task-merges.md) — the platform rebases then squashes; consolidate from each task's own commits in a worktree, then `merge -s ours` the stale branch.
 - [Preload worker transport chain](preload-worker-transport-chain.md) — a logger import in the `--import` preload spawned pino workers without bound; keep side effects behind `isMainThread`.
 - [Pinned packageExtensions after upgrades](pinned-package-extensions-after-upgrades.md) — exact-version extension keys silently stop applying after upgrades and broke the Chat App publish build.
 - [Release summary secret contract](release-summary-secret-contract.md) — secret masking is per-job and exact-match only; every workflow summary writer needs an inventoried sentinel contract.
 - [Node sleeping fixtures](node-sleeping-fixtures.md) — an unresolved top-level promise does not keep Node alive; use an active handle for signal-waiting fixtures.
+- [Test-only environment controls](generated-check-fault-controls.md) — faults and fixture paths need explicit subprocess opt-ins; harnesses strip them from the base env and prove inertness.
+- [GitHub PR template discovery](github-pr-template-discovery.md) — validate templates on the live default branch; a correct workspace copy does not populate GitHub’s new-PR form.
+- [pnpm drizzle-orm / OpenTelemetry peer duplication](pnpm-drizzle-otel-duplication.md) — adding @opentelemetry/api-dependent packages alongside drizzle-orm can fork incompatible type instances; converge peers and avoid externalizing otel interfaces.
+- [Hook rollback replacement](hook-rollback-replacement.md) — restore preserved hooks by atomic replacement; never remove the active hook before restoration succeeds.
+- [Playwright runtime setup](playwright-runtime-setup.md) — declare Chromium libraries through Replit Nix and launch once before diagnostics so setup failures are unmistakable.
+- [Evidence metadata duplicate detection](evidence-duplicate-detection.md) — detect duplicate keys generically (no allowlists) and mirror the producer's full field set in fixtures.
+- [Task merge against an unrelated main](task-merge-unrelated-main.md) — a rebase replaying from "Initial commit" with no merge base means main-repl HEAD was transiently swapped; abandon and retry, never resolve.
+- [Account-access lookup deadline](account-access-retry-budget.md) — one hard deadline for waits and in-flight Clerk requests, under Socket.IO’s 45 s connect timeout; pass capped hints to clients.
+- [Relocatable Pino bundles](relocatable-pino-bundles.md) — esbuild-plugin-pino can bake the build machine’s absolute output path into workers; rewrite and validate bundle-relative paths.
+- [Browser E2E phase budgets](e2e-phase-budgets.md) — bound and label external setup, navigation, assertions, and teardown separately so stalls identify their real phase.
+- [Chat App script tests need explicit wiring](chat-app-script-tests.md) — Jest ignores `scripts/` and `.mjs`; a node:test file there runs only via its own package script chained into `test`.
+- [.replit merge regressions](replit-config-merge-regressions.md) — task merges can drop validation workflows and the post-merge timeout; an untracked `?? .replit` stub in a task env gets committed too.
 - [Generated-check test controls](generated-check-fault-controls.md) — test-only environment faults and fixture paths require explicit, separate subprocess opt-ins.
 - [GitHub probe write permissions](github-probe-write-permissions.md) — verify commit/tree access before planning a live CI probe; ref creation alone is not enough.
+- [GitHub connection workflow scope](github-connection-workflow-scope.md) — cannot touch workflow files or logs; pushes need a valid Git Providers grant or owner PAT; check redactions first.
+- [Open merges vs task merges](open-merges-vs-task-merges.md) — platform task merges hard-reset the main checkout and destroy any in-progress merge; merge in a git worktree, then fast-forward.
+- [Android preflight JSON contract](android-preflight-json-contract.md) — validate optional redacted sidecars and compare public/local statuses with the Markdown handoff record.
+- [GitHub ruleset status checks](github-ruleset-status-checks.md) — required checks accept an omitted integration ID; sending JSON null is rejected by the ruleset API.
+- [expo-router vendored react-navigation](expo-router-vendored-navigation.md) — read tab-bar height from `expo-router/js-tabs` context with an inset fallback; never add `@react-navigation/*`; mock it in Jest.

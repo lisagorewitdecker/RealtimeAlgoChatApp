@@ -1,6 +1,11 @@
 import { getAuth } from "@clerk/express";
 import type { Request, Response } from "express";
 import { getAccountAccess } from "./accountAccess";
+import {
+  ACCOUNT_ACCESS_UNAVAILABLE_CODE,
+  ACCOUNT_ACCESS_UNAVAILABLE_MESSAGE,
+  accountAccessRetryAfterSeconds,
+} from "./accountAccessUnavailable";
 import { logger } from "./logger";
 
 export async function requireAuthorizedUser(
@@ -24,8 +29,20 @@ export async function requireAuthorizedUser(
       code: access.reason === "banned" ? "BANNED" : "EMAIL_UNVERIFIED",
     });
   } catch (error) {
-    logger.warn({ err: error }, "Account access check failed");
-    res.status(503).json({ error: "Account access is temporarily unavailable." });
+    // The lookup already spent its retry budget on Clerk; instead of holding
+    // the request any longer, tell the client when to come back. The header
+    // carries Clerk's (capped) guidance for the next attempt, and the body
+    // repeats it for clients that only read JSON.
+    const retryAfterSeconds = accountAccessRetryAfterSeconds(error);
+    logger.warn({ err: error, retryAfterSeconds }, "Account access check failed");
+    res
+      .status(503)
+      .setHeader("Retry-After", String(retryAfterSeconds))
+      .json({
+        error: ACCOUNT_ACCESS_UNAVAILABLE_MESSAGE,
+        code: ACCOUNT_ACCESS_UNAVAILABLE_CODE,
+        retryAfterSeconds,
+      });
   }
   return null;
 }

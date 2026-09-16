@@ -75,6 +75,10 @@ export function validateBrandingFiles({ brandingSource, appMetadataSource }) {
   return productName;
 }
 
+function platformLabel(platform) {
+  return platform === "ios" ? "iOS" : "Android";
+}
+
 function requireNativeValue(metadata, key, platform) {
   const value = metadata?.[key];
   if (typeof value !== "string" || value.length === 0) {
@@ -83,6 +87,48 @@ function requireNativeValue(metadata, key, platform) {
     );
   }
   return value;
+}
+
+/**
+ * Parses the candidate metadata written by the workflow's inspection step.
+ * JSON parser messages quote the offending input, and the inspected metadata
+ * carries private identifiers (bundle and package IDs), so a parse failure
+ * reports a fixed reason instead of the parser message. The uploaded metadata
+ * file remains available for detailed inspection.
+ */
+export function parseNativeMetadata({ platform, source }) {
+  let metadata;
+  try {
+    metadata = JSON.parse(source);
+  } catch {
+    throw new Error(
+      `Native ${platformLabel(platform)} metadata is not valid JSON; inspect the uploaded native metadata file rather than the source app.json.`,
+    );
+  }
+  if (
+    metadata === null ||
+    typeof metadata !== "object" ||
+    Array.isArray(metadata)
+  ) {
+    throw new Error(
+      `Native ${platformLabel(platform)} metadata is not a JSON object; inspect the uploaded native metadata file rather than the source app.json.`,
+    );
+  }
+  return metadata;
+}
+
+function readNativeMetadata({ platform, metadataPath }) {
+  let source;
+  try {
+    source = readFileSync(metadataPath, "utf8");
+  } catch (error) {
+    const code =
+      typeof error?.code === "string" ? ` (${error.code})` : "";
+    throw new Error(
+      `Native ${platformLabel(platform)} metadata could not be read from ${metadataPath}${code}; the installed candidate was not inspected.`,
+    );
+  }
+  return parseNativeMetadata({ platform, source });
 }
 
 function validateNativeIosMetadata({
@@ -288,6 +334,16 @@ function nativePermissionSummary({
   expectedPermissionDescriptions,
   expectedPermissions,
 }) {
+  const label =
+    platform === "ios" ? "Permission copy" : "Permission declarations";
+  if (metadata === null) {
+    return {
+      label,
+      status: "UNAVAILABLE",
+      detail: "native metadata could not be inspected",
+    };
+  }
+
   if (platform === "ios") {
     const fields = [
       [
@@ -301,30 +357,50 @@ function nativePermissionSummary({
         expectedPermissionDescriptions?.microphone,
       ],
     ];
-    const mismatches = fields
-      .filter(([, actual, expected]) => actual !== expected)
+    // Fields the candidate never declared are reported separately from
+    // declared copy that differs, so reviewers know whether to look at the
+    // build's Info.plist keys or at the permission strings themselves.
+    const unavailableFields = fields
+      .filter(
+        ([, actual]) => typeof actual !== "string" || actual.length === 0,
+      )
       .map(([field]) => field);
+    const mismatchedFields = fields
+      .filter(
+        ([field, actual, expected]) =>
+          !unavailableFields.includes(field) && actual !== expected,
+      )
+      .map(([field]) => field);
+    const findings = [];
+    if (unavailableFields.length > 0) {
+      findings.push(`unavailable field: ${unavailableFields.join(", ")}`);
+    }
+    if (mismatchedFields.length > 0) {
+      findings.push(`mismatched field: ${mismatchedFields.join(", ")}`);
+    }
     return {
-      label: "Permission copy",
-      status: mismatches.length === 0 ? "PASS" : "FAIL",
+      label,
+      status: findings.length === 0 ? "PASS" : "FAIL",
       detail:
-        mismatches.length === 0
-          ? "camera and microphone"
-          : `mismatched field: ${mismatches.join(", ")}`,
+        findings.length === 0 ? "camera and microphone" : findings.join("; "),
     };
   }
 
-  const actualPermissions = Array.isArray(metadata?.permissions)
-    ? metadata.permissions
-    : [];
+  if (!Array.isArray(metadata?.permissions)) {
+    return {
+      label,
+      status: "FAIL",
+      detail: "unavailable field: permissions",
+    };
+  }
   const requiredPermissions = Array.isArray(expectedPermissions)
     ? expectedPermissions
     : [];
   const missingPermissions = requiredPermissions.filter(
-    (permission) => !actualPermissions.includes(permission),
+    (permission) => !metadata.permissions.includes(permission),
   );
   return {
-    label: "Permission declarations",
+    label,
     status: missingPermissions.length === 0 ? "PASS" : "FAIL",
     detail:
       missingPermissions.length === 0
@@ -333,6 +409,12 @@ function nativePermissionSummary({
   };
 }
 
+/**
+ * Renders the concise step-summary fragment. Pass `metadata: null` when the
+ * candidate metadata could not be read or parsed; the fragment then reports
+ * the label and permission result as unavailable instead of comparing fields
+ * that were never inspected.
+ */
 export function formatNativeBrandingSummary({
   platform,
   buildId,
@@ -424,10 +506,13 @@ function runNativeValidation() {
     microphone: appMetadata?.expo?.ios?.infoPlist?.NSMicrophoneUsageDescription,
   };
   const expectedPermissions = appMetadata?.expo?.android?.permissions;
+  // Stays null until the candidate metadata is read and parsed, so a failed
+  // inspection is summarized as unavailable rather than as mismatched fields.
+  let metadata = null;
   let report;
 
   try {
-    const metadata = JSON.parse(readFileSync(metadataPath, "utf8"));
+    metadata = readNativeMetadata({ platform, metadataPath });
     const details = validateNativeArtifactMetadata({
       platform,
       metadata,
@@ -459,12 +544,6 @@ function runNativeValidation() {
     );
     console.log(`Native ${platform} branding matches: ${productName}`);
   } catch (error) {
-    let metadata = {};
-    try {
-      metadata = JSON.parse(readFileSync(metadataPath, "utf8"));
-    } catch {
-      // The detailed report contains the metadata parsing failure.
-    }
     report = nativeBrandingReport({
       platform,
       buildId,

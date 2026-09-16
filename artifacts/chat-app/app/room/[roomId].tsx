@@ -112,12 +112,16 @@ export default function RoomScreen() {
   const [moderatingUserId, setModeratingUserId] = useState<string | null>(null);
   const [roomBanned, setRoomBanned] = useState(false);
   const [roomReady, setRoomReady] = useState(false);
+  const [messageReplayGap, setMessageReplayGap] = useState(false);
   const [retryingRoomKey, setRetryingRoomKey] = useState(false);
   const [hasRoomKey, setHasRoomKey] = useState(() => !!getRoomKey(roomId));
   const inputRef = useRef<TextInput>(null);
   const hasTrackedRoomJoin = useRef(false);
   const roomKeyLoadRef = useRef<Promise<void> | null>(null);
   const roomKeyEnvelopeRecoveryRef = useRef<Promise<boolean> | null>(null);
+  const messagesRef = useRef<Message[]>([]);
+  messagesRef.current = messages;
+  const recoveryRequestRef = useRef<string | null>(null);
   // Mirrors `canModerate` for socket handlers, which must not re-subscribe
   // (and re-join) whenever moderation rights change.
   const canModerateRef = useRef(false);
@@ -140,6 +144,20 @@ export default function RoomScreen() {
     },
     [decryptMessage, roomId],
   );
+
+  const mergeMessages = useCallback((incoming: Message[]) => {
+    setMessages((current) => {
+      const byId = new Map(current.map((message) => [message.id, message]));
+      for (const message of incoming) byId.set(message.id, message);
+      const merged = [...byId.values()].sort(
+        (left, right) =>
+          (left.timestamp ?? 0) - (right.timestamp ?? 0) ||
+          left.id.localeCompare(right.id),
+      );
+      messagesRef.current = merged;
+      return merged;
+    });
+  }, []);
 
   const acceptRoomKeyEnvelope = useCallback(
     (envelope: RoomKeyEnvelope | null | undefined): Promise<boolean> => {
@@ -268,6 +286,8 @@ export default function RoomScreen() {
       users: User[];
       canModerate?: boolean;
       keyEnvelope?: RoomKeyEnvelope | null;
+      replayAfterMessageId?: string;
+      replayGap?: boolean;
     }) {
       // The roster carries the key the server holds for every member, this
       // device included. A different key for this account means another
@@ -287,7 +307,26 @@ export default function RoomScreen() {
       }
       const finishJoin = () => {
         setRoomReady(true);
-        setMessages(uniqueMessages(data.messages.map(decryptIncomingMessage)));
+        const knownCursor = [...messagesRef.current]
+          .reverse()
+          .find((message) => message.type === "text");
+        const incomingMessages = data.messages.map(decryptIncomingMessage);
+        if (knownCursor) {
+          mergeMessages(incomingMessages);
+          const requestId = `${roomId}:${Date.now()}`;
+          recoveryRequestRef.current = requestId;
+          socket?.emit("recover-messages", {
+            requestId,
+            roomId,
+            afterMessageId: knownCursor.id,
+            afterTimestamp: knownCursor.timestamp,
+          });
+        } else {
+          const initialMessages = uniqueMessages(incomingMessages);
+          messagesRef.current = initialMessages;
+          setMessages(initialMessages);
+        }
+        setMessageReplayGap(data.replayGap === true);
         setUsers(data.users);
         setCanModerate(data.canModerate === true);
         trackEvent("room_joined", {
@@ -318,7 +357,34 @@ export default function RoomScreen() {
       finishAfterEnvelope();
     }
     function onMessage(msg: Message & { ciphertext?: string; nonce?: string }) {
-      setMessages((prev) => appendMessageById(prev, decryptIncomingMessage(msg)));
+      mergeMessages([decryptIncomingMessage(msg)]);
+    }
+    function onMessageRecoveryPage(data: {
+      requestId: string;
+      messages: Array<Message & { ciphertext?: string; nonce?: string }>;
+      hasMore: boolean;
+      nextCursor: { id: string; timestamp: number };
+    }) {
+      if (data.requestId !== recoveryRequestRef.current) return;
+      mergeMessages(data.messages.map(decryptIncomingMessage));
+      if (data.hasMore) {
+        const requestId = `${roomId}:${Date.now()}:${data.nextCursor.id}`;
+        recoveryRequestRef.current = requestId;
+        socket?.emit("recover-messages", {
+          requestId,
+          roomId,
+          afterMessageId: data.nextCursor.id,
+          afterTimestamp: data.nextCursor.timestamp,
+        });
+      } else {
+        recoveryRequestRef.current = null;
+        setMessageReplayGap(false);
+      }
+    }
+    function onMessageRecoveryError(data: { requestId?: string }) {
+      if (data.requestId === recoveryRequestRef.current) {
+        recoveryRequestRef.current = null;
+      }
     }
     function onUserJoined(data: {
       userId: string;
@@ -400,16 +466,20 @@ export default function RoomScreen() {
     }
 
     const joinRoom = () => {
+      const lastSeenMessageId = messagesRef.current.at(-1)?.id;
       socket.emit("join-room", {
         roomId,
         createIfMissing: createIfMissing !== false,
         roomName,
+        ...(lastSeenMessageId ? { lastSeenMessageId } : {}),
       });
     };
 
     socket.on("connect", joinRoom);
     socket.on("room-joined", onRoomJoined);
     socket.on("message", onMessage);
+    socket.on("message-recovery-page", onMessageRecoveryPage);
+    socket.on("message-recovery-error", onMessageRecoveryError);
     socket.on("user-joined", onUserJoined);
     socket.on("user-key-changed", onUserKeyChanged);
     socket.on("user-left", onUserLeft);
@@ -424,6 +494,8 @@ export default function RoomScreen() {
       socket.off("connect", joinRoom);
       socket.off("room-joined", onRoomJoined);
       socket.off("message", onMessage);
+      socket.off("message-recovery-page", onMessageRecoveryPage);
+      socket.off("message-recovery-error", onMessageRecoveryError);
       socket.off("user-joined", onUserJoined);
       socket.off("user-key-changed", onUserKeyChanged);
       socket.off("user-left", onUserLeft);
@@ -443,6 +515,7 @@ export default function RoomScreen() {
     handleRoomBanned,
     acceptRoomKeyEnvelope,
     decryptIncomingMessage,
+    mergeMessages,
     encryptRoomKey,
     getRoomKey,
     markDeviceKeySuperseded,
@@ -726,6 +799,7 @@ export default function RoomScreen() {
 
   return (
     <KeyboardAvoidingView
+      testID="room-keyboard-avoiding-view"
       style={[styles.root, { backgroundColor: colors.background }]}
       behavior="padding"
       keyboardVerticalOffset={0}
@@ -882,8 +956,31 @@ export default function RoomScreen() {
         </View>
       ) : null}
 
+      {messageReplayGap ? (
+        <View
+          testID="room-message-gap-warning"
+          accessibilityRole="alert"
+          style={[
+            styles.keyWarning,
+            { backgroundColor: colors.card, borderBottomColor: colors.destructive },
+          ]}
+        >
+          <Feather name="alert-triangle" size={18} color={colors.destructive} />
+          <View style={styles.keyWarningCopy}>
+            <Text style={[styles.keyWarningTitle, { color: colors.foreground }]}>
+              Some messages could not be recovered
+            </Text>
+            <Text style={[styles.keyWarningText, { color: colors.mutedForeground }]}>
+              This device was disconnected longer than the room history kept for
+              reconnects. Newer messages are shown below.
+            </Text>
+          </View>
+        </View>
+      ) : null}
+
       <FlatList
         testID="room-message-list"
+        accessibilityLabel={`${messages.length} messages`}
         data={[...messages].reverse()}
         keyExtractor={(m) => m.id}
         renderItem={({ item }) => (
@@ -1039,6 +1136,8 @@ const styles = StyleSheet.create({
   input: {
     flex: 1, minHeight: 44, maxHeight: 120, paddingHorizontal: 16,
     paddingVertical: 12, fontSize: 15, borderWidth: 1,
+    // Android centers multiline text vertically by default; iOS top-aligns.
+    textAlignVertical: "top",
   },
   sendBtn: { width: 44, height: 44, alignItems: "center", justifyContent: "center" },
 });
