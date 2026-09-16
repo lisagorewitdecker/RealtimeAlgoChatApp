@@ -17,6 +17,7 @@ import {
   createHandoffPreflightRecord,
   formatHandoffPreflight,
   getPublicPreviewManifestUrl,
+  parsePreviewTimeout,
   requestLocalHandoffProbe,
   requestPublicPreviewManifest,
   readAndValidateHandoffPreflight,
@@ -31,6 +32,52 @@ const validatorPath = join(
   import.meta.dirname,
   "validate-preview-startup.mjs",
 );
+
+test("uses defaults only when preview timeout environment values are absent", () => {
+  assert.equal(
+    parsePreviewTimeout("PREVIEW_STARTUP_TIMEOUT_MS", undefined, 30_000),
+    30_000,
+  );
+  assert.equal(
+    parsePreviewTimeout("PREVIEW_HANDOFF_TIMEOUT_MS", null, 60_000),
+    60_000,
+  );
+  assert.equal(
+    parsePreviewTimeout("PREVIEW_PUBLIC_TIMEOUT_MS", undefined, 15_000),
+    15_000,
+  );
+});
+
+test("accepts positive finite preview timeout values", () => {
+  for (const [name, value] of [
+    ["PREVIEW_STARTUP_TIMEOUT_MS", "1000"],
+    ["PREVIEW_HANDOFF_TIMEOUT_MS", "40"],
+    ["PREVIEW_PUBLIC_TIMEOUT_MS", "25.5"],
+  ]) {
+    assert.equal(parsePreviewTimeout(name, value, 999), Number(value));
+  }
+});
+
+test("rejects malformed and non-positive preview timeout values", () => {
+  for (const name of [
+    "PREVIEW_STARTUP_TIMEOUT_MS",
+    "PREVIEW_HANDOFF_TIMEOUT_MS",
+    "PREVIEW_PUBLIC_TIMEOUT_MS",
+  ]) {
+    for (const value of ["", "not-a-number", "2_000", "0", "-1", "Infinity"]) {
+      assert.throws(
+        () => parsePreviewTimeout(name, value, 999),
+        (error) => {
+          assert.equal(
+            error.message,
+            `${name} must be a positive finite number of milliseconds.`,
+          );
+          return true;
+        },
+      );
+    }
+  }
+});
 
 function mockFetch(response) {
   const originalFetch = globalThis.fetch;

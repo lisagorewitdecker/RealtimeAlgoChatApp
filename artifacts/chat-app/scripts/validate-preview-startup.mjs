@@ -754,6 +754,19 @@ async function findFreePort() {
   });
 }
 
+export function parsePreviewTimeout(name, value, defaultValue) {
+  if (value == null) return defaultValue;
+
+  const timeoutMs = Number(value);
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+    throw new Error(
+      `${name} must be a positive finite number of milliseconds.`,
+    );
+  }
+
+  return timeoutMs;
+}
+
 function parseArgs(argv) {
   const platformIndex = argv.indexOf("--platform");
   const logFileIndex = argv.indexOf("--log-file");
@@ -781,14 +794,21 @@ function parseArgs(argv) {
     platform,
     logFile: logFileIndex === -1 ? null : argv[logFileIndex + 1],
     recordOutput,
-    timeoutMs:
-      Number(process.env.PREVIEW_STARTUP_TIMEOUT_MS) || DEFAULT_TIMEOUT_MS,
-    handoffTimeoutMs:
-      Number(process.env.PREVIEW_HANDOFF_TIMEOUT_MS) ||
+    timeoutMs: parsePreviewTimeout(
+      "PREVIEW_STARTUP_TIMEOUT_MS",
+      process.env.PREVIEW_STARTUP_TIMEOUT_MS,
+      DEFAULT_TIMEOUT_MS,
+    ),
+    handoffTimeoutMs: parsePreviewTimeout(
+      "PREVIEW_HANDOFF_TIMEOUT_MS",
+      process.env.PREVIEW_HANDOFF_TIMEOUT_MS,
       DEFAULT_HANDOFF_TIMEOUT_MS,
-    publicPreviewTimeoutMs:
-      Number(process.env.PREVIEW_PUBLIC_TIMEOUT_MS) ||
+    ),
+    publicPreviewTimeoutMs: parsePreviewTimeout(
+      "PREVIEW_PUBLIC_TIMEOUT_MS",
+      process.env.PREVIEW_PUBLIC_TIMEOUT_MS,
       DEFAULT_PUBLIC_PREVIEW_TIMEOUT_MS,
+    ),
   };
 }
 
