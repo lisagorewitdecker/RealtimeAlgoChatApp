@@ -163,10 +163,40 @@ function documentedCallerJob() {
   return jobs[0];
 }
 
+function documentedCallerSecrets() {
+  const section = callerDocumentation.match(
+    /#### Required reusable-workflow secrets\n([\s\S]*?)\n#### Optional reusable-workflow secrets\n([\s\S]*?)\n\nBuild each candidate with/,
+  );
+  assert.ok(
+    section,
+    "the caller setup documentation must separate required and optional reusable-workflow secrets",
+  );
+
+  const parseSecretList = (list, classification) => {
+    const secrets = [...list.matchAll(/^- `([A-Z0-9_]+)`/gm)].map(
+      ([, secret]) => secret,
+    );
+    assert.ok(
+      secrets.length > 0,
+      `the caller setup documentation must list ${classification} reusable-workflow secrets`,
+    );
+    return secrets.sort();
+  };
+
+  return {
+    required: parseSecretList(section[1], "required"),
+    optional: parseSecretList(section[2], "optional"),
+  };
+}
+
 function assertMobileReleaseNodeVersions(releaseWorkflow, nodeRange) {
   const configuredJobs = [];
+  const malformedVersions = [];
   const mismatches = [];
   for (const [jobId, job] of Object.entries(releaseWorkflow.jobs ?? {})) {
+    if (jobId === "mobile-release-node-range") {
+      continue;
+    }
     for (const step of job.steps ?? []) {
       if (String(step.uses ?? "").startsWith("actions/setup-node@")) {
         configuredJobs.push({
@@ -188,18 +218,31 @@ function assertMobileReleaseNodeVersions(releaseWorkflow, nodeRange) {
         nodeRange,
       )}`,
     );
-    if (
-      !nodeVersionSatisfiesRange(
+    let satisfiesRange;
+    try {
+      satisfiesRange = nodeVersionSatisfiesRange(
         configuredVersion,
         nodeRange,
         `mobile-release job "${jobId}" node-version`,
-      )
-    ) {
+      );
+    } catch (error) {
+      if (
+        String(error.message).includes(
+          "must be a concrete Node major/minor/patch version",
+        )
+      ) {
+        malformedVersions.push(error.message);
+        continue;
+      }
+      throw error;
+    }
+    if (!satisfiesRange) {
       mismatches.push(
         `mobile-release job "${jobId}" configures Node ${JSON.stringify(configuredVersion)}, outside package.json engines.node range ${JSON.stringify(nodeRange)}`,
       );
     }
   }
+  assert.equal(malformedVersions.length, 0, malformedVersions.join("\n"));
   assert.equal(mismatches.length, 0, mismatches.join("\n"));
 }
 
@@ -230,6 +273,28 @@ test("documented caller passes every required build ID through with", () => {
       `${input} must be passed from non-secret caller configuration`,
     );
   }
+});
+
+test("controlled Node range validation input is optional and stays outside secrets", () => {
+  const workflowDispatchInputs = workflow.on?.workflow_dispatch?.inputs ?? {};
+  const workflowCallInputs = workflow.on?.workflow_call?.inputs ?? {};
+  for (const inputs of [workflowDispatchInputs, workflowCallInputs]) {
+    assert.equal(
+      inputs.node_range_override?.required,
+      false,
+      "controlled Node range validation must be opt-in",
+    );
+    assert.equal(
+      inputs.node_range_override?.type,
+      "string",
+      "controlled Node range validation must accept an isolated string fixture",
+    );
+  }
+  assert.equal(
+    workflow.on.workflow_call.secrets?.node_range_override,
+    undefined,
+    "the controlled Node range fixture must not cross the reusable secrets boundary",
+  );
 });
 
 test("candidate build IDs do not cross the reusable secrets boundary", () => {
@@ -275,6 +340,30 @@ test("release credentials remain in the reusable workflow secrets contract", () 
   }
 });
 
+test("caller setup documentation lists every reusable workflow secret with its required setting", () => {
+  const workflowSecrets = workflow.on.workflow_call.secrets ?? {};
+  const documentedSecrets = documentedCallerSecrets();
+  const requiredSecrets = Object.entries(workflowSecrets)
+    .filter(([, contract]) => contract.required === true)
+    .map(([secret]) => secret)
+    .sort();
+  const optionalSecrets = Object.entries(workflowSecrets)
+    .filter(([, contract]) => contract.required !== true)
+    .map(([secret]) => secret)
+    .sort();
+
+  assert.deepEqual(
+    documentedSecrets.required,
+    requiredSecrets,
+    "the documented required secrets must exactly match required workflow_call secrets",
+  );
+  assert.deepEqual(
+    documentedSecrets.optional,
+    optionalSecrets,
+    "the documented optional secrets must exactly match optional workflow_call secrets",
+  );
+});
+
 test("every mobile release setup-node value stays inside the declared Node range", () => {
   const nodeRange = rootPackage.engines?.node;
   assert.equal(
@@ -284,6 +373,73 @@ test("every mobile release setup-node value stays inside the declared Node range
   );
 
   assertMobileReleaseNodeVersions(workflow, nodeRange);
+});
+
+test("invalid Node range guard blocks release jobs before setup or publish work", () => {
+  const guard = workflow.jobs?.["mobile-release-node-range"];
+  assert.ok(guard, "mobile release must validate its Node range in a dedicated guard job");
+  assert.match(
+    guard.steps?.find((step) => step.name === "Read package.json Node range")?.run,
+    /NODE_RANGE_OVERRIDE/,
+    "the guard must support an isolated controlled range fixture",
+  );
+  const resolveStep = guard.steps?.find(
+    (step) => step.name === "Resolve configured Node range",
+  );
+  assert.equal(
+    resolveStep?.["continue-on-error"],
+    true,
+    "the resolver must continue so the guard can emit its actionable diagnostic",
+  );
+  assert.equal(
+    resolveStep?.with?.["node-version"],
+    "${{ steps.read-node-range.outputs.node_range }}",
+    "the resolver must validate the selected package or fixture range",
+  );
+  const rejectStep = guard.steps?.find(
+    (step) => step.name === "Reject invalid Node range before release checks",
+  );
+  assert.equal(
+    rejectStep?.if,
+    "${{ always() }}",
+    "the invalid-range diagnostic must run after a resolver failure",
+  );
+  assert.match(
+    rejectStep?.run,
+    /package\.json engines\.node contains an unsupported range/,
+    "the failure must identify package.json engines.node",
+  );
+  assert.match(
+    rejectStep?.run,
+    /NODE_RANGE/,
+    "the failure must include the offending range",
+  );
+  for (const [jobId, job] of Object.entries(workflow.jobs ?? {})) {
+    if (
+      jobId === "mobile-release-node-range" ||
+      jobId === "android-preview-evidence" ||
+      jobId === "ios-preview-evidence" ||
+      jobId === "mobile-publish"
+    ) {
+      continue;
+    }
+    if (job.if?.includes("github.event_name != 'pull_request'")) {
+      assert.ok(
+        (job.needs ?? []).includes("mobile-release-node-range"),
+        `${jobId} must wait for the Node range guard before release work`,
+      );
+    }
+  }
+  assert.match(
+    String(workflow.jobs?.["mobile-release-gate"]?.if),
+    /needs\.mobile-release-node-range\.result == 'success'/,
+    "the release gate must not start after the Node range guard fails",
+  );
+  assert.doesNotMatch(
+    rejectStep?.run,
+    /secrets\./,
+    "the invalid-range diagnostic must not read or expose release secrets",
+  );
 });
 
 test("out-of-range mobile release Node diagnostics identify every job and version", () => {
@@ -329,6 +485,7 @@ test("out-of-range mobile release Node diagnostics identify every job and versio
 });
 
 test("malformed mobile release Node versions identify the affected job and required format", () => {
+  const fixture = structuredClone(workflow);
   const nodeRange = rootPackage.engines.node;
   const malformedValues = [
     ["native-ios", "24."],
@@ -336,7 +493,6 @@ test("malformed mobile release Node versions identify the affected job and requi
   ];
 
   for (const [jobId, configuredVersion] of malformedValues) {
-    const fixture = structuredClone(workflow);
     const setupNodeStep = fixture.jobs[jobId].steps.find((step) =>
       String(step.uses ?? "").startsWith("actions/setup-node@"),
     );
@@ -345,10 +501,12 @@ test("malformed mobile release Node versions identify the affected job and requi
       `${jobId} fixture must configure Node with actions/setup-node`,
     );
     setupNodeStep.with["node-version"] = configuredVersion;
+  }
 
-    assert.throws(
-      () => assertMobileReleaseNodeVersions(fixture, nodeRange),
-      (error) => {
+  assert.throws(
+    () => assertMobileReleaseNodeVersions(fixture, nodeRange),
+    (error) => {
+      for (const [jobId, configuredVersion] of malformedValues) {
         assert.ok(
           error.message.includes(`mobile-release job "${jobId}"`),
           `the failure must identify the mobile release job ${jobId}`,
@@ -363,10 +521,10 @@ test("malformed mobile release Node versions identify the affected job and requi
           error.message.includes(JSON.stringify(configuredVersion)),
           `the failure must identify the malformed Node version ${JSON.stringify(configuredVersion)}`,
         );
-        return true;
-      },
-    );
-  }
+      }
+      return true;
+    },
+  );
 });
 
 test("missing mobile release Node versions identify the affected job and required configuration", () => {
@@ -587,7 +745,7 @@ test("iOS preview evidence runs for every pull request", () => {
   );
   assert.match(
     evidenceStep.run,
-    /git diff[\s\S]*\$\{IOS_PREVIEW_BASE_SHA\}\.\.\.\$\{IOS_PREVIEW_HEAD_SHA\}[\s\S]*artifacts\/chat-app\/test-results\/encrypted-room-recovery\/ios\/\*\*\/validation-record\.md/,
+    /git diff[\s\S]*--find-renames[\s\S]*--diff-filter=ACDMRT[\s\S]*\$\{IOS_PREVIEW_BASE_SHA\}\.\.\.\$\{IOS_PREVIEW_HEAD_SHA\}[\s\S]*artifacts\/chat-app\/test-results\/encrypted-room-recovery\/ios\/\*\*\/validation-record\.md/,
     "the job must select changed iOS validation records from the pull request diff",
   );
   assert.match(
@@ -599,6 +757,16 @@ test("iOS preview evidence runs for every pull request", () => {
     evidenceStep.run,
     /changed iOS preview validation record is missing/,
     "deleted or missing changed records must fail the job",
+  );
+  assert.match(
+    evidenceStep.run,
+    /BLOCKED \(valid physical-phone handoff unavailable\)/,
+    "a valid physical-phone BLOCKED record must be distinguished in the summary",
+  );
+  assert.match(
+    evidenceStep.run,
+    /FAIL \(public edge\)/,
+    "a public-edge FAIL record must be distinguished in the summary",
   );
 });
 

@@ -138,9 +138,11 @@ describe("email account signup", () => {
     expect(content.justifyContent).toBe("center");
     expect(content.paddingHorizontal).toBe(28);
     // Native safe-area insets (24 top / 12 bottom in this test) plus the
-    // screen's own 28pt padding, mirroring sign-in.
-    expect(content.paddingTop).toBe(52);
-    expect(content.paddingBottom).toBe(40);
+    // screen's own 28pt padding, mirroring sign-in; the web build would use
+    // its fixed 67pt / 34pt instead. This suite runs under the iOS and Android
+    // Jest projects, so both native platforms are held to the insets.
+    expect(content.paddingTop).toBe(24 + 28);
+    expect(content.paddingBottom).toBe(12 + 28);
 
     const fields = within(scroll);
     expect(fields.getByPlaceholderText("Email address")).toBeTruthy();

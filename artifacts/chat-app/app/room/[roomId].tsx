@@ -40,6 +40,7 @@ interface Message {
   avatarEmoji?: string;
   timestamp: number;
   type: "text" | "system";
+  deleted?: boolean;
 }
 
 interface User {
@@ -122,6 +123,8 @@ export default function RoomScreen() {
   const messagesRef = useRef<Message[]>([]);
   messagesRef.current = messages;
   const recoveryRequestRef = useRef<string | null>(null);
+  const deletionRecoveryCursorRef = useRef({ id: "", deletedAt: Date.now() });
+  const deletedMessageIdsRef = useRef(new Set<string>());
   // Mirrors `canModerate` for socket handlers, which must not re-subscribe
   // (and re-join) whenever moderation rights change.
   const canModerateRef = useRef(false);
@@ -310,7 +313,9 @@ export default function RoomScreen() {
         const knownCursor = [...messagesRef.current]
           .reverse()
           .find((message) => message.type === "text");
-        const incomingMessages = data.messages.map(decryptIncomingMessage);
+        const incomingMessages = data.messages
+          .filter((message) => !deletedMessageIdsRef.current.has(message.id))
+          .map(decryptIncomingMessage);
         if (knownCursor) {
           mergeMessages(incomingMessages);
           const requestId = `${roomId}:${Date.now()}`;
@@ -320,6 +325,8 @@ export default function RoomScreen() {
             roomId,
             afterMessageId: knownCursor.id,
             afterTimestamp: knownCursor.timestamp,
+            deletedAfter: deletionRecoveryCursorRef.current.deletedAt,
+            deletedAfterId: deletionRecoveryCursorRef.current.id,
           });
         } else {
           const initialMessages = uniqueMessages(incomingMessages);
@@ -362,11 +369,33 @@ export default function RoomScreen() {
     function onMessageRecoveryPage(data: {
       requestId: string;
       messages: Array<Message & { ciphertext?: string; nonce?: string }>;
+      deletedMessageIds?: string[];
       hasMore: boolean;
       nextCursor: { id: string; timestamp: number };
+      nextDeletionCursor?: { id: string; deletedAt: number };
     }) {
       if (data.requestId !== recoveryRequestRef.current) return;
-      mergeMessages(data.messages.map(decryptIncomingMessage));
+      const deletedIds = new Set(data.deletedMessageIds ?? []);
+      for (const id of deletedIds) deletedMessageIdsRef.current.add(id);
+      setMessages((current) => {
+        const retained = current.filter((message) => !deletedIds.has(message.id));
+        const byId = new Map(retained.map((message) => [message.id, message]));
+        for (const message of data.messages.map(decryptIncomingMessage)) {
+          if (!deletedMessageIdsRef.current.has(message.id)) {
+            byId.set(message.id, message);
+          }
+        }
+        const merged = [...byId.values()].sort(
+          (left, right) =>
+            (left.timestamp ?? 0) - (right.timestamp ?? 0) ||
+            left.id.localeCompare(right.id),
+        );
+        messagesRef.current = merged;
+        return merged;
+      });
+      if (data.nextDeletionCursor) {
+        deletionRecoveryCursorRef.current = data.nextDeletionCursor;
+      }
       if (data.hasMore) {
         const requestId = `${roomId}:${Date.now()}:${data.nextCursor.id}`;
         recoveryRequestRef.current = requestId;
@@ -375,6 +404,8 @@ export default function RoomScreen() {
           roomId,
           afterMessageId: data.nextCursor.id,
           afterTimestamp: data.nextCursor.timestamp,
+            deletedAfter: deletionRecoveryCursorRef.current.deletedAt,
+            deletedAfterId: deletionRecoveryCursorRef.current.id,
         });
       } else {
         recoveryRequestRef.current = null;
@@ -385,6 +416,15 @@ export default function RoomScreen() {
       if (data.requestId === recoveryRequestRef.current) {
         recoveryRequestRef.current = null;
       }
+    }
+    function onMessageDeleted(data: { roomId?: string; messageId?: string }) {
+      if (data.roomId !== roomId || !data.messageId) return;
+      deletedMessageIdsRef.current.add(data.messageId);
+      setMessages((current) => {
+        const retained = current.filter((message) => message.id !== data.messageId);
+        messagesRef.current = retained;
+        return retained;
+      });
     }
     function onUserJoined(data: {
       userId: string;
@@ -480,6 +520,7 @@ export default function RoomScreen() {
     socket.on("message", onMessage);
     socket.on("message-recovery-page", onMessageRecoveryPage);
     socket.on("message-recovery-error", onMessageRecoveryError);
+    socket.on("message-deleted", onMessageDeleted);
     socket.on("user-joined", onUserJoined);
     socket.on("user-key-changed", onUserKeyChanged);
     socket.on("user-left", onUserLeft);
@@ -496,6 +537,7 @@ export default function RoomScreen() {
       socket.off("message", onMessage);
       socket.off("message-recovery-page", onMessageRecoveryPage);
       socket.off("message-recovery-error", onMessageRecoveryError);
+      socket.off("message-deleted", onMessageDeleted);
       socket.off("user-joined", onUserJoined);
       socket.off("user-key-changed", onUserKeyChanged);
       socket.off("user-left", onUserLeft);
@@ -608,6 +650,46 @@ export default function RoomScreen() {
     });
     setText("");
   }, [encryptMessage, roomKeyPersistenceFailure, text, socket, roomId]);
+
+  const deleteRoomMessage = useCallback(
+    async (messageId: string) => {
+      try {
+        const token = await getToken();
+        const response = await fetch(
+          `${apiBaseUrl()}/api/moderation/${encodeURIComponent(roomId)}/messages/${encodeURIComponent(messageId)}`,
+          {
+            method: "DELETE",
+            headers: { Authorization: `Bearer ${token ?? ""}` },
+          },
+        );
+        if (!response.ok) throw new Error("Unable to delete this message.");
+      } catch (error) {
+        Alert.alert(
+          "Unable to delete message",
+          error instanceof Error ? error.message : "Please try again.",
+        );
+      }
+    },
+    [getToken, roomId],
+  );
+
+  const confirmDeleteMessage = useCallback(
+    (messageId: string) => {
+      if (Platform.OS === "web") {
+        if (globalThis.confirm("Delete this message?")) void deleteRoomMessage(messageId);
+        return;
+      }
+      Alert.alert("Delete message?", "This removes the message for everyone.", [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: () => void deleteRoomMessage(messageId),
+        },
+      ]);
+    },
+    [deleteRoomMessage],
+  );
 
   const retrySavingRoomKey = useCallback(async () => {
     setRetryingRoomKey(true);
@@ -984,7 +1066,11 @@ export default function RoomScreen() {
         data={[...messages].reverse()}
         keyExtractor={(m) => m.id}
         renderItem={({ item }) => (
-          <MessageBubble message={item} isSelf={item.userId === userId} />
+          <MessageBubble
+            message={item}
+            isSelf={item.userId === userId}
+            onLongPress={canModerate && item.type === "text" ? confirmDeleteMessage : undefined}
+          />
         )}
         inverted
         contentContainerStyle={[

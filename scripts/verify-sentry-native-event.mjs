@@ -4,6 +4,8 @@ import { chmod, mkdir, writeFile } from "node:fs/promises";
 import path, { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 
+import { findDuplicateJsonObjectKeys } from "./find-duplicate-json-object-keys.mjs";
+
 const DEFAULT_API_BASE_URL = "https://sentry.io";
 const DEFAULT_ATTEMPTS = 18;
 const DEFAULT_INTERVAL_MS = 10_000;
@@ -34,107 +36,6 @@ function requiredEnv(env, name) {
     throw new Error(`Missing required Sentry verification setting: ${name}.`);
   }
   return value;
-}
-
-function duplicateJsonFields(raw) {
-  let index = 0;
-  const duplicates = new Set();
-
-  function skipWhitespace() {
-    while (/\s/.test(raw[index] ?? "")) index += 1;
-  }
-
-  function readString() {
-    if (raw[index] !== '"') return null;
-    const start = index;
-    index += 1;
-    while (index < raw.length) {
-      if (raw[index] === "\\") {
-        index += 2;
-      } else if (raw[index] === '"') {
-        index += 1;
-        try {
-          return JSON.parse(raw.slice(start, index));
-        } catch {
-          return null;
-        }
-      } else {
-        index += 1;
-      }
-    }
-    return null;
-  }
-
-  function scanValue() {
-    skipWhitespace();
-    if (raw[index] === "{") return scanObject();
-    if (raw[index] === "[") return scanArray();
-    if (raw[index] === '"') return readString() !== null;
-
-    const start = index;
-    while (index < raw.length && !/[,\]}]/.test(raw[index])) index += 1;
-    return index > start;
-  }
-
-  function scanObject() {
-    if (raw[index] !== "{") return false;
-    const keys = new Set();
-    index += 1;
-    skipWhitespace();
-    if (raw[index] === "}") {
-      index += 1;
-      return true;
-    }
-    while (index < raw.length) {
-      skipWhitespace();
-      const key = readString();
-      if (key === null) return false;
-      if (keys.has(key)) duplicates.add(key);
-      else keys.add(key);
-      skipWhitespace();
-      if (raw[index] !== ":") return false;
-      index += 1;
-      if (!scanValue()) return false;
-      skipWhitespace();
-      if (raw[index] === "}") {
-        index += 1;
-        return true;
-      }
-      if (raw[index] !== ",") return false;
-      index += 1;
-    }
-    return false;
-  }
-
-  function scanArray() {
-    if (raw[index] !== "[") return false;
-    index += 1;
-    skipWhitespace();
-    if (raw[index] === "]") {
-      index += 1;
-      return true;
-    }
-    while (index < raw.length) {
-      if (!scanValue()) return false;
-      skipWhitespace();
-      if (raw[index] === "]") {
-        index += 1;
-        return true;
-      }
-      if (raw[index] !== ",") return false;
-      index += 1;
-    }
-    return false;
-  }
-
-  if (!scanValue()) {
-    throw new Error("evidence is not valid JSON");
-  }
-  skipWhitespace();
-  if (index !== raw.length) {
-    throw new Error("evidence is not valid JSON");
-  }
-  return [...duplicates];
 }
 
 function parseTrigger(triggerPath) {
@@ -357,7 +258,7 @@ export function verifyNativeSentryEvidence({
   }
 
   const rawEvidence = readFileSync(evidencePath, "utf8");
-  if (duplicateJsonFields(rawEvidence).length > 0) {
+  if (findDuplicateJsonObjectKeys(rawEvidence).length > 0) {
     throw new Error("duplicate JSON field(s)");
   }
 

@@ -2,6 +2,7 @@ import React from "react";
 import { render } from "@testing-library/react-native";
 import { StyleSheet } from "react-native";
 import AiPanel from "../components/AiPanel";
+import { onTestPlatform } from "../test-utils/platform";
 
 jest.mock("@clerk/expo", () => ({
   useAuth: () => ({ getToken: jest.fn().mockResolvedValue("clerk-token") }),
@@ -67,5 +68,16 @@ describe("AI panel layout", () => {
     const input = getByTestId("ai-panel-input");
     expect(input.props.multiline).toBe(true);
     expect(StyleSheet.flatten(input.props.style).textAlignVertical).toBe("top");
+  });
+
+  it("uses the platform's bottom padding under the input bar", () => {
+    const { getByTestId } = render(<AiPanel roomId="room-42" />);
+
+    // The bar keeps 8pt above the keyboard on iOS and 12pt on Android. This
+    // suite runs under both Jest projects, so the Android project is what
+    // proves the non-iOS branch of that Platform.OS check.
+    const bar = StyleSheet.flatten(getByTestId("ai-panel-input-bar").props.style);
+    expect(bar.paddingBottom).toBe(onTestPlatform({ ios: 8, android: 12 }));
+    expect(bar.paddingTop).toBe(10);
   });
 });
