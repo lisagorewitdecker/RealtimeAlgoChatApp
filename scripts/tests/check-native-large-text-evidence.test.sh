@@ -320,6 +320,38 @@ fi
 assert_contains "$incomplete_output" "[android] Missing runner metadata and device details"
 assert_contains "$incomplete_output" "[ios] Found 1 empty call-surface screenshot file(s)"
 
+conflicting_candidate_ids_root="$TEST_ROOT/conflicting-candidate-ids"
+write_valid_run "$conflicting_candidate_ids_root" ios
+write_valid_run "$conflicting_candidate_ids_root" android
+conflicting_candidate_id_one="must-not-be-printed-conflicting-candidate-one"
+conflicting_candidate_id_two="must-not-be-printed-conflicting-candidate-two"
+printf '%s\n%s\n' \
+  "$conflicting_candidate_id_one" \
+  "$conflicting_candidate_id_two" \
+  > "$conflicting_candidate_ids_root/android/20260909T120000Z/candidate-build-id.txt"
+if conflicting_candidate_ids_output="$(bash "$CHECKER" "$conflicting_candidate_ids_root" 2>&1)"; then
+  echo "conflicting candidate build IDs case unexpectedly passed" >&2
+  exit 1
+fi
+assert_contains "$conflicting_candidate_ids_output" "[android] Candidate build ID file at $conflicting_candidate_ids_root/android/20260909T120000Z/candidate-build-id.txt must contain exactly one non-empty identifier line."
+assert_not_contains "$conflicting_candidate_ids_output" "$conflicting_candidate_id_one"
+assert_not_contains "$conflicting_candidate_ids_output" "$conflicting_candidate_id_two"
+
+duplicate_candidate_ids_root="$TEST_ROOT/duplicate-candidate-ids"
+write_valid_run "$duplicate_candidate_ids_root" ios
+write_valid_run "$duplicate_candidate_ids_root" android
+duplicate_candidate_id="must-not-be-printed-duplicate-candidate"
+printf '%s\n%s\n' \
+  "$duplicate_candidate_id" \
+  "$duplicate_candidate_id" \
+  > "$duplicate_candidate_ids_root/android/20260909T120000Z/candidate-build-id.txt"
+if duplicate_candidate_ids_output="$(bash "$CHECKER" "$duplicate_candidate_ids_root" 2>&1)"; then
+  echo "duplicate candidate build IDs case unexpectedly passed" >&2
+  exit 1
+fi
+assert_contains "$duplicate_candidate_ids_output" "[android] Candidate build ID file at $duplicate_candidate_ids_root/android/20260909T120000Z/candidate-build-id.txt must contain exactly one non-empty identifier line."
+assert_not_contains "$duplicate_candidate_ids_output" "$duplicate_candidate_id"
+
 summary_root="$TEST_ROOT/summary"
 write_valid_run "$summary_root" ios
 write_valid_run "$summary_root" android

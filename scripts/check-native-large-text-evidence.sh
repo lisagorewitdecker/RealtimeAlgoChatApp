@@ -356,6 +356,21 @@ first_line_trimmed() {
   head -n 1 "$1" | tr -d '\r' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//'
 }
 
+candidate_build_id_file_is_valid() {
+  local candidate_path="$1"
+
+  awk '
+    {
+      sub(/\r$/, "")
+      line_count++
+      if ($0 !~ /^[[:space:]]*$/) non_empty_count++
+    }
+    END {
+      exit !(line_count == 1 && non_empty_count == 1)
+    }
+  ' "$candidate_path"
+}
+
 check_required_file() {
   local platform="$1"
   local run_dir="$2"
@@ -412,6 +427,16 @@ validate_platform() {
   check_required_file "$platform" "$run_dir" "sentry-maestro-results.xml" "controlled Sentry probe JUnit result"
   check_required_file "$platform" "$run_dir" "sentry-trigger.txt" "controlled Sentry probe metadata"
   check_required_file "$platform" "$run_dir" "sentry-source-map-evidence.json" "Sentry source-map evidence"
+
+  local candidate_build_id_path="$run_dir/candidate-build-id.txt"
+  local candidate_build_id_is_valid=0
+  if [[ -s "$candidate_build_id_path" ]]; then
+    if candidate_build_id_file_is_valid "$candidate_build_id_path"; then
+      candidate_build_id_is_valid=1
+    else
+      issue "$platform" "Candidate build ID file at ${candidate_build_id_path} must contain exactly one non-empty identifier line. Regenerate it for one candidate build without merging or editing its contents."
+    fi
+  fi
 
   if [[ -s "$run_dir/pass-fail-record.txt" ]]; then
     local pass_fail_path="$run_dir/pass-fail-record.txt"
@@ -493,10 +518,11 @@ validate_platform() {
   fi
 
   if [[ -s "$run_dir/sentry-source-map-evidence.json" ]] &&
+    ((candidate_build_id_is_valid == 1)) &&
     ((sentry_trigger_has_errors == 0)); then
     local candidate_build_id
     local sentry_validation_output
-    candidate_build_id="$(tr -d '\r\n' < "$run_dir/candidate-build-id.txt")"
+    candidate_build_id="$(first_line_trimmed "$candidate_build_id_path")"
     if ! sentry_validation_output="$(
       "$NODE_BINARY" --input-type=module - \
         "$run_dir/sentry-source-map-evidence.json" \
