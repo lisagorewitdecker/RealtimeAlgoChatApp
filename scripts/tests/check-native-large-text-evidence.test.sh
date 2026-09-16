@@ -3,8 +3,31 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 CHECKER="$ROOT_DIR/scripts/check-native-large-text-evidence.sh"
-TEST_ROOT="$(mktemp -d)"
-trap 'rm -rf "$TEST_ROOT"' EXIT
+SAVED_TEST_STATUS="$ROOT_DIR/artifacts/api-server/test-results/.last-run.json"
+TEST_PARENT="$(mktemp -d)"
+TEST_ROOT="$TEST_PARENT/fixtures"
+CLEANUP_GUARD="$TEST_PARENT/cleanup-must-not-escape-fixtures"
+SAVED_TEST_STATUS_SNAPSHOT="$TEST_PARENT/last-run.snapshot.json"
+mkdir -p "$TEST_ROOT"
+printf 'keep\n' > "$CLEANUP_GUARD"
+cp "$SAVED_TEST_STATUS" "$SAVED_TEST_STATUS_SNAPSHOT"
+
+cleanup_test_fixtures() {
+  rm -rf "$TEST_ROOT"
+
+  if [[ ! -f "$CLEANUP_GUARD" ]]; then
+    echo "Native evidence test cleanup escaped its fixture directory" >&2
+    return 1
+  fi
+  if ! cmp -s "$SAVED_TEST_STATUS_SNAPSHOT" "$SAVED_TEST_STATUS"; then
+    echo "Native evidence test cleanup changed the saved API test status" >&2
+    return 1
+  fi
+
+  rm -rf "$TEST_PARENT"
+}
+
+trap cleanup_test_fixtures EXIT
 
 assert_contains() {
   local output="$1"
@@ -1105,5 +1128,8 @@ if wrong_platform_output="$(bash "$CHECKER" "$wrong_platform_root" 2>&1)"; then
   exit 1
 fi
 assert_contains "$wrong_platform_output" "[android] Review record identifies the wrong platform in $wrong_platform_root/android/20260909T120000Z/review-record.txt."
+
+cleanup_test_fixtures
+trap - EXIT
 
 echo "Native large-text evidence completeness regression tests passed."
