@@ -379,7 +379,7 @@ validate_pass_record() {
     failure "PASS records require native Android/Expo Go request evidence; workspace curl output is insufficient."
   fi
 
-  local result_row result_lower screenshot_path screenshot_file redaction_row
+  local result_row result_lower screenshot_path screenshot_file
   result_row="$(boundary_row "Redacted screenshot or exact phone error captured")"
   result_lower="$(printf '%s' "$result_row" | tr '[:upper:]' '[:lower:]')"
   if [[ "$(boundary_status "Redacted screenshot or exact phone error captured")" != "pass" ]]; then
@@ -394,7 +394,6 @@ validate_pass_record() {
       ! is_supported_image_file "$screenshot_file"; then
       failure "The PASS record's redacted screenshot path must point to an existing non-empty supported image file."
     else
-      redaction_row="$(boundary_row "Screenshot redaction review")"
       if [[ "$(boundary_status "Screenshot redaction review")" != "pass" ]]; then
         failure "PASS records with a screenshot require a separate Screenshot redaction review row marked PASS."
       fi
