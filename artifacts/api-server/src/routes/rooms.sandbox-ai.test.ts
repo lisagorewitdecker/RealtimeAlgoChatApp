@@ -65,13 +65,15 @@ describe("sandbox page", () => {
     expect(html).toContain('<script src="/api/crypto-client.js"></script>');
     expect(html).toContain('<script src="/api/socket-client.js"></script>');
     expect(html).toContain(
-      "socket=io({path:'/api/socket.io',auth:{token:CAPABILITY},reconnection:false})",
+      "socket=io({path:'/api/socket.io',auth:{token:CAPABILITY},reconnection:true,reconnectionAttempts:15,reconnectionDelay:1500})",
     );
     expect(html).toContain("socket.emit('join-room',{roomId:ROOM_ID,createIfMissing:true})");
     expect(html).toContain(
       "socket.emit('sandbox-update',{roomId:ROOM_ID,ciphertext:encrypted.ciphertextB64,nonce:encrypted.nonceB64})",
     );
     expect(html).toContain("socket.on('sandbox-update'");
+    expect(html).toContain("Connection restored — you can retry your question.");
+    expect(html).toContain("Retry when the room reconnects.");
     expect(html).toContain("DevStudioCrypto.decryptText");
     expect(html).toContain("DevStudioCrypto?.encryptText");
   });
@@ -162,20 +164,25 @@ declare global {
   interface Window {
     __emits: RecordedEmit[];
     __fire: (event: string, payload: unknown) => void;
+    __socket: { connect: () => void; disconnect: () => void };
   }
 }
 
 type SandboxBrowserWindow = {
   __emits: RecordedEmit[];
   __fire: (event: string, payload: unknown) => void;
+  __socket: { connect: () => void; disconnect: () => void };
 };
 
 const FAKE_SOCKET_CLIENT = [
   "window.__emits=[];window.__handlers={};",
   "window.io=function(){const s={connected:true,",
   "on(ev,fn){(window.__handlers[ev]=window.__handlers[ev]||[]).push(fn);return s},",
-  "emit(ev,p){window.__emits.push({event:ev,payload:JSON.parse(JSON.stringify(p))});return s}};return s};",
-  "window.__fire=(ev,p)=>(window.__handlers[ev]||[]).forEach(fn=>fn(p));",
+  "emit(ev,p){window.__emits.push({event:ev,payload:JSON.parse(JSON.stringify(p))});return s},",
+  "connect(){if(s.connected)return;s.connected=true;(window.__handlers.connect||[]).forEach(fn=>fn());return s},",
+  "disconnect(){if(!s.connected)return;s.connected=false;(window.__handlers.disconnect||[]).forEach(fn=>fn());return s}};window.__socket=s;return s};",
+  "window.__socket=null;",
+  "window.__fire=(ev,p)=>{if(window.__socket&&ev==='disconnect')window.__socket.connected=false;if(window.__socket&&ev==='connect')window.__socket.connected=true;(window.__handlers[ev]||[]).forEach(fn=>fn(p));};",
 ].join("");
 
 const FAKE_CRYPTO_CLIENT =
@@ -444,6 +451,49 @@ describe("sandbox AI tab in a browser", () => {
     expect(await page.locator("#aiRetryBtn").isHidden()).toBe(true);
     expect(await page.locator("#ai-notice").isVisible()).toBe(true);
     expect(await page.locator("#ai-composer").isVisible()).toBe(false);
+    await page.close();
+  });
+
+  it("offers a guarded retry after an interrupted reply reconnects", async () => {
+    const page = await openSandbox();
+    await acceptDisclosure(page);
+
+    const interrupted = await ask(page, "Explain this after reconnecting.");
+    await page.evaluate(() => {
+      (globalThis as unknown as SandboxBrowserWindow).__socket.disconnect();
+    });
+    expect(await status(page)).toBe(
+      "Connection lost — the reply was interrupted. Retry when the room reconnects.",
+    );
+    expect(await page.locator("#aiRetryBtn").isVisible()).toBe(true);
+    expect(await page.locator("#aiRetryBtn").isDisabled()).toBe(true);
+    expect(await emitsOf(page, "assistant-request")).toHaveLength(1);
+
+    await page.evaluate(() => {
+      (globalThis as unknown as SandboxBrowserWindow).__socket.connect();
+    });
+    expect(await page.locator("#aiRetryBtn").isDisabled()).toBe(true);
+    await fire(page, "room-joined", {});
+    expect(await status(page)).toBe(
+      "Connection restored — you can retry your question.",
+    );
+    expect(await page.locator("#aiRetryBtn").isDisabled()).toBe(false);
+
+    await page.click('.tab[data-tab="html"]');
+    await page.fill("#htmlEditor", "<main>after reconnect</main>");
+    await page.click('.tab[data-tab="ai"]');
+    await page.click("#aiRetryBtn");
+
+    const requests = await emitsOf(page, "assistant-request");
+    expect(requests).toHaveLength(2);
+    expect(requests[1]!.payload).toMatchObject({
+      prompt: "Explain this after reconnecting.",
+      files: { html: "<main>after reconnect</main>" },
+      disclosureAcknowledged: true,
+    });
+    expect((requests[1]!.payload as { requestId: string }).requestId).not.toBe(
+      interrupted,
+    );
     await page.close();
   });
 

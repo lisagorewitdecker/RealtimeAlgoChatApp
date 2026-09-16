@@ -301,6 +301,26 @@ test("reports malformed native metadata with a fixed reason", () => {
   );
 });
 
+test("rejects duplicate nested native metadata fields with a fixed reason", () => {
+  const privateIdentifier = "nested-native-metadata-private-id";
+  assert.throws(
+    () =>
+      parseNativeMetadata({
+        platform: "android",
+        source: `{"applicationLabel":"RealtimeAlgoChatApp Studio","permissions":{"name":"android.permission.CAMERA","name":"${privateIdentifier}"}}`,
+      }),
+    (error) => {
+      assert.match(
+        error.message,
+        /Native Android metadata contains duplicate fields/,
+      );
+      assert.doesNotMatch(error.message, new RegExp(privateIdentifier));
+      assert.doesNotMatch(error.message, /position|token/i);
+      return true;
+    },
+  );
+});
+
 test("formats an iOS native branding summary with permission-copy status", () => {
   const summary = formatNativeBrandingSummary({
     platform: "ios",

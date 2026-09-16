@@ -24,6 +24,12 @@ const colors = {
     bubbleOtherText: "#F4F6FA",
     systemMsg: "#9AA4B5",
     online: "#55C995",
+    // Surface of the classic tab bar: `background` at partial opacity, so
+    // content scrolling under the absolutely positioned bar shows through it
+    // on Android and web the way it does through the iOS blur. The alpha keeps
+    // the tab tints (`primary`, `mutedForeground`) at 4.5:1 or better even
+    // over white content; `__tests__/TabLayout.test.tsx` checks it.
+    tabBarBackground: "rgba(14, 17, 24, 0.85)",
   },
   dark: {
     text: "#F4F6FA",
@@ -50,6 +56,7 @@ const colors = {
     bubbleOtherText: "#F4F6FA",
     systemMsg: "#9AA4B5",
     online: "#55C995",
+    tabBarBackground: "rgba(14, 17, 24, 0.85)",
   },
   // High-contrast palette — WCAG AA/AAA compliant with much stronger contrast
   highContrast: {
@@ -77,6 +84,10 @@ const colors = {
     bubbleOtherText: "#FFFFFF",
     systemMsg: "#BBBBBB",
     online: "#00EE88",
+    // Denser than the default palette on purpose: still see-through, but
+    // low-vision users get less visual noise behind the tab controls (the
+    // same idea as the system "Reduce Transparency" settings).
+    tabBarBackground: "rgba(0, 0, 0, 0.9)",
   },
   radius: 12,
 };

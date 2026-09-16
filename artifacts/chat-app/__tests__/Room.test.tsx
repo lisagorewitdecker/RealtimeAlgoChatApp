@@ -243,7 +243,102 @@ describe("room ban handling", () => {
       roomId: "room-42",
       afterMessageId: "before-outage",
       afterTimestamp: 10,
+      deletedAfter: expect.any(Number),
     });
+  });
+
+  it("removes a cached message when reconnect recovery returns its tombstone", () => {
+    const { getByTestId, queryByTestId } = render(<RoomScreen />);
+    act(() => {
+      mockHandlers.get("room-joined")?.({
+        messages: [
+          {
+            id: "deleted-while-offline",
+            userId: "user-ada",
+            username: "Ada",
+            type: "text",
+            timestamp: 10,
+            ciphertext: "ciphertext",
+            nonce: "nonce",
+          },
+        ],
+        users: [],
+      });
+    });
+    expect(getByTestId("message-deleted-while-offline")).toBeTruthy();
+
+    act(() => {
+      mockHandlers.get("connect")?.();
+      mockHandlers.get("room-joined")?.({ messages: [], users: [] });
+    });
+    const request = socketEmits("recover-messages").at(-1)?.[1];
+    act(() => {
+      mockHandlers.get("message-recovery-page")?.({
+        requestId: request.requestId,
+        messages: [],
+        deletedMessageIds: ["deleted-while-offline"],
+        hasMore: false,
+        nextCursor: {
+          id: request.afterMessageId,
+          timestamp: request.afterTimestamp,
+        },
+        nextDeletionCursor: {
+          id: "deleted-while-offline",
+          deletedAt: request.deletedAfter + 1,
+        },
+      });
+    });
+
+    expect(queryByTestId("message-deleted-while-offline")).toBeNull();
+  });
+
+  it("does not resurrect a live-deleted message from a stale recovery page", () => {
+    const { queryByTestId } = render(<RoomScreen />);
+    act(() => {
+      mockHandlers.get("room-joined")?.({
+        messages: [
+          {
+            id: "race-message",
+            userId: "user-ada",
+            username: "Ada",
+            type: "text",
+            timestamp: 10,
+            ciphertext: "ciphertext",
+            nonce: "nonce",
+          },
+        ],
+        users: [],
+      });
+      mockHandlers.get("connect")?.();
+      mockHandlers.get("room-joined")?.({ messages: [], users: [] });
+    });
+    const request = socketEmits("recover-messages").at(-1)?.[1];
+
+    act(() => {
+      mockHandlers.get("message-deleted")?.({
+        roomId: "room-42",
+        messageId: "race-message",
+      });
+      mockHandlers.get("message-recovery-page")?.({
+        requestId: request.requestId,
+        messages: [
+          {
+            id: "race-message",
+            userId: "user-ada",
+            username: "Ada",
+            type: "text",
+            timestamp: 10,
+            ciphertext: "stale-ciphertext",
+            nonce: "stale-nonce",
+          },
+        ],
+        deletedMessageIds: [],
+        hasMore: false,
+        nextCursor: { id: "race-message", timestamp: 10 },
+      });
+    });
+
+    expect(queryByTestId("message-race-message")).toBeNull();
   });
 
   it("shows room loading feedback until the server confirms the join", () => {

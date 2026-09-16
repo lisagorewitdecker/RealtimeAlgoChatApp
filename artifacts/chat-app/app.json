@@ -32,10 +32,16 @@
         }
       ],
       [
-        "@sentry/react-native/expo",
+        "./plugins/withSentryNativeUpload.js",
         {
           "organization": "lisagorewitdecker-06",
           "project": "react-native"
+        }
+      ],
+      [
+        "@clerk/expo",
+        {
+          "appleSignIn": false
         }
       ],
       "expo-font",
@@ -47,8 +53,7 @@
           "backgroundColor": "#0D0D1A"
         }
       ],
-      "expo-web-browser",
-      "@sentry/react-native"
+      "expo-web-browser"
     ],
     "experiments": {
       "typedRoutes": true,
