@@ -18,6 +18,12 @@ export function createIpRateLimit({
   scope,
   windowMs,
 }: RateLimitOptions): RequestHandler {
+  if (process.env["NODE_ENV"] === "production") {
+    return (_req: Request, _res: Response, next: NextFunction): void => {
+      next();
+    };
+  }
+
   const windows = new Map<string, RateLimitWindow>();
 
   return (req: Request, res: Response, next: NextFunction): void => {
