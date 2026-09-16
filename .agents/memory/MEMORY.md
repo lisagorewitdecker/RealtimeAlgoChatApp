@@ -50,6 +50,7 @@
 - [Stale node_modules after merge](physical-device-evidence.md) — Jest "Cannot find module '@babel/generator'" means node_modules lags the lockfile; reinstall frozen and offline.
 - [Preview device debugging](preview-device-debugging.md) — in-container probes bypass the public edge; use the opt-in Metro request log and check the live manifest date first.
 - [Preview timeout test configuration](preview-timeout-test-configuration.md) — pass plain decimal timeout env values; Number() rejects numeric separators and silently falls back to the default.
+- [iOS preview rename detection](ios-preview-rename-detection.md) — force Git rename detection so a moved validation record is checked and linked only at its new timestamped path.
 - [Room key hydration](room-key-hydration.md) — key-load promises must always settle; storage read failures become retryable load failures, never a hang or key replacement.
 - [Job summary untrusted text](job-summary-untrusted-text.md) — render PR-body text and contract findings in backtick-safe code spans in GitHub job summaries; never as raw Markdown.
 - [Task merges land on the checked-out branch](branch-divergence-from-task-merges.md) — the platform rebases then squashes; consolidate in a worktree, then `merge -s ours` the stale branch.

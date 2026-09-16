@@ -51,6 +51,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readdirSync,
+  renameSync,
   readFileSync,
   rmSync,
   statSync,
@@ -1839,7 +1840,7 @@ test("Android preview evidence keeps its pull-request validation and privacy con
   );
 });
 
-test("iOS preview evidence skips clean pull requests and blocks malformed changed records", () => {
+test("iOS preview evidence covers renamed records and blocks malformed changes", () => {
   const iosJob = workflow.jobs["ios-preview-evidence"];
   assert.ok(iosJob, "the release workflow must define the iOS preview job");
   assert.equal(
@@ -1863,19 +1864,30 @@ test("iOS preview evidence skips clean pull requests and blocks malformed change
     "changed iOS records must run the focused checker",
   );
 
-  function runIosPreviewJob(name, { recordText, deleteRecord = false }) {
+  function runIosPreviewJob(
+    name,
+    {
+      recordText,
+      baseRecordText = "# iOS preview validation record\n",
+      deleteRecord = false,
+      renameRecord = false,
+    },
+  ) {
     const fixtureRoot = path.join(testRoot, `ios-preview-${name}`);
-    const recordPath = path.join(
+    const baseRecordPath = path.join(
       fixtureRoot,
       "artifacts/chat-app/test-results/encrypted-room-recovery/ios/20260915T120000Z/validation-record.md",
+    );
+    const recordPath = path.join(
+      fixtureRoot,
+      `artifacts/chat-app/test-results/encrypted-room-recovery/ios/${renameRecord ? "20260915T121500Z" : "20260915T120000Z"}/validation-record.md`,
     );
     const summaryPath = path.join(fixtureRoot, "summary.md");
     const runnerPath = path.join(fixtureRoot, "run-job.sh");
     const binDirectory = path.join(fixtureRoot, "bin");
-    const baselineRecordText = "# iOS preview validation record\n";
-    mkdirSync(path.dirname(recordPath), { recursive: true });
+    mkdirSync(path.dirname(baseRecordPath), { recursive: true });
     mkdirSync(binDirectory, { recursive: true });
-    writeFileSync(recordPath, baselineRecordText);
+    writeFileSync(baseRecordPath, baseRecordText);
 
     const git = (args) => {
       const result = spawnSync(gitPath, args, {
@@ -1892,7 +1904,7 @@ test("iOS preview evidence skips clean pull requests and blocks malformed change
     git(["config", "user.email", "contract-test@example.invalid"]);
     git(["config", "user.name", "Contract Test"]);
     writeFileSync(path.join(fixtureRoot, "README.md"), "base\n");
-    git(["add", "README.md", recordPath]);
+    git(["add", "README.md", baseRecordPath]);
     git(["commit", "--quiet", "-m", "base iOS preview record"]);
     const baseSha = spawnSync(gitPath, ["rev-parse", "HEAD"], {
       cwd: fixtureRoot,
@@ -1900,7 +1912,11 @@ test("iOS preview evidence skips clean pull requests and blocks malformed change
     }).stdout.trim();
 
     if (deleteRecord) {
-      rmSync(recordPath);
+      rmSync(baseRecordPath);
+    } else if (renameRecord) {
+      mkdirSync(path.dirname(recordPath), { recursive: true });
+      renameSync(baseRecordPath, recordPath);
+      writeFileSync(recordPath, recordText);
     } else {
       writeFileSync(recordPath, recordText);
     }
@@ -1939,6 +1955,8 @@ test("iOS preview evidence skips clean pull requests and blocks malformed change
     });
     return {
       result,
+      baseRecordPath: path.relative(fixtureRoot, baseRecordPath),
+      recordPath: path.relative(fixtureRoot, recordPath),
       summary: readFileSync(summaryPath, "utf8"),
     };
   }
@@ -1963,8 +1981,7 @@ test("iOS preview evidence skips clean pull requests and blocks malformed change
     "the failed summary must not copy iOS record evidence",
   );
 
-  const blocked = runIosPreviewJob("blocked", {
-    recordText: `# iOS preview validation record
+  const blockedRecord = `# iOS preview validation record
 
 **Result: BLOCKED — no physical iPhone was available**
 
@@ -1974,7 +1991,11 @@ test("iOS preview evidence skips clean pull requests and blocks malformed change
 | Local handoff probe (manifest and bundle) | NOT_RUN | No local probe was available. |
 | Expo Go launch on physical iPhone | BLOCKED | No physical phone was available. |
 | Server-side native request evidence | BLOCKED | No native request was available. |
-`,
+`;
+  const blocked = runIosPreviewJob("blocked", {
+    recordText: blockedRecord,
+    baseRecordText: blockedRecord,
+    renameRecord: true,
   });
   assert.equal(
     blocked.result.status,
@@ -1986,9 +2007,25 @@ test("iOS preview evidence skips clean pull requests and blocks malformed change
     /Validation: \*\*PASS\*\*[\s\S]*Record result: \*\*BLOCKED \(valid physical-phone handoff unavailable\)\*\*/,
     "the summary must distinguish a valid physical-phone BLOCKED record",
   );
+  assert.match(
+    blocked.summary,
+    /- Changed records checked: \*\*1\*\*/,
+    "a renamed valid BLOCKED record must count as one changed record",
+  );
+  assert.match(
+    blocked.summary,
+    new RegExp(
+      `\\[${blocked.recordPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\]\\(https://github\\.example/example/chat-app/blob/[^)]+/${blocked.recordPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\)`,
+    ),
+    "a renamed valid BLOCKED record must be linked at its new path",
+  );
+  assert.doesNotMatch(
+    blocked.summary,
+    new RegExp(blocked.baseRecordPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
+    "a renamed valid BLOCKED record must not leave its old path in the summary",
+  );
 
-  const publicFailure = runIosPreviewJob("public-failure", {
-    recordText: `# iOS preview validation record
+  const publicFailureRecord = `# iOS preview validation record
 
 **Result: FAIL — the public preview edge was unavailable**
 
@@ -1998,7 +2035,11 @@ test("iOS preview evidence skips clean pull requests and blocks malformed change
 | Local handoff probe (manifest and bundle) | NOT_RUN | The public probe failed first. |
 | Expo Go launch on physical iPhone | FAIL | Physical launch was not attempted after the public failure. |
 | Server-side native request evidence | FAIL | Native request evidence was not available after the public failure. |
-`,
+`;
+  const publicFailure = runIosPreviewJob("public-failure", {
+    recordText: publicFailureRecord,
+    baseRecordText: publicFailureRecord,
+    renameRecord: true,
   });
   assert.equal(
     publicFailure.result.status,
@@ -2009,6 +2050,53 @@ test("iOS preview evidence skips clean pull requests and blocks malformed change
     publicFailure.summary,
     /Validation: \*\*PASS\*\*[\s\S]*Record result: \*\*FAIL \(public edge\)\*\*/,
     "the summary must distinguish a public-edge FAIL record",
+  );
+  assert.match(
+    publicFailure.summary,
+    /- Changed records checked: \*\*1\*\*/,
+    "a renamed public-edge FAIL record must count as one changed record",
+  );
+  assert.match(
+    publicFailure.summary,
+    new RegExp(
+      `\\[${publicFailure.recordPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\]\\(https://github\\.example/example/chat-app/blob/[^)]+/${publicFailure.recordPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\)`,
+    ),
+    "a renamed public-edge FAIL record must be linked at its new path",
+  );
+
+  const renamedMalformed = runIosPreviewJob("renamed-malformed", {
+    baseRecordText: blockedRecord,
+    recordText: blockedRecord.replace("**Result: BLOCKED", "**Result: PASS"),
+    renameRecord: true,
+  });
+  assert.notEqual(
+    renamedMalformed.result.status,
+    0,
+    "a malformed renamed iOS preview record must fail the job",
+  );
+  assert.match(
+    renamedMalformed.summary,
+    /- Changed records checked: \*\*1\*\*/,
+    "a malformed renamed record must count as one changed record",
+  );
+  assert.match(
+    renamedMalformed.summary,
+    new RegExp(
+      `\\[${renamedMalformed.recordPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\]\\(https://github\\.example/example/chat-app/blob/[^)]+/${renamedMalformed.recordPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\)`,
+    ),
+    "a malformed renamed record must be linked at its new path",
+  );
+  assert.doesNotMatch(
+    renamedMalformed.summary,
+    new RegExp(
+      renamedMalformed.baseRecordPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
+    ),
+    "a malformed renamed record must not be treated as a deleted old path",
+  );
+  assert.match(
+    renamedMalformed.summary,
+    /Validation: \*\*FAIL\*\*[\s\S]*PASS records must include a real Device model value\./,
+    "a malformed renamed record must report the fixed checker reason",
   );
 
   const deleted = runIosPreviewJob("deleted", {

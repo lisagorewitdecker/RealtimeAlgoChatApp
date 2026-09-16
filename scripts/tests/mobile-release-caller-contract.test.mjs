@@ -603,7 +603,7 @@ test("iOS preview evidence runs for every pull request", () => {
   );
   assert.match(
     evidenceStep.run,
-    /git diff[\s\S]*\$\{IOS_PREVIEW_BASE_SHA\}\.\.\.\$\{IOS_PREVIEW_HEAD_SHA\}[\s\S]*artifacts\/chat-app\/test-results\/encrypted-room-recovery\/ios\/\*\*\/validation-record\.md/,
+    /git diff[\s\S]*--find-renames[\s\S]*--diff-filter=ACDMRT[\s\S]*\$\{IOS_PREVIEW_BASE_SHA\}\.\.\.\$\{IOS_PREVIEW_HEAD_SHA\}[\s\S]*artifacts\/chat-app\/test-results\/encrypted-room-recovery\/ios\/\*\*\/validation-record\.md/,
     "the job must select changed iOS validation records from the pull request diff",
   );
   assert.match(
