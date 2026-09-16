@@ -1,0 +1,113 @@
+name: Preview startup summary regression
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/preview-startup-summary-regression.yml
+      - .replit
+      - artifacts/chat-app/package.json
+      - artifacts/chat-app/scripts/preview-startup-runtime-library-fixture.mjs
+      - artifacts/chat-app/scripts/validate-preview-startup.mjs
+      - artifacts/chat-app/scripts/validate-preview-startup-runtime-diagnostic.test.mjs
+  workflow_dispatch:
+    inputs:
+      reviewed_ref:
+        description: Git branch, tag, or commit SHA to verify
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  verify-hosted-summary:
+    name: Verify hosted preview startup summary
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out reviewed revision
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || inputs.reviewed_ref }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Verify healthy and failing preview startup summaries
+        shell: bash
+        env:
+          REVIEWED_REF: ${{ github.event.pull_request.head.sha || inputs.reviewed_ref }}
+        run: |
+          set -euo pipefail
+          summary_path="$(mktemp)"
+          healthy_log="$(mktemp)"
+          trap 'rm -f "$summary_path" "$healthy_log"' EXIT
+          resolved_commit_sha="$(git rev-parse --verify HEAD)"
+
+          printf 'Starting Metro Bundler\n' > "$healthy_log"
+          healthy_output="$(
+            GITHUB_STEP_SUMMARY="$summary_path" \
+              node artifacts/chat-app/scripts/validate-preview-startup.mjs \
+              --log-file "$healthy_log" 2>&1
+          )"
+          if ! grep -Fq -- "Expo preview startup output is healthy:" <<< "$healthy_output"; then
+            echo "The healthy preview startup validation did not retain its success output." >&2
+            printf '%s\n' "$healthy_output" >&2
+            exit 1
+          fi
+          if [[ -s "$summary_path" ]]; then
+            echo "The healthy preview startup validation unexpectedly wrote a failure summary." >&2
+            cat "$summary_path" >&2
+            exit 1
+          fi
+
+          if GITHUB_STEP_SUMMARY="$summary_path" \
+            PREVIEW_STARTUP_TEST_FIXTURE=missing-runtime-library \
+            node artifacts/chat-app/scripts/validate-preview-startup.mjs > /tmp/preview-startup-failure.log 2>&1; then
+            echo "The missing-runtime-library preview startup scenario unexpectedly passed." >&2
+            exit 1
+          fi
+
+          expected_diagnosis="Expo preview startup error: Error: /opt/expo/react-native-devtools: error while loading shared libraries: libgtk-3.so.0: cannot open shared object file: No such file or directory"
+          if ! grep -Fq -- "### Expo preview startup" "$summary_path" ||
+            ! grep -Fq -- "**Status:** FAIL" "$summary_path" ||
+            ! grep -Fq -- "$expected_diagnosis" "$summary_path"; then
+            echo "The hosted summary did not contain the bounded missing-library diagnosis." >&2
+            cat "$summary_path" >&2
+            exit 1
+          fi
+          if [[ "$(grep -Fc -- "### Expo preview startup" "$summary_path")" != "1" ]] ||
+            [[ "$(wc -c < "$summary_path")" -gt 700 ]]; then
+            echo "The hosted preview startup failure summary was not bounded to one diagnosis." >&2
+            cat "$summary_path" >&2
+            exit 1
+          fi
+          expected_summary_path="$(mktemp)"
+          cat > "$expected_summary_path" <<'EOF'
+          ### Expo preview startup
+
+          **Status:** FAIL
+
+          **Diagnosis:** Expo preview startup error: Error: /opt/expo/react-native-devtools: error while loading shared libraries: libgtk-3.so.0: cannot open shared object file: No such file or directory
+
+          EOF
+          if ! cmp -s "$summary_path" "$expected_summary_path"; then
+            echo "The hosted preview startup summary contained output beyond the bounded diagnosis." >&2
+            diff -u "$expected_summary_path" "$summary_path" >&2 || true
+            rm -f "$expected_summary_path"
+            exit 1
+          fi
+          rm -f "$expected_summary_path"
+          if grep -Eiq -- 'https?://|authorization|proxy-authorization|password|passwd|secret|token|credential' "$summary_path"; then
+            echo "The hosted preview startup summary contained private material." >&2
+            cat "$summary_path" >&2
+            exit 1
+          fi
+
+          {
+            echo "## Reviewed preview startup revision"
+            printf -- '- Checked ref: `%s`\n' "$REVIEWED_REF"
+            printf -- '- Resolved commit SHA: `%s`\n' "$resolved_commit_sha"
+            echo
+            echo "## Preview startup summary regression"
+            echo "- Healthy captured startup: **PASS** (success output retained; no failure section)"
+            cat "$summary_path"
+          } >> "$GITHUB_STEP_SUMMARY"
