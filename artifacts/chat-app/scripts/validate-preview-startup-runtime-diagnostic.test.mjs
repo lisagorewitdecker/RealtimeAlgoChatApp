@@ -107,6 +107,42 @@ const fixtures = [
     detail: /missing runtime library: .*libgtk-3-0\.dll/,
     libraryIdentifier: "libgtk-3-0.dll",
   },
+  {
+    name: "Linux shared-library loader with spaces",
+    fixture: "missing-runtime-library-spaced",
+    detail:
+      /shared libraries: \/opt\/expo\/React Native DevTools\/libgtk-3\.so\.0/,
+    libraryIdentifier: "libgtk-3.so.0",
+    containsNoise: true,
+  },
+  {
+    name: "macOS dyld loader with a quoted path",
+    fixture: "missing-runtime-library-dyld-quoted",
+    detail:
+      /Library not loaded: '\/opt\/homebrew\/Library\/Application Support\/Expo\/libgtk-3\.dylib'/,
+    libraryIdentifier: "libgtk-3.dylib",
+    containsNoise: true,
+  },
+  {
+    name: "Windows loader with a quoted path",
+    fixture: "missing-runtime-library-windows-quoted",
+    detail:
+      /because "C:\\Program Files\\Expo\\React Native DevTools\\libgtk-3-0\.dll" was not found/,
+    libraryIdentifier: "libgtk-3-0.dll",
+    containsNoise: true,
+  },
+  {
+    name: "macOS dyld loader with a quoted long path",
+    fixture: "missing-runtime-library-dyld-quoted-long-path",
+    detail: /missing runtime library: .*libgtk-3\.dylib/,
+    libraryIdentifier: "libgtk-3.dylib",
+  },
+  {
+    name: "Windows loader with a quoted long path",
+    fixture: "missing-runtime-library-windows-quoted-long-path",
+    detail: /missing runtime library: .*libgtk-3-0\.dll/,
+    libraryIdentifier: "libgtk-3-0.dll",
+  },
 ];
 
 test("live and captured preview validation report the same diagnosis for every loader format", () => {
@@ -159,6 +195,13 @@ test("live and captured preview validation report the same diagnosis for every l
         capturedDiagnostic.length <= 512,
         `${fixtureCase.name} diagnostic exceeded the 512-character limit`,
       );
+      if (fixtureCase.containsNoise) {
+        assert.doesNotMatch(
+          capturedDiagnostic,
+          /unrelated log text|[\u0000-\u001f\u007f]/,
+          `${fixtureCase.name} included unrelated or control text`,
+        );
+      }
     }
   } finally {
     rmSync(temporaryDirectory, { recursive: true, force: true });
