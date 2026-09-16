@@ -1,8 +1,11 @@
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
 import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { promisify } from "node:util";
+import { fileURLToPath } from "node:url";
 
 import {
   findReadableSourceMappedFrame,
@@ -10,6 +13,9 @@ import {
   verifyNativeSentryEvent,
   verifyNativeSentryEvidence,
 } from "../verify-sentry-native-event.mjs";
+
+const execFileAsync = promisify(execFile);
+const scriptPath = fileURLToPath(new URL("../verify-sentry-native-event.mjs", import.meta.url));
 
 function eventFixture(overrides = {}) {
   return {
@@ -474,4 +480,77 @@ test("rejects non-object saved evidence JSON", async () => {
       }),
     /evidence must be a JSON object/,
   );
+});
+
+test("rejects credential-like token text embedded in evidence strings", async () => {
+  const tempDir = await mkdtemp(path.join(tmpdir(), "sentry-evidence-text-secret-"));
+  const evidencePath = path.join(tempDir, "sentry-source-map-evidence.json");
+  const triggerPath = path.join(tempDir, "sentry-trigger.txt");
+  const evidenceRecord = validateNativeSentryEvent(eventFixture(), expected);
+
+  await writeFile(
+    evidencePath,
+    `${JSON.stringify({
+      ...evidenceRecord,
+      diagnostic: "captured sentry_auth_token=secret-value during test",
+    })}\n`,
+  );
+  await writeFile(
+    triggerPath,
+    [
+      "platform=ios",
+      "candidate_build_id=build-ios",
+      "marker=run-1234-ios",
+    ].join("\n"),
+  );
+
+  assert.throws(
+    () =>
+      verifyNativeSentryEvidence({
+        evidencePath,
+        triggerPath,
+        expectedPlatform: expected.platform,
+        expectedBuildId: expected.candidateBuildId,
+        expectedProbeMarker: expected.marker,
+        expectedRelease: expected.release,
+        expectedDist: expected.dist,
+      }),
+    /evidence contains credential-like content/,
+  );
+});
+
+test("cli uses evidence verification mode for environment-only inputs", async () => {
+  const tempDir = await mkdtemp(path.join(tmpdir(), "sentry-cli-env-"));
+  const evidencePath = path.join(tempDir, "sentry-source-map-evidence.json");
+  const triggerPath = path.join(tempDir, "sentry-trigger.txt");
+
+  await writeFile(
+    evidencePath,
+    `${JSON.stringify(validateNativeSentryEvent(eventFixture(), expected))}\n`,
+  );
+  await writeFile(
+    triggerPath,
+    [
+      "platform=ios",
+      "candidate_build_id=build-ios",
+      "marker=run-1234-ios",
+    ].join("\n"),
+  );
+
+  const { stdout, stderr } = await execFileAsync(process.execPath, [scriptPath], {
+    env: {
+      ...process.env,
+      SENTRY_AUTH_TOKEN: "",
+      SENTRY_EVIDENCE_PATH: evidencePath,
+      SENTRY_TRIGGER_PATH: triggerPath,
+      SENTRY_EXPECTED_PLATFORM: expected.platform,
+      SENTRY_EXPECTED_BUILD_ID: expected.candidateBuildId,
+      SENTRY_PROBE_MARKER: expected.marker,
+      SENTRY_EXPECTED_RELEASE: expected.release,
+      SENTRY_EXPECTED_DIST: expected.dist,
+    },
+  });
+
+  assert.equal(stdout, "");
+  assert.equal(stderr, "");
 });

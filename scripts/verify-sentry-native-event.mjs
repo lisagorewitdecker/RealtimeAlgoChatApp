@@ -12,6 +12,8 @@ const EXPECTED_TRIGGER_KEYS = new Set(["platform", "candidate_build_id", "marker
 const CREDENTIAL_FIELD_PATTERN =
   /^(?:authorization[_-]?token|auth[_-]?token|sentry_auth_token|access[_-]?token|refresh[_-]?token)$/i;
 const BEARER_TOKEN_PATTERN = /^bearer\s+[A-Za-z0-9._~+/-]{8,}$/i;
+const CREDENTIAL_TEXT_PATTERN =
+  /(?:\b(?:authorization|auth|access|refresh|sentry_auth)[_-]?token\b\s*(?::|=)\s*["']?[A-Za-z0-9._~+/-]{8,}|bearer\s+[A-Za-z0-9._~+/-]{8,})/i;
 
 function parseArgs(argv) {
   const options = new Map();
@@ -220,6 +222,10 @@ function hasCredentialLikeContent(value) {
   });
 }
 
+function hasCredentialLikeText(rawEvidence) {
+  return CREDENTIAL_TEXT_PATTERN.test(rawEvidence);
+}
+
 function tagMap(event) {
   return new Map(
     (event.tags ?? []).map((tag) =>
@@ -345,8 +351,7 @@ export function verifyNativeSentryEvidence({
   if (!evidence || typeof evidence !== "object" || Array.isArray(evidence)) {
     throw new Error("evidence must be a JSON object");
   }
-
-  if (hasCredentialLikeContent(evidence)) {
+  if (hasCredentialLikeText(rawEvidence) || hasCredentialLikeContent(evidence)) {
     throw new Error("evidence contains credential-like content");
   }
 
@@ -522,6 +527,15 @@ function isEvidenceVerificationRequest(cliOptions, env) {
       "expected-release",
       "expected-dist",
     ].some((key) => cliOptions.has(key))
+  ) {
+    return true;
+  }
+
+  if (
+    !env.SENTRY_AUTH_TOKEN &&
+    env.SENTRY_EVIDENCE_PATH &&
+    env.SENTRY_EXPECTED_PLATFORM &&
+    env.SENTRY_EXPECTED_BUILD_ID
   ) {
     return true;
   }
