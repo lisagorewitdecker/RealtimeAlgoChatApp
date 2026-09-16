@@ -26,8 +26,9 @@
  *   7. Multiple changed Android preview records are validated independently;
  *      one failure does not hide the valid record or expose either record's
  *      evidence text.
- *   8. A duplicate Android preflight field fails with the fixed redacted-schema
- *      message without exposing the duplicate value or raw artifact content.
+ *   8. Malformed, schema-invalid, and duplicate Android preflight artifacts
+ *      fail with the fixed redacted-schema message without exposing their
+ *      markers or raw artifact content.
  *   9. A missing Android preflight validator produces a fixed dependency
  *      diagnostic without running the checker or exposing evidence content.
  *  10. A failed artifact extraction clears partial platform output before its
@@ -1950,6 +1951,75 @@ test("Android preview evidence keeps its pull-request validation and privacy con
       /DUPLICATE_PREFLIGHT_SENTINEL|raw-duplicate-preflight-content|public manifest HTTP 200 \(128 bytes\)/,
       `${surfaceName} must not expose the duplicate preflight value or raw artifact content`,
     );
+  }
+
+  const malformedPreflight =
+    '{"schema":"android-preview-handoff-preflight/v1","platform":"android","boundaries":{"publicManifestReachability":{"status":"PASS","evidence":"MALFORMED_PREFLIGHT_SENTINEL raw-malformed-preflight-content"}';
+  const schemaInvalidPreflight = blockedPreflight.replace(
+    "public manifest HTTP 200 (128 bytes)",
+    "SCHEMA_INVALID_PREFLIGHT_SENTINEL raw-schema-invalid-preflight-content",
+  );
+
+  for (const {
+    name,
+    preflight,
+    forbidden,
+    description,
+  } of [
+    {
+      name: "malformed-preflight",
+      preflight: malformedPreflight,
+      forbidden: /MALFORMED_PREFLIGHT_SENTINEL|raw-malformed-preflight-content/,
+      description: "malformed",
+    },
+    {
+      name: "schema-invalid-preflight",
+      preflight: schemaInvalidPreflight,
+      forbidden:
+        /SCHEMA_INVALID_PREFLIGHT_SENTINEL|raw-schema-invalid-preflight-content/,
+      description: "schema-invalid",
+    },
+  ]) {
+    const run = runAndroidPreviewJob(name, blockedRecord, {
+      sidecarOnly: true,
+      changedPreflight: preflight,
+    });
+    const failure = [run.result.stdout, run.result.stderr].join("\n");
+
+    assert.notEqual(
+      run.result.status,
+      0,
+      `a ${description} Android preflight artifact must fail the release validation job`,
+    );
+    assert.match(
+      run.summary,
+      new RegExp(
+        fixedRedactedSchemaMessage.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
+      ),
+      `the ${description} job summary must use the fixed redacted-schema contract message`,
+    );
+    assert.match(
+      failure,
+      new RegExp(
+        fixedRedactedSchemaMessage.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
+      ),
+      `the ${description} checker failure must use the fixed redacted-schema contract message`,
+    );
+    for (const [surfaceName, surface] of [
+      ["job summary", run.summary],
+      ["surfaced checker failure", failure],
+    ]) {
+      assert.doesNotMatch(
+        surface,
+        forbidden,
+        `the ${description} ${surfaceName} must not expose the marker or raw artifact content`,
+      );
+      assert.doesNotMatch(
+        surface,
+        /public manifest HTTP 200 \(128 bytes\)/,
+        `the ${description} ${surfaceName} must not expose valid preflight artifact content`,
+      );
+    }
   }
 
   const sidecarOnly = runAndroidPreviewJob("sidecar-only", blockedRecord, {
