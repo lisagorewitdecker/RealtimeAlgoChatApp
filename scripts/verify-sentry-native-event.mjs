@@ -1,5 +1,19 @@
-import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+#!/usr/bin/env node
+import { existsSync, readFileSync } from "node:fs";
+import { chmod, mkdir, writeFile } from "node:fs/promises";
+import path, { dirname, join } from "node:path";
+import { pathToFileURL } from "node:url";
+
+const DEFAULT_API_BASE_URL = "https://sentry.io";
+const DEFAULT_ATTEMPTS = 18;
+const DEFAULT_INTERVAL_MS = 10_000;
+const EXPECTED_PROBE_FUNCTION = "createNativeSourceMapProbeError";
+const EXPECTED_TRIGGER_KEYS = new Set(["platform", "candidate_build_id", "marker"]);
+const CREDENTIAL_FIELD_PATTERN =
+  /^(?:authorization[_-]?token|auth[_-]?token|sentry_auth_token|access[_-]?token|refresh[_-]?token)$/i;
+const BEARER_TOKEN_PATTERN = /^bearer\s+[A-Za-z0-9._~+/-]{8,}$/i;
+const CREDENTIAL_TEXT_PATTERN =
+  /(?:\b(?:authorization|auth|access|refresh|sentry_auth)[_-]?token\b\s*(?::|=)\s*["']?[A-Za-z0-9._~+/-]{8,}|bearer\s+[A-Za-z0-9._~+/-]{8,})/i;
 
 function parseArgs(argv) {
   const options = new Map();
@@ -14,15 +28,24 @@ function parseArgs(argv) {
   return options;
 }
 
+function requiredEnv(env, name) {
+  const value = env[name]?.trim();
+  if (!value) {
+    throw new Error(`Missing required Sentry verification setting: ${name}.`);
+  }
+  return value;
+}
+
 function duplicateJsonFields(raw) {
   let index = 0;
-  const duplicates = [];
+  const duplicates = new Set();
 
   function skipWhitespace() {
     while (/\s/.test(raw[index] ?? "")) index += 1;
   }
 
   function readString() {
+    if (raw[index] !== '"') return null;
     const start = index;
     index += 1;
     while (index < raw.length) {
@@ -30,163 +53,196 @@ function duplicateJsonFields(raw) {
         index += 2;
       } else if (raw[index] === '"') {
         index += 1;
-        return JSON.parse(raw.slice(start, index));
+        try {
+          return JSON.parse(raw.slice(start, index));
+        } catch {
+          return null;
+        }
       } else {
         index += 1;
       }
     }
-    throw new Error("unterminated JSON string");
+    return null;
   }
 
   function scanValue() {
     skipWhitespace();
-    if (raw[index] === "{") {
-      scanObject();
-    } else if (raw[index] === "[") {
-      scanArray();
-    } else if (raw[index] === '"') {
-      readString();
-    } else {
-      while (index < raw.length && !/[,\]}]/.test(raw[index])) index += 1;
-    }
+    if (raw[index] === "{") return scanObject();
+    if (raw[index] === "[") return scanArray();
+    if (raw[index] === '"') return readString() !== null;
+
+    const start = index;
+    while (index < raw.length && !/[,\]}]/.test(raw[index])) index += 1;
+    return index > start;
   }
 
   function scanObject() {
+    if (raw[index] !== "{") return false;
     const keys = new Set();
     index += 1;
     skipWhitespace();
     if (raw[index] === "}") {
       index += 1;
-      return;
+      return true;
     }
     while (index < raw.length) {
       skipWhitespace();
       const key = readString();
-      if (keys.has(key)) duplicates.push(key);
-      keys.add(key);
+      if (key === null) return false;
+      if (keys.has(key)) duplicates.add(key);
+      else keys.add(key);
       skipWhitespace();
+      if (raw[index] !== ":") return false;
       index += 1;
-      scanValue();
+      if (!scanValue()) return false;
       skipWhitespace();
       if (raw[index] === "}") {
         index += 1;
-        return;
+        return true;
       }
+      if (raw[index] !== ",") return false;
       index += 1;
     }
+    return false;
   }
 
   function scanArray() {
+    if (raw[index] !== "[") return false;
     index += 1;
     skipWhitespace();
     if (raw[index] === "]") {
       index += 1;
-      return;
+      return true;
     }
     while (index < raw.length) {
-      scanValue();
+      if (!scanValue()) return false;
       skipWhitespace();
       if (raw[index] === "]") {
         index += 1;
-        return;
+        return true;
       }
+      if (raw[index] !== ",") return false;
       index += 1;
     }
+    return false;
   }
 
-  scanValue();
-  return [...new Set(duplicates)];
+  if (!scanValue()) {
+    throw new Error("evidence is not valid JSON");
+  }
+  skipWhitespace();
+  if (index !== raw.length) {
+    throw new Error("evidence is not valid JSON");
+  }
+  return [...duplicates];
 }
 
 function parseTrigger(triggerPath) {
-  return Object.fromEntries(
-    readFileSync(triggerPath, "utf8")
-      .trim()
-      .split(/\r?\n/)
-      .map((line) => {
-        const separatorIndex = line.indexOf("=");
-        return [line.slice(0, separatorIndex), line.slice(separatorIndex + 1)];
-      }),
+  const seenKeys = new Set();
+  const lines = readFileSync(triggerPath, "utf8")
+    .split(/\r?\n/)
+    .map((line) => line.trim());
+
+  if (lines.at(-1) === "") {
+    lines.pop();
+  }
+
+  if (lines.length === 0) {
+    throw new Error("trigger metadata is empty");
+  }
+
+  const trigger = Object.fromEntries(
+    lines.map((line) => {
+      const separatorIndex = line.indexOf("=");
+      if (
+        line.length === 0 ||
+        separatorIndex <= 0 ||
+        separatorIndex !== line.lastIndexOf("=")
+      ) {
+        throw new Error("trigger metadata is malformed");
+      }
+      const key = line.slice(0, separatorIndex);
+      const value = line.slice(separatorIndex + 1).trim();
+      if (!EXPECTED_TRIGGER_KEYS.has(key) || value.length === 0) {
+        throw new Error("trigger metadata is malformed");
+      }
+      if (seenKeys.has(key)) {
+        throw new Error("trigger metadata contains duplicate field(s)");
+      }
+      seenKeys.add(key);
+      return [key, value];
+    }),
   );
-}
 
-const cliOptions = parseArgs(process.argv.slice(2));
-const evidencePath = cliOptions.get("evidence-path") ?? process.env.SENTRY_EVIDENCE_PATH;
-const expectedPlatform = cliOptions.get("platform") ?? process.env.SENTRY_EXPECTED_PLATFORM;
-const expectedBuildId = cliOptions.get("candidate-build-id") ?? process.env.SENTRY_EXPECTED_BUILD_ID;
-const expectedProbeMarker = cliOptions.get("expected-probe-marker") ?? process.env.SENTRY_PROBE_MARKER ?? "";
-const expectedRelease = cliOptions.get("expected-release") ?? process.env.SENTRY_EXPECTED_RELEASE ?? "";
-const expectedDist = cliOptions.get("expected-dist") ?? process.env.SENTRY_EXPECTED_DIST ?? "";
-const triggerPath =
-  cliOptions.get("trigger-path") ??
-  process.env.SENTRY_TRIGGER_PATH ??
-  (evidencePath ? join(dirname(evidencePath), "sentry-trigger.txt") : undefined);
-
-if (!evidencePath || !triggerPath || !expectedPlatform || !expectedBuildId) {
-  throw new Error("missing evidence verification inputs");
-}
-
-const rawEvidence = readFileSync(evidencePath, "utf8");
-if (/(?:auth(?:orization)?[_-]?token|sentry_auth_token|bearer\s+[A-Za-z0-9._-]+)/i.test(rawEvidence)) {
-  throw new Error("evidence contains credential-like content");
-}
-
-let evidence;
-try {
-  evidence = JSON.parse(rawEvidence);
-} catch {
-  throw new Error("evidence is not valid JSON");
-}
-
-if (duplicateJsonFields(rawEvidence).length > 0) {
-  throw new Error("duplicate JSON field(s)");
-}
-
-const trigger = parseTrigger(triggerPath);
-for (const key of ["eventId", "marker", "release", "dist"]) {
-  if (typeof evidence[key] !== "string" || evidence[key].trim() === "") {
-    throw new Error(`${key} is missing`);
+  if (seenKeys.size !== EXPECTED_TRIGGER_KEYS.size) {
+    throw new Error("trigger metadata is malformed");
   }
+
+  return trigger;
 }
 
-if (evidence.status !== "PASS") throw new Error("status is not PASS");
-if (evidence.platform !== expectedPlatform) throw new Error("platform does not match");
-if (evidence.candidateBuildId !== expectedBuildId) throw new Error("candidate build ID does not match");
-if (trigger.platform !== expectedPlatform) throw new Error("trigger platform does not match");
-if (trigger.candidate_build_id !== expectedBuildId) throw new Error("trigger candidate build ID does not match");
-if (trigger.marker !== evidence.marker) throw new Error("trigger marker does not match");
-if (expectedProbeMarker && evidence.marker !== expectedProbeMarker) throw new Error("probe marker does not match");
-if (expectedRelease && evidence.release !== expectedRelease) throw new Error("release does not match");
-if (expectedDist && evidence.dist !== expectedDist) throw new Error("dist does not match");
-
-const frame = evidence.readableFrame;
-if (
-  !frame ||
-  typeof frame.filename !== "string" ||
-  !/\.[cm]?[jt]sx?$/i.test(frame.filename) ||
-  typeof frame.function !== "string" ||
-  !frame.function.includes("createNativeSourceMapProbeError") ||
-  !Number.isInteger(frame.line) ||
-  !Number.isInteger(frame.column)
-) {
-  throw new Error("readable source-mapped frame is missing");
+function escapeSentrySearchValue(value) {
+  return value.replaceAll("\\", "\\\\").replaceAll('"', '\\"');
 }
-#!/usr/bin/env node
-import { chmod, mkdir, writeFile } from "node:fs/promises";
-import path from "node:path";
-import { pathToFileURL } from "node:url";
 
-const DEFAULT_API_BASE_URL = "https://sentry.io";
-const DEFAULT_ATTEMPTS = 18;
-const DEFAULT_INTERVAL_MS = 10_000;
-const EXPECTED_PROBE_FUNCTION = "createNativeSourceMapProbeError";
-
-function requiredEnv(env, name) {
-  const value = env[name]?.trim();
-  if (!value) {
-    throw new Error(`Missing required Sentry verification setting: ${name}.`);
+function normalizeSentryApiBaseUrl(apiBaseUrl) {
+  let parsedUrl;
+  try {
+    parsedUrl = new URL(apiBaseUrl);
+  } catch {
+    throw new Error("SENTRY_API_BASE_URL must be a valid HTTPS URL.");
   }
-  return value;
+
+  if (parsedUrl.protocol !== "https:") {
+    throw new Error("SENTRY_API_BASE_URL must use HTTPS.");
+  }
+  if (parsedUrl.username || parsedUrl.password) {
+    throw new Error("SENTRY_API_BASE_URL must not contain credentials.");
+  }
+  if (!/^\/*$/.test(parsedUrl.pathname)) {
+    throw new Error("SENTRY_API_BASE_URL must not include a path.");
+  }
+  parsedUrl.pathname = "/";
+  parsedUrl.search = "";
+  parsedUrl.hash = "";
+  return parsedUrl;
+}
+
+function hasCredentialLikeContent(value) {
+  if (typeof value === "string") {
+    return (
+      BEARER_TOKEN_PATTERN.test(value.trim()) ||
+      CREDENTIAL_TEXT_PATTERN.test(value)
+    );
+  }
+
+  if (Array.isArray(value)) {
+    return value.some((entry) => hasCredentialLikeContent(entry));
+  }
+
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  return Object.entries(value).some(([key, entryValue]) => {
+    if (CREDENTIAL_FIELD_PATTERN.test(key)) {
+      if (typeof entryValue === "string") {
+        return entryValue.trim().length > 0;
+      }
+      if (Array.isArray(entryValue)) {
+        return entryValue.length > 0;
+      }
+      if (entryValue && typeof entryValue === "object") {
+        return Object.keys(entryValue).length > 0;
+      }
+      return entryValue !== null && entryValue !== undefined;
+    }
+    return hasCredentialLikeContent(entryValue);
+  });
+}
+
+function hasCredentialLikeText(rawEvidence) {
+  return CREDENTIAL_TEXT_PATTERN.test(rawEvidence);
 }
 
 function tagMap(event) {
@@ -287,11 +343,77 @@ export function validateNativeSentryEvent(event, expected) {
   };
 }
 
+export function verifyNativeSentryEvidence({
+  evidencePath,
+  triggerPath,
+  expectedPlatform,
+  expectedBuildId,
+  expectedProbeMarker = "",
+  expectedRelease = "",
+  expectedDist = "",
+}) {
+  if (!evidencePath || !triggerPath || !expectedPlatform || !expectedBuildId) {
+    throw new Error("missing evidence verification inputs");
+  }
+
+  const rawEvidence = readFileSync(evidencePath, "utf8");
+  if (duplicateJsonFields(rawEvidence).length > 0) {
+    throw new Error("duplicate JSON field(s)");
+  }
+
+  let evidence;
+  try {
+    evidence = JSON.parse(rawEvidence);
+  } catch {
+    throw new Error("evidence is not valid JSON");
+  }
+  if (!evidence || typeof evidence !== "object" || Array.isArray(evidence)) {
+    throw new Error("evidence must be a JSON object");
+  }
+  if (hasCredentialLikeText(rawEvidence) || hasCredentialLikeContent(evidence)) {
+    throw new Error("evidence contains credential-like content");
+  }
+
+  const trigger = parseTrigger(triggerPath);
+  for (const key of ["eventId", "marker", "release", "dist"]) {
+    if (typeof evidence[key] !== "string" || evidence[key].trim() === "") {
+      throw new Error(`${key} is missing`);
+    }
+  }
+
+  if (evidence.status !== "PASS") throw new Error("status is not PASS");
+  if (evidence.platform !== expectedPlatform) throw new Error("platform does not match");
+  if (evidence.candidateBuildId !== expectedBuildId) throw new Error("candidate build ID does not match");
+  if (trigger.platform !== expectedPlatform) throw new Error("trigger platform does not match");
+  if (trigger.candidate_build_id !== expectedBuildId) throw new Error("trigger candidate build ID does not match");
+  if (trigger.marker !== evidence.marker) throw new Error("trigger marker does not match");
+  if (expectedProbeMarker && evidence.marker !== expectedProbeMarker) throw new Error("probe marker does not match");
+  if (expectedRelease && evidence.release !== expectedRelease) throw new Error("release does not match");
+  if (expectedDist && evidence.dist !== expectedDist) throw new Error("dist does not match");
+
+  const frame = evidence.readableFrame;
+  if (
+    !frame ||
+    typeof frame.filename !== "string" ||
+    !/\.[cm]?[jt]sx?$/i.test(frame.filename) ||
+    typeof frame.function !== "string" ||
+    !frame.function.includes(EXPECTED_PROBE_FUNCTION) ||
+    !Number.isInteger(frame.line) ||
+    frame.line <= 0 ||
+    !Number.isInteger(frame.column) ||
+    frame.column <= 0
+  ) {
+    throw new Error("readable source-mapped frame is missing");
+  }
+
+  return evidence;
+}
+
 async function sentryRequest(fetchImpl, url, token) {
   const response = await fetchImpl(url, {
     headers: {
       Accept: "application/json",
-      Authorization: `Bearer ${token}`,
+      "Authorization": ["Bearer", token].join(" "),
     },
   });
   if (!response.ok) {
@@ -317,14 +439,15 @@ export async function verifyNativeSentryEvent({
   attempts = DEFAULT_ATTEMPTS,
   intervalMs = DEFAULT_INTERVAL_MS,
 }) {
+  const baseUrl = normalizeSentryApiBaseUrl(apiBaseUrl);
   const query = [
-    `release:"${expected.release.replaceAll('"', '\\"')}"`,
-    `mobile_sentry_probe:${expected.marker}`,
-    `mobile_platform:${expected.platform}`,
+    `release:"${escapeSentrySearchValue(expected.release)}"`,
+    `mobile_sentry_probe:"${escapeSentrySearchValue(expected.marker)}"`,
+    `mobile_platform:"${escapeSentrySearchValue(expected.platform)}"`,
   ].join(" ");
   const listUrl = new URL(
     `/api/0/projects/${encodeURIComponent(organization)}/${encodeURIComponent(project)}/events/`,
-    apiBaseUrl,
+    baseUrl,
   );
   listUrl.searchParams.set("full", "1");
   listUrl.searchParams.set("query", query);
@@ -338,7 +461,7 @@ export async function verifyNativeSentryEvent({
         if (!eventId) continue;
         const detailUrl = new URL(
           `/api/0/projects/${encodeURIComponent(organization)}/${encodeURIComponent(project)}/events/${encodeURIComponent(eventId)}/`,
-          apiBaseUrl,
+          baseUrl,
         );
         const event = await sentryRequest(fetchImpl, detailUrl, token);
         try {
@@ -362,6 +485,27 @@ export async function verifyNativeSentryEvent({
       "The controlled native JavaScript error did not arrive in Sentry before the verification timeout.",
     )
   );
+}
+
+function resolveEvidenceVerificationInputs(cliOptions, env) {
+  const evidencePath = cliOptions.get("evidence-path") ?? env.SENTRY_EVIDENCE_PATH;
+  return {
+    evidencePath,
+    triggerPath:
+      cliOptions.get("trigger-path") ??
+      env.SENTRY_TRIGGER_PATH ??
+      (evidencePath ? join(dirname(evidencePath), "sentry-trigger.txt") : undefined),
+    expectedPlatform: cliOptions.get("platform") ?? env.SENTRY_EXPECTED_PLATFORM,
+    expectedBuildId: cliOptions.get("candidate-build-id") ?? env.SENTRY_EXPECTED_BUILD_ID,
+    expectedProbeMarker:
+      cliOptions.get("expected-probe-marker") ?? env.SENTRY_PROBE_MARKER ?? "",
+    expectedRelease: cliOptions.get("expected-release") ?? env.SENTRY_EXPECTED_RELEASE ?? "",
+    expectedDist: cliOptions.get("expected-dist") ?? env.SENTRY_EXPECTED_DIST ?? "",
+  };
+}
+
+async function runEvidenceVerification(cliOptions, env = process.env) {
+  verifyNativeSentryEvidence(resolveEvidenceVerificationInputs(cliOptions, env));
 }
 
 async function main(env = process.env) {
@@ -398,11 +542,56 @@ async function main(env = process.env) {
   );
 }
 
+function hasRemoteVerificationInputs(env) {
+  return typeof env.SENTRY_AUTH_TOKEN === "string" && env.SENTRY_AUTH_TOKEN.trim() !== "";
+}
+
+function isEvidenceVerificationRequest(cliOptions, env) {
+  return (
+    cliOptions.has("evidence-path") ||
+    cliOptions.has("trigger-path") ||
+    Boolean(env.SENTRY_EVIDENCE_PATH) ||
+    Boolean(env.SENTRY_TRIGGER_PATH)
+  );
+}
+
+function canFallbackToRemoteVerification(error, cliOptions, env) {
+  const cliEvidencePath = cliOptions.get("evidence-path");
+  const envEvidencePath = env.SENTRY_EVIDENCE_PATH;
+  const evidencePath = cliEvidencePath ?? envEvidencePath;
+  return (
+    !cliEvidencePath &&
+    Boolean(envEvidencePath) &&
+    !cliOptions.has("trigger-path") &&
+    hasRemoteVerificationInputs(env) &&
+    error &&
+    typeof error === "object" &&
+    "code" in error &&
+    error.code === "ENOENT" &&
+    !existsSync(evidencePath)
+  );
+}
+
+async function runCli(argv = process.argv.slice(2), env = process.env) {
+  const cliOptions = parseArgs(argv);
+  if (isEvidenceVerificationRequest(cliOptions, env)) {
+    try {
+      await runEvidenceVerification(cliOptions, env);
+      return;
+    } catch (error) {
+      if (!canFallbackToRemoteVerification(error, cliOptions, env)) {
+        throw error;
+      }
+    }
+  }
+  await main(env);
+}
+
 if (
   process.argv[1] &&
   import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href
 ) {
-  main().catch((error) => {
+  runCli().catch((error) => {
     console.error(error.message);
     process.exitCode = 1;
   });
