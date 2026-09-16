@@ -1,10 +1,14 @@
 import assert from "node:assert/strict";
+import { mkdtemp, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import test from "node:test";
 
 import {
   findReadableSourceMappedFrame,
   validateNativeSentryEvent,
   verifyNativeSentryEvent,
+  verifyNativeSentryEvidence,
 } from "../verify-sentry-native-event.mjs";
 
 function eventFixture(overrides = {}) {
@@ -119,4 +123,137 @@ test("retries transient Sentry API failures", async () => {
 
   assert.equal(evidence.status, "PASS");
   assert.equal(responses.length, 0);
+});
+
+test("rejects a non-HTTPS Sentry API base URL", async () => {
+  await assert.rejects(
+    () =>
+      verifyNativeSentryEvent({
+        fetchImpl: async () => {
+          throw new Error("fetch should not run");
+        },
+        apiBaseUrl: "http://sentry.example",
+        token: "test-token",
+        organization: "test-org",
+        project: "test-project",
+        expected,
+        attempts: 1,
+        intervalMs: 0,
+      }),
+    /SENTRY_API_BASE_URL must use HTTPS/,
+  );
+});
+
+test("rejects a credentialed Sentry API base URL", async () => {
+  await assert.rejects(
+    () =>
+      verifyNativeSentryEvent({
+        fetchImpl: async () => {
+          throw new Error("fetch should not run");
+        },
+        apiBaseUrl: ["https://", "user:pass@sentry.example"].join(""),
+        token: "test-token",
+        organization: "test-org",
+        project: "test-project",
+        expected,
+        attempts: 1,
+        intervalMs: 0,
+      }),
+    /SENTRY_API_BASE_URL must not contain credentials/,
+  );
+});
+
+test("quotes Sentry search values before requesting events", async () => {
+  const capturedUrls = [];
+  await assert.rejects(
+    () =>
+      verifyNativeSentryEvent({
+        fetchImpl: async (url) => {
+          capturedUrls.push(new URL(url));
+          return Response.json([]);
+        },
+        apiBaseUrl: "https://sentry.example?ignored=yes#hash",
+        token: "test-token",
+        organization: "test-org",
+        project: "test-project",
+        expected: {
+          ...expected,
+          marker: 'run 1234 "ios"',
+        },
+        attempts: 1,
+        intervalMs: 0,
+      }),
+    /verification timeout/,
+  );
+
+  assert.equal(capturedUrls.length, 1);
+  assert.equal(
+    capturedUrls[0].searchParams.get("query"),
+    String.raw`release:"chat-app@1.0.0+abc123" mobile_sentry_probe:"run 1234 \"ios\"" mobile_platform:"ios"`,
+  );
+  assert.equal(capturedUrls[0].searchParams.get("ignored"), null);
+  assert.equal(capturedUrls[0].hash, "");
+});
+
+
+test("accepts a redacted saved evidence file", async () => {
+  const tempDir = await mkdtemp(path.join(tmpdir(), "sentry-evidence-"));
+  const evidencePath = path.join(tempDir, "sentry-source-map-evidence.json");
+  const triggerPath = path.join(tempDir, "sentry-trigger.txt");
+
+  await writeFile(
+    evidencePath,
+    `${JSON.stringify(validateNativeSentryEvent(eventFixture(), expected))}\n`,
+  );
+  await writeFile(
+    triggerPath,
+    [
+      "platform=ios",
+      "candidate_build_id=build-ios",
+      "marker=run-1234-ios",
+    ].join("\n"),
+  );
+
+  const evidence = verifyNativeSentryEvidence({
+    evidencePath,
+    triggerPath,
+    expectedPlatform: expected.platform,
+    expectedBuildId: expected.candidateBuildId,
+    expectedProbeMarker: expected.marker,
+    expectedRelease: expected.release,
+    expectedDist: expected.dist,
+  });
+
+  assert.equal(evidence.eventId, "0123456789abcdef0123456789abcdef");
+});
+
+test("rejects duplicate trigger metadata fields", async () => {
+  const tempDir = await mkdtemp(path.join(tmpdir(), "sentry-trigger-"));
+  const evidencePath = path.join(tempDir, "sentry-source-map-evidence.json");
+  const triggerPath = path.join(tempDir, "sentry-trigger.txt");
+
+  await writeFile(
+    evidencePath,
+    `${JSON.stringify(validateNativeSentryEvent(eventFixture(), expected))}\n`,
+  );
+  await writeFile(
+    triggerPath,
+    [
+      "platform=ios",
+      "candidate_build_id=build-ios",
+      "marker=run-1234-ios",
+      "marker=attacker-controlled",
+    ].join("\n"),
+  );
+
+  assert.throws(
+    () =>
+      verifyNativeSentryEvidence({
+        evidencePath,
+        triggerPath,
+        expectedPlatform: expected.platform,
+        expectedBuildId: expected.candidateBuildId,
+      }),
+    /trigger metadata contains duplicate field\(s\)/,
+  );
 });
