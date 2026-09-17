@@ -479,6 +479,28 @@ describe("sandbox AI tab in a browser", () => {
     );
     expect(await page.locator("#aiRetryBtn").isDisabled()).toBe(false);
 
+    // Events from the interrupted request can arrive after the room has
+    // rejoined. None of them may replace the restored retry state.
+    await fire(page, "assistant-chunk", {
+      requestId: interrupted,
+      text: "stale answer",
+    });
+    await fire(page, "assistant-done", {
+      requestId: interrupted,
+      cancelled: false,
+    });
+    await fire(page, "assistant-error", {
+      requestId: interrupted,
+      code: "SERVICE_ERROR",
+      message: "Stale failure from the interrupted request.",
+    });
+    expect(await page.locator("#aiOutput").textContent()).toBe("");
+    expect(await status(page)).toBe(
+      "Connection restored — you can retry your question.",
+    );
+    expect(await page.locator("#aiRetryBtn").isVisible()).toBe(true);
+    expect(await page.locator("#aiRetryBtn").isDisabled()).toBe(false);
+
     await page.click('.tab[data-tab="html"]');
     await page.fill("#htmlEditor", "<main>after reconnect</main>");
     await page.click('.tab[data-tab="ai"]');
