@@ -85,7 +85,10 @@ const androidPreflightScript = "scripts/check-android-release-prerequisites.sh";
 const nativeEvidenceCheckerScript =
   "scripts/check-native-large-text-evidence.sh";
 const untrustedCheckerWrapperScript = "scripts/run-untrusted-checker.sh";
-
+const pinnedUploadArtifactAction =
+  "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02";
+const pinnedDownloadArtifactAction =
+  "actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093";
 /**
  * Inventory of every script invoked by the release workflow that writes
  * `GITHUB_STEP_SUMMARY`. The discovery test fails when the workflow gains a
@@ -617,6 +620,30 @@ test("candidate build IDs use non-secret variables or reusable-workflow inputs",
 test("idle-profile registration check blocks release and reports its result", () => {
   const idleJob = workflow.jobs["idle-profile-registration"];
   assert.ok(idleJob, "release workflow must define the idle-profile job");
+  const configStep = idleJob.steps.find(
+    (step) => step.name === "Determine idle-profile secret configuration",
+  );
+  assert.ok(
+    configStep,
+    "idle-profile job must determine its secret configuration before conditional checks",
+  );
+  assert.equal(configStep.id, "idle-profile-config");
+  assert.equal(configStep.env.E2E_CHAT_URL, "${{ secrets.E2E_CHAT_URL }}");
+  assert.equal(configStep.env.E2E_API_URL, "${{ secrets.E2E_API_URL }}");
+  assert.equal(
+    configStep.env.CLERK_PUBLISHABLE_KEY,
+    "${{ secrets.CLERK_PUBLISHABLE_KEY }}",
+  );
+  assert.equal(configStep.env.CLERK_SECRET_KEY, "${{ secrets.CLERK_SECRET_KEY }}");
+  assert.equal(configStep.env.DATABASE_URL, "${{ secrets.DATABASE_URL }}");
+  assert.match(
+    configStep.run,
+    /echo "browser_targets_configured=true" >> "\$GITHUB_OUTPUT"/,
+  );
+  assert.match(
+    configStep.run,
+    /echo "release_check_configured=true" >> "\$GITHUB_OUTPUT"/,
+  );
 
   const preflightStep = idleJob.steps.find(
     (step) => step.name === "Verify idle-profile browser targets",
@@ -624,6 +651,11 @@ test("idle-profile registration check blocks release and reports its result", ()
   assert.ok(
     preflightStep,
     "idle-profile job must preflight its browser targets",
+  );
+  assert.equal(
+    preflightStep.if,
+    "${{ steps.idle-profile-config.outputs.browser_targets_configured == 'true' }}",
+    "preflight must run only when browser target configuration is present",
   );
   assert.equal(preflightStep.env.E2E_CHAT_URL, "${{ secrets.E2E_CHAT_URL }}");
   assert.equal(preflightStep.env.E2E_API_URL, "${{ secrets.E2E_API_URL }}");
@@ -654,6 +686,11 @@ test("idle-profile registration check blocks release and reports its result", ()
     (step) => step.name === "Run idle-profile registration release check",
   );
   assert.ok(runStep, "idle-profile job must run the browser check");
+  assert.equal(
+    runStep.if,
+    "${{ steps.idle-profile-config.outputs.release_check_configured == 'true' }}",
+    "idle-profile Playwright check must run only when release-check configuration is present",
+  );
   assert.ok(
     idleJob.steps.indexOf(preflightStep) < idleJob.steps.indexOf(runStep),
     "both browser targets must be verified before Playwright starts",
@@ -686,7 +723,7 @@ test("idle-profile registration check blocks release and reports its result", ()
     "${{ always() }}",
     "browser evidence upload must run even when the Playwright check fails",
   );
-  assert.equal(uploadStep.uses, "actions/upload-artifact@v4");
+  assert.equal(uploadStep.uses, pinnedUploadArtifactAction);
   assert.equal(
     uploadStep.with.name,
     "idle-profile-registration-browser-evidence",
@@ -734,6 +771,7 @@ test("idle-profile registration check blocks release and reports its result", ()
   assert.equal(summaryStep.if, "${{ always() }}");
   assert.match(summaryStep.run, /## Idle profile registration/);
   assert.match(summaryStep.run, /Status: \*\*PASS\*\*/);
+  assert.match(summaryStep.run, /Status: \*\*SKIP\*\*/);
   assert.match(summaryStep.run, /Status: \*\*FAIL\*\*/);
 
   const gate = workflow.jobs["mobile-release-gate"];
@@ -929,12 +967,12 @@ test("native evidence downloads retry without exposing evidence contents", () =>
 
     assert.equal(
       download?.uses,
-      "actions/download-artifact@v4",
+      pinnedDownloadArtifactAction,
       `${jobId}: ${platform} must use the official artifact downloader`,
     );
     assert.equal(
       retry?.uses,
-      "actions/download-artifact@v4",
+      pinnedDownloadArtifactAction,
       `${jobId}: ${platform} retry must use the official artifact downloader`,
     );
     assert.equal(
@@ -1116,7 +1154,7 @@ test("publish requires candidate-bound approvals from the current run attempt", 
       `${jobId} evidence directory must be unique to the GitHub run attempt`,
     );
     const upload = workflow.jobs[jobId].steps.find(
-      (step) => step[`uses`] === "actions/upload-artifact@v4",
+      (step) => step[`uses`] === pinnedUploadArtifactAction,
     );
     assert.equal(
       upload?.with?.name,
@@ -1171,7 +1209,7 @@ test("publish requires candidate-bound approvals from the current run attempt", 
   for (const jobId of ["mobile-release-gate", "mobile-publish"]) {
     const downloads = workflow.jobs[jobId].steps.filter(
       (step) =>
-        step[`uses`] === "actions/download-artifact@v4" &&
+        step[`uses`] === pinnedDownloadArtifactAction &&
         step.id?.startsWith("download"),
     );
     assert.deepEqual(
@@ -1495,16 +1533,15 @@ test("Android preview evidence keeps its pull-request validation and privacy con
     Object.prototype.hasOwnProperty.call(workflow.on ?? {}, "pull_request"),
     "the release workflow must support pull_request",
   );
-  const pullRequest = workflow.on.pull_request ?? {};
   assert.equal(
-    pullRequest.paths,
+    workflow.on.pull_request?.paths,
     undefined,
-    "the required Android preview evidence check must not use a pull_request paths filter",
+    "the Android preview evidence check must not use a pull_request path filter",
   );
   assert.equal(
-    pullRequest["paths-ignore"],
+    workflow.on.pull_request?.["paths-ignore"],
     undefined,
-    "the required Android preview evidence check must not use a pull_request paths-ignore filter",
+    "the Android preview evidence check must not use pull_request paths-ignore rules",
   );
 
   const validationStep = androidJob.steps.find(
@@ -2105,12 +2142,12 @@ test("iOS preview evidence covers renamed records and blocks malformed changes",
   assert.ok(validationStep, "the iOS preview job must validate changed records");
   assert.match(
     validationStep.run,
-    /No iOS preview validation records changed; nothing to validate\./,
+    /No iOS preview validation records or preflight artifacts changed; nothing to validate\./,
     "zero changed records must skip successfully",
   );
   assert.match(
     validationStep.run,
-    /pnpm run validate:ios-preview-evidence -- "\$record_path"/,
+    /pnpm run validate:ios-preview-evidence -- "\$\{checker_args\[@\]\}"/,
     "changed iOS records must run the focused checker",
   );
 
@@ -2119,6 +2156,9 @@ test("iOS preview evidence covers renamed records and blocks malformed changes",
     {
       recordText,
       baseRecordText = "# iOS preview validation record\n",
+      preflightText,
+      basePreflightText,
+      updateOnlyPreflight = false,
       deleteRecord = false,
       renameRecord = false,
     },
@@ -2132,12 +2172,23 @@ test("iOS preview evidence covers renamed records and blocks malformed changes",
       fixtureRoot,
       `artifacts/chat-app/test-results/encrypted-room-recovery/ios/${renameRecord ? "20260915T121500Z" : "20260915T120000Z"}/validation-record.md`,
     );
+    const basePreflightPath = path.join(
+      fixtureRoot,
+      "artifacts/chat-app/test-results/encrypted-room-recovery/ios/20260915T120000Z/ios-preview-preflight.json",
+    );
+    const preflightPath = path.join(
+      fixtureRoot,
+      `artifacts/chat-app/test-results/encrypted-room-recovery/ios/${renameRecord ? "20260915T121500Z" : "20260915T120000Z"}/ios-preview-preflight.json`,
+    );
     const summaryPath = path.join(fixtureRoot, "summary.md");
     const runnerPath = path.join(fixtureRoot, "run-job.sh");
     const binDirectory = path.join(fixtureRoot, "bin");
     mkdirSync(path.dirname(baseRecordPath), { recursive: true });
     mkdirSync(binDirectory, { recursive: true });
     writeFileSync(baseRecordPath, baseRecordText);
+    if (basePreflightText !== undefined) {
+      writeFileSync(basePreflightPath, basePreflightText);
+    }
 
     const git = (args) => {
       const result = spawnSync(gitPath, args, {
@@ -2154,7 +2205,11 @@ test("iOS preview evidence covers renamed records and blocks malformed changes",
     git(["config", "user.email", "contract-test@example.invalid"]);
     git(["config", "user.name", "Contract Test"]);
     writeFileSync(path.join(fixtureRoot, "README.md"), "base\n");
-    git(["add", "README.md", baseRecordPath]);
+    const baseFiles = ["README.md", baseRecordPath];
+    if (basePreflightText !== undefined) {
+      baseFiles.push(basePreflightPath);
+    }
+    git(["add", ...baseFiles]);
     git(["commit", "--quiet", "-m", "base iOS preview record"]);
     const baseSha = spawnSync(gitPath, ["rev-parse", "HEAD"], {
       cwd: fixtureRoot,
@@ -2166,9 +2221,22 @@ test("iOS preview evidence covers renamed records and blocks malformed changes",
     } else if (renameRecord) {
       mkdirSync(path.dirname(recordPath), { recursive: true });
       renameSync(baseRecordPath, recordPath);
+      if (basePreflightText !== undefined) {
+        renameSync(basePreflightPath, preflightPath);
+      }
       writeFileSync(recordPath, recordText);
+      if (preflightText !== undefined) {
+        writeFileSync(preflightPath, preflightText);
+      }
+    } else if (updateOnlyPreflight) {
+      if (preflightText !== undefined) {
+        writeFileSync(preflightPath, preflightText);
+      }
     } else {
       writeFileSync(recordPath, recordText);
+      if (preflightText !== undefined) {
+        writeFileSync(preflightPath, preflightText);
+      }
     }
     git(["add", "-A"]);
     git(["commit", "--quiet", "-m", "changed iOS preview record"]);
@@ -2180,7 +2248,7 @@ test("iOS preview evidence covers renamed records and blocks malformed changes",
     writeStub(
       binDirectory,
       "pnpm",
-      'set -euo pipefail\nrecord="${!#}"\nexec bash "$IOS_PREVIEW_CHECKER" "$record"',
+      'set -euo pipefail\nshift 3\nexec bash "$IOS_PREVIEW_CHECKER" "$@"',
     );
     writeFileSync(runnerPath, `#!${bashPath}\n${validationStep.run}\n`);
     chmodSync(runnerPath, 0o755);
@@ -2362,6 +2430,68 @@ test("iOS preview evidence covers renamed records and blocks malformed changes",
     deleted.summary,
     /changed iOS preview validation record is missing/,
     "the summary must identify the missing changed iOS record",
+  );
+
+  const preflightOnly = runIosPreviewJob("preflight-only", {
+    recordText: blockedRecord,
+    baseRecordText: blockedRecord,
+    basePreflightText: `{
+  "schema": "ios-preview-handoff-preflight/v1",
+  "platform": "ios",
+  "boundaries": {
+    "publicManifestReachability": {
+      "status": "PASS",
+      "evidence": "public manifest HTTP 200 (128 bytes)"
+    },
+    "localHandoffProbe": {
+      "status": "NOT_RUN",
+      "evidence": "Local manifest/bundle probe not run — no successful probe result was recorded"
+    },
+    "expoGoLaunch": {
+      "status": "NOT_ASSESSED",
+      "evidence": "Requires a physical iPhone running stock Expo Go."
+    },
+    "serverNativeRequestEvidence": {
+      "status": "NOT_ASSESSED",
+      "evidence": "Requires filtered Metro or API evidence from that physical Expo Go session."
+    }
+  }
+}
+`,
+    preflightText: `{
+  "schema": "ios-preview-handoff-preflight/v1",
+  "platform": "ios",
+  "boundaries": {
+    "publicManifestReachability": {
+      "status": "PASS",
+      "evidence": "public manifest HTTP 200 (129 bytes)"
+    },
+    "localHandoffProbe": {
+      "status": "NOT_RUN",
+      "evidence": "Local manifest/bundle probe not run — no successful probe result was recorded"
+    },
+    "expoGoLaunch": {
+      "status": "NOT_ASSESSED",
+      "evidence": "Requires a physical iPhone running stock Expo Go."
+    },
+    "serverNativeRequestEvidence": {
+      "status": "NOT_ASSESSED",
+      "evidence": "Requires filtered Metro or API evidence from that physical Expo Go session."
+    }
+  }
+}
+`,
+    updateOnlyPreflight: true,
+  });
+  assert.equal(
+    preflightOnly.result.status,
+    0,
+    "a changed iOS preflight artifact must still validate its paired record",
+  );
+  assert.match(
+    preflightOnly.summary,
+    /- Changed records checked: \*\*1\*\*/,
+    "a preflight-only iOS change must still count its paired validation record",
   );
 });
 
@@ -3849,7 +3979,7 @@ test("partial native reruns keep each platform linked to its own artifact", () =
 
   const gateDownloads = workflow.jobs["mobile-release-gate"].steps.filter(
     (step) =>
-      step.uses === "actions/download-artifact@v4" &&
+      step.uses === pinnedDownloadArtifactAction &&
       step.id?.startsWith("download"),
   );
   assert.deepEqual(

@@ -50,6 +50,28 @@ const releaseCredentialSecrets = [
   "NATIVE_SMOKE_PASSWORD",
   "SENTRY_AUTH_TOKEN",
 ];
+const pinnedCheckoutAction =
+  "actions/checkout@11d5960a326750d5838078e36cf38b85af677262";
+const pinnedSetupNodeAction =
+  "actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020";
+function resolveWorkflowEnvExpression(value, workflowEnv, jobEnv, stepEnv) {
+  const match = String(value).trim().match(/^\$\{\{\s*env\.([A-Z0-9_]+)\s*\}\}$/);
+  if (!match) {
+    return value;
+  }
+
+  const [, name] = match;
+  if (stepEnv?.[name] !== undefined) {
+    return stepEnv[name];
+  }
+  if (jobEnv?.[name] !== undefined) {
+    return jobEnv[name];
+  }
+  if (workflowEnv?.[name] !== undefined) {
+    return workflowEnv[name];
+  }
+  return value;
+}
 
 function parseNodeVersion(value, description) {
   const text = String(value).trim();
@@ -201,7 +223,12 @@ function assertMobileReleaseNodeVersions(releaseWorkflow, nodeRange) {
       if (String(step.uses ?? "").startsWith("actions/setup-node@")) {
         configuredJobs.push({
           jobId,
-          configuredVersion: step.with?.["node-version"],
+          configuredVersion: resolveWorkflowEnvExpression(
+            step.with?.["node-version"],
+            releaseWorkflow.env,
+            job.env,
+            step.env,
+          ),
         });
       }
     }
@@ -435,6 +462,26 @@ test("invalid Node range guard blocks release jobs before setup or publish work"
     /needs\.mobile-release-node-range\.result == 'success'/,
     "the release gate must not start after the Node range guard fails",
   );
+  assert.match(
+    String(workflow.jobs?.["mobile-release-gate"]?.if),
+    /needs\.native-ios\.result == 'success'/,
+    "the release gate must only start after the iOS native smoke job succeeds",
+  );
+  assert.match(
+    String(workflow.jobs?.["mobile-release-gate"]?.if),
+    /needs\.native-android\.result == 'success'/,
+    "the release gate must only start after the Android native smoke job succeeds",
+  );
+  assert.match(
+    String(workflow.jobs?.["mobile-release-gate"]?.if),
+    /needs\.idle-profile-registration\.result == 'success'/,
+    "the release gate must only start after idle-profile registration succeeds",
+  );
+  assert.match(
+    String(workflow.jobs?.["mobile-release-gate"]?.if),
+    /needs\.native-evidence-summary-regression\.result == 'success'/,
+    "the release gate must only start after hosted summary regression succeeds",
+  );
   assert.doesNotMatch(
     rejectStep?.run,
     /secrets\./,
@@ -598,6 +645,88 @@ test("blocked release diagnostics identify the supported Node range safely", () 
   );
 });
 
+test("workflow hardening pins actions, runs for every pull request, and bounds duplicate release work", () => {
+  assert.ok(
+    Object.prototype.hasOwnProperty.call(workflow.on ?? {}, "pull_request"),
+    "pull_request runs must stay enabled so the required Android preview evidence check is always created",
+  );
+  assert.equal(
+    workflow.on?.pull_request?.paths,
+    undefined,
+    "pull_request runs must stay unscoped so the required Android preview evidence check is always created",
+  );
+  assert.equal(
+    workflow.on?.pull_request?.["paths-ignore"],
+    undefined,
+    "the workflow should not use pull_request paths-ignore rules",
+  );
+  assert.equal(
+    workflow.concurrency?.group,
+    "mobile-release-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref || github.run_id }}",
+    "duplicate mobile release runs must share a stable concurrency group",
+  );
+  assert.equal(
+    workflow.concurrency?.["cancel-in-progress"],
+    "${{ github.event_name == 'pull_request' }}",
+    "only pull request reruns should cancel earlier in-flight runs",
+  );
+  assert.equal(
+    workflow.defaults?.run?.shell,
+    "bash",
+    "release workflow run steps must default to bash",
+  );
+  assert.equal(
+    workflow.env?.RELEASE_NODE_VERSION,
+    24,
+    "release workflow must centralize its concrete Node version",
+  );
+
+  for (const [jobId, job] of Object.entries(workflow.jobs ?? {})) {
+    for (const step of job.steps ?? []) {
+      if (String(step.uses ?? "").startsWith("actions/checkout@")) {
+        assert.equal(
+          step.uses,
+          pinnedCheckoutAction,
+          `${jobId} must pin actions/checkout by commit SHA`,
+        );
+      }
+      if (String(step.uses ?? "").startsWith("actions/setup-node@")) {
+        assert.equal(
+          step.uses,
+          pinnedSetupNodeAction,
+          `${jobId} must pin actions/setup-node by commit SHA`,
+        );
+      }
+    }
+  }
+
+  assert.equal(
+    workflow.jobs?.["android-prerequisite-preflight"]?.["timeout-minutes"],
+    20,
+    "Android release runner preflight must not wait indefinitely on self-hosted infrastructure",
+  );
+  assert.equal(
+    workflow.jobs?.["native-ios"]?.["timeout-minutes"],
+    90,
+    "native-ios must have an explicit timeout",
+  );
+  assert.equal(
+    workflow.jobs?.["native-android"]?.["timeout-minutes"],
+    90,
+    "native-android must have an explicit timeout",
+  );
+  assert.equal(
+    workflow.jobs?.["idle-profile-registration"]?.["timeout-minutes"],
+    20,
+    "idle-profile-registration must have an explicit timeout",
+  );
+  assert.equal(
+    workflow.jobs?.["mobile-publish"]?.["timeout-minutes"],
+    45,
+    "mobile-publish must have an explicit timeout",
+  );
+});
+
 test("publish job runs the evidence privacy and submission-boundary regression before approval validation and submission", () => {
   const publishSteps = workflow.jobs?.["mobile-publish"]?.steps ?? [];
   const privacyIndex = publishSteps.findIndex(
@@ -673,7 +802,7 @@ test("iOS preview evidence validation succeeds when no handoff record changed", 
   );
   assert.match(
     evidenceStep.run,
-    /No iOS preview validation records changed; nothing to validate\./,
+    /No iOS preview validation records or preflight artifacts changed; nothing to validate\./,
     "zero changed records must explain why validation did not run",
   );
   assert.match(
@@ -688,16 +817,15 @@ test("Android preview evidence runs for every pull request", () => {
     Object.prototype.hasOwnProperty.call(workflow.on ?? {}, "pull_request"),
     "mobile release workflow must support pull_request",
   );
-  const pullRequest = workflow.on.pull_request ?? {};
   assert.equal(
-    pullRequest.paths,
+    workflow.on.pull_request?.paths,
     undefined,
-    "the required Android preview evidence check must not use a pull_request paths filter",
+    "the Android preview evidence check must not use a pull_request path filter",
   );
   assert.equal(
-    pullRequest["paths-ignore"],
+    workflow.on.pull_request?.["paths-ignore"],
     undefined,
-    "the required Android preview evidence check must not use a pull_request paths-ignore filter",
+    "the Android preview evidence check must not use pull_request paths-ignore rules",
   );
 
   const evidenceJob = workflow.jobs?.["android-preview-evidence"];
@@ -713,16 +841,15 @@ test("iOS preview evidence runs for every pull request", () => {
     Object.prototype.hasOwnProperty.call(workflow.on ?? {}, "pull_request"),
     "mobile release workflow must support pull_request",
   );
-  const pullRequest = workflow.on.pull_request ?? {};
   assert.equal(
-    pullRequest.paths,
+    workflow.on.pull_request?.paths,
     undefined,
-    "the required iOS preview evidence check must not use a pull_request paths filter",
+    "the iOS preview evidence check must not use a pull_request path filter",
   );
   assert.equal(
-    pullRequest["paths-ignore"],
+    workflow.on.pull_request?.["paths-ignore"],
     undefined,
-    "the required iOS preview evidence check must not use a pull_request paths-ignore filter",
+    "the iOS preview evidence check must not use pull_request paths-ignore rules",
   );
 
   const evidenceJob = workflow.jobs?.["ios-preview-evidence"];
@@ -747,12 +874,17 @@ test("iOS preview evidence runs for every pull request", () => {
   );
   assert.match(
     evidenceStep.run,
-    /git diff[\s\S]*--find-renames[\s\S]*--diff-filter=ACDMRT[\s\S]*\$\{IOS_PREVIEW_BASE_SHA\}\.\.\.\$\{IOS_PREVIEW_HEAD_SHA\}[\s\S]*artifacts\/chat-app\/test-results\/encrypted-room-recovery\/ios\/\*\*\/validation-record\.md/,
+    /git diff[\s\S]*--find-renames[\s\S]*--diff-filter=ACDMRT[\s\S]*\$\{IOS_PREVIEW_BASE_SHA\}\.\.\.\$\{IOS_PREVIEW_HEAD_SHA\}[\s\S]*artifacts\/chat-app\/test-results\/encrypted-room-recovery\/ios\/\*\*\/validation-record\.md[\s\S]*artifacts\/chat-app\/test-results\/encrypted-room-recovery\/ios\/\*\*\/ios-preview-preflight\.json/,
     "the job must select changed iOS validation records from the pull request diff",
   );
   assert.match(
     evidenceStep.run,
-    /pnpm run validate:ios-preview-evidence -- "\$record_path"/,
+    /changed_preflight_paths[\s\S]*record_path="\$\{changed_path%\/ios-preview-preflight\.json\}\/validation-record\.md"/,
+    "the job must map changed iOS preflight artifacts back to their validation records",
+  );
+  assert.match(
+    evidenceStep.run,
+    /pnpm run validate:ios-preview-evidence -- "\$\{checker_args\[@\]\}"/,
     "the job must run the focused iOS checker for every changed record",
   );
   assert.match(
