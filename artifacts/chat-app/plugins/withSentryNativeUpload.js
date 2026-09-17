@@ -54,7 +54,7 @@ function dotenvDeclaresAuthToken(filePath) {
   try {
     contents = fs.readFileSync(filePath, "utf8");
   } catch (error) {
-    if (error?.code === "ENOENT") {
+    if (error && error.code === "ENOENT") {
       return false;
     }
     throw error;
