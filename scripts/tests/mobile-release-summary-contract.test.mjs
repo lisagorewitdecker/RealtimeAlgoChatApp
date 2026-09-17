@@ -85,10 +85,38 @@ const androidPreflightScript = "scripts/check-android-release-prerequisites.sh";
 const nativeEvidenceCheckerScript =
   "scripts/check-native-large-text-evidence.sh";
 const untrustedCheckerWrapperScript = "scripts/run-untrusted-checker.sh";
+const nativeRecoveryContractScript =
+  "scripts/native-release-recovery-contract.sh";
 const pinnedUploadArtifactAction =
   "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02";
 const pinnedDownloadArtifactAction =
   "actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093";
+
+const recoveryContractResult = spawnSync(
+  bashPath,
+  [
+    "-c",
+    'source "$1"; native_release_recovery_line ios; native_release_recovery_line android',
+    "native-release-recovery-contract",
+    path.join(workspaceRoot, nativeRecoveryContractScript),
+  ],
+  { cwd: workspaceRoot, encoding: "utf8" },
+);
+assert.equal(
+  recoveryContractResult.status,
+  0,
+  "the native recovery contract must load successfully",
+);
+const nativeRecoveryLines = recoveryContractResult.stdout.trimEnd().split("\n");
+assert.deepEqual(
+  nativeRecoveryLines,
+  [
+    "- Recovery: **Rerun the iOS native large-text job, or make the existing iOS artifact available, then rerun the mobile release gate.**",
+    "- Recovery: **Rerun the Android native large-text job, or make the existing Android artifact available, then rerun the mobile release gate.**",
+  ],
+  "the native recovery contract must keep both fixed, safe recovery lines",
+);
+const [iosRecoveryLine, androidRecoveryLine] = nativeRecoveryLines;
 /**
  * Inventory of every script invoked by the release workflow that writes
  * `GITHUB_STEP_SUMMARY`. The discovery test fails when the workflow gains a
@@ -1102,6 +1130,48 @@ test("hosted native evidence regression proves a transient download recovers", (
     recoveryStep.run,
     /cat\s+.*(?:candidate-build-id|runner-metadata|pass-fail-record|sentry-source-map)/,
     "the hosted recovery scenario must not print downloaded evidence contents",
+  );
+});
+
+test("native recovery validation uses the shared contract", () => {
+  const regressionJob = workflow.jobs["native-evidence-summary-regression"];
+  const failedDownloadStep = regressionJob.steps.find(
+    (step) => step.name === "Verify failed platform artifact download summary",
+  );
+  const bothFailedDownloadStep = regressionJob.steps.find(
+    (step) =>
+      step.name ===
+      "Verify both platform artifact download failures have recovery guidance",
+  );
+
+  assert.ok(
+    failedDownloadStep,
+    "the workflow must keep its single-platform recovery validation",
+  );
+  assert.ok(
+    bothFailedDownloadStep,
+    "the workflow must keep its both-platform recovery validation",
+  );
+
+  assert.match(
+    failedDownloadStep.run,
+    /source scripts\/native-release-recovery-contract\.sh/,
+    "single-platform recovery validation must source the shared contract",
+  );
+  assert.match(
+    failedDownloadStep.run,
+    /\$NATIVE_IOS_RECOVERY_LINE/,
+    "single-platform recovery validation must use the shared iOS line",
+  );
+  assert.match(
+    bothFailedDownloadStep.run,
+    /source scripts\/native-release-recovery-contract\.sh/,
+    "both-platform recovery validation must source the shared contract",
+  );
+  assert.match(
+    bothFailedDownloadStep.run,
+    /\$NATIVE_IOS_RECOVERY_LINE[\s\S]*\$NATIVE_ANDROID_RECOVERY_LINE/,
+    "both-platform recovery validation must use both shared lines",
   );
 });
 
@@ -3865,10 +3935,9 @@ test("empty platform artifact downloads preserve the other platform report", () 
     iosSection,
     /native evidence artifact download did not complete/,
   );
-  assert.match(
-    iosSection,
-    /- Recovery: \*\*Rerun the iOS native large-text job, or make the existing iOS artifact available, then rerun the mobile release gate\.\*\*/,
-    "the empty iOS download result must include a fixed recovery action",
+  assert.ok(
+    iosSection.includes(iosRecoveryLine),
+    "the empty iOS download result must include the shared fixed recovery action",
   );
   assert.match(iosSection, /- Detailed evidence report: \*\*Unavailable\*\*/);
   assert.doesNotMatch(
@@ -3945,17 +4014,15 @@ test("both empty platform artifact downloads include fixed recovery actions", ()
   );
   assert.match(iosSection, /- Status: \*\*FAIL\*\*/);
   assert.match(iosSection, /- Artifact download: \*\*FAIL\*\*/);
-  assert.match(
-    iosSection,
-    /- Recovery: \*\*Rerun the iOS native large-text job, or make the existing iOS artifact available, then rerun the mobile release gate\.\*\*/,
-    "the empty iOS download result must include a fixed recovery action",
+  assert.ok(
+    iosSection.includes(iosRecoveryLine),
+    "the empty iOS download result must include the shared fixed recovery action",
   );
   assert.match(androidSection, /- Status: \*\*FAIL\*\*/);
   assert.match(androidSection, /- Artifact download: \*\*FAIL\*\*/);
-  assert.match(
-    androidSection,
-    /- Recovery: \*\*Rerun the Android native large-text job, or make the existing Android artifact available, then rerun the mobile release gate\.\*\*/,
-    "the empty Android download result must include a fixed recovery action",
+  assert.ok(
+    androidSection.includes(androidRecoveryLine),
+    "the empty Android download result must include the shared fixed recovery action",
   );
   assert.doesNotMatch(
     summary,
@@ -4074,11 +4141,8 @@ test("unsafe download metadata cannot alter fixed platform recovery actions", ()
     .filter((line) => line.startsWith("- Recovery:"));
   assert.deepEqual(
     recoveryLines,
-    [
-      "- Recovery: **Rerun the iOS native large-text job, or make the existing iOS artifact available, then rerun the mobile release gate.**",
-      "- Recovery: **Rerun the Android native large-text job, or make the existing Android artifact available, then rerun the mobile release gate.**",
-    ],
-    "both platform recovery instructions must remain fixed plain text",
+    nativeRecoveryLines,
+    "both platform recovery instructions must come from the shared fixed contract",
   );
   assert.match(
     summary,

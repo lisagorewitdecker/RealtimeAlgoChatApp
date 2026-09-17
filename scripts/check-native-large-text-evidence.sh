@@ -20,6 +20,10 @@ UTC_TIMESTAMP_PATTERN='^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$'
 TEMPLATE_PLACEHOLDER_PATTERN='^<.*>$'
 NATIVE_EVIDENCE_REPORT_NAME="native-branding-check.md"
 
+# The recovery wording is also consumed by the release workflow's contract
+# checks. Keep reviewer-facing guidance identical across both boundaries.
+source "$ROOT_DIR/scripts/native-release-recovery-contract.sh"
+
 if [[ "$REQUIRE_APPROVAL" != "0" && "$REQUIRE_APPROVAL" != "1" ]]; then
   echo "NATIVE_EVIDENCE_REQUIRE_APPROVAL must be 0 or 1." >&2
   exit 2
@@ -838,11 +842,7 @@ write_evidence_summary() {
         echo "- Detailed evidence report: **Unavailable**"
       fi
       if [[ "$download_status" == "FAIL" ]]; then
-        if [[ "$platform" == "ios" ]]; then
-          echo "- Recovery: **Rerun the iOS native large-text job, or make the existing iOS artifact available, then rerun the mobile release gate.**"
-        else
-          echo "- Recovery: **Rerun the Android native large-text job, or make the existing Android artifact available, then rerun the mobile release gate.**"
-        fi
+        native_release_recovery_line "$platform"
       fi
       if [[ -n "${SUMMARY_ISSUES[$platform]}" ]]; then
         echo
