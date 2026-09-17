@@ -93,3 +93,4 @@
 - [GitHub candidate ID migration](github-candidate-id-migration.md) — secret values cannot be read through the API; migrate only from exact installed-device build records.
 - [macOS scripts on bash 3.2](macos-script-bash-compat.md) — Mac-run scripts must avoid bash 4+ constructs; Linux tests cannot catch them, so grep before shipping.
 - [Self-hosted runner provisioning](self-hosted-runner-provisioning.md) — explicit short-circuits around checksum/extract, token via ACTIONS_RUNNER_INPUT_TOKEN, verify .runner identity+labels before svc.sh; test via sourced mode.
+- [Hosted redaction probes](hosted-redaction-probes.md) — Actions echoes env and run scripts; assemble hostile values from encoded literals before capturing checker streams.
