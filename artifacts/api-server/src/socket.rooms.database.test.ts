@@ -29,6 +29,7 @@ import {
   roomBansTable,
   roomsTable,
 } from "@workspace/db";
+import { loadEncryptedMessagesAfter } from "./lib/e2eePersistence.js";
 import { resetSocketRoomStateForTest, setupSocketIO } from "./socket.js";
 
 interface RunningServer {
@@ -40,6 +41,19 @@ interface RunningServer {
 const clients: ClientSocket[] = [];
 const roomIds = new Set<string>();
 let runningServer: RunningServer | null = null;
+
+interface ExplainPlan {
+  [key: string]: unknown;
+  Plans?: ExplainPlan[];
+  "Index Name"?: string;
+}
+
+function collectIndexNames(plan: ExplainPlan): string[] {
+  return [
+    ...(typeof plan["Index Name"] === "string" ? [plan["Index Name"]] : []),
+    ...(plan.Plans ?? []).flatMap(collectIndexNames),
+  ];
+}
 
 function waitForEvent<T>(socket: ClientSocket, event: string): Promise<T> {
   return new Promise((resolve) => socket.once(event, resolve));
@@ -129,6 +143,80 @@ afterAll(async () => {
 });
 
 describe("database-backed Socket.IO message recovery", () => {
+  it("keeps large-room recovery on the active cursor index", async () => {
+    const roomId = `db-recovery-plan-${Date.now()}-${process.pid}`;
+    roomIds.add(roomId);
+    await db.insert(roomsTable).values({
+      id: roomId,
+      name: "Large database recovery",
+      createdBy: "user-ada",
+    });
+
+    const messageCount = 12_000;
+    const idPrefix = `${roomId}-message-`;
+    const stored = Array.from({ length: messageCount }, (_, index) => {
+      const sequence = index + 1;
+      const id = `${idPrefix}${String(sequence).padStart(5, "0")}`;
+      return {
+        id,
+        roomId,
+        userId: "user-ada",
+        username: "Ada",
+        ciphertext: `ciphertext-${sequence}`,
+        nonce: `nonce-${sequence}`,
+        type: "text" as const,
+        // Equal timestamps exercise the timestamp/id part of the keyset cursor.
+        timestampMs: 10_000 + Math.floor(index / 4),
+        deletedAt: sequence % 11 === 0 ? new Date() : null,
+      };
+    });
+    const insertBatchSize = 1_000;
+    for (let start = 0; start < stored.length; start += insertBatchSize) {
+      await db
+        .insert(messagesTable)
+        .values(stored.slice(start, start + insertBatchSize));
+    }
+    await pool.query("ANALYZE messages");
+
+    const cursorSequence = 11_900;
+    const cursor = stored[cursorSequence - 1]!;
+    const explained = await pool.query<{ "QUERY PLAN": Array<{ Plan: ExplainPlan }> }>(
+      `EXPLAIN (FORMAT JSON)
+       SELECT id, ciphertext, nonce, user_id, username, timestamp_ms, type, system_content
+       FROM messages
+       WHERE room_id = $1
+         AND deleted_at IS NULL
+         AND (timestamp_ms > $2 OR (timestamp_ms = $2 AND id > $3))
+       ORDER BY timestamp_ms ASC, id ASC
+       LIMIT 81`,
+      [roomId, cursor.timestampMs, cursor.id],
+    );
+    const plan = explained.rows[0]?.["QUERY PLAN"][0]?.Plan;
+    expect(plan).toBeDefined();
+    expect(collectIndexNames(plan!)).toContain("messages_active_room_cursor_idx");
+
+    const page = await loadEncryptedMessagesAfter(
+      roomId,
+      { id: cursor.id, timestamp: cursor.timestampMs },
+      80,
+    );
+    const expected = stored
+      .filter(
+        (message) =>
+          message.deletedAt === null &&
+          (message.timestampMs > cursor.timestampMs ||
+            (message.timestampMs === cursor.timestampMs && message.id > cursor.id)),
+      )
+      .sort(
+        (left, right) =>
+          left.timestampMs - right.timestampMs || left.id.localeCompare(right.id),
+      )
+      .slice(0, 80)
+      .map((message) => message.id);
+    expect(page.messages.map((message) => message.id)).toEqual(expected);
+    expect(page.messages).toHaveLength(expected.length);
+  });
+
   it("recovers every active message in keyset order after restart and stops after revocation", async () => {
     const roomId = `db-recovery-${Date.now()}-${process.pid}`;
     roomIds.add(roomId);
