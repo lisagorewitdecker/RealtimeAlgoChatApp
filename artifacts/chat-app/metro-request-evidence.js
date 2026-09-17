@@ -1,3 +1,4 @@
+/* jshint esversion: 11 */
 /* jshint esversion: 6 */
 
 const path = require("node:path");
