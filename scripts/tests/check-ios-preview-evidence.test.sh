@@ -4,6 +4,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 CHECKER="$ROOT_DIR/scripts/check-ios-preview-evidence.sh"
+VALIDATOR="$ROOT_DIR/artifacts/chat-app/scripts/validate-preview-startup.mjs"
 TEST_ROOT="$(mktemp -d)"
 trap 'rm -rf "$TEST_ROOT"' EXIT
 
@@ -114,6 +115,15 @@ if truncated_json_output="$(bash "$CHECKER" "$json_contract_record" 2>&1)"; then
 fi
 assert_contains "$truncated_json_output" "does not satisfy the redacted schema"
 assert_not_contains "$truncated_json_output" "$truncated_json_sentinel"
+if truncated_json_direct_output="$(
+  node "$VALIDATOR" --validate-record "$json_contract_path" 2>&1
+)"; then
+  printf 'Truncated iOS preflight JSON unexpectedly passed direct validation.\n' >&2
+  exit 1
+fi
+assert_contains "$truncated_json_direct_output" \
+  "Preview handoff preflight JSON is not valid JSON."
+assert_not_contains "$truncated_json_direct_output" "$truncated_json_sentinel"
 
 non_json_sentinel="ios-preview-non-json-preflight-sentinel"
 cat >"$json_contract_path" <<EOF
@@ -126,6 +136,15 @@ if non_json_output="$(bash "$CHECKER" "$json_contract_record" 2>&1)"; then
 fi
 assert_contains "$non_json_output" "does not satisfy the redacted schema"
 assert_not_contains "$non_json_output" "$non_json_sentinel"
+if non_json_direct_output="$(
+  node "$VALIDATOR" --validate-record "$json_contract_path" 2>&1
+)"; then
+  printf 'Non-JSON iOS preflight content unexpectedly passed direct validation.\n' >&2
+  exit 1
+fi
+assert_contains "$non_json_direct_output" \
+  "Preview handoff preflight JSON is not valid JSON."
+assert_not_contains "$non_json_direct_output" "$non_json_sentinel"
 
 cat >"$json_contract_path" <<'EOF'
 {"schema":"ios-preview-handoff-preflight/v1","platform":"ios","boundaries":{"publicManifestReachability":{"status":"GARBAGE","evidence":"public manifest HTTP 200 (128 bytes)"},"localHandoffProbe":{"status":"NOT_RUN","evidence":"Local manifest/bundle probe not run — no successful probe result was recorded"},"expoGoLaunch":{"status":"NOT_ASSESSED","evidence":"Requires a physical iPhone running stock Expo Go."},"serverNativeRequestEvidence":{"status":"NOT_ASSESSED","evidence":"Requires filtered Metro or API evidence from that physical Expo Go session."}}}

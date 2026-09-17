@@ -4,6 +4,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 CHECKER="$ROOT_DIR/scripts/check-android-preview-evidence.sh"
+VALIDATOR="$ROOT_DIR/artifacts/chat-app/scripts/validate-preview-startup.mjs"
 TEST_ROOT="$(mktemp -d)"
 trap 'rm -rf "$TEST_ROOT"' EXIT
 
@@ -102,6 +103,47 @@ if invalid_json_output="$(bash "$CHECKER" "$json_contract_record" 2>&1)"; then
 fi
 assert_contains "$invalid_json_output" "does not satisfy the redacted schema"
 assert_not_contains "$invalid_json_output" "GARBAGE"
+
+truncated_json_sentinel="android-preview-truncated-preflight-sentinel"
+cat >"$json_contract_path" <<EOF
+{"schema":"android-preview-handoff-preflight/v1","platform":"android","boundaries":{"publicManifestReachability":{"status":"PASS","evidence":"public manifest HTTP 200 (128 bytes)"},"localHandoffProbe":{"status":"NOT_RUN","evidence":"$truncated_json_sentinel"
+EOF
+if truncated_json_output="$(bash "$CHECKER" "$json_contract_record" 2>&1)"; then
+  printf 'Truncated Android preflight JSON unexpectedly passed.\n' >&2
+  exit 1
+fi
+assert_contains "$truncated_json_output" "does not satisfy the redacted schema"
+assert_not_contains "$truncated_json_output" "$truncated_json_sentinel"
+if truncated_json_direct_output="$(
+  node "$VALIDATOR" --validate-record "$json_contract_path" 2>&1
+)"; then
+  printf 'Truncated Android preflight JSON unexpectedly passed direct validation.\n' >&2
+  exit 1
+fi
+assert_contains "$truncated_json_direct_output" \
+  "Preview handoff preflight JSON is not valid JSON."
+assert_not_contains "$truncated_json_direct_output" "$truncated_json_sentinel"
+
+non_json_sentinel="android-preview-non-json-preflight-sentinel"
+cat >"$json_contract_path" <<EOF
+$non_json_sentinel
+This is not a JSON preflight record.
+EOF
+if non_json_output="$(bash "$CHECKER" "$json_contract_record" 2>&1)"; then
+  printf 'Non-JSON Android preflight content unexpectedly passed.\n' >&2
+  exit 1
+fi
+assert_contains "$non_json_output" "does not satisfy the redacted schema"
+assert_not_contains "$non_json_output" "$non_json_sentinel"
+if non_json_direct_output="$(
+  node "$VALIDATOR" --validate-record "$json_contract_path" 2>&1
+)"; then
+  printf 'Non-JSON Android preflight content unexpectedly passed direct validation.\n' >&2
+  exit 1
+fi
+assert_contains "$non_json_direct_output" \
+  "Preview handoff preflight JSON is not valid JSON."
+assert_not_contains "$non_json_direct_output" "$non_json_sentinel"
 
 duplicate_json_sentinel="duplicate-preflight-secret"
 cat >"$json_contract_path" <<EOF
