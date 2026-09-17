@@ -15,9 +15,12 @@ import { join } from "node:path";
 import test from "node:test";
 
 import {
+  classifyDevServerSignIn,
   createHandoffPreflightRecord,
+  formatDevServerSignIn,
   formatHandoffPreflight,
   getPublicPreviewManifestUrl,
+  manifestHasSignedInDeveloper,
   parsePreviewTimeout,
   requestLocalHandoffProbe,
   requestPublicPreviewManifest,
@@ -79,6 +82,10 @@ test("rejects malformed and non-positive preview timeout values", () => {
     }
   }
 });
+
+// Never a real value: the tests only prove it stays out of every message.
+const SESSION_SECRET_SENTINEL = "sentinel-expo-session-secret-value";
+const SIGNED_IN_ACCOUNT = "replit-private-test-account";
 
 function mockFetch(response) {
   const originalFetch = globalThis.fetch;
@@ -280,27 +287,56 @@ test("accepts a public HTTP 200 manifest and sends the iOS Expo header", async (
   );
 
   try {
-    await requestPublicPreviewManifest(1_000, previewEnvironment, "ios");
+    const result = await requestPublicPreviewManifest(
+      1_000,
+      previewEnvironment,
+      "ios",
+    );
 
     assert.equal(fetchMock.request.options.headers["expo-platform"], "ios");
+    assert.equal(result.signedInDeveloper, false);
   } finally {
     fetchMock.restore();
   }
 });
 
-test("local iOS handoff probe requests both manifest and bundle with the iOS header", async () => {
+test("public manifest probe reports a signed-in dev server without echoing the account", async () => {
+  const fetchMock = mockFetch(
+    new Response(
+      JSON.stringify({
+        extra: {
+          scopeKey: "@anonymous/chat-app-00000000-0000-0000-0000-000000000000",
+          expoGo: { username: SIGNED_IN_ACCOUNT },
+        },
+        launchAsset: {
+          url: "https://preview.example.test/_expo/static/js/bundle",
+        },
+      }),
+      { status: 200 },
+    ),
+  );
+
+  try {
+    const result = await requestPublicPreviewManifest(
+      1_000,
+      previewEnvironment,
+      "ios",
+    );
+
+    assert.equal(result.signedInDeveloper, true);
+    assert.doesNotMatch(JSON.stringify(result), new RegExp(SIGNED_IN_ACCOUNT));
+  } finally {
+    fetchMock.restore();
+  }
+});
+
+async function withLocalManifestServer(manifest, run) {
   const observedPlatforms = [];
   const server = createServer((request, response) => {
     observedPlatforms.push(request.headers["expo-platform"]);
     response.setHeader("content-type", "application/json");
     if (request.url === "/") {
-      response.end(
-        JSON.stringify({
-          launchAsset: {
-            url: "https://preview.example.test/_expo/static/js/ios-bundle",
-          },
-        }),
-      );
+      response.end(JSON.stringify(manifest));
       return;
     }
     response.setHeader("content-type", "application/javascript");
@@ -312,14 +348,179 @@ test("local iOS handoff probe requests both manifest and bundle with the iOS hea
   assert.notEqual(typeof address, "string");
 
   try {
-    const result = await requestLocalHandoffProbe(address.port, 1_000, "ios");
-    assert.match(result.manifest, /^manifest HTTP 200/);
-    assert.match(result.bundle, /^bundle HTTP 200/);
-    assert.deepEqual(observedPlatforms, ["ios", "ios"]);
+    return await run(address.port, observedPlatforms);
   } finally {
     await new Promise((resolve, reject) =>
       server.close((error) => (error ? reject(error) : resolve())),
     );
+  }
+}
+
+test("local iOS handoff probe requests both manifest and bundle with the iOS header", async () => {
+  await withLocalManifestServer(
+    {
+      launchAsset: {
+        url: "https://preview.example.test/_expo/static/js/ios-bundle",
+      },
+    },
+    async (port, observedPlatforms) => {
+      const result = await requestLocalHandoffProbe(port, 1_000, "ios");
+      assert.match(result.manifest, /^manifest HTTP 200/);
+      assert.match(result.bundle, /^bundle HTTP 200/);
+      assert.deepEqual(observedPlatforms, ["ios", "ios"]);
+      assert.equal(result.signedInDeveloper, false);
+    },
+  );
+});
+
+test("local handoff probe detects the signed-in account field without echoing it", async () => {
+  await withLocalManifestServer(
+    {
+      extra: { expoGo: { username: SIGNED_IN_ACCOUNT } },
+      launchAsset: {
+        url: "https://preview.example.test/_expo/static/js/ios-bundle",
+      },
+    },
+    async (port) => {
+      const result = await requestLocalHandoffProbe(port, 1_000, "ios");
+      assert.equal(result.signedInDeveloper, true);
+      assert.doesNotMatch(
+        JSON.stringify(result),
+        new RegExp(SIGNED_IN_ACCOUNT),
+      );
+    },
+  );
+});
+
+test("manifest sign-in detection keys on the Expo Go username field only", () => {
+  assert.equal(
+    manifestHasSignedInDeveloper({
+      extra: { expoGo: { username: SIGNED_IN_ACCOUNT } },
+    }),
+    true,
+  );
+  // Expo CLI omits the field for anonymous servers; the scope key stays
+  // anonymous without an EAS project even when the CLI is signed in.
+  assert.equal(
+    manifestHasSignedInDeveloper({
+      extra: {
+        scopeKey: "@anonymous/chat-app-00000000-0000-0000-0000-000000000000",
+        expoGo: { developer: { tool: "expo-cli" } },
+      },
+    }),
+    false,
+  );
+  assert.equal(
+    manifestHasSignedInDeveloper({ extra: { expoGo: { username: "" } } }),
+    false,
+  );
+  assert.equal(
+    manifestHasSignedInDeveloper({
+      extra: { expoGo: { username: "anonymous" } },
+    }),
+    false,
+  );
+  assert.equal(manifestHasSignedInDeveloper(null), false);
+  assert.equal(manifestHasSignedInDeveloper({}), false);
+});
+
+test("dev server sign-in passes when both served manifests carry a signed-in account", () => {
+  for (const environment of [
+    { REPLIT_EXPO_SESSION_SECRET: SESSION_SECRET_SENTINEL },
+    {},
+  ]) {
+    const signIn = classifyDevServerSignIn(
+      { localSignedIn: true, publicSignedIn: true },
+      environment,
+    );
+    assert.equal(signIn.status, "SIGNED_IN");
+    assert.equal(signIn.severity, "pass");
+    assert.equal(
+      formatDevServerSignIn(signIn),
+      "dev_server_sign_in=SIGNED_IN; evidence=public and local Expo Go manifests both carry a signed-in Expo account (extra.expoGo.username present)",
+    );
+  }
+});
+
+test("dev server sign-in fails when the session secret is set but a manifest is anonymous", () => {
+  const environment = { REPLIT_EXPO_SESSION_SECRET: SESSION_SECRET_SENTINEL };
+
+  const localOnly = classifyDevServerSignIn(
+    { localSignedIn: false, publicSignedIn: true },
+    environment,
+  );
+  assert.equal(localOnly.status, "ANONYMOUS");
+  assert.equal(localOnly.severity, "fail");
+  assert.match(
+    localOnly.evidence,
+    /^REPLIT_EXPO_SESSION_SECRET is set but the local Expo Go manifest is anonymous \(no extra\.expoGo\.username\)\./,
+  );
+  assert.match(localOnly.evidence, /create-launch login step is missing or failed/);
+  assert.match(localOnly.evidence, /"Logged in as"/);
+  assert.match(localOnly.evidence, /restart the managed Chat App\/Expo workflow/);
+
+  const publicOnly = classifyDevServerSignIn(
+    { localSignedIn: true, publicSignedIn: false },
+    environment,
+  );
+  assert.equal(publicOnly.severity, "fail");
+  assert.match(publicOnly.evidence, /the public Expo Go manifest is anonymous/);
+
+  const both = classifyDevServerSignIn(
+    { localSignedIn: false, publicSignedIn: false },
+    environment,
+  );
+  assert.equal(both.severity, "fail");
+  assert.match(
+    both.evidence,
+    /the public and local Expo Go manifest is anonymous/,
+  );
+
+  // A probe that never reported sign-in state must not pass the gate.
+  const missing = classifyDevServerSignIn({}, environment);
+  assert.equal(missing.severity, "fail");
+  assert.match(
+    missing.evidence,
+    /the public and local Expo Go manifest is anonymous/,
+  );
+
+  for (const signIn of [localOnly, publicOnly, both, missing]) {
+    const line = formatDevServerSignIn(signIn);
+    assert.match(line, /^dev_server_sign_in=ANONYMOUS; evidence=/);
+    assert.doesNotMatch(line, new RegExp(SESSION_SECRET_SENTINEL));
+  }
+});
+
+test("dev server sign-in only warns when no session secret is configured", () => {
+  for (const environment of [{}, { REPLIT_EXPO_SESSION_SECRET: "" }]) {
+    const signIn = classifyDevServerSignIn(
+      { localSignedIn: false, publicSignedIn: false },
+      environment,
+    );
+    assert.equal(signIn.status, "ANONYMOUS");
+    assert.equal(signIn.severity, "warn");
+    assert.match(
+      signIn.evidence,
+      /^REPLIT_EXPO_SESSION_SECRET is unset, so the public and local Expo Go manifest is anonymous/,
+    );
+    assert.match(signIn.evidence, /iOS Expo Go 57 cannot load the app/);
+  }
+});
+
+test("dev server sign-in output never contains the session secret", () => {
+  const environment = { REPLIT_EXPO_SESSION_SECRET: SESSION_SECRET_SENTINEL };
+  const combinations = [
+    { localSignedIn: true, publicSignedIn: true },
+    { localSignedIn: false, publicSignedIn: true },
+    { localSignedIn: true, publicSignedIn: false },
+    { localSignedIn: false, publicSignedIn: false },
+  ];
+
+  for (const combination of combinations) {
+    const signIn = classifyDevServerSignIn(combination, environment);
+    const serialized = `${formatDevServerSignIn(signIn)} ${JSON.stringify(signIn)}`;
+    assert.doesNotMatch(serialized, new RegExp(SESSION_SECRET_SENTINEL));
+    assert.doesNotMatch(serialized, /sessionSecret/);
   }
 });
 

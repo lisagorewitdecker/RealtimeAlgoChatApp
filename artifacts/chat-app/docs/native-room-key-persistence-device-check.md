@@ -44,6 +44,12 @@ published build is not a substitute.
    `public_manifest_reachability=PASS`. A non-200 public manifest response is a
    public-edge failure: repair or restart the managed workflow and rerun the
    preflight. It is not a `BLOCKED` result for missing iPhone evidence.
+   The output must also end with `dev_server_sign_in=SIGNED_IN`: Expo Go 57 on
+   iOS only loads a project whose dev server is signed into the repl's Expo
+   account, which the Chat App `dev` script does from the managed session
+   (see the Expo Go gotcha in `replit.md`). `dev_server_sign_in=ANONYMOUS`
+   with the session secret present fails the preflight and means the sign-in
+   step is missing or failed; that is a workspace problem, not iPhone evidence.
 4. The operator opens the fresh preview in stock Expo Go, waits for the Chat App
    landing screen, and captures a redacted screenshot. Treat the phone launch
    as observed only when both the iPhone screen and filtered server-side native
@@ -78,7 +84,24 @@ published build is not a substitute.
 5. If Expo Go cannot launch, record the exact iPhone error and a redacted
    screenshot. A workspace `curl`, a browser tab, or a Metro startup line
    proves public reachability or workflow readiness only; the preview preflight
-   is also not proof of an Expo Go session launch.
+   is also not proof of an Expo Go session launch. Do not use
+   `artifacts/chat-app/.expo/devices.json` as launch evidence either: Expo Go
+   57 on iOS sends no `expo-dev-client-id` header, so it stays empty even
+   after the bundle was downloaded. The redacted Metro request log above is
+   the server-side marker; `DEBUG=Metro:InspectorProxy` in the development
+   environment additionally shows the Expo Go device connection and its close
+   code in the workflow log (see the Expo Go gotcha in `replit.md`).
+
+   Replit iPhone simulator, 2026-09-17 (SDK 57, Expo Go 57.0.5, dev server
+   signed in, `dev_server_sign_in=SIGNED_IN`): the public manifest was
+   accepted, Expo Go connected the inspector (`app=host.exp.Exponent`) and
+   downloaded the iOS bundle (HTTP 200, ~16 MB), then the inspector connection
+   closed with code 1006 about 4 s later with no `iOS LOG`, asset, lazy-bundle,
+   or API request, and the simulator showed the iOS home screen. Result:
+   `Expo Go launch` = FAIL (app quits during startup in Expo Go 57 iOS —
+   tracked as a follow-up task), `Server-side native request evidence` = PASS
+   (`platform=ios` bundle request with an Expo Go client, user agent redacted).
+   Physical iPhone and Android rows were not assessed in that session.
 6. Save `validation-record.md` under
    `test-results/encrypted-room-recovery/ios/<UTC timestamp>/`. Keep all four
    rows below even when one is `FAIL`, `BLOCKED`, or `NOT_ASSESSED`. A public

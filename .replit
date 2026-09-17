@@ -64,12 +64,12 @@ args = "playwright-clean-runtime"
 name = "chat-app-preview-startup"
 author = "agent"
 
-[[workflows.workflow.tasks]]
-task = "shell.exec"
-args = "pnpm --filter @workspace/chat-app run validate:preview-startup"
-
 [workflows.workflow.metadata]
 isValidation = true
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "flock -w 900 /tmp/replit-heavy-validation.lock pnpm --filter @workspace/chat-app run validate:preview-startup"
 
 [[workflows.workflow]]
 name = "typecheck"

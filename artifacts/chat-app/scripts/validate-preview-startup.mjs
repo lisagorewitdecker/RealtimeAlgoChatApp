@@ -66,6 +66,10 @@ const HANDOFF_EVIDENCE_PATTERNS = Object.freeze({
       /^Requires filtered Metro or API evidence from that physical Expo Go session\.$/,
   },
 });
+const DEV_SERVER_SIGN_IN_STATUSES = Object.freeze({
+  signedIn: "SIGNED_IN",
+  anonymous: "ANONYMOUS",
+});
 const READY_MARKERS = [/Starting Metro Bundler/i, /› Metro:/i];
 const STARTUP_FAILURES = [
   /error while loading shared libraries:/i,
@@ -464,6 +468,80 @@ function publicPreviewRecoveryMessage() {
   );
 }
 
+/**
+ * Expo CLI advertises the account its dev server is signed into through
+ * `extra.expoGo.username`; Expo Go 57 on iOS compares that account with its
+ * own before loading the project. An anonymous manifest omits the field.
+ * Only the presence of the field is inspected so no account identifier or
+ * session value ever reaches validation output.
+ */
+export function manifestHasSignedInDeveloper(manifest) {
+  const username = manifest?.extra?.expoGo?.username;
+  return (
+    typeof username === "string" &&
+    username.length > 0 &&
+    username !== "anonymous"
+  );
+}
+
+function hasExpoSessionSecret(environment) {
+  const secret = environment.REPLIT_EXPO_SESSION_SECRET;
+  return typeof secret === "string" && secret.length > 0;
+}
+
+function describeManifestSources(sources) {
+  return sources.length === 2 ? `${sources[0]} and ${sources[1]}` : sources[0];
+}
+
+export function classifyDevServerSignIn(
+  { localSignedIn, publicSignedIn },
+  environment = process.env,
+) {
+  // Anything short of an explicit `true` counts as anonymous so a missing
+  // probe result can never make this gate pass by accident.
+  const anonymousSources = [];
+  if (publicSignedIn !== true) anonymousSources.push("public");
+  if (localSignedIn !== true) anonymousSources.push("local");
+  const secretConfigured = hasExpoSessionSecret(environment);
+
+  if (anonymousSources.length === 0) {
+    return {
+      status: DEV_SERVER_SIGN_IN_STATUSES.signedIn,
+      severity: "pass",
+      evidence:
+        "public and local Expo Go manifests both carry a signed-in Expo account (extra.expoGo.username present)",
+    };
+  }
+
+  const anonymousDescription = describeManifestSources(anonymousSources);
+  if (secretConfigured) {
+    return {
+      status: DEV_SERVER_SIGN_IN_STATUSES.anonymous,
+      severity: "fail",
+      evidence:
+        `REPLIT_EXPO_SESSION_SECRET is set but the ${anonymousDescription} Expo Go ` +
+        "manifest is anonymous (no extra.expoGo.username). iOS Expo Go 57 only " +
+        "loads the app from a dev server signed into the same Expo account, so " +
+        "the dev script's create-launch login step is missing or failed. Check " +
+        'the Chat App workflow log for the "Logged in as" line, then restart ' +
+        "the managed Chat App/Expo workflow.",
+    };
+  }
+
+  return {
+    status: DEV_SERVER_SIGN_IN_STATUSES.anonymous,
+    severity: "warn",
+    evidence:
+      `REPLIT_EXPO_SESSION_SECRET is unset, so the ${anonymousDescription} Expo Go ` +
+      "manifest is anonymous (no extra.expoGo.username). iOS Expo Go 57 cannot " +
+      "load the app until the workspace supplies the managed Expo session.",
+  };
+}
+
+export function formatDevServerSignIn(signIn) {
+  return `dev_server_sign_in=${signIn.status}; evidence=${signIn.evidence}`;
+}
+
 export function getPublicPreviewManifestUrl(environment = process.env) {
   const configuredSetting =
     environment.PREVIEW_PUBLIC_URL != null
@@ -557,6 +635,7 @@ export async function requestPublicPreviewManifest(
     );
   }
 
+  let signedInDeveloper;
   try {
     const manifest = JSON.parse(body);
     if (
@@ -567,6 +646,7 @@ export async function requestPublicPreviewManifest(
     ) {
       throw new Error("manifest did not provide a launch asset URL");
     }
+    signedInDeveloper = manifestHasSignedInDeveloper(manifest);
   } catch (error) {
     const detail =
       error instanceof Error ? error.message : "manifest returned invalid JSON";
@@ -576,7 +656,7 @@ export async function requestPublicPreviewManifest(
     );
   }
 
-  return { outcome };
+  return { outcome, signedInDeveloper };
 }
 
 function localBundleUrl(port, launchAssetUrl) {
@@ -715,6 +795,7 @@ export async function requestLocalHandoffProbe(
       return {
         ...outcome,
         launchAssetPath: new URL(launchAssetUrl).pathname,
+        signedInDeveloper: manifestHasSignedInDeveloper(manifest),
       };
     } catch (error) {
       lastError = new Error(
@@ -1016,12 +1097,35 @@ async function validateLivePreview(
             localHandoff,
           });
           if (recordOutput) await writeHandoffPreflight(recordOutput, record);
+          // The reachability record above is complete regardless of sign-in
+          // state; the sign-in check is a separate gate for iOS Expo Go 57.
+          const signIn = classifyDevServerSignIn(
+            {
+              localSignedIn: localHandoff.signedInDeveloper,
+              publicSignedIn: publicManifest.signedInDeveloper,
+            },
+            process.env,
+          );
           finish(() => {
             stopChild();
             console.log(
               `Expo preview reached Metro running status on port ${port}.`,
             );
             console.log(formatHandoffPreflight(record));
+            if (signIn.severity === "pass") {
+              console.log(formatDevServerSignIn(signIn));
+              resolveResult();
+              return;
+            }
+            console.warn(formatDevServerSignIn(signIn));
+            if (signIn.severity === "fail") {
+              rejectResult(
+                new Error(
+                  `Expo dev server sign-in check failed: ${signIn.evidence}`,
+                ),
+              );
+              return;
+            }
             resolveResult();
           });
         } catch (error) {

@@ -198,3 +198,99 @@ test("development entrypoint preserves an explicit Expo key and falls back to th
     /EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY=.*EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY.*VITE_CLERK_PUBLISHABLE_KEY/,
   );
 });
+
+// Expo Go 57 on iOS only loads a project from a dev server signed into the
+// repl's Expo account, so the dev script signs Expo CLI in before Metro starts.
+function devScriptSignInGuard() {
+  const devScript = packageJson.scripts.dev;
+  assert.match(devScript, /^sh -c '/, "dev script must start with the guard");
+  // The guard is a single-quoted `sh -c` body; the first `' && ` closes it.
+  const separator = devScript.indexOf("' && ");
+  assert.notEqual(separator, -1, "dev script must chain the sign-in guard");
+  return {
+    guard: devScript.slice(0, separator + 1),
+    start: devScript.slice(separator + "' && ".length),
+  };
+}
+
+function runDevScriptSignInGuard(environmentOverrides) {
+  const { guard } = devScriptSignInGuard();
+  const environment = { ...process.env, ...environmentOverrides };
+  for (const [key, value] of Object.entries(environmentOverrides)) {
+    if (value === undefined) delete environment[key];
+  }
+  return spawnSync("sh", ["-c", `${guard} && echo METRO_WOULD_START`], {
+    cwd: path.join(__dirname, ".."),
+    env: environment,
+    encoding: "utf8",
+    timeout: 60_000,
+  });
+}
+
+test("development entrypoint signs Expo CLI in from the managed session before starting Metro", () => {
+  const { guard, start } = devScriptSignInGuard();
+  assert.match(
+    guard,
+    /create-launch login --session "\$REPLIT_EXPO_SESSION_SECRET" \|\| true/,
+  );
+  assert.match(guard, /if \[ -n "\$REPLIT_EXPO_SESSION_SECRET" \]/);
+  // create-launch writes ~/.expo/state.json atomically but never creates the
+  // directory, so a fresh container must get it before the login runs.
+  assert.match(
+    guard,
+    /mkdir -p "\$\{__UNSAFE_EXPO_HOME_DIRECTORY:-\$HOME\/\.expo\}" && pnpm exec create-launch login/,
+  );
+  assert.match(start, /pnpm exec expo start --localhost --port \$PORT$/);
+  assert.equal(
+    packageJson.devDependencies["create-launch"],
+    "0.3.6",
+    "create-launch must stay pinned to the exact version the Expo skill prescribes",
+  );
+});
+
+test("development sign-in guard skips silently without a session and never blocks startup", () => {
+  const skipped = runDevScriptSignInGuard({
+    REPLIT_EXPO_SESSION_SECRET: undefined,
+    EXPO_TOKEN: undefined,
+  });
+  assert.equal(skipped.status, 0, skipped.stderr);
+  assert.equal(skipped.stdout.trim(), "METRO_WOULD_START");
+  assert.equal(skipped.stderr, "");
+
+  const sentinel = "sentinel-invalid-expo-session";
+  // Keep the rejected sentinel away from the real Expo CLI state file, and
+  // start from a home directory that does not exist yet, like a fresh
+  // container before Metro has created ~/.expo.
+  const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "expo-home-"));
+  const freshExpoHome = path.join(scratch, "fresh-home", ".expo");
+  try {
+    const failedLogin = runDevScriptSignInGuard({
+      REPLIT_EXPO_SESSION_SECRET: sentinel,
+      EXPO_TOKEN: undefined,
+      __UNSAFE_EXPO_HOME_DIRECTORY: freshExpoHome,
+    });
+    assert.equal(failedLogin.status, 0, failedLogin.stderr);
+    assert.match(failedLogin.stdout, /METRO_WOULD_START/);
+    assert.doesNotMatch(
+      `${failedLogin.stdout}${failedLogin.stderr}`,
+      new RegExp(sentinel),
+    );
+    assert.doesNotMatch(
+      failedLogin.stderr,
+      /ENOENT/,
+      "the guard must create the Expo home directory before logging in",
+    );
+    assert.equal(
+      fs.existsSync(freshExpoHome),
+      true,
+      "the guard must create the Expo home directory before logging in",
+    );
+    assert.equal(
+      fs.existsSync(path.join(freshExpoHome, "state.json")),
+      false,
+      "a rejected session must not be persisted",
+    );
+  } finally {
+    fs.rmSync(scratch, { recursive: true, force: true });
+  }
+});

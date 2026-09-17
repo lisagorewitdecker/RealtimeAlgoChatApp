@@ -43,7 +43,8 @@
 - [Native evidence review record](native-evidence-review-record.md) — a missing human review is reported, not fatal (the CI gate runs before anyone can review); rejected or mismatched records fail.
 - [Native evidence diagnostic privacy](native-evidence-diagnostic-privacy.md) — release failures name fields and artifact paths without echoing parsed fixture values or parser snippets.
 - [Candidate-bound release evidence](candidate-bound-release-evidence.md) — checks for prebuilt mobile candidates must verify evidence inside each binary, not current release-time secrets.
-- [Expo Go native modules & preview 502s](expo-go-native-modules.md) — gate native SDK init outside Expo Go; orphan `expo start` blocks the port prompt; Go home screen = dropped launch.
+- [Expo Go native modules & preview 502s](expo-go-native-modules.md) — gate native SDK init outside Expo Go; orphan `expo start` blocks the port prompt; iOS Expo Go 57 needs the dev server signed in (`extra.expoGo.username`, not scopeKey); `mkdir -p ~/.expo` before `create-launch login` or fresh boots stay anonymous.
+- [iPhone simulator startup crash evidence](expo-go-native-modules.md) — `devices.json` stays empty for Expo Go 57 iOS; prove reach with the request log + `DEBUG=Metro:InspectorProxy`; bundle 200 then close 1006 = app crash, not sign-in.
 - [Expo Go secure-store keys](expo-go-native-modules.md) — expo-secure-store rejects `:` in key names on phones only; encode keys and keep the Jest mock enforcing the real pattern.
 - [Physical-device evidence tasks](physical-device-evidence.md) — no phones are reachable here; probe once, file a BLOCKED record per the docs procedure, then ask the user for device access.
 - [Release-run preconditions live on GitHub](physical-device-evidence.md) — audit environments/secrets/vars/runners/runs by name via the GitHub connection before planning a release run.
