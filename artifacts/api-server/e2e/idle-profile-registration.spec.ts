@@ -1,7 +1,4 @@
-import { createClerkClient } from "@clerk/backend";
-import { setupClerkTestingToken } from "@clerk/testing/playwright";
 import { expect, test, type BrowserContext } from "@playwright/test";
-import { db, pool, userProfilesTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import {
   throwTestAndCleanupFailures,
@@ -58,6 +55,10 @@ test("an idle signed-in client registers its public key only once across token r
     );
     return;
   }
+
+  const { createClerkClient } = await import("@clerk/backend");
+  const { setupClerkTestingToken } = await import("@clerk/testing/playwright");
+  const { db, pool, userProfilesTable } = await import("@workspace/db");
 
   const suffix = crypto.randomUUID().replaceAll("-", "").slice(0, 16);
   const email = `idle-profile-${suffix}+clerk_test@example.com`;
