@@ -1343,8 +1343,9 @@ jobs:
 
       - name: Run idle-profile registration release check
         id: idle-profile-check
-        if: ${{ steps.idle-profile-config.outputs.release_check_configured == 'true' }}
+        if: ${{ always() }}
         env:
+          TASK_264_CONTROLLED_FAILURE: "true"
           E2E_CHAT_URL: ${{ secrets.E2E_CHAT_URL }}
           E2E_API_URL: ${{ secrets.E2E_API_URL }}
           CLERK_PUBLISHABLE_KEY: ${{ secrets.CLERK_PUBLISHABLE_KEY }}
