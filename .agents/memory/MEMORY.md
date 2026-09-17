@@ -26,7 +26,7 @@
 - [Cryptocurrency boundary](cryptocurrency-boundary.md) — do not add cryptocurrency payments or wallet features; preserve cryptographic E2EE separately.
 - [Validation workflow concurrency](validation-workflow-concurrency.md) — completion validation launches every check at once; heavy commands stay behind the shared flock prefix.
 - [Artifact cold-start readiness](artifact-startup-after-pnpm-pruning.md) — open the port before async asset preloading; bypassing the package manager alone is insufficient.
-- [Mobile release browser validation](mobile-release-browser-validation.md) — proxied E2E flows need a fresh Expo/API pair; the API dev server is a one-shot build, so restart it after any rebase.
+- [Mobile release browser validation](mobile-release-browser-validation.md) — proxied E2E flows need a healthy, freshly served Expo/API pair; restart the one-shot API dev server after any rebase.
 - [Node preload worker inheritance](node-preload-worker-inheritance.md) — `--import` preloads also run in worker threads; guard process-wide initialization to the main thread.
 - [Node preload paths](node-preload-paths.md) — hosted monorepo artifact commands run from the workspace root; make entrypoint and `--import` paths root-relative.
 - [React Native async act](react-native-async-act.md) — flush provider effects with a separate async act after render; nesting render in async act can unmount RNTL trees.
@@ -74,7 +74,6 @@
 - [Chat App source-rule checks](chat-app-source-rule-checks.md) — conventions hidden by mocked dependencies need fast AST-based source rules with explicit diagnostics.
 - [Web E2EE key persistence](web-key-persistence.md) — web keys stay in localStorage by owner decision (accepted scan risk); jest-expo has no localStorage, so stub it in tests.
 - [.replit merge regressions](replit-config-merge-regressions.md) — task merges can drop validation workflows and the post-merge timeout; an untracked `.replit` stub in a task env gets committed.
-- [Generated-check test controls](generated-check-fault-controls.md) — test-only environment faults and fixture paths require explicit, separate subprocess opt-ins.
 - [Worktree-local state vs shared Git config](shared-git-config-worktree-records.md) — worktrees share local git config; shared single-valued records let siblings impersonate each other.
 - [GitHub probe write permissions](github-probe-write-permissions.md) — verify commit/tree access before planning a live CI probe; ref creation alone is not enough.
 - [GitHub connection workflow scope](github-connection-workflow-scope.md) — cannot touch workflow files or logs; pushes need a valid Git Providers grant or owner PAT; check redactions first.
@@ -94,3 +93,8 @@
 - [macOS scripts on bash 3.2](macos-script-bash-compat.md) — Mac-run scripts must avoid bash 4+ constructs; Linux tests cannot catch them, so grep before shipping.
 - [Self-hosted runner provisioning](self-hosted-runner-provisioning.md) — explicit short-circuits around checksum/extract, token via ACTIONS_RUNNER_INPUT_TOKEN, verify .runner identity+labels before svc.sh; test via sourced mode.
 - [Hosted redaction probes](hosted-redaction-probes.md) — Actions echoes env and run scripts; assemble hostile values from encoded literals before capturing checker streams.
+- [GitHub release browser evidence](github-release-browser-evidence.md) — missing release-environment targets make idle-profile evidence skip before Playwright runs.
+- [Volatile tracked test results](volatile-tracked-test-results.md) — a committed Playwright run marker under artifacts/api-server can change during unrelated work; restore it before completing.
+- [Expo Go native modules & preview 502s](expo-go-native-modules.md) — gate native SDK init outside Expo Go; orphan `expo start` blocks the port prompt; Go home screen = dropped launch.
+- [Task merges land on the checked-out branch](branch-divergence-from-task-merges.md) — reunify development/production with a no-ff merge then fast-forward; never use stale `origin/*` refs.
+- [Generated-check fault controls](generated-check-fault-controls.md) — test-only faults and fixture paths require explicit subprocess opt-ins; harnesses strip inherited env and prove inertness.
