@@ -56,7 +56,7 @@ export default function ChatsScreen() {
         const data = await res.json();
         setRooms(data.rooms ?? []);
       }
-    } catch (_) {
+    } catch {
       // Keep the last successful room list visible when a refresh fails.
     } finally {
       setLoading(false);
