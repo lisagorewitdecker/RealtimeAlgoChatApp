@@ -11,8 +11,16 @@ import {
   getPublicKeyRecord,
   registerPublicKey,
 } from "../lib/e2eePersistence";
+import { createIpRateLimit } from "../middlewares/rateLimit";
 
 const router = Router();
+const profileRateLimit = createIpRateLimit({
+  scope: "profile-routes",
+  windowMs: 60_000,
+  maxRequests: 120,
+});
+
+router.use(profileRateLimit);
 
 function isValidPublicKey(value: unknown): value is string {
   if (
