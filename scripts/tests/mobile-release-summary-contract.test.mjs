@@ -23,9 +23,9 @@
  *      changing the other platform's fixed report link.
  *   6. A failed platform artifact download keeps the release blocked without
  *      hiding the other platform's report link.
- *   7. Multiple changed Android preview records are validated independently;
- *      one failure does not hide the valid record or expose either record's
- *      evidence text.
+ *   7. Mixed record-only, sidecar-only, and paired Android preview changes are
+ *      validated independently; one failure does not hide valid records or
+ *      expose any record's evidence text.
  *   8. Malformed, schema-invalid, and duplicate Android preflight artifacts
  *      fail with the fixed redacted-schema message without exposing their
  *      markers or raw artifact content.
@@ -1699,6 +1699,15 @@ test("Android preview evidence keeps its pull-request validation and privacy con
         `artifacts/chat-app/test-results/encrypted-room-recovery/android/${timestamp}/android-preview-preflight.json`,
       ),
     );
+    const recordModes = recordDefinitions.map((definition) => {
+      if (definition.mode !== undefined) {
+        return definition.mode;
+      }
+      if (sidecarOnly) {
+        return "sidecar-only";
+      }
+      return definition.preflight === undefined ? "record-only" : "paired";
+    });
     const recordPath = recordPaths[0];
     const preflightPath = preflightPaths[0];
     const summaryPath = path.join(fixtureRoot, "summary.md");
@@ -1716,18 +1725,13 @@ test("Android preview evidence keeps its pull-request validation and privacy con
       mkdirSync(path.dirname(validatorPath), { recursive: true });
       writeFileSync(validatorPath, "// contract fixture\n");
     }
-    if (sidecarOnly) {
-      writeFileSync(recordPath, recordDefinitions[0].text);
-      writeFileSync(preflightPath, blockedPreflight);
-    } else {
-      for (const [
-        index,
-        { text, baseText, preflight },
-      ] of recordDefinitions.entries()) {
-        if (preflight !== undefined) {
-          writeFileSync(recordPaths[index], baseText ?? text);
-          writeFileSync(preflightPaths[index], blockedPreflight);
-        }
+    for (const [index, { text, baseText }] of recordDefinitions.entries()) {
+      if (
+        recordModes[index] === "sidecar-only" ||
+        recordModes[index] === "paired"
+      ) {
+        writeFileSync(recordPaths[index], baseText ?? text);
+        writeFileSync(preflightPaths[index], blockedPreflight);
       }
     }
 
@@ -1749,16 +1753,12 @@ test("Android preview evidence keeps its pull-request validation and privacy con
     git([
       "add",
       "README.md",
-      ...(sidecarOnly
-        ? [recordPath, preflightPath]
-        : [
-            ...recordDefinitions.flatMap(({ preflight }, index) =>
-              preflight === undefined ? [] : [recordPaths[index]],
-            ),
-            ...recordDefinitions.flatMap(({ preflight }, index) =>
-              preflight === undefined ? [] : [preflightPaths[index]],
-            ),
-          ]),
+      ...recordDefinitions.flatMap((_, index) =>
+        recordModes[index] === "sidecar-only" ||
+        recordModes[index] === "paired"
+          ? [recordPaths[index], preflightPaths[index]]
+          : [],
+      ),
       ...(!missingValidator ? [validatorPath] : []),
     ]);
     git(["commit", "--quiet", "-m", "base"]);
@@ -1766,24 +1766,29 @@ test("Android preview evidence keeps its pull-request validation and privacy con
       cwd: fixtureRoot,
       encoding: "utf8",
     }).stdout.trim();
-    if (sidecarOnly) {
-      writeFileSync(preflightPath, changedPreflight);
-      git(["add", preflightPath]);
-    } else {
-      for (const [index, { text, preflight }] of recordDefinitions.entries()) {
+    const changedPaths = [];
+    for (const [index, { text, preflight }] of recordDefinitions.entries()) {
+      if (
+        recordModes[index] === "record-only" ||
+        recordModes[index] === "paired"
+      ) {
         writeFileSync(recordPaths[index], text);
-        if (preflight !== undefined) {
-          writeFileSync(preflightPaths[index], preflight);
-        }
+        changedPaths.push(recordPaths[index]);
       }
-      git([
-        "add",
-        ...recordPaths,
-        ...recordDefinitions.flatMap(({ preflight }, index) =>
-          preflight === undefined ? [] : [preflightPaths[index]],
-        ),
-      ]);
+      if (
+        recordModes[index] === "sidecar-only" ||
+        recordModes[index] === "paired"
+      ) {
+        writeFileSync(
+          preflightPaths[index],
+          recordModes[index] === "sidecar-only"
+            ? changedPreflight
+            : preflight,
+        );
+        changedPaths.push(preflightPaths[index]);
+      }
     }
+    git(["add", ...changedPaths]);
     git(["commit", "--quiet", "-m", "android preview record"]);
     const headSha = spawnSync(gitPath, ["rev-parse", "HEAD"], {
       cwd: fixtureRoot,
@@ -1980,6 +1985,112 @@ test("Android preview evidence keeps its pull-request validation and privacy con
     multiRecord.summary,
     /PRIVATE_MULTI_RECORD_EVIDENCE|Workspace curl returned HTTP 200|No physical phone was available/,
     "a multi-record summary must not expose evidence text from either record",
+  );
+
+  const changedSidecarOnlyPreflight = `${blockedPreflight}\n`;
+  const mixedModes = runAndroidPreviewJob(
+    "mixed-modes",
+    [
+      {
+        timestamp: "20260915T120000Z",
+        mode: "record-only",
+        text: blockedRecord,
+      },
+      {
+        timestamp: "20260915T121500Z",
+        mode: "sidecar-only",
+        text: blockedRecord,
+      },
+      {
+        timestamp: "20260915T123000Z",
+        mode: "paired",
+        baseText: blockedRecord,
+        text: blockedRecord.replace(
+          "Workspace curl returned HTTP 200.",
+          "PRIVATE_MIXED_MODES_EVIDENCE Workspace curl returned HTTP 200.",
+        ),
+        preflight: mismatchedPreflight,
+      },
+    ],
+    {
+      changedPreflight: changedSidecarOnlyPreflight,
+    },
+  );
+  assert.notEqual(
+    mixedModes.result.status,
+    0,
+    "a failing paired Android preview change must fail the mixed validation job",
+  );
+  assert.match(
+    mixedModes.summary,
+    /- Changed records checked: \*\*3\*\*/,
+    "the mixed summary must count record-only, sidecar-only, and paired changes",
+  );
+  assert.deepEqual(
+    mixedModes.checkerArgs,
+    [
+      [mixedModes.recordPaths[0], ""],
+      [mixedModes.recordPaths[1], mixedModes.preflightPaths[1]],
+      [mixedModes.recordPaths[2], mixedModes.preflightPaths[2]],
+    ],
+    "each mixed Android change must validate with only its own optional sidecar",
+  );
+  for (const recordPath of mixedModes.recordPaths) {
+    const escapedPath = recordPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const recordLinkPattern = new RegExp(
+      `\\[${escapedPath}\\]\\(https://github\\.example/example/chat-app/blob/[^)]+/${escapedPath}\\)`,
+      "g",
+    );
+    const recordSectionPattern = new RegExp(
+      `### \\[${escapedPath}\\]\\(https://github\\.example/example/chat-app/blob/[^)]+/${escapedPath}\\)[\\s\\S]*?(?=\\n### |$)`,
+      "g",
+    );
+    assert.equal(
+      mixedModes.summary.match(recordLinkPattern)?.length ?? 0,
+      1,
+      `the mixed summary must include exactly one stable link for ${recordPath}`,
+    );
+    assert.equal(
+      mixedModes.summary.match(recordSectionPattern)?.length ?? 0,
+      1,
+      `the mixed summary must include exactly one validation section for ${recordPath}`,
+    );
+  }
+  assert.equal(
+    mixedModes.summary.match(/- Validation: \*\*PASS\*\*/g)?.length ?? 0,
+    2,
+    "valid record-only and sidecar-only changes must remain visible after the paired failure",
+  );
+  assert.equal(
+    mixedModes.summary.match(/- Validation: \*\*FAIL\*\*/g)?.length ?? 0,
+    1,
+    "the mixed summary must mark only the failing paired change as failed",
+  );
+  assert.match(
+    mixedModes.summary,
+    new RegExp(
+      `### \\[${mixedModes.recordPaths[0].replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\][\\s\\S]*- Record result: \\*\\*BLOCKED \\(valid\\)\\*\\*`,
+    ),
+    "the record-only change must remain represented as valid",
+  );
+  assert.match(
+    mixedModes.summary,
+    new RegExp(
+      `### \\[${mixedModes.recordPaths[1].replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\][\\s\\S]*- Record result: \\*\\*BLOCKED \\(valid\\)\\*\\*`,
+    ),
+    "the sidecar-only change must remain represented as valid",
+  );
+  assert.match(
+    mixedModes.summary,
+    new RegExp(
+      `### \\[${mixedModes.recordPaths[2].replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\][\\s\\S]*Missing-boundary reason[\\s\\S]*preflight JSON public manifest boundary does not match the Markdown record\\.`,
+    ),
+    "the paired change must contribute its sanitized failure reason",
+  );
+  assert.doesNotMatch(
+    mixedModes.summary,
+    /PRIVATE_MIXED_MODES_EVIDENCE|Workspace curl returned HTTP 200|No physical phone was available/,
+    "the mixed summary must not expose evidence text from any change mode",
   );
 
   const duplicatePreflight = blockedPreflight.replace(
