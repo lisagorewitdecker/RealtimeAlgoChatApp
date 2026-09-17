@@ -1290,6 +1290,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Verify idle-profile browser targets
+        id: idle-profile-preflight
         if: ${{ secrets.E2E_CHAT_URL != '' && secrets.E2E_API_URL != '' }}
         env:
           E2E_CHAT_URL: ${{ secrets.E2E_CHAT_URL }}
@@ -1363,6 +1364,7 @@ jobs:
       - name: Summarize idle-profile registration check
         if: ${{ always() }}
         env:
+          IDLE_PROFILE_PREFLIGHT_RESULT: ${{ steps.idle-profile-preflight.outcome }}
           IDLE_PROFILE_RESULT: ${{ steps.idle-profile-check.outcome }}
         run: |
           set -euo pipefail
@@ -1372,6 +1374,9 @@ jobs:
             if [[ "$IDLE_PROFILE_RESULT" == "success" ]]; then
               echo "- Status: **PASS**"
               echo "- Result: the idle client did not repeat \`PUT /api/profile\` after token refresh."
+            elif [[ "$IDLE_PROFILE_PREFLIGHT_RESULT" != "success" ]]; then
+              echo "- Status: **FAIL**"
+              echo "- Result: release is blocked because idle-profile browser target preflight failed."
             elif [[ "$IDLE_PROFILE_RESULT" == "skipped" ]]; then
               echo "- Status: **SKIP**"
               echo "- Result: check was skipped because idle-profile secrets are not configured."
