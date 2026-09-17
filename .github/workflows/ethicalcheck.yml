@@ -64,8 +64,8 @@ jobs:
           email: "xxx@apisec.ai"
           sarif-result-file: "ethicalcheck-results.sarif"
 
-       - name: Upload sarif file to repository
-         uses: github/codeql-action/upload-sarif@v3
+        - name: Upload sarif file to repository
+          uses: github/codeql-action/upload-sarif@6f5948dfacef28e207b48d0905cf90c03365536d
          with:
           sarif_file: ./ethicalcheck-results.sarif
 
