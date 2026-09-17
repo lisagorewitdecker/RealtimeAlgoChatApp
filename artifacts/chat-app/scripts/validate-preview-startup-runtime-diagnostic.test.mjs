@@ -42,6 +42,13 @@ function findDiagnostic(output) {
     .find((line) => line.startsWith("Expo preview startup error:"));
 }
 
+function containsControlCharacters(value) {
+  return Array.from(value).some((character) => {
+    const code = character.charCodeAt(0);
+    return code <= 0x1f || code === 0x7f;
+  });
+}
+
 function installedPackageVersion(packageName) {
   const packageJsonPath = packageRequire.resolve(`${packageName}/package.json`);
   return JSON.parse(readFileSync(packageJsonPath, "utf8")).version;
@@ -196,9 +203,9 @@ test("live and captured preview validation report the same diagnosis for every l
         `${fixtureCase.name} diagnostic exceeded the 512-character limit`,
       );
       if (fixtureCase.containsNoise) {
-        assert.doesNotMatch(
-          capturedDiagnostic,
-          /unrelated log text|[\u0000-\u001f\u007f]/,
+        assert.ok(
+          !capturedDiagnostic.includes("unrelated log text") &&
+            !containsControlCharacters(capturedDiagnostic),
           `${fixtureCase.name} included unrelated or control text`,
         );
       }
@@ -329,10 +336,7 @@ test("CI summaries retain bounded long-path loader diagnostics and library ident
   ];
 
   try {
-    for (const {
-      fixture: fixtureName,
-      libraryIdentifier,
-    } of longPathFixtures) {
+    for (const { fixture: fixtureName } of longPathFixtures) {
       const logPath = join(temporaryDirectory, `${fixtureName}.log`);
       const summaryPath = join(temporaryDirectory, `${fixtureName}.md`);
       const unrelatedOutput =
