@@ -200,6 +200,7 @@ jobs:
           if diff_output="$(
             git diff \
               --name-only \
+              --find-renames \
               --diff-filter=ACDMRT \
               "${ANDROID_PREVIEW_BASE_SHA}...${ANDROID_PREVIEW_HEAD_SHA}" \
               -- \
