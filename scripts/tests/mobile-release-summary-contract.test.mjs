@@ -2100,12 +2100,12 @@ test("iOS preview evidence covers renamed records and blocks malformed changes",
   assert.ok(validationStep, "the iOS preview job must validate changed records");
   assert.match(
     validationStep.run,
-    /No iOS preview validation records changed; nothing to validate\./,
+    /No iOS preview validation records or preflight artifacts changed; nothing to validate\./,
     "zero changed records must skip successfully",
   );
   assert.match(
     validationStep.run,
-    /pnpm run validate:ios-preview-evidence -- "\$record_path"/,
+    /pnpm run validate:ios-preview-evidence -- "\$\{checker_args\[@\]\}"/,
     "changed iOS records must run the focused checker",
   );
 
@@ -2114,6 +2114,9 @@ test("iOS preview evidence covers renamed records and blocks malformed changes",
     {
       recordText,
       baseRecordText = "# iOS preview validation record\n",
+      preflightText,
+      basePreflightText,
+      updateOnlyPreflight = false,
       deleteRecord = false,
       renameRecord = false,
     },
@@ -2127,12 +2130,23 @@ test("iOS preview evidence covers renamed records and blocks malformed changes",
       fixtureRoot,
       `artifacts/chat-app/test-results/encrypted-room-recovery/ios/${renameRecord ? "20260915T121500Z" : "20260915T120000Z"}/validation-record.md`,
     );
+    const basePreflightPath = path.join(
+      fixtureRoot,
+      "artifacts/chat-app/test-results/encrypted-room-recovery/ios/20260915T120000Z/ios-preview-preflight.json",
+    );
+    const preflightPath = path.join(
+      fixtureRoot,
+      `artifacts/chat-app/test-results/encrypted-room-recovery/ios/${renameRecord ? "20260915T121500Z" : "20260915T120000Z"}/ios-preview-preflight.json`,
+    );
     const summaryPath = path.join(fixtureRoot, "summary.md");
     const runnerPath = path.join(fixtureRoot, "run-job.sh");
     const binDirectory = path.join(fixtureRoot, "bin");
     mkdirSync(path.dirname(baseRecordPath), { recursive: true });
     mkdirSync(binDirectory, { recursive: true });
     writeFileSync(baseRecordPath, baseRecordText);
+    if (basePreflightText !== undefined) {
+      writeFileSync(basePreflightPath, basePreflightText);
+    }
 
     const git = (args) => {
       const result = spawnSync(gitPath, args, {
@@ -2149,7 +2163,11 @@ test("iOS preview evidence covers renamed records and blocks malformed changes",
     git(["config", "user.email", "contract-test@example.invalid"]);
     git(["config", "user.name", "Contract Test"]);
     writeFileSync(path.join(fixtureRoot, "README.md"), "base\n");
-    git(["add", "README.md", baseRecordPath]);
+    const baseFiles = ["README.md", baseRecordPath];
+    if (basePreflightText !== undefined) {
+      baseFiles.push(basePreflightPath);
+    }
+    git(["add", ...baseFiles]);
     git(["commit", "--quiet", "-m", "base iOS preview record"]);
     const baseSha = spawnSync(gitPath, ["rev-parse", "HEAD"], {
       cwd: fixtureRoot,
@@ -2161,9 +2179,22 @@ test("iOS preview evidence covers renamed records and blocks malformed changes",
     } else if (renameRecord) {
       mkdirSync(path.dirname(recordPath), { recursive: true });
       renameSync(baseRecordPath, recordPath);
+      if (basePreflightText !== undefined) {
+        renameSync(basePreflightPath, preflightPath);
+      }
       writeFileSync(recordPath, recordText);
+      if (preflightText !== undefined) {
+        writeFileSync(preflightPath, preflightText);
+      }
+    } else if (updateOnlyPreflight) {
+      if (preflightText !== undefined) {
+        writeFileSync(preflightPath, preflightText);
+      }
     } else {
       writeFileSync(recordPath, recordText);
+      if (preflightText !== undefined) {
+        writeFileSync(preflightPath, preflightText);
+      }
     }
     git(["add", "-A"]);
     git(["commit", "--quiet", "-m", "changed iOS preview record"]);
@@ -2175,7 +2206,7 @@ test("iOS preview evidence covers renamed records and blocks malformed changes",
     writeStub(
       binDirectory,
       "pnpm",
-      'set -euo pipefail\nrecord="${!#}"\nexec bash "$IOS_PREVIEW_CHECKER" "$record"',
+      'set -euo pipefail\nshift 3\nexec bash "$IOS_PREVIEW_CHECKER" "$@"',
     );
     writeFileSync(runnerPath, `#!${bashPath}\n${validationStep.run}\n`);
     chmodSync(runnerPath, 0o755);
@@ -2357,6 +2388,68 @@ test("iOS preview evidence covers renamed records and blocks malformed changes",
     deleted.summary,
     /changed iOS preview validation record is missing/,
     "the summary must identify the missing changed iOS record",
+  );
+
+  const preflightOnly = runIosPreviewJob("preflight-only", {
+    recordText: blockedRecord,
+    baseRecordText: blockedRecord,
+    basePreflightText: `{
+  "schema": "ios-preview-handoff-preflight/v1",
+  "platform": "ios",
+  "boundaries": {
+    "publicManifestReachability": {
+      "status": "PASS",
+      "evidence": "public manifest HTTP 200 (128 bytes)"
+    },
+    "localHandoffProbe": {
+      "status": "NOT_RUN",
+      "evidence": "Local manifest/bundle probe not run — no successful probe result was recorded"
+    },
+    "expoGoLaunch": {
+      "status": "NOT_ASSESSED",
+      "evidence": "Requires a physical iPhone running stock Expo Go."
+    },
+    "serverNativeRequestEvidence": {
+      "status": "NOT_ASSESSED",
+      "evidence": "Requires filtered Metro or API evidence from that physical Expo Go session."
+    }
+  }
+}
+`,
+    preflightText: `{
+  "schema": "ios-preview-handoff-preflight/v1",
+  "platform": "ios",
+  "boundaries": {
+    "publicManifestReachability": {
+      "status": "PASS",
+      "evidence": "public manifest HTTP 200 (129 bytes)"
+    },
+    "localHandoffProbe": {
+      "status": "NOT_RUN",
+      "evidence": "Local manifest/bundle probe not run — no successful probe result was recorded"
+    },
+    "expoGoLaunch": {
+      "status": "NOT_ASSESSED",
+      "evidence": "Requires a physical iPhone running stock Expo Go."
+    },
+    "serverNativeRequestEvidence": {
+      "status": "NOT_ASSESSED",
+      "evidence": "Requires filtered Metro or API evidence from that physical Expo Go session."
+    }
+  }
+}
+`,
+    updateOnlyPreflight: true,
+  });
+  assert.equal(
+    preflightOnly.result.status,
+    0,
+    "a changed iOS preflight artifact must still validate its paired record",
+  );
+  assert.match(
+    preflightOnly.summary,
+    /- Changed records checked: \*\*1\*\*/,
+    "a preflight-only iOS change must still count its paired validation record",
   );
 });
 

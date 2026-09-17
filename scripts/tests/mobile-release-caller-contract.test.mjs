@@ -782,7 +782,7 @@ test("iOS preview evidence validation succeeds when no handoff record changed", 
   );
   assert.match(
     evidenceStep.run,
-    /No iOS preview validation records changed; nothing to validate\./,
+    /No iOS preview validation records or preflight artifacts changed; nothing to validate\./,
     "zero changed records must explain why validation did not run",
   );
   assert.match(
@@ -854,12 +854,17 @@ test("iOS preview evidence runs for every pull request", () => {
   );
   assert.match(
     evidenceStep.run,
-    /git diff[\s\S]*--find-renames[\s\S]*--diff-filter=ACDMRT[\s\S]*\$\{IOS_PREVIEW_BASE_SHA\}\.\.\.\$\{IOS_PREVIEW_HEAD_SHA\}[\s\S]*artifacts\/chat-app\/test-results\/encrypted-room-recovery\/ios\/\*\*\/validation-record\.md/,
+    /git diff[\s\S]*--find-renames[\s\S]*--diff-filter=ACDMRT[\s\S]*\$\{IOS_PREVIEW_BASE_SHA\}\.\.\.\$\{IOS_PREVIEW_HEAD_SHA\}[\s\S]*artifacts\/chat-app\/test-results\/encrypted-room-recovery\/ios\/\*\*\/validation-record\.md[\s\S]*artifacts\/chat-app\/test-results\/encrypted-room-recovery\/ios\/\*\*\/ios-preview-preflight\.json/,
     "the job must select changed iOS validation records from the pull request diff",
   );
   assert.match(
     evidenceStep.run,
-    /pnpm run validate:ios-preview-evidence -- "\$record_path"/,
+    /changed_preflight_paths[\s\S]*record_path="\$\{changed_path%\/ios-preview-preflight\.json\}\/validation-record\.md"/,
+    "the job must map changed iOS preflight artifacts back to their validation records",
+  );
+  assert.match(
+    evidenceStep.run,
+    /pnpm run validate:ios-preview-evidence -- "\$\{checker_args\[@\]\}"/,
     "the job must run the focused iOS checker for every changed record",
   );
   assert.match(
