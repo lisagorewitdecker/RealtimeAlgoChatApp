@@ -241,7 +241,7 @@ function runLiveMetroTimeoutFixture(
   fixtureName,
   expectedResource,
   platform = "android",
-  handoffTimeoutMs = 40,
+  handoffTimeoutMs = 250,
 ) {
   const directory = mkdtempSync(join(tmpdir(), "preview-live-timeout-"));
   const preloadPath = join(directory, "mock-public-preview.mjs");

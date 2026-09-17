@@ -907,6 +907,31 @@ test("iOS preview evidence runs for every pull request", () => {
     /FAIL \(public edge\)/,
     "a public-edge FAIL record must be distinguished in the summary",
   );
+  const validationLoopStart = evidenceStep.run.indexOf(
+    'for record_path in "${changed_records[@]}"; do',
+  );
+  const validationLoopEnd = evidenceStep.run.indexOf(
+    "\ndone",
+    validationLoopStart,
+  );
+  assert.ok(
+    validationLoopStart >= 0 && validationLoopEnd > validationLoopStart,
+    "the iOS preview job must validate records inside an explicit loop",
+  );
+  const validationLoop = evidenceStep.run.slice(
+    validationLoopStart,
+    validationLoopEnd,
+  );
+  assert.match(
+    validationLoop,
+    /overall_status=1/,
+    "an invalid iOS record must preserve a failing overall status",
+  );
+  assert.doesNotMatch(
+    validationLoop,
+    /\bexit\b/,
+    "an invalid iOS record must not exit before later changed records are summarized",
+  );
 });
 
 test("routine unit validation runs the caller contract check", () => {

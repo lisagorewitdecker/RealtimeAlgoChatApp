@@ -2870,30 +2870,65 @@ test("iOS preview evidence covers renamed records and blocks malformed changes",
     },
   ) {
     const fixtureRoot = path.join(testRoot, `ios-preview-${name}`);
-    const baseRecordPath = path.join(
-      fixtureRoot,
-      "artifacts/chat-app/test-results/encrypted-room-recovery/ios/20260915T120000Z/validation-record.md",
+    const recordDefinitions = Array.isArray(recordText)
+      ? recordText
+      : [
+          {
+            timestamp: renameRecord
+              ? "20260915T121500Z"
+              : "20260915T120000Z",
+            baseTimestamp: "20260915T120000Z",
+            text: recordText,
+            baseText: baseRecordText,
+            preflight: preflightText,
+            basePreflight: basePreflightText,
+            updateOnlyPreflight,
+            deleteRecord,
+          },
+        ];
+    const recordPaths = recordDefinitions.map(({ timestamp }) =>
+      path.join(
+        fixtureRoot,
+        `artifacts/chat-app/test-results/encrypted-room-recovery/ios/${timestamp}/validation-record.md`,
+      ),
     );
-    const recordPath = path.join(
-      fixtureRoot,
-      `artifacts/chat-app/test-results/encrypted-room-recovery/ios/${renameRecord ? "20260915T121500Z" : "20260915T120000Z"}/validation-record.md`,
+    const baseRecordPaths = recordDefinitions.map(
+      ({ timestamp, baseTimestamp = "20260915T120000Z" }) =>
+        path.join(
+          fixtureRoot,
+          `artifacts/chat-app/test-results/encrypted-room-recovery/ios/${renameRecord ? baseTimestamp : timestamp}/validation-record.md`,
+        ),
     );
-    const basePreflightPath = path.join(
-      fixtureRoot,
-      "artifacts/chat-app/test-results/encrypted-room-recovery/ios/20260915T120000Z/ios-preview-preflight.json",
+    const preflightPaths = recordDefinitions.map(({ timestamp }) =>
+      path.join(
+        fixtureRoot,
+        `artifacts/chat-app/test-results/encrypted-room-recovery/ios/${timestamp}/ios-preview-preflight.json`,
+      ),
     );
-    const preflightPath = path.join(
-      fixtureRoot,
-      `artifacts/chat-app/test-results/encrypted-room-recovery/ios/${renameRecord ? "20260915T121500Z" : "20260915T120000Z"}/ios-preview-preflight.json`,
+    const basePreflightPaths = recordDefinitions.map(
+      ({ timestamp, baseTimestamp = "20260915T120000Z" }) =>
+        path.join(
+          fixtureRoot,
+          `artifacts/chat-app/test-results/encrypted-room-recovery/ios/${renameRecord ? baseTimestamp : timestamp}/ios-preview-preflight.json`,
+        ),
     );
+    const recordPath = recordPaths[0];
+    const baseRecordPath = baseRecordPaths[0];
     const summaryPath = path.join(fixtureRoot, "summary.md");
     const runnerPath = path.join(fixtureRoot, "run-job.sh");
     const binDirectory = path.join(fixtureRoot, "bin");
-    mkdirSync(path.dirname(baseRecordPath), { recursive: true });
+    for (const record of [...recordPaths, ...baseRecordPaths]) {
+      mkdirSync(path.dirname(record), { recursive: true });
+    }
     mkdirSync(binDirectory, { recursive: true });
-    writeFileSync(baseRecordPath, baseRecordText);
-    if (basePreflightText !== undefined) {
-      writeFileSync(basePreflightPath, basePreflightText);
+    for (const [
+      index,
+      { text, baseText, basePreflight },
+    ] of recordDefinitions.entries()) {
+      writeFileSync(baseRecordPaths[index], baseText ?? text);
+      if (basePreflight !== undefined) {
+        writeFileSync(basePreflightPaths[index], basePreflight);
+      }
     }
 
     const git = (args) => {
@@ -2911,10 +2946,13 @@ test("iOS preview evidence covers renamed records and blocks malformed changes",
     git(["config", "user.email", "contract-test@example.invalid"]);
     git(["config", "user.name", "Contract Test"]);
     writeFileSync(path.join(fixtureRoot, "README.md"), "base\n");
-    const baseFiles = ["README.md", baseRecordPath];
-    if (basePreflightText !== undefined) {
-      baseFiles.push(basePreflightPath);
-    }
+    const baseFiles = [
+      "README.md",
+      ...baseRecordPaths,
+      ...recordDefinitions.flatMap(({ basePreflight }, index) =>
+        basePreflight === undefined ? [] : [basePreflightPaths[index]],
+      ),
+    ];
     git(["add", ...baseFiles]);
     git(["commit", "--quiet", "-m", "base iOS preview record"]);
     const baseSha = spawnSync(gitPath, ["rev-parse", "HEAD"], {
@@ -2922,26 +2960,37 @@ test("iOS preview evidence covers renamed records and blocks malformed changes",
       encoding: "utf8",
     }).stdout.trim();
 
-    if (deleteRecord) {
-      rmSync(baseRecordPath);
-    } else if (renameRecord) {
-      mkdirSync(path.dirname(recordPath), { recursive: true });
-      renameSync(baseRecordPath, recordPath);
-      if (basePreflightText !== undefined) {
-        renameSync(basePreflightPath, preflightPath);
-      }
-      writeFileSync(recordPath, recordText);
-      if (preflightText !== undefined) {
-        writeFileSync(preflightPath, preflightText);
-      }
-    } else if (updateOnlyPreflight) {
-      if (preflightText !== undefined) {
-        writeFileSync(preflightPath, preflightText);
-      }
-    } else {
-      writeFileSync(recordPath, recordText);
-      if (preflightText !== undefined) {
-        writeFileSync(preflightPath, preflightText);
+    for (const [
+      index,
+      {
+        text,
+        preflight,
+        basePreflight,
+        updateOnlyPreflight: definitionUpdatesOnlyPreflight = false,
+        deleteRecord: definitionDeletesRecord = false,
+      },
+    ] of recordDefinitions.entries()) {
+      if (definitionDeletesRecord) {
+        rmSync(baseRecordPaths[index]);
+      } else if (renameRecord) {
+        mkdirSync(path.dirname(recordPaths[index]), { recursive: true });
+        renameSync(baseRecordPaths[index], recordPaths[index]);
+        if (basePreflight !== undefined) {
+          renameSync(basePreflightPaths[index], preflightPaths[index]);
+        }
+        writeFileSync(recordPaths[index], text);
+        if (preflight !== undefined) {
+          writeFileSync(preflightPaths[index], preflight);
+        }
+      } else if (definitionUpdatesOnlyPreflight) {
+        if (preflight !== undefined) {
+          writeFileSync(preflightPaths[index], preflight);
+        }
+      } else {
+        writeFileSync(recordPaths[index], text);
+        if (preflight !== undefined) {
+          writeFileSync(preflightPaths[index], preflight);
+        }
       }
     }
     git(["add", "-A"]);
@@ -2981,6 +3030,12 @@ test("iOS preview evidence covers renamed records and blocks malformed changes",
       result,
       baseRecordPath: path.relative(fixtureRoot, baseRecordPath),
       recordPath: path.relative(fixtureRoot, recordPath),
+      baseRecordPaths: baseRecordPaths.map((record) =>
+        path.relative(fixtureRoot, record),
+      ),
+      recordPaths: recordPaths.map((record) =>
+        path.relative(fixtureRoot, record),
+      ),
       summary: readFileSync(summaryPath, "utf8"),
     };
   }
@@ -3086,6 +3141,103 @@ test("iOS preview evidence covers renamed records and blocks malformed changes",
       `\\[${publicFailure.recordPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\]\\(https://github\\.example/example/chat-app/blob/[^)]+/${publicFailure.recordPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\)`,
     ),
     "a renamed public-edge FAIL record must be linked at its new path",
+  );
+
+  const multipleRenamed = runIosPreviewJob("multiple-renamed", {
+    renameRecord: true,
+    recordText: [
+      {
+        baseTimestamp: "20260915T120000Z",
+        timestamp: "20260915T121500Z",
+        baseText: blockedRecord,
+        text: blockedRecord.replace(
+          "**Result: BLOCKED",
+          "**Result: PASS",
+        ),
+      },
+      {
+        baseTimestamp: "20260915T120500Z",
+        timestamp: "20260915T122000Z",
+        baseText: blockedRecord,
+        text: blockedRecord,
+      },
+      {
+        baseTimestamp: "20260915T121000Z",
+        timestamp: "20260915T122500Z",
+        baseText: publicFailureRecord,
+        text: publicFailureRecord,
+      },
+    ],
+  });
+  assert.notEqual(
+    multipleRenamed.result.status,
+    0,
+    "one malformed renamed iOS record must fail the job without hiding later valid records",
+  );
+  assert.match(
+    multipleRenamed.summary,
+    /- Changed records checked: \*\*3\*\*/,
+    "the summary must report the exact number of renamed destination records",
+  );
+  for (const [index, recordPath] of multipleRenamed.recordPaths.entries()) {
+    const escapedPath = recordPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const recordLinkPattern = new RegExp(
+      `\\[${escapedPath}\\]\\(https://github\\.example/example/chat-app/blob/[^)]+/${escapedPath}\\)`,
+      "g",
+    );
+    const recordSectionPattern = new RegExp(
+      `### \\[${escapedPath}\\]\\(https://github\\.example/example/chat-app/blob/[^)]+/${escapedPath}\\)[\\s\\S]*?(?=\\n### |$)`,
+      "g",
+    );
+    assert.equal(
+      multipleRenamed.summary.match(recordLinkPattern)?.length ?? 0,
+      1,
+      `each renamed iOS destination must have one stable link: ${recordPath}`,
+    );
+    assert.equal(
+      multipleRenamed.summary.match(recordSectionPattern)?.length ?? 0,
+      1,
+      `each renamed iOS destination must have one validation section: ${recordPath}`,
+    );
+    assert.match(
+      multipleRenamed.summary,
+      new RegExp(
+        `### \\[${escapedPath}\\]\\(https://github\\.example/example/chat-app/blob/[^)]+/${escapedPath}\\)[\\s\\S]*?- Validation: \\*\\*(?:PASS|FAIL)\\*\\*`,
+      ),
+      `each renamed iOS destination must report its validation result: ${recordPath}`,
+    );
+    assert.doesNotMatch(
+      multipleRenamed.summary,
+      new RegExp(
+        multipleRenamed.baseRecordPaths[index].replace(
+          /[.*+?^${}()|[\]\\]/g,
+          "\\$&",
+        ),
+      ),
+      `the renamed iOS summary must not retain the old path for ${recordPath}`,
+    );
+  }
+  const blockedDestination = multipleRenamed.recordPaths[1].replace(
+    /[.*+?^${}()|[\]\\]/g,
+    "\\$&",
+  );
+  assert.match(
+    multipleRenamed.summary,
+    new RegExp(
+      `### \\[${blockedDestination}\\][\\s\\S]*?Record result: \\*\\*BLOCKED \\(valid physical-phone handoff unavailable\\)\\*\\*`,
+    ),
+    "a valid BLOCKED result must remain visible after an earlier renamed record fails",
+  );
+  const publicFailureDestination = multipleRenamed.recordPaths[2].replace(
+    /[.*+?^${}()|[\]\\]/g,
+    "\\$&",
+  );
+  assert.match(
+    multipleRenamed.summary,
+    new RegExp(
+      `### \\[${publicFailureDestination}\\][\\s\\S]*?Record result: \\*\\*FAIL \\(public edge\\)\\*\\*`,
+    ),
+    "a valid public-edge FAIL result must remain visible after an earlier renamed record fails",
   );
 
   const renamedMalformed = runIosPreviewJob("renamed-malformed", {
