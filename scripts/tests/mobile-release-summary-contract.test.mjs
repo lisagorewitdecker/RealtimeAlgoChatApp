@@ -628,6 +628,11 @@ test("idle-profile registration check blocks release and reports its result", ()
     preflightStep,
     "idle-profile job must preflight its browser targets",
   );
+  assert.equal(
+    preflightStep.if,
+    "${{ secrets.E2E_CHAT_URL != '' && secrets.E2E_API_URL != '' }}",
+    "preflight must run only when browser target secrets are configured",
+  );
   assert.equal(preflightStep.env.E2E_CHAT_URL, "${{ secrets.E2E_CHAT_URL }}");
   assert.equal(preflightStep.env.E2E_API_URL, "${{ secrets.E2E_API_URL }}");
   assert.match(
@@ -657,6 +662,31 @@ test("idle-profile registration check blocks release and reports its result", ()
     (step) => step.name === "Run idle-profile registration release check",
   );
   assert.ok(runStep, "idle-profile job must run the browser check");
+  assert.match(
+    runStep.if,
+    /secrets\.E2E_CHAT_URL != ''/,
+    "idle-profile Playwright check must require the configured chat target secret",
+  );
+  assert.match(
+    runStep.if,
+    /secrets\.E2E_API_URL != ''/,
+    "idle-profile Playwright check must require the configured API target secret",
+  );
+  assert.match(
+    runStep.if,
+    /secrets\.CLERK_PUBLISHABLE_KEY != ''/,
+    "idle-profile Playwright check must require Clerk publishable key configuration",
+  );
+  assert.match(
+    runStep.if,
+    /secrets\.CLERK_SECRET_KEY != ''/,
+    "idle-profile Playwright check must require Clerk secret key configuration",
+  );
+  assert.match(
+    runStep.if,
+    /secrets\.DATABASE_URL != ''/,
+    "idle-profile Playwright check must require database configuration",
+  );
   assert.ok(
     idleJob.steps.indexOf(preflightStep) < idleJob.steps.indexOf(runStep),
     "both browser targets must be verified before Playwright starts",
@@ -737,6 +767,7 @@ test("idle-profile registration check blocks release and reports its result", ()
   assert.equal(summaryStep.if, "${{ always() }}");
   assert.match(summaryStep.run, /## Idle profile registration/);
   assert.match(summaryStep.run, /Status: \*\*PASS\*\*/);
+  assert.match(summaryStep.run, /Status: \*\*SKIP\*\*/);
   assert.match(summaryStep.run, /Status: \*\*FAIL\*\*/);
 
   const gate = workflow.jobs["mobile-release-gate"];
