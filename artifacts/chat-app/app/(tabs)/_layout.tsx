@@ -7,6 +7,7 @@ import { Feather } from "@expo/vector-icons";
 import React from "react";
 import { Platform, StyleSheet, View, useColorScheme } from "react-native";
 
+import { useAccessibilityOptional } from "@/contexts/AccessibilityContext";
 import { useColors } from "@/hooks/useColors";
 
 function NativeTabLayout() {
@@ -34,7 +35,13 @@ function NativeTabLayout() {
  * scroll. Screens still reserve its measured height (`useTabBarContentInset`)
  * because whatever ends up under the bar is dimmed and cannot be tapped.
  *
- * iOS draws the surface with a native blur. Android and web draw the
+ * With the Reduce transparency accessibility option (the in-app toggle, which
+ * follows iOS's system Reduce Transparency setting until the user changes it)
+ * the bar is instead the opaque palette `background` on every platform: no
+ * blur, no translucent panel. It keeps its hairline border, and it stays
+ * absolutely positioned so the height the screens reserve does not change.
+ *
+ * Otherwise iOS draws the surface with a native blur. Android and web draw the
  * palette's translucent `tabBarBackground` panel behind a hairline border
  * instead of expo-blur's Android blur (`blurMethod="dimezisBlurView"`), which
  * was evaluated and left out:
@@ -54,6 +61,7 @@ function NativeTabLayout() {
  */
 function ClassicTabLayout() {
   const colors = useColors();
+  const { reduceTransparency } = useAccessibilityOptional();
   const colorScheme = useColorScheme();
   const isDark = colorScheme === "dark";
   const isIOS = Platform.OS === "ios";
@@ -67,30 +75,34 @@ function ClassicTabLayout() {
         headerShown: false,
         tabBarStyle: {
           position: "absolute",
-          // The surface comes from `tabBarBackground` on every platform; the
-          // bar itself stays clear so the screen shows through it.
-          backgroundColor: "transparent",
+          // The see-through surface comes from `tabBarBackground` on every
+          // platform; the bar itself stays clear so the screen shows through
+          // it. With Reduce transparency the bar is the opaque palette
+          // background and no surface element is drawn at all.
+          backgroundColor: reduceTransparency ? colors.background : "transparent",
           borderTopWidth: isIOS ? 1 : StyleSheet.hairlineWidth,
           borderTopColor: colors.border,
           elevation: 0,
           ...(isWeb ? { height: 84 } : {}),
         },
-        tabBarBackground: () =>
-          isIOS ? (
-            <BlurView
-              intensity={100}
-              tint={isDark ? "dark" : "light"}
-              style={StyleSheet.absoluteFill}
-            />
-          ) : (
-            <View
-              testID="tab-bar-surface"
-              style={[
-                StyleSheet.absoluteFill,
-                { backgroundColor: colors.tabBarBackground },
-              ]}
-            />
-          ),
+        tabBarBackground: reduceTransparency
+          ? undefined
+          : () =>
+              isIOS ? (
+                <BlurView
+                  intensity={100}
+                  tint={isDark ? "dark" : "light"}
+                  style={StyleSheet.absoluteFill}
+                />
+              ) : (
+                <View
+                  testID="tab-bar-surface"
+                  style={[
+                    StyleSheet.absoluteFill,
+                    { backgroundColor: colors.tabBarBackground },
+                  ]}
+                />
+              ),
       }}
     >
       <Tabs.Screen

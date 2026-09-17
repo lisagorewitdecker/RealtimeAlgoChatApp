@@ -28,7 +28,9 @@ const colors = {
     // content scrolling under the absolutely positioned bar shows through it
     // on Android and web the way it does through the iOS blur. The alpha keeps
     // the tab tints (`primary`, `mutedForeground`) at 4.5:1 or better even
-    // over white content; `__tests__/TabLayout.test.tsx` checks it.
+    // over white content; `__tests__/TabLayout.test.tsx` checks it. With the
+    // Reduce transparency accessibility option the bar uses the opaque
+    // `background` instead, on every platform.
     tabBarBackground: "rgba(14, 17, 24, 0.85)",
   },
   dark: {
@@ -85,8 +87,10 @@ const colors = {
     systemMsg: "#BBBBBB",
     online: "#00EE88",
     // Denser than the default palette on purpose: still see-through, but
-    // low-vision users get less visual noise behind the tab controls (the
-    // same idea as the system "Reduce Transparency" settings).
+    // low-vision users get less visual noise behind the tab controls. Users
+    // who want nothing showing through turn on Reduce transparency (the
+    // in-app option, or iOS's system setting), which swaps this panel for
+    // the opaque `background`.
     tabBarBackground: "rgba(0, 0, 0, 0.9)",
   },
   radius: 12,

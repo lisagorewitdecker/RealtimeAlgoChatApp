@@ -67,9 +67,11 @@ export default function ProfileScreen() {
     highContrast,
     fontScale,
     reduceMotion,
+    reduceTransparency,
     setHighContrast,
     setFontScale,
     setReduceMotion,
+    setReduceTransparency,
   } = useAccessibility();
   const { getToken } = useAuth();
   const { isConnected, connectionError } = useSocket();
@@ -567,8 +569,8 @@ export default function ProfileScreen() {
             </Text>
           </View>
           <Text style={[styles.accessibilityHint, { color: colors.mutedForeground }]}>
-            Personalize contrast, text size, and motion to make {PRODUCT_NAME} more
-            comfortable to use.
+            Personalize contrast, text size, motion, and transparency to make{" "}
+            {PRODUCT_NAME} more comfortable to use.
           </Text>
 
           <View style={styles.accessibilityOption}>
@@ -708,6 +710,49 @@ export default function ProfileScreen() {
                 ]}
               >
                 {reduceMotion ? "On" : "Off"}
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          <View style={styles.accessibilityOption}>
+            <View style={styles.accessibilityOptionCopy}>
+              <Text style={[styles.accessibilityOptionTitle, { color: colors.foreground }]}>
+                Reduce transparency
+              </Text>
+              <Text style={[styles.accessibilityOptionHint, { color: colors.mutedForeground }]}>
+                Use a solid tab bar instead of a see-through one.
+              </Text>
+            </View>
+            <TouchableOpacity
+              testID="accessibility-reduce-transparency-toggle"
+              style={[
+                styles.accessibilityToggle,
+                {
+                  backgroundColor: reduceTransparency ? colors.primary : colors.background,
+                  borderColor: reduceTransparency ? colors.primary : colors.border,
+                  borderRadius: colors.radius - 2,
+                },
+              ]}
+              onPress={() => {
+                const nextValue = !reduceTransparency;
+                setReduceTransparency(nextValue);
+                trackEvent("accessibility_preference_changed", {
+                  preference: "reduce_transparency",
+                  value: nextValue,
+                });
+              }}
+              activeOpacity={0.8}
+              accessibilityRole="switch"
+              accessibilityLabel={`Reduce transparency: ${reduceTransparency ? "on" : "off"}`}
+              accessibilityState={{ checked: reduceTransparency }}
+            >
+              <Text
+                style={[
+                  styles.accessibilityToggleText,
+                  { color: reduceTransparency ? colors.primaryForeground : colors.foreground },
+                ]}
+              >
+                {reduceTransparency ? "On" : "Off"}
               </Text>
             </TouchableOpacity>
           </View>

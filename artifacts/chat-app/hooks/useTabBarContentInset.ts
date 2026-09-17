@@ -8,9 +8,10 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
  *
  * The classic tab bar in `app/(tabs)/_layout.tsx` is absolutely positioned
  * over the screen and see-through on every platform (a blur on iOS, a
- * translucent tinted panel on Android and web). Content that scrolls under it
- * shows through, but dimmed and out of reach for taps, so content that only
- * reserves the safe-area inset still ends up stuck behind the bar. The tab
+ * translucent tinted panel on Android and web), or opaque when the Reduce
+ * transparency accessibility option is on. Either way content that scrolls
+ * under it is out of reach for taps, so content that only reserves the
+ * safe-area inset still ends up stuck behind the bar. The tab
  * navigator publishes the measured height of that bar (safe-area inset
  * included) through `BottomTabBarHeightContext`, which
  * expo-router re-exports from its vendored react-navigation. That vendored

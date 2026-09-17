@@ -11,6 +11,7 @@ import colors from "../constants/colors";
 import TabLayout from "../app/(tabs)/_layout";
 
 let mockHighContrast = false;
+let mockReduceTransparency = false;
 
 jest.mock("@expo/vector-icons", () => ({
   Feather: () => null,
@@ -74,7 +75,10 @@ jest.mock("expo-router/unstable-native-tabs", () => {
 });
 
 jest.mock("@/contexts/AccessibilityContext", () => ({
-  useAccessibilityOptional: () => ({ highContrast: mockHighContrast }),
+  useAccessibilityOptional: () => ({
+    highContrast: mockHighContrast,
+    reduceTransparency: mockReduceTransparency,
+  }),
 }));
 
 type Rgb = [number, number, number];
@@ -140,6 +144,7 @@ describe("classic tab bar surface", () => {
   afterEach(() => {
     Platform.OS = originalPlatform;
     mockHighContrast = false;
+    mockReduceTransparency = false;
   });
 
   it("draws a translucent tinted panel behind a hairline border on Android", () => {
@@ -198,6 +203,94 @@ describe("classic tab bar surface", () => {
   });
 });
 
+// The Reduce transparency accessibility option (the in-app toggle, which
+// follows iOS's system setting until the user changes it) replaces the
+// see-through surface with the opaque palette background. The layout must
+// otherwise be identical: the bar stays absolutely positioned with the same
+// border so the height screens reserve through useTabBarContentInset does not
+// move.
+describe("classic tab bar with Reduce transparency", () => {
+  const originalPlatform = Platform.OS;
+
+  beforeEach(() => {
+    mockReduceTransparency = true;
+  });
+
+  afterEach(() => {
+    Platform.OS = originalPlatform;
+    mockHighContrast = false;
+    mockReduceTransparency = false;
+  });
+
+  it("replaces the Android panel with the opaque palette background", () => {
+    Platform.OS = "android";
+    const view = render(<TabLayout />);
+
+    const bar = tabBarStyle(view);
+    expect(bar.backgroundColor).toBe(colors.dark.background);
+    expect(parseColor(colors.dark.background).alpha).toBe(1);
+    expect(view.queryByTestId("tab-bar-surface")).toBeNull();
+    expect(view.queryByTestId("tab-bar-blur")).toBeNull();
+
+    // Same bar otherwise: still overlaid, still bordered.
+    expect(bar.position).toBe("absolute");
+    expect(bar.borderTopWidth).toBe(StyleSheet.hairlineWidth);
+    expect(bar.borderTopColor).toBe(colors.dark.border);
+    expect(bar.elevation).toBe(0);
+  });
+
+  it("replaces the iOS blur with the opaque palette background", () => {
+    Platform.OS = "ios";
+    const view = render(<TabLayout />);
+
+    const bar = tabBarStyle(view);
+    expect(bar.backgroundColor).toBe(colors.dark.background);
+    expect(view.queryByTestId("tab-bar-blur")).toBeNull();
+    expect(view.queryByTestId("tab-bar-surface")).toBeNull();
+    expect(bar.position).toBe("absolute");
+    expect(bar.borderTopWidth).toBe(1);
+    expect(bar.borderTopColor).toBe(colors.dark.border);
+  });
+
+  it("replaces the web panel while keeping the fixed-height bar", () => {
+    Platform.OS = "web";
+    const view = render(<TabLayout />);
+
+    const bar = tabBarStyle(view);
+    expect(bar.backgroundColor).toBe(colors.dark.background);
+    expect(view.queryByTestId("tab-bar-surface")).toBeNull();
+    expect(view.queryByTestId("tab-bar-blur")).toBeNull();
+    expect(bar.position).toBe("absolute");
+    expect(bar.borderTopWidth).toBe(StyleSheet.hairlineWidth);
+    expect(bar.height).toBe(84);
+  });
+
+  it("uses the high-contrast background when both options are on", () => {
+    Platform.OS = "android";
+    mockHighContrast = true;
+    const view = render(<TabLayout />);
+
+    const bar = tabBarStyle(view);
+    expect(bar.backgroundColor).toBe(colors.highContrast.background);
+    expect(parseColor(colors.highContrast.background).alpha).toBe(1);
+    expect(bar.borderTopColor).toBe(colors.highContrast.border);
+    expect(view.queryByTestId("tab-bar-surface")).toBeNull();
+  });
+
+  it("returns to the see-through surface when the option is turned off again", () => {
+    Platform.OS = "android";
+    const view = render(<TabLayout />);
+    expect(tabBarStyle(view).backgroundColor).toBe(colors.dark.background);
+    expect(view.queryByTestId("tab-bar-surface")).toBeNull();
+
+    mockReduceTransparency = false;
+    view.rerender(<TabLayout />);
+
+    expect(tabBarStyle(view).backgroundColor).toBe("transparent");
+    expect(surfaceStyle(view).backgroundColor).toBe(colors.dark.tabBarBackground);
+  });
+});
+
 describe("tab bar surface tokens", () => {
   const palettes = ["light", "dark", "highContrast"] as const;
   const white: Rgb = [255, 255, 255];
@@ -237,6 +330,19 @@ describe("tab bar surface tokens", () => {
           // WCAG AA for normal text; the tab labels are small text.
           expect(contrastRatio(tint, composited)).toBeGreaterThanOrEqual(4.5);
         }
+      }
+    },
+  );
+
+  it.each(palettes)(
+    "%s keeps the tab tints readable on the opaque Reduce transparency bar",
+    (name) => {
+      const palette = colors[name];
+      const surface = parseColor(palette.background);
+
+      expect(surface.alpha).toBe(1);
+      for (const tint of [palette.primary, palette.mutedForeground]) {
+        expect(contrastRatio(parseColor(tint).rgb, surface.rgb)).toBeGreaterThanOrEqual(4.5);
       }
     },
   );

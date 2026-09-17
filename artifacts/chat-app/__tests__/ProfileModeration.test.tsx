@@ -108,9 +108,11 @@ const accessibilityValue = {
   highContrast: false,
   fontScale: 1.0 as const,
   reduceMotion: false,
+  reduceTransparency: false,
   setHighContrast: jest.fn(),
   setFontScale: jest.fn(),
   setReduceMotion: jest.fn(),
+  setReduceTransparency: jest.fn(),
   persistenceError: null,
   retryPersistence: jest.fn(),
 };
@@ -189,6 +191,35 @@ describe("profile moderation controls", () => {
     fireEvent.press(getByTestId("accessibility-reduced-motion-toggle"));
 
     expect(accessibilityValue.setReduceMotion).toHaveBeenCalledWith(true);
+  });
+
+  it("lets users turn on reduce transparency from accessibility settings", () => {
+    const { getByTestId, getByRole } = render(<ProfileScreen />);
+
+    const toggle = getByTestId("accessibility-reduce-transparency-toggle");
+    // Announced like the other toggles: a switch whose name carries its state.
+    expect(toggle.props.accessibilityRole).toBe("switch");
+    expect(toggle.props.accessibilityLabel).toBe("Reduce transparency: off");
+    expect(toggle.props.accessibilityState).toEqual({ checked: false });
+    expect(getByRole("switch", { name: "Reduce transparency: off" })).toBe(toggle);
+
+    fireEvent.press(toggle);
+
+    expect(accessibilityValue.setReduceTransparency).toHaveBeenLastCalledWith(true);
+  });
+
+  it("lets users turn reduce transparency back off", () => {
+    mockUseAccessibility.mockReturnValue({ ...accessibilityValue, reduceTransparency: true });
+    const { getByTestId, getByText } = render(<ProfileScreen />);
+
+    const toggle = getByTestId("accessibility-reduce-transparency-toggle");
+    expect(toggle.props.accessibilityLabel).toBe("Reduce transparency: on");
+    expect(toggle.props.accessibilityState).toEqual({ checked: true });
+    expect(getByText("Use a solid tab bar instead of a see-through one.")).toBeTruthy();
+
+    fireEvent.press(toggle);
+
+    expect(accessibilityValue.setReduceTransparency).toHaveBeenLastCalledWith(false);
   });
 
   it("does not show account moderation controls to non-administrators", () => {
