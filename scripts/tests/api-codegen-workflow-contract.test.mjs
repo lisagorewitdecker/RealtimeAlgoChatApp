@@ -315,13 +315,13 @@ test("generated-client drift evidence remains visible in the CI job log", () => 
   );
   assert.match(
     generatedCheckerSource,
-    /console\.error\("Generated API drift detected after regeneration:"\)/,
-    "the job log must retain the primary generated-client drift failure signal",
+    /const driftReport = describeDrift\(before, after, differences\);\s*console\.error\(driftReport\)/,
+    "the job log must emit the complete bounded generated-client drift report",
   );
   assert.match(
     generatedCheckerSource,
-    /console\.error\(\s*`Run \\`\$\{regenerationCommand\}\\` and commit the generated output\.`\s*\)/,
-    "the job log must retain the generated-client regeneration command when summary publishing is unavailable",
+    /"Generated API drift detected after regeneration:"[\s\S]*`Run \\`\$\{regenerationCommand\}\\` and commit the generated output\.`/,
+    "the bounded report fallback must retain the failure signal and regeneration command when detailed rendering is unavailable",
   );
 });
 
