@@ -102,6 +102,25 @@ test("API codegen workflow runs for the complete development pull-request event 
   );
 });
 
+test("API codegen workflow checks out full history for generated-client validation", () => {
+  const checkoutStep = steps.find((step) => step.id === "checkout");
+
+  assert.ok(
+    checkoutStep,
+    "the API codegen workflow must keep a checkout step because full history is required for generated-client validation",
+  );
+  assert.equal(
+    checkoutStep.uses,
+    "actions/checkout@v4",
+    "the API codegen workflow checkout step must use actions/checkout",
+  );
+  assert.equal(
+    checkoutStep.with?.["fetch-depth"],
+    0,
+    "the API codegen workflow checkout must use fetch-depth: 0 because full history is required for generated-client validation",
+  );
+});
+
 test("API compatibility receives the current pull request description", () => {
   assert.ok(
     compatibilityStep,
