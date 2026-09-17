@@ -903,6 +903,26 @@ export function parsePreviewTimeout(name, value, defaultValue) {
   return timeoutMs;
 }
 
+export function parsePreviewTimeouts(environment = process.env) {
+  return {
+    timeoutMs: parsePreviewTimeout(
+      "PREVIEW_STARTUP_TIMEOUT_MS",
+      environment.PREVIEW_STARTUP_TIMEOUT_MS,
+      DEFAULT_TIMEOUT_MS,
+    ),
+    handoffTimeoutMs: parsePreviewTimeout(
+      "PREVIEW_HANDOFF_TIMEOUT_MS",
+      environment.PREVIEW_HANDOFF_TIMEOUT_MS,
+      DEFAULT_HANDOFF_TIMEOUT_MS,
+    ),
+    publicPreviewTimeoutMs: parsePreviewTimeout(
+      "PREVIEW_PUBLIC_TIMEOUT_MS",
+      environment.PREVIEW_PUBLIC_TIMEOUT_MS,
+      DEFAULT_PUBLIC_PREVIEW_TIMEOUT_MS,
+    ),
+  };
+}
+
 function parseArgs(argv) {
   const platformIndex = argv.indexOf("--platform");
   const logFileIndex = argv.indexOf("--log-file");
@@ -930,21 +950,7 @@ function parseArgs(argv) {
     platform,
     logFile: logFileIndex === -1 ? null : argv[logFileIndex + 1],
     recordOutput,
-    timeoutMs: parsePreviewTimeout(
-      "PREVIEW_STARTUP_TIMEOUT_MS",
-      process.env.PREVIEW_STARTUP_TIMEOUT_MS,
-      DEFAULT_TIMEOUT_MS,
-    ),
-    handoffTimeoutMs: parsePreviewTimeout(
-      "PREVIEW_HANDOFF_TIMEOUT_MS",
-      process.env.PREVIEW_HANDOFF_TIMEOUT_MS,
-      DEFAULT_HANDOFF_TIMEOUT_MS,
-    ),
-    publicPreviewTimeoutMs: parsePreviewTimeout(
-      "PREVIEW_PUBLIC_TIMEOUT_MS",
-      process.env.PREVIEW_PUBLIC_TIMEOUT_MS,
-      DEFAULT_PUBLIC_PREVIEW_TIMEOUT_MS,
-    ),
+    ...parsePreviewTimeouts(),
   };
 }
 
@@ -1193,6 +1199,11 @@ async function validateLivePreview(
 }
 
 async function main() {
+  if (process.argv.includes("--validate-timeouts")) {
+    parsePreviewTimeouts();
+    return;
+  }
+
   const validateRecordIndex = process.argv.indexOf("--validate-record");
   if (validateRecordIndex !== -1) {
     const outputPath = process.argv[validateRecordIndex + 1];

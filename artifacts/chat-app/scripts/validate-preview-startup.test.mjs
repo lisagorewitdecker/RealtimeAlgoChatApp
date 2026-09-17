@@ -22,6 +22,7 @@ import {
   getPublicPreviewManifestUrl,
   MAX_PREVIEW_TIMEOUT_MS,
   manifestHasSignedInDeveloper,
+  parsePreviewTimeouts,
   parsePreviewTimeout,
   requestLocalHandoffProbe,
   requestPublicPreviewManifest,
@@ -37,8 +38,14 @@ const validatorPath = join(
   import.meta.dirname,
   "validate-preview-startup.mjs",
 );
+const packageRoot = join(import.meta.dirname, "..");
 
 test("uses defaults only when preview timeout environment values are absent", () => {
+  assert.deepEqual(parsePreviewTimeouts({}), {
+    timeoutMs: 30_000,
+    handoffTimeoutMs: 60_000,
+    publicPreviewTimeoutMs: 15_000,
+  });
   assert.equal(
     parsePreviewTimeout("PREVIEW_STARTUP_TIMEOUT_MS", undefined, 30_000),
     30_000,
@@ -110,6 +117,27 @@ test("rejects malformed and non-positive preview timeout values", () => {
   }
 });
 
+test(
+  "workflow entry points reject malformed and non-positive preview timeouts before live work",
+  { skip: process.env.PREVIEW_TIMEOUT_ENTRYPOINT_TEST === "1" },
+  () => {
+    for (const entryPoint of [
+      "validate:preview-startup",
+      "test:preview-live-timeout",
+    ]) {
+      for (const setting of [
+        "PREVIEW_STARTUP_TIMEOUT_MS",
+        "PREVIEW_HANDOFF_TIMEOUT_MS",
+        "PREVIEW_PUBLIC_TIMEOUT_MS",
+      ]) {
+        for (const value of ["not-a-number", "0", "-1"]) {
+          runPreviewTimeoutEntryPoint(entryPoint, setting, value);
+        }
+      }
+    }
+  },
+);
+
 // Never a real value: the tests only prove it stays out of every message.
 const SESSION_SECRET_SENTINEL = "sentinel-expo-session-secret-value";
 const SIGNED_IN_ACCOUNT = "replit-private-test-account";
@@ -132,10 +160,88 @@ function mockFetch(response) {
   };
 }
 
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function runPreviewTimeoutEntryPoint(entryPoint, setting, value) {
+  const directory = mkdtempSync(join(tmpdir(), "preview-timeout-entrypoint-"));
+  const metroMarkerPath = join(directory, "metro-started.marker");
+  const requestMarkerPath = join(directory, "public-request.marker");
+  const preloadPath = join(directory, "reject-public-request.mjs");
+
+  writeFileSync(
+    preloadPath,
+    `import { appendFileSync } from "node:fs";
+const markerPath = ${JSON.stringify(requestMarkerPath)};
+const originalFetch = globalThis.fetch;
+globalThis.fetch = async (url, options) => {
+  if (String(url).startsWith("https://preview-timeout-entrypoint.test/")) {
+    appendFileSync(markerPath, "public request attempted\\n");
+  }
+  return originalFetch(url, options);
+};
+`,
+    "utf8",
+  );
+
+  try {
+    const result = spawnSync(
+      "pnpm",
+      ["run", entryPoint],
+      {
+        cwd: packageRoot,
+        env: {
+          ...process.env,
+          NODE_OPTIONS: [
+            process.env.NODE_OPTIONS,
+            `--import ${preloadPath}`,
+          ]
+            .filter(Boolean)
+            .join(" "),
+          PREVIEW_TIMEOUT_ENTRYPOINT_TEST: "1",
+          PREVIEW_PUBLIC_URL:
+            "https://preview-timeout-entrypoint.test/expo",
+          PREVIEW_STARTUP_TEST_FIXTURE: "handoff-server",
+          PREVIEW_STARTUP_LIVE_START_MARKER: metroMarkerPath,
+          [setting]: value,
+        },
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+        timeout: 15_000,
+      },
+    );
+    const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
+    const expectedMessage =
+      `${setting} must be a positive finite number of milliseconds.`;
+
+    assert.notEqual(
+      result.error?.code,
+      "ETIMEDOUT",
+      `${entryPoint} did not reject ${setting}=${value} promptly`,
+    );
+    assert.notEqual(result.status, 0, output);
+    assert.match(output, new RegExp(escapeRegExp(expectedMessage)));
+    assert.equal(
+      existsSync(metroMarkerPath),
+      false,
+      `${entryPoint} started Metro before rejecting ${setting}=${value}`,
+    );
+    assert.equal(
+      existsSync(requestMarkerPath),
+      false,
+      `${entryPoint} made a public request before rejecting ${setting}=${value}`,
+    );
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+}
+
 function runLiveMetroTimeoutFixture(
   fixtureName,
   expectedResource,
   platform = "android",
+  handoffTimeoutMs = 40,
 ) {
   const directory = mkdtempSync(join(tmpdir(), "preview-live-timeout-"));
   const preloadPath = join(directory, "mock-public-preview.mjs");
@@ -175,7 +281,7 @@ globalThis.fetch = async (url, options = {}) => {
             .join(" "),
           PREVIEW_PUBLIC_URL: "https://public-preview.test/expo",
           PREVIEW_PUBLIC_TIMEOUT_MS: "100",
-          PREVIEW_HANDOFF_TIMEOUT_MS: "40",
+          PREVIEW_HANDOFF_TIMEOUT_MS: String(handoffTimeoutMs),
           PREVIEW_STARTUP_TIMEOUT_MS: "1000",
           PREVIEW_STARTUP_TEST_FIXTURE: fixtureName,
           PREVIEW_STARTUP_EXPECTED_EXPO_PLATFORM: platform,
@@ -200,11 +306,16 @@ globalThis.fetch = async (url, options = {}) => {
     assert.match(output, /public_manifest_reachability=PASS/);
     assert.match(output, /local_handoff_probe=FAIL/);
     assert.match(output, expectedResource);
-    assert.match(output, /40ms configured local handoff deadline/);
     assert.match(
       output,
-      /response headers received but body did not complete/,
+      new RegExp(`${handoffTimeoutMs}ms configured local handoff deadline`),
     );
+    if (platform === "android") {
+      assert.match(
+        output,
+        /response headers received but body did not complete/,
+      );
+    }
     assert.match(
       output,
       /Restart or repair the managed Chat App\/Expo workflow/,
@@ -1146,6 +1257,8 @@ test(
     runLiveMetroTimeoutFixture(
       "handoff-server-stall-bundle",
       /bundle response headers received but body did not complete/,
+      "android",
+      1_000,
     ),
 );
 
