@@ -1,4 +1,6 @@
 /* jshint esversion: 11 */
+/* jshint esversion: 6 */
+
 const path = require("node:path");
 
 const MAX_REQUEST_EVIDENCE_LINES = 1_000;
