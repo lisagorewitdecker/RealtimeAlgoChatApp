@@ -93,7 +93,7 @@ export default function AiPanel({ roomId: _roomId }: Props) {
       const decoder = new TextDecoder();
       let accumulated = "";
 
-      while (true) {
+      for (;;) {
         const { done, value } = await reader.read();
         if (done) break;
 
@@ -120,7 +120,7 @@ export default function AiPanel({ roomId: _roomId }: Props) {
               );
             }
             if (data.done) break;
-          } catch (parseErr) {
+          } catch {
             // ignore malformed SSE line
           }
         }

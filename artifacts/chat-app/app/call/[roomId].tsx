@@ -150,7 +150,7 @@ export default function CallScreen() {
       if (msg.type === "call-layout") {
         setCallControlsFit(callControlsFitViewport(msg as CallLayoutReport));
       }
-    } catch (_) {
+    } catch {
       // Ignore malformed bridge messages from the embedded call page.
     }
   }
