@@ -241,6 +241,66 @@ globalThis.fetch = async () => {
   }
 }
 
+function runEmptyPreviewConfigurationCli() {
+  const directory = mkdtempSync(join(tmpdir(), "preview-empty-config-cli-"));
+  const markerPath = join(directory, "unexpected-public-request.marker");
+  const preloadPath = join(directory, "reject-public-request.mjs");
+
+  writeFileSync(
+    preloadPath,
+    `import { appendFileSync } from "node:fs";
+const markerPath = ${JSON.stringify(markerPath)};
+globalThis.fetch = async () => {
+  appendFileSync(markerPath, "public request attempted\\n");
+  throw new Error("public request should not be attempted");
+};
+`,
+    "utf8",
+  );
+
+  try {
+    const result = spawnSync(process.execPath, [validatorPath], {
+      env: {
+        ...process.env,
+        NODE_OPTIONS: [
+          process.env.NODE_OPTIONS,
+          `--import ${preloadPath}`,
+        ]
+          .filter(Boolean)
+          .join(" "),
+        PREVIEW_PUBLIC_URL: "",
+        REPLIT_EXPO_DEV_DOMAIN: "preview.example.test/expo",
+        PREVIEW_PUBLIC_TIMEOUT_MS: "1000",
+        PREVIEW_HANDOFF_TIMEOUT_MS: "1000",
+        PREVIEW_STARTUP_TIMEOUT_MS: "1000",
+        PREVIEW_STARTUP_TEST_FIXTURE: "handoff-server",
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+      timeout: 5_000,
+    });
+    const output =
+      result.stdout.toString() + result.stderr.toString();
+
+    assert.notEqual(
+      result.error?.code,
+      "ETIMEDOUT",
+      "an empty PREVIEW_PUBLIC_URL left the preview validation command running indefinitely",
+    );
+    assert.notEqual(result.status, 0, output);
+    assert.match(
+      output,
+      /Public Expo preview manifest URL is not configured.*REPLIT_EXPO_DEV_DOMAIN or PREVIEW_PUBLIC_URL/,
+    );
+    assert.equal(
+      existsSync(markerPath),
+      false,
+      "an empty PREVIEW_PUBLIC_URL attempted a public request before reporting its missing configuration",
+    );
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+}
+
 test("accepts a public HTTP 200 manifest and sends the Android Expo header", async () => {
   const fetchMock = mockFetch(
     new Response(
@@ -1083,6 +1143,10 @@ test("CLI rejects malformed PREVIEW_PUBLIC_URL before making a public request", 
     "PREVIEW_PUBLIC_URL",
     "https://[invalid",
   );
+});
+
+test("CLI reports missing configuration for an empty PREVIEW_PUBLIC_URL before making a public request", () => {
+  runEmptyPreviewConfigurationCli();
 });
 
 test("CLI rejects malformed REPLIT_EXPO_DEV_DOMAIN before making a public request", () => {
