@@ -49,7 +49,7 @@ describe("createIpRateLimit", () => {
     });
   });
 
-  it("skips process-local caps in production", () => {
+  it("enforces caps in production", () => {
     vi.stubEnv("NODE_ENV", "production");
 
     const rateLimit = createIpRateLimit({
@@ -64,9 +64,11 @@ describe("createIpRateLimit", () => {
     rateLimit(request, response, next);
     rateLimit(request, response, next);
 
-    expect(next).toHaveBeenCalledTimes(2);
-    expect(response.status).not.toHaveBeenCalled();
-    expect(response.setHeader).not.toHaveBeenCalled();
-    expect(response.json).not.toHaveBeenCalled();
+    expect(next).toHaveBeenCalledTimes(1);
+    expect(response.status).toHaveBeenCalledWith(429);
+    expect(response.setHeader).toHaveBeenCalledWith("Retry-After", "60");
+    expect(response.json).toHaveBeenCalledWith({
+      error: "Too many requests. Please try again later.",
+    });
   });
 });
