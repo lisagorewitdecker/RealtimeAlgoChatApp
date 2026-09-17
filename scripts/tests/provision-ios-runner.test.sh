@@ -18,8 +18,22 @@ BASH_BIN="$(command -v bash)"
 ENV_BIN="$(command -v env)"
 GREP_BIN="$(command -v grep)"
 
-test_root="$(mktemp -d)"
-trap 'rm -rf "$test_root"' EXIT
+test_parent="$(mktemp -d)"
+test_root="$test_parent/fixtures"
+cleanup_guard="$test_parent/cleanup-must-not-escape-fixtures"
+mkdir -p "$test_root"
+printf 'keep\n' >"$cleanup_guard"
+
+cleanup_test_fixtures() {
+  rm -rf "$test_root"
+  if [[ ! -f "$cleanup_guard" ]]; then
+    echo "iOS runner provisioning test cleanup escaped its fixture directory" >&2
+    return 1
+  fi
+  rm -rf "$test_parent"
+}
+
+trap cleanup_test_fixtures EXIT
 
 fail() {
   printf '%s\n' "$*" >&2
@@ -658,5 +672,8 @@ done <<<"$expected_secrets"
 while IFS= read -r variable; do
   assert_docs_contains "$variable"
 done <<<"$expected_variables"
+
+cleanup_test_fixtures
+trap - EXIT
 
 printf 'provision-ios-runner.test.sh: all cases passed\n'

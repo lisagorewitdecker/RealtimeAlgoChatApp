@@ -5,8 +5,22 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 CHECKER="$ROOT_DIR/scripts/check-ios-preview-evidence.sh"
 VALIDATOR="$ROOT_DIR/artifacts/chat-app/scripts/validate-preview-startup.mjs"
-TEST_ROOT="$(mktemp -d)"
-trap 'rm -rf "$TEST_ROOT"' EXIT
+TEST_PARENT="$(mktemp -d)"
+TEST_ROOT="$TEST_PARENT/fixtures"
+CLEANUP_GUARD="$TEST_PARENT/cleanup-must-not-escape-fixtures"
+mkdir -p "$TEST_ROOT"
+printf 'keep\n' >"$CLEANUP_GUARD"
+
+cleanup_test_fixtures() {
+  rm -rf "$TEST_ROOT"
+  if [[ ! -f "$CLEANUP_GUARD" ]]; then
+    echo "iOS preview evidence test cleanup escaped its fixture directory" >&2
+    return 1
+  fi
+  rm -rf "$TEST_PARENT"
+}
+
+trap cleanup_test_fixtures EXIT
 
 assert_contains() {
   local output="$1"
@@ -275,5 +289,8 @@ if missing_output="$(bash "$empty_root/scripts/check-ios-preview-evidence.sh" 2>
   exit 1
 fi
 assert_contains "$missing_output" "No iOS preview evidence record was found under"
+
+cleanup_test_fixtures
+trap - EXIT
 
 printf 'iOS preview evidence regression tests passed.\n'

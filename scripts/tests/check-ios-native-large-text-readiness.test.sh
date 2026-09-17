@@ -19,8 +19,22 @@ MKDIR_BIN="$(command -v mkdir)"
 RM_BIN="$(command -v rm)"
 GREP_BIN="$(command -v grep)"
 
-test_root="$("$MKTEMP_BIN" -d)"
-trap '"$RM_BIN" -rf "$test_root"' EXIT
+test_parent="$("$MKTEMP_BIN" -d)"
+test_root="$test_parent/fixtures"
+cleanup_guard="$test_parent/cleanup-must-not-escape-fixtures"
+"$MKDIR_BIN" -p "$test_root"
+printf 'keep\n' >"$cleanup_guard"
+
+cleanup_test_fixtures() {
+  "$RM_BIN" -rf "$test_root"
+  if [[ ! -f "$cleanup_guard" ]]; then
+    echo "iOS native large-text readiness cleanup escaped its fixture directory" >&2
+    return 1
+  fi
+  "$RM_BIN" -rf "$test_parent"
+}
+
+trap cleanup_test_fixtures EXIT
 
 utilities="$test_root/utilities"
 "$MKDIR_BIN" -p "$utilities" "$test_root/home"
@@ -479,5 +493,8 @@ for summary in "$test_root"/*-summary.md; do
     assert_not_contains "$(<"$summary")" "$sentinel" "credential sentinel"
   done
 done
+
+cleanup_test_fixtures
+trap - EXIT
 
 echo "iOS native large-text readiness regression tests passed."

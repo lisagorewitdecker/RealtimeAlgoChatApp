@@ -2,8 +2,22 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-TEST_ROOT="$(mktemp -d)"
-trap 'rm -rf "$TEST_ROOT"' EXIT
+TEST_PARENT="$(mktemp -d)"
+TEST_ROOT="$TEST_PARENT/fixtures"
+CLEANUP_GUARD="$TEST_PARENT/cleanup-must-not-escape-fixtures"
+mkdir -p "$TEST_ROOT"
+printf 'keep\n' >"$CLEANUP_GUARD"
+
+cleanup_test_fixtures() {
+  rm -rf "$TEST_ROOT"
+  if [[ ! -f "$CLEANUP_GUARD" ]]; then
+    echo "Native branding command test cleanup escaped its fixture directory" >&2
+    return 1
+  fi
+  rm -rf "$TEST_PARENT"
+}
+
+trap cleanup_test_fixtures EXIT
 
 assert_contains() {
   local file="$1"
@@ -155,5 +169,8 @@ expect_incomplete_metadata_failure android-missing-declarations android \
   "Native Android metadata is missing permissions" \
   "- Permission declarations: **FAIL** (unavailable field: permissions)"
 assert_not_contains "$TEST_ROOT/android-missing-declarations-results/native-branding-summary.md" "missing: android.permission"
+
+cleanup_test_fixtures
+trap - EXIT
 
 echo "Native branding command regression tests passed."

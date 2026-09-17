@@ -3,8 +3,22 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 WRITER="$ROOT_DIR/artifacts/chat-app/e2e/native-large-text/write-review-record-template.sh"
-TEST_ROOT="$(mktemp -d)"
-trap 'rm -rf "$TEST_ROOT"' EXIT
+TEST_PARENT="$(mktemp -d)"
+TEST_ROOT="$TEST_PARENT/fixtures"
+CLEANUP_GUARD="$TEST_PARENT/cleanup-must-not-escape-fixtures"
+mkdir -p "$TEST_ROOT"
+printf 'keep\n' >"$CLEANUP_GUARD"
+
+cleanup_test_fixtures() {
+  rm -rf "$TEST_ROOT"
+  if [[ ! -f "$CLEANUP_GUARD" ]]; then
+    echo "Review-record template test cleanup escaped its fixture directory" >&2
+    return 1
+  fi
+  rm -rf "$TEST_PARENT"
+}
+
+trap cleanup_test_fixtures EXIT
 
 for platform in ios android; do
   build_id="candidate-${platform}-exact-value"
@@ -32,5 +46,8 @@ EOF
     exit 1
   fi
 done
+
+cleanup_test_fixtures
+trap - EXIT
 
 echo "Native review-record template contract tests passed."

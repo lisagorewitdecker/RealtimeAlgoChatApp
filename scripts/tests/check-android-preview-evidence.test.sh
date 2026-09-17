@@ -5,8 +5,22 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 CHECKER="$ROOT_DIR/scripts/check-android-preview-evidence.sh"
 VALIDATOR="$ROOT_DIR/artifacts/chat-app/scripts/validate-preview-startup.mjs"
-TEST_ROOT="$(mktemp -d)"
-trap 'rm -rf "$TEST_ROOT"' EXIT
+TEST_PARENT="$(mktemp -d)"
+TEST_ROOT="$TEST_PARENT/fixtures"
+CLEANUP_GUARD="$TEST_PARENT/cleanup-must-not-escape-fixtures"
+mkdir -p "$TEST_ROOT"
+printf 'keep\n' >"$CLEANUP_GUARD"
+
+cleanup_test_fixtures() {
+  rm -rf "$TEST_ROOT"
+  if [[ ! -f "$CLEANUP_GUARD" ]]; then
+    echo "Android preview evidence test cleanup escaped its fixture directory" >&2
+    return 1
+  fi
+  rm -rf "$TEST_PARENT"
+}
+
+trap cleanup_test_fixtures EXIT
 
 assert_contains() {
   local haystack="$1"
@@ -613,5 +627,8 @@ if unrelated_output="$(bash "$CHECKER" "$unrelated_blocked" 2>&1)"; then
   exit 1
 fi
 assert_contains "$unrelated_output" "required Android preview row"
+
+cleanup_test_fixtures
+trap - EXIT
 
 echo "Android preview evidence regression tests passed."

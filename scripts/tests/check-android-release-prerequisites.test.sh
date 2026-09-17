@@ -13,8 +13,22 @@ MKTEMP_BIN="$(command -v mktemp)"
 RM_BIN="$(command -v rm)"
 GREP_BIN="$(command -v grep)"
 
-test_root="$("$MKTEMP_BIN" -d)"
-trap '"$RM_BIN" -rf "$test_root"' EXIT
+test_parent="$("$MKTEMP_BIN" -d)"
+test_root="$test_parent/fixtures"
+cleanup_guard="$test_parent/cleanup-must-not-escape-fixtures"
+"$MKDIR_BIN" -p "$test_root"
+printf 'keep\n' >"$cleanup_guard"
+
+cleanup_test_fixtures() {
+  "$RM_BIN" -rf "$test_root"
+  if [[ ! -f "$cleanup_guard" ]]; then
+    echo "Android preflight test cleanup escaped its fixture directory" >&2
+    return 1
+  fi
+  "$RM_BIN" -rf "$test_parent"
+}
+
+trap cleanup_test_fixtures EXIT
 "$MKDIR_BIN" -p "$test_root/sdk" "$test_root/home"
 
 make_utilities() {
@@ -262,5 +276,8 @@ assert_contains "$missing_output" "Required command is missing: sdkmanager"
 assert_contains "$missing_output" "Required Android SDK tool is missing: aapt2."
 assert_contains "$missing_output" "Required release value is missing: NATIVE_SMOKE_APP_ID"
 assert_not_contains "$missing_output" "secret-value-must-not-print"
+
+cleanup_test_fixtures
+trap - EXIT
 
 echo "Android preflight regression tests passed."
