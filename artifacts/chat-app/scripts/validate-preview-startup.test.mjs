@@ -105,7 +105,11 @@ function mockFetch(response) {
   };
 }
 
-function runLiveMetroTimeoutFixture(fixtureName, expectedResource) {
+function runLiveMetroTimeoutFixture(
+  fixtureName,
+  expectedResource,
+  platform = "android",
+) {
   const directory = mkdtempSync(join(tmpdir(), "preview-live-timeout-"));
   const preloadPath = join(directory, "mock-public-preview.mjs");
   writeFileSync(
@@ -130,24 +134,29 @@ globalThis.fetch = async (url, options = {}) => {
 
   try {
     const startedAt = Date.now();
-    const result = spawnSync(process.execPath, [validatorPath], {
-      env: {
-        ...process.env,
-        NODE_OPTIONS: [
-          process.env.NODE_OPTIONS,
-          `--import ${preloadPath}`,
-        ]
-          .filter(Boolean)
-          .join(" "),
-        PREVIEW_PUBLIC_URL: "https://public-preview.test/expo",
-        PREVIEW_PUBLIC_TIMEOUT_MS: "100",
-        PREVIEW_HANDOFF_TIMEOUT_MS: "40",
-        PREVIEW_STARTUP_TIMEOUT_MS: "1000",
-        PREVIEW_STARTUP_TEST_FIXTURE: fixtureName,
+    const result = spawnSync(
+      process.execPath,
+      [validatorPath, "--platform", platform],
+      {
+        env: {
+          ...process.env,
+          NODE_OPTIONS: [
+            process.env.NODE_OPTIONS,
+            `--import ${preloadPath}`,
+          ]
+            .filter(Boolean)
+            .join(" "),
+          PREVIEW_PUBLIC_URL: "https://public-preview.test/expo",
+          PREVIEW_PUBLIC_TIMEOUT_MS: "100",
+          PREVIEW_HANDOFF_TIMEOUT_MS: "40",
+          PREVIEW_STARTUP_TIMEOUT_MS: "1000",
+          PREVIEW_STARTUP_TEST_FIXTURE: fixtureName,
+          PREVIEW_STARTUP_EXPECTED_EXPO_PLATFORM: platform,
+        },
+        stdio: ["ignore", "pipe", "pipe"],
+        timeout: 4_000,
       },
-      stdio: ["ignore", "pipe", "pipe"],
-      timeout: 4_000,
-    });
+    );
     const output =
       result.stdout.toString() + result.stderr.toString();
 
@@ -1110,6 +1119,17 @@ test(
     runLiveMetroTimeoutFixture(
       "handoff-server-stall-bundle",
       /bundle response headers received but body did not complete/,
+    ),
+);
+
+test(
+  "live Metro iOS bundle timeout exits with the timed-out resource and recovery guidance",
+  { timeout: 5_000 },
+  () =>
+    runLiveMetroTimeoutFixture(
+      "handoff-server-stall-bundle",
+      /bundle request did not complete/,
+      "ios",
     ),
 );
 

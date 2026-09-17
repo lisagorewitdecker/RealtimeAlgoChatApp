@@ -114,8 +114,19 @@ if (fileURLToPath(import.meta.url) === process.argv[1]) {
     }
     const stallManifest = fixtureName === "handoff-server-stall-manifest";
     const stallBundle = fixtureName === "handoff-server-stall-bundle";
+    const expectedExpoPlatform =
+      process.env.PREVIEW_STARTUP_EXPECTED_EXPO_PLATFORM ?? "android";
     const port = Number(process.env.PORT);
     const server = createServer((request, response) => {
+      if (request.headers["expo-platform"] !== expectedExpoPlatform) {
+        response.statusCode = 400;
+        response.end(
+          `Expected expo-platform header ${expectedExpoPlatform}, received ` +
+            `${request.headers["expo-platform"] ?? "missing"}`,
+        );
+        return;
+      }
+
       if (request.url === "/") {
         response.writeHead(200, { "content-type": "application/json" });
         if (stallManifest) {
