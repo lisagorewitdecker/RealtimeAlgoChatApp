@@ -145,6 +145,42 @@ assert_contains "$non_json_direct_output" \
   "Preview handoff preflight JSON is not valid JSON."
 assert_not_contains "$non_json_direct_output" "$non_json_sentinel"
 
+unreadable_json_sentinel="android-preview-unreadable-preflight-sentinel"
+unreadable_root="$TEST_ROOT/unreadable-json"
+unreadable_record="$unreadable_root/validation-record.md"
+unreadable_json_path="$unreadable_root/android-preview-preflight.json"
+mkdir -p "$unreadable_root"
+cp "$blocked_record" "$unreadable_record"
+cat >"$unreadable_json_path" <<EOF
+{"schema":"android-preview-handoff-preflight/v1","platform":"android","sentinel":"$unreadable_json_sentinel"}
+EOF
+chmod 000 "$unreadable_json_path"
+
+if ((EUID == 0)); then
+  if ! command -v runuser >/dev/null 2>&1; then
+    printf 'Unreadable Android preflight fixture requires runuser when tests run as root.\n' >&2
+    exit 1
+  fi
+  # Root can bypass mode bits, so run the checker as an unprivileged account.
+  chmod 755 "$TEST_ROOT" "$unreadable_root"
+  unreadable_command=(
+    runuser --user nobody -- bash "$CHECKER" "$unreadable_record"
+    "$unreadable_json_path"
+  )
+else
+  unreadable_command=(
+    bash "$CHECKER" "$unreadable_record" "$unreadable_json_path"
+  )
+fi
+if unreadable_output="$("${unreadable_command[@]}" 2>&1)"; then
+  printf 'Unreadable Android preflight JSON unexpectedly passed.\n' >&2
+  exit 1
+fi
+assert_contains "$unreadable_output" "does not satisfy the redacted schema"
+assert_not_contains "$unreadable_output" "$unreadable_json_sentinel"
+assert_not_contains "$unreadable_output" "$unreadable_json_path"
+assert_not_contains "$unreadable_output" "EACCES"
+
 duplicate_json_sentinel="duplicate-preflight-secret"
 cat >"$json_contract_path" <<EOF
 {"schema":"android-preview-handoff-preflight/v1","schema":"$duplicate_json_sentinel","platform":"android","boundaries":{"publicManifestReachability":{"status":"PASS","status":"FAIL","evidence":"public manifest HTTP 200 (128 bytes)"},"localHandoffProbe":{"status":"NOT_RUN","evidence":"Local manifest/bundle probe not run — no successful probe result was recorded"},"expoGoLaunch":{"status":"NOT_ASSESSED","evidence":"Requires a physical Android phone running stock Expo Go."},"serverNativeRequestEvidence":{"status":"NOT_ASSESSED","evidence":"Requires filtered Metro or API evidence from that physical Expo Go session."}}}
