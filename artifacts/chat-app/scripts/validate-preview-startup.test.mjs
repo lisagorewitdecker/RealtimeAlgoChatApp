@@ -785,6 +785,98 @@ globalThis.fetch = async (url, options = {}) => {
 );
 
 test(
+  "CLI keeps a failed public boundary and record-save recovery clear when output is unwritable",
+  { timeout: 5_000 },
+  () => {
+    const directory = mkdtempSync(
+      join(tmpdir(), "preview-handoff-unwritable-record-cli-"),
+    );
+    const stdoutPath = join(directory, "validator.stdout.log");
+    const stderrPath = join(directory, "validator.stderr.log");
+    const preloadPath = join(directory, "stall-public-fetch.mjs");
+    writeFileSync(
+      preloadPath,
+      `globalThis.fetch = async (url, options = {}) => {
+  if (String(url).startsWith("https://public-preview.test/")) {
+    await new Promise((resolve, reject) => {
+      const signal = options.signal;
+      if (!signal) {
+        reject(new Error("test fetch requires an abort signal"));
+        return;
+      }
+      signal.addEventListener(
+        "abort",
+        () => reject(new Error("response body contains private-secret")),
+        { once: true },
+      );
+    });
+  }
+  throw new Error("unexpected request URL https://private.example.test/path");
+};
+`,
+      "utf8",
+    );
+
+    try {
+      const stdout = openSync(stdoutPath, "w");
+      const stderr = openSync(stderrPath, "w");
+      let result;
+      try {
+        result = spawnSync(
+          process.execPath,
+          [
+            validatorPath,
+            "--platform",
+            "android",
+            "--record-output",
+            "/dev/null/unwritable-preview-handoff.json",
+          ],
+          {
+            env: {
+              ...process.env,
+              NODE_OPTIONS: [
+                process.env.NODE_OPTIONS,
+                `--import ${preloadPath}`,
+              ]
+                .filter(Boolean)
+                .join(" "),
+              PREVIEW_PUBLIC_URL:
+                "https://public-preview.test/private-path?token=private-secret",
+              PREVIEW_PUBLIC_TIMEOUT_MS: "25",
+              PREVIEW_STARTUP_TIMEOUT_MS: "2000",
+              PREVIEW_STARTUP_TEST_FIXTURE: "handoff-server",
+            },
+            stdio: ["ignore", stdout, stderr],
+          },
+        );
+      } finally {
+        closeSync(stdout);
+        closeSync(stderr);
+      }
+      const output =
+        readFileSync(stdoutPath, "utf8") + readFileSync(stderrPath, "utf8");
+
+      assert.notEqual(result.status, 0, output);
+      assert.match(output, /public_manifest_reachability=FAIL/);
+      assert.match(
+        output,
+        /Preview handoff preflight failed at the public manifest probe/,
+      );
+      assert.match(
+        output,
+        /Recovery: rerun with --record-output set to a writable JSON file, or omit --record-output/,
+      );
+      assert.doesNotMatch(
+        output,
+        /\/dev\/null|public-preview\.test|private-path|private-secret|token=|private\.example\.test|response body contains private-secret/i,
+      );
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
   "CLI saves a redacted failed local boundary when the local bundle probe times out",
   { timeout: 5_000 },
   () => {

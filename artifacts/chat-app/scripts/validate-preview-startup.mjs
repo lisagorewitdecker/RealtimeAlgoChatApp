@@ -290,6 +290,19 @@ function safePreflightFailure(status) {
   return `${status} — no successful probe result was recorded`;
 }
 
+function formatRecordWriteFailure(phase) {
+  const boundary =
+    phase === "public"
+      ? "public manifest probe"
+      : "local manifest/bundle probe";
+  return (
+    `Preview handoff preflight failed at the ${boundary}. ` +
+    "The failed-boundary record could not be saved. " +
+    "Recovery: rerun with --record-output set to a writable JSON file, " +
+    "or omit --record-output."
+  );
+}
+
 function isPlainObject(value) {
   return (
     value !== null &&
@@ -1144,10 +1157,7 @@ async function validateLivePreview(
             try {
               await writeHandoffPreflight(recordOutput, record);
             } catch (recordError) {
-              finalError = new AggregateError(
-                [error, recordError],
-                "Preview handoff preflight failed and its record could not be written.",
-              );
+              finalError = new Error(formatRecordWriteFailure(phase));
             }
           }
           finish(() => {
