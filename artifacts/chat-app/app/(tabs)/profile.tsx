@@ -40,12 +40,14 @@ type AccountSearchResult = {
 
 type ModerationHistoryEntry = {
   id: number;
-  action: "ban" | "restore";
+  action: "ban" | "restore" | "message_delete";
   actorUserId: string;
   actorUsername: string;
-  targetUserId: string;
-  targetUsername: string;
+  targetUserId: string | null;
+  targetUsername: string | null;
   targetEmail: string | null;
+  roomId: string | null;
+  messageId: string | null;
   createdAt: string;
 };
 
@@ -1093,8 +1095,8 @@ export default function ProfileScreen() {
             ) : historyEntries.length === 0 ? (
               <Text style={[styles.moderationHint, { color: colors.mutedForeground }]}>
                 {appliedHistoryFilters.targetUserId || appliedHistoryFilters.actorUserId
-                  ? "No ban or restore actions match these filters."
-                  : "No ban or restore actions yet."}
+                  ? "No moderation actions match these filters."
+                  : "No moderation actions yet."}
               </Text>
             ) : (
               <>
@@ -1115,16 +1117,22 @@ export default function ProfileScreen() {
                         >
                           {entry.actorUsername}
                         </Text>
-                        {entry.action === "ban" ? " banned " : " restored "}
-                        <Text
-                          testID={`moderation-history-entry-${entry.id}-filter-target`}
-                          onPress={() => filterHistoryByTarget(entry.targetUserId)}
-                          accessibilityRole="button"
-                          accessibilityLabel={`Filter moderation history by account ${entry.targetUsername}`}
-                          style={[styles.historyActorLink, { color: colors.primary }]}
-                        >
-                          {entry.targetUsername}
-                        </Text>
+                        {entry.action === "message_delete" ? (
+                          ` deleted message ${entry.messageId ?? "unknown"} from room ${entry.roomId ?? "unknown"}`
+                        ) : (
+                          <>
+                            {entry.action === "ban" ? " banned " : " restored "}
+                            <Text
+                              testID={`moderation-history-entry-${entry.id}-filter-target`}
+                              onPress={() => entry.targetUserId && filterHistoryByTarget(entry.targetUserId)}
+                              accessibilityRole="button"
+                              accessibilityLabel={`Filter moderation history by account ${entry.targetUsername ?? "unknown"}`}
+                              style={[styles.historyActorLink, { color: colors.primary }]}
+                            >
+                              {entry.targetUsername ?? "Unknown account"}
+                            </Text>
+                          </>
+                        )}
                       </Text>
                       <Text style={[styles.historyMeta, { color: colors.mutedForeground }]}>
                         {new Date(entry.createdAt).toLocaleString()}

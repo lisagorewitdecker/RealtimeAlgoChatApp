@@ -339,6 +339,38 @@ describe("profile moderation controls", () => {
     expect(queryByTestId("moderation-search-input")).toBeNull();
   });
 
+  it("shows who deleted a message with its room and message IDs", async () => {
+    mockUseApp.mockReturnValue({ ...appValue, isAdmin: true });
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        actions: [
+          {
+            id: 9,
+            action: "message_delete",
+            actorUserId: "user-admin",
+            actorUsername: "Ada",
+            targetUserId: null,
+            targetUsername: null,
+            targetEmail: null,
+            roomId: "room-123",
+            messageId: "message-456",
+            createdAt: "2026-09-17T12:00:00.000Z",
+          },
+        ],
+        nextCursor: null,
+      }),
+    });
+
+    const { findByTestId, getByText, queryByTestId } = render(<ProfileScreen />);
+
+    expect(await findByTestId("moderation-history-entry-9")).toBeTruthy();
+    expect(
+      getByText(" deleted message message-456 from room room-123", { exact: false }),
+    ).toBeTruthy();
+    expect(queryByTestId("moderation-history-entry-9-filter-target")).toBeNull();
+  });
+
   it("lets an administrator find and select an account before banning it", async () => {
     mockUseApp.mockReturnValue({ ...appValue, isAdmin: true });
     mockFetch.mockImplementation(async (url: string) => {
