@@ -462,6 +462,26 @@ test("invalid Node range guard blocks release jobs before setup or publish work"
     /needs\.mobile-release-node-range\.result == 'success'/,
     "the release gate must not start after the Node range guard fails",
   );
+  assert.match(
+    String(workflow.jobs?.["mobile-release-gate"]?.if),
+    /needs\.native-ios\.result == 'success'/,
+    "the release gate must only start after the iOS native smoke job succeeds",
+  );
+  assert.match(
+    String(workflow.jobs?.["mobile-release-gate"]?.if),
+    /needs\.native-android\.result == 'success'/,
+    "the release gate must only start after the Android native smoke job succeeds",
+  );
+  assert.match(
+    String(workflow.jobs?.["mobile-release-gate"]?.if),
+    /needs\.idle-profile-registration\.result == 'success'/,
+    "the release gate must only start after idle-profile registration succeeds",
+  );
+  assert.match(
+    String(workflow.jobs?.["mobile-release-gate"]?.if),
+    /needs\.native-evidence-summary-regression\.result == 'success'/,
+    "the release gate must only start after hosted summary regression succeeds",
+  );
   assert.doesNotMatch(
     rejectStep?.run,
     /secrets\./,
