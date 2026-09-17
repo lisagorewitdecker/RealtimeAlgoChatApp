@@ -798,6 +798,11 @@ test("Android preview evidence runs for every pull request", () => {
     "mobile release workflow must support pull_request",
   );
   assert.equal(
+    workflow.on.pull_request?.paths,
+    undefined,
+    "the Android preview evidence check must not use a pull_request path filter",
+  );
+  assert.equal(
     workflow.on.pull_request?.["paths-ignore"],
     undefined,
     "the Android preview evidence check must not use pull_request paths-ignore rules",
@@ -815,6 +820,11 @@ test("iOS preview evidence runs for every pull request", () => {
   assert.ok(
     Object.prototype.hasOwnProperty.call(workflow.on ?? {}, "pull_request"),
     "mobile release workflow must support pull_request",
+  );
+  assert.equal(
+    workflow.on.pull_request?.paths,
+    undefined,
+    "the iOS preview evidence check must not use a pull_request path filter",
   );
   assert.equal(
     workflow.on.pull_request?.["paths-ignore"],

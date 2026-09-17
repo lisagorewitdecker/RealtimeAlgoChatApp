@@ -1492,6 +1492,11 @@ test("Android preview evidence keeps its pull-request validation and privacy con
     "the release workflow must support pull_request",
   );
   assert.equal(
+    workflow.on.pull_request?.paths,
+    undefined,
+    "the Android preview evidence check must not use a pull_request path filter",
+  );
+  assert.equal(
     workflow.on.pull_request?.["paths-ignore"],
     undefined,
     "the Android preview evidence check must not use pull_request paths-ignore rules",
