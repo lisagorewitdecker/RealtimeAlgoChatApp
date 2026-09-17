@@ -472,11 +472,20 @@ jobs:
 
       - name: Verify blocked native evidence summary
         shell: bash
+        env:
+          REVIEWED_REF: ${{ github.ref }}
         run: |
           set -euo pipefail
           blocked_root="$(mktemp -d)"
           summary_path="$(mktemp)"
           trap 'rm -rf "$blocked_root" "$summary_path"' EXIT
+          resolved_commit_sha="$(git rev-parse --verify HEAD)"
+
+          {
+            echo "## Reviewed release revision"
+            printf -- '- Checked ref: `%s`\n' "$REVIEWED_REF"
+            printf -- '- Resolved commit SHA: `%s`\n' "$resolved_commit_sha"
+          } >> "$GITHUB_STEP_SUMMARY"
 
           if GITHUB_STEP_SUMMARY="$summary_path" bash scripts/run-untrusted-checker.sh bash scripts/check-native-large-text-evidence.sh "$blocked_root"; then
             echo "The blocked native evidence scenario unexpectedly passed." >&2
@@ -531,11 +540,20 @@ jobs:
 
       - name: Verify failed platform artifact download summary
         shell: bash
+        env:
+          REVIEWED_REF: ${{ github.ref }}
         run: |
           set -euo pipefail
           failed_download_root="$(mktemp -d)"
           summary_path="$(mktemp)"
           trap 'rm -rf "$failed_download_root" "$summary_path"' EXIT
+          resolved_commit_sha="$(git rev-parse --verify HEAD)"
+
+          {
+            echo "## Reviewed release revision"
+            printf -- '- Checked ref: `%s`\n' "$REVIEWED_REF"
+            printf -- '- Resolved commit SHA: `%s`\n' "$resolved_commit_sha"
+          } >> "$GITHUB_STEP_SUMMARY"
 
           if \
             GITHUB_STEP_SUMMARY="$summary_path" \
@@ -598,11 +616,20 @@ jobs:
 
       - name: Verify both platform artifact download failures have recovery guidance
         shell: bash
+        env:
+          REVIEWED_REF: ${{ github.ref }}
         run: |
           set -euo pipefail
           failed_download_root="$(mktemp -d)"
           summary_path="$(mktemp)"
           trap 'rm -rf "$failed_download_root" "$summary_path"' EXIT
+          resolved_commit_sha="$(git rev-parse --verify HEAD)"
+
+          {
+            echo "## Reviewed release revision"
+            printf -- '- Checked ref: `%s`\n' "$REVIEWED_REF"
+            printf -- '- Resolved commit SHA: `%s`\n' "$resolved_commit_sha"
+          } >> "$GITHUB_STEP_SUMMARY"
 
           if \
             GITHUB_STEP_SUMMARY="$summary_path" \
@@ -661,6 +688,8 @@ jobs:
 
       - name: Verify temporary native evidence artifact outage recovers on retry
         shell: bash
+        env:
+          REVIEWED_REF: ${{ github.ref }}
         run: |
           set -euo pipefail
           recovery_root="$(mktemp -d)"
@@ -668,6 +697,13 @@ jobs:
           failed_retry_summary_path="$(mktemp)"
           attempt_file="$recovery_root/ios-download-attempt"
           trap 'rm -rf "$recovery_root" "$pass_summary_path" "$failed_retry_summary_path"' EXIT
+          resolved_commit_sha="$(git rev-parse --verify HEAD)"
+
+          {
+            echo "## Reviewed release revision"
+            printf -- '- Checked ref: `%s`\n' "$REVIEWED_REF"
+            printf -- '- Resolved commit SHA: `%s`\n' "$resolved_commit_sha"
+          } >> "$GITHUB_STEP_SUMMARY"
 
           write_controlled_evidence() {
             local platform="$1"
@@ -1409,11 +1445,23 @@ jobs:
         if: ${{ always() }}
         continue-on-error: true
         env:
+          REVIEWED_REF: ${{ github.ref }}
           NATIVE_IOS_EVIDENCE_ARTIFACT_URL: ${{ needs.native-ios.outputs.native_evidence_artifact_url }}
           NATIVE_ANDROID_EVIDENCE_ARTIFACT_URL: ${{ needs.native-android.outputs.native_evidence_artifact_url }}
           NATIVE_IOS_EVIDENCE_DOWNLOAD_RESULT: ${{ steps.download-ios-native-smoke.outcome == 'success' && 'success' || steps.retry-ios-native-smoke.outcome }}
           NATIVE_ANDROID_EVIDENCE_DOWNLOAD_RESULT: ${{ steps.download-android-native-smoke.outcome == 'success' && 'success' || steps.retry-android-native-smoke.outcome }}
-        run: bash scripts/run-untrusted-checker.sh bash scripts/check-native-large-text-evidence.sh
+        shell: bash
+        run: |
+          set -euo pipefail
+          resolved_commit_sha="$(git rev-parse --verify HEAD)"
+
+          {
+            echo "## Reviewed release revision"
+            printf -- '- Checked ref: `%s`\n' "$REVIEWED_REF"
+            printf -- '- Resolved commit SHA: `%s`\n' "$resolved_commit_sha"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          bash scripts/run-untrusted-checker.sh bash scripts/check-native-large-text-evidence.sh
 
       - name: Block release unless both native checks pass
         if: ${{ always() }}
@@ -1621,10 +1669,22 @@ jobs:
 
       - name: Require approved iOS and Android evidence
         env:
+          REVIEWED_REF: ${{ github.ref }}
           NATIVE_EVIDENCE_REQUIRE_APPROVAL: "1"
           NATIVE_IOS_EVIDENCE_ARTIFACT_URL: ${{ needs.mobile-release-gate.outputs.ios_native_evidence_artifact_url }}
           NATIVE_ANDROID_EVIDENCE_ARTIFACT_URL: ${{ needs.mobile-release-gate.outputs.android_native_evidence_artifact_url }}
-        run: bash scripts/run-untrusted-checker.sh bash scripts/check-native-large-text-evidence.sh
+        shell: bash
+        run: |
+          set -euo pipefail
+          resolved_commit_sha="$(git rev-parse --verify HEAD)"
+
+          {
+            echo "## Reviewed release revision"
+            printf -- '- Checked ref: `%s`\n' "$REVIEWED_REF"
+            printf -- '- Resolved commit SHA: `%s`\n' "$resolved_commit_sha"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          bash scripts/run-untrusted-checker.sh bash scripts/check-native-large-text-evidence.sh
 
       - name: Verify publishing inputs
         env:

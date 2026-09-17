@@ -795,9 +795,11 @@ test("failed native evidence checks remain reviewable before blocking release", 
     true,
     "native evidence validation must preserve its summary before the blocker runs",
   );
-  assert.equal(
+  assert.match(
     evidenceStep.run,
-    `bash ${untrustedCheckerWrapperScript} bash ${nativeEvidenceCheckerScript}`,
+    new RegExp(
+      `bash ${untrustedCheckerWrapperScript.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} bash ${nativeEvidenceCheckerScript.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`,
+    ),
     "native evidence validation must use the untrusted checker boundary",
   );
   assert.equal(
@@ -1056,9 +1058,11 @@ test("failed native evidence checks remain reviewable before blocking release", 
     true,
     "native evidence validation must preserve its summary before the blocker runs",
   );
-  assert.equal(
+  assert.match(
     evidenceStep.run,
-    `bash ${untrustedCheckerWrapperScript} bash ${nativeEvidenceCheckerScript}`,
+    new RegExp(
+      `bash ${untrustedCheckerWrapperScript.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} bash ${nativeEvidenceCheckerScript.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`,
+    ),
     "native evidence validation must use the untrusted checker boundary",
   );
 
@@ -1299,6 +1303,9 @@ function summaryEnvExpressionProblem(expression, { jobId, job }) {
   const trimmed = expression.trim();
   if (
     /^steps\.[\w-]+\.(outcome|conclusion)$/.test(trimmed) ||
+    /^steps\.[\w-]+\.(outcome|conclusion)\s*==\s*'[^']*'\s*&&\s*'[^']*'\s*\|\|\s*steps\.[\w-]+\.(outcome|conclusion)$/.test(
+      trimmed,
+    ) ||
     /^needs\.[\w-]+\.result$/.test(trimmed) ||
     /^needs\.[\w-]+\.outputs\.[\w-]+$/.test(trimmed) ||
     trimmed === "job.status" ||
@@ -4148,4 +4155,47 @@ test("native evidence checker output is isolated from workflow commands", () => 
     /::stop-commands::[0-9a-f-]+\n::warning::untrusted checker output\n::[0-9a-f-]+::/,
     "the wrapper must keep checker output visible between the command-boundary markers",
   );
+});
+
+test("hosted native evidence summaries record the checked revision before untrusted checks", () => {
+  const checkerCall = `bash ${nativeEvidenceCheckerScript}`;
+  const checkerCallers = listSteps().filter(({ step }) =>
+    String(step.run ?? "").includes(checkerCall),
+  );
+
+  assert.equal(
+    checkerCallers.length,
+    6,
+    "every hosted native evidence summary caller must be covered",
+  );
+
+  for (const { label, step } of checkerCallers) {
+    assert.equal(
+      step.env?.REVIEWED_REF,
+      "${{ github.ref }}",
+      `${label} must use the trusted workflow ref for revision metadata`,
+    );
+
+    const run = String(step.run);
+    const revisionMetadataIndex = run.indexOf(
+      'echo "## Reviewed release revision"',
+    );
+    const checkerIndex = run.indexOf(checkerCall);
+    assert.ok(
+      revisionMetadataIndex >= 0 && revisionMetadataIndex < checkerIndex,
+      `${label} must write trusted revision metadata before the checker can fail`,
+    );
+    assert.match(
+      run,
+      /resolved_commit_sha="\$\(git rev-parse --verify HEAD\)"/,
+      `${label} must resolve the checked commit from the checkout`,
+    );
+    assert.match(run, /Checked ref: `%s`/);
+    assert.match(run, /Resolved commit SHA: `%s`/);
+    assert.doesNotMatch(
+      run,
+      /summary_path.*(?:REVIEWED_REF|resolved_commit_sha)|(?:REVIEWED_REF|resolved_commit_sha).*summary_path/,
+      `${label} must not derive revision metadata from checker output`,
+    );
+  }
 });
