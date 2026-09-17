@@ -620,6 +620,30 @@ test("candidate build IDs use non-secret variables or reusable-workflow inputs",
 test("idle-profile registration check blocks release and reports its result", () => {
   const idleJob = workflow.jobs["idle-profile-registration"];
   assert.ok(idleJob, "release workflow must define the idle-profile job");
+  const configStep = idleJob.steps.find(
+    (step) => step.name === "Determine idle-profile secret configuration",
+  );
+  assert.ok(
+    configStep,
+    "idle-profile job must determine its secret configuration before conditional checks",
+  );
+  assert.equal(configStep.id, "idle-profile-config");
+  assert.equal(configStep.env.E2E_CHAT_URL, "${{ secrets.E2E_CHAT_URL }}");
+  assert.equal(configStep.env.E2E_API_URL, "${{ secrets.E2E_API_URL }}");
+  assert.equal(
+    configStep.env.CLERK_PUBLISHABLE_KEY,
+    "${{ secrets.CLERK_PUBLISHABLE_KEY }}",
+  );
+  assert.equal(configStep.env.CLERK_SECRET_KEY, "${{ secrets.CLERK_SECRET_KEY }}");
+  assert.equal(configStep.env.DATABASE_URL, "${{ secrets.DATABASE_URL }}");
+  assert.match(
+    configStep.run,
+    /echo "browser_targets_configured=true" >> "\$GITHUB_OUTPUT"/,
+  );
+  assert.match(
+    configStep.run,
+    /echo "release_check_configured=true" >> "\$GITHUB_OUTPUT"/,
+  );
 
   const preflightStep = idleJob.steps.find(
     (step) => step.name === "Verify idle-profile browser targets",
@@ -627,6 +651,11 @@ test("idle-profile registration check blocks release and reports its result", ()
   assert.ok(
     preflightStep,
     "idle-profile job must preflight its browser targets",
+  );
+  assert.equal(
+    preflightStep.if,
+    "${{ steps.idle-profile-config.outputs.browser_targets_configured == 'true' }}",
+    "preflight must run only when browser target configuration is present",
   );
   assert.equal(preflightStep.env.E2E_CHAT_URL, "${{ secrets.E2E_CHAT_URL }}");
   assert.equal(preflightStep.env.E2E_API_URL, "${{ secrets.E2E_API_URL }}");
@@ -657,6 +686,11 @@ test("idle-profile registration check blocks release and reports its result", ()
     (step) => step.name === "Run idle-profile registration release check",
   );
   assert.ok(runStep, "idle-profile job must run the browser check");
+  assert.equal(
+    runStep.if,
+    "${{ steps.idle-profile-config.outputs.release_check_configured == 'true' }}",
+    "idle-profile Playwright check must run only when release-check configuration is present",
+  );
   assert.ok(
     idleJob.steps.indexOf(preflightStep) < idleJob.steps.indexOf(runStep),
     "both browser targets must be verified before Playwright starts",
@@ -737,6 +771,7 @@ test("idle-profile registration check blocks release and reports its result", ()
   assert.equal(summaryStep.if, "${{ always() }}");
   assert.match(summaryStep.run, /## Idle profile registration/);
   assert.match(summaryStep.run, /Status: \*\*PASS\*\*/);
+  assert.match(summaryStep.run, /Status: \*\*SKIP\*\*/);
   assert.match(summaryStep.run, /Status: \*\*FAIL\*\*/);
 
   const gate = workflow.jobs["mobile-release-gate"];

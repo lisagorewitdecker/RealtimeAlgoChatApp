@@ -1,3 +1,5 @@
+/* jshint esversion: 6 */
+
 // Listed only by the Android project in jest.config.js.
 //
 // jest-expo's Android preset makes react-native resolve to its Android

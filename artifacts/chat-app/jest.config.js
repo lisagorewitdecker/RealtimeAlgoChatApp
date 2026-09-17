@@ -1,3 +1,5 @@
+/* jshint esversion: 6 */
+
 // The Chat App suite runs as two Jest projects.
 //
 // jest-expo's default preset resolves react-native to its iOS build, so an
