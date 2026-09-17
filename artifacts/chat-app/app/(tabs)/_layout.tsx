@@ -30,21 +30,26 @@ function NativeTabLayout() {
 }
 
 /**
- * The classic tab bar is absolutely positioned over the screen and see-through
- * on every platform, so the chat list and profile show through it as they
- * scroll. Screens still reserve its measured height (`useTabBarContentInset`)
- * because whatever ends up under the bar is dimmed and cannot be tapped.
+ * The classic tab bar is absolutely positioned over the screen. Screens
+ * reserve its measured height (`useTabBarContentInset`) because whatever ends
+ * up under the bar is covered or dimmed and cannot be tapped.
  *
- * With the Reduce transparency accessibility option (the in-app toggle, which
- * follows iOS's system Reduce Transparency setting until the user changes it)
- * the bar is instead the opaque palette `background` on every platform: no
- * blur, no translucent panel. It keeps its hairline border, and it stays
- * absolutely positioned so the height the screens reserve does not change.
+ * Each platform draws the surface differently:
  *
- * Otherwise iOS draws the surface with a native blur. Android and web draw the
- * palette's translucent `tabBarBackground` panel behind a hairline border
- * instead of expo-blur's Android blur (`blurMethod="dimezisBlurView"`), which
- * was evaluated and left out:
+ * - iOS keeps the bar clear and draws a native blur behind the tab items, so
+ *   the chat list shows through it as it scrolls.
+ * - Android paints the bar itself with the opaque palette background and
+ *   draws no background element at all.
+ * - Web keeps the bar clear on a fixed 84pt height and draws the palette's
+ *   translucent `tabBarBackground` panel behind a hairline border.
+ *
+ * Reduce transparency (the in-app toggle, which follows iOS's system setting
+ * until the user changes it) replaces each surface with the opaque palette
+ * background and removes the blur or panel. The bar remains absolutely
+ * positioned so the reserved height does not change.
+ *
+ * expo-blur's Android blur (`blurMethod="dimezisBlurView"`) was evaluated and
+ * left out:
  *
  * - It only blurs when a `BlurTargetView` wraps the content and its ref is
  *   passed as `blurTarget`; without one the native side silently falls back
@@ -54,7 +59,7 @@ function NativeTabLayout() {
  * - It re-blurs the target on every frame the target redraws (list
  *   scrolling), on the CPU below Android 12 (API 31), which Expo documents as
  *   a performance risk; the API 31+ variant falls back to the tinted panel on
- *   older devices anyway, so the panel has to look right regardless.
+ *   older devices anyway, so the solid bar has to look right regardless.
  * - No Android device or emulator is reachable from this workspace to
  *   measure either path, so the bounded-cost panel ships until a device pass
  *   shows the blur is worth it.
@@ -66,6 +71,7 @@ function ClassicTabLayout() {
   const isDark = colorScheme === "dark";
   const isIOS = Platform.OS === "ios";
   const isWeb = Platform.OS === "web";
+  const isAndroid = Platform.OS === "android";
 
   return (
     <Tabs
@@ -75,17 +81,17 @@ function ClassicTabLayout() {
         headerShown: false,
         tabBarStyle: {
           position: "absolute",
-          // The see-through surface comes from `tabBarBackground` on every
-          // platform; the bar itself stays clear so the screen shows through
-          // it. With Reduce transparency the bar is the opaque palette
-          // background and no surface element is drawn at all.
-          backgroundColor: reduceTransparency ? colors.background : "transparent",
+          // Android's surface is the bar itself. iOS and web keep the bar
+          // clear so the screen shows through their background surface.
+          // Reduce transparency makes every platform opaque.
+          backgroundColor:
+            reduceTransparency || isAndroid ? colors.background : "transparent",
           borderTopWidth: isIOS ? 1 : StyleSheet.hairlineWidth,
           borderTopColor: colors.border,
           elevation: 0,
           ...(isWeb ? { height: 84 } : {}),
         },
-        tabBarBackground: reduceTransparency
+        tabBarBackground: reduceTransparency || isAndroid
           ? undefined
           : () =>
               isIOS ? (

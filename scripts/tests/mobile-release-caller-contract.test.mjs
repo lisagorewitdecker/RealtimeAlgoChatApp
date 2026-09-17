@@ -656,6 +656,11 @@ test("workflow hardening pins actions, runs for every pull request, and bounds d
     "pull_request runs must stay unscoped so the required Android preview evidence check is always created",
   );
   assert.equal(
+    workflow.on?.pull_request,
+    null,
+    "the unconfigured pull_request trigger must remain explicitly enabled",
+  );
+  assert.equal(
     workflow.on?.pull_request?.["paths-ignore"],
     undefined,
     "the workflow should not use pull_request paths-ignore rules",

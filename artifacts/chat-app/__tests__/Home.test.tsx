@@ -143,9 +143,9 @@ describe("home screen tab bar reservation", () => {
 
   it("reserves the measured tab bar height below the last room", async () => {
     // The classic tab navigator publishes its measured bar height (bottom
-    // inset included) through this context; the bar overlays the screen (it
-    // is see-through, but still dims and blocks whatever scrolls under it), so
-    // the end of the list must clear it.
+    // inset included) through this context; the bar overlays the screen and
+    // covers or dims whatever scrolls under it (it is opaque on Android and
+    // translucent on iOS/web), so the end of the list must clear it.
     // A bar taller than the default 49pt + inset (scaled labels, for
     // instance) is exactly the case the former flat `insets.bottom + 90`
     // reservation could not follow.
@@ -165,10 +165,9 @@ describe("home screen tab bar reservation", () => {
         <ChatsScreen />
       </BottomTabBarHeightContext.Provider>,
     );
+
     expect(listPaddingBottom(view)).toBe(49 + NATIVE_BREATHING_ROOM);
 
-    // A taller bar (scaled labels, three-button navigation) must move the
-    // last row up with it rather than hide behind a fixed reservation.
     view.rerender(
       <BottomTabBarHeightContext.Provider value={120}>
         <ChatsScreen />
@@ -178,9 +177,6 @@ describe("home screen tab bar reservation", () => {
   });
 
   it("falls back to the safe-area inset when no tab bar height is published", async () => {
-    // Native iOS 26 tabs (and a screen rendered outside the navigator) publish
-    // no measured height; the safe-area inset already covers what the system
-    // draws at the bottom.
     mockInsets.bottom = 34;
     const view = await renderRooms(<ChatsScreen />);
 
@@ -211,6 +207,5 @@ describe("home screen tab bar reservation", () => {
     );
 
     expect(listPaddingBottom(view)).toBe(84 + WEB_BREATHING_ROOM);
-    expect(listPaddingBottom(view)).toBe(90);
   });
 });

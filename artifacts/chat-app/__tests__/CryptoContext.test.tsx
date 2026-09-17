@@ -35,6 +35,48 @@ const deviceKeypairStorageKey = (userId: string) =>
 const mockDeviceKeyWriteError = "Keychain write failed (errSecInteractionNotAllowed)";
 const originalPlatform = Platform.OS;
 
+// jest-expo's environment has no Web Storage, so the web tests install this
+// stand-in. Assertions go through the instance rather than `localStorage?.`
+// lookups, which pass vacuously when the global is missing.
+class MemoryStorage {
+  private readonly entries = new Map<string, string>();
+  get length() {
+    return this.entries.size;
+  }
+  clear() {
+    this.entries.clear();
+  }
+  getItem(key: string) {
+    return this.entries.get(key) ?? null;
+  }
+  key(index: number) {
+    return [...this.entries.keys()][index] ?? null;
+  }
+  removeItem(key: string) {
+    this.entries.delete(key);
+  }
+  setItem(key: string, value: string) {
+    this.entries.set(key, String(value));
+  }
+}
+const originalLocalStorage = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
+function installBrowserStorage(): MemoryStorage {
+  const storage = new MemoryStorage();
+  Object.defineProperty(globalThis, "localStorage", {
+    value: storage,
+    configurable: true,
+    writable: true,
+  });
+  return storage;
+}
+function uninstallBrowserStorage() {
+  if (originalLocalStorage) {
+    Object.defineProperty(globalThis, "localStorage", originalLocalStorage);
+  } else {
+    delete (globalThis as { localStorage?: unknown }).localStorage;
+  }
+}
+
 jest.mock("expo-secure-store", () => {
   // Same validation as the real module on iOS and Android: the keychain and
   // keystore reject any other key name, which is exactly what broke room key
@@ -92,6 +134,11 @@ jest.mock("@clerk/expo", () => ({
 }));
 
 let cryptoValue: CryptoContextValue | null = null;
+// Reset through a function: an inline `cryptoValue = null` would let
+// TypeScript narrow the variable to `null` across the awaited re-render.
+function forgetCryptoProbe() {
+  cryptoValue = null;
+}
 
 function CryptoProbe() {
   cryptoValue = useCrypto();
@@ -285,47 +332,93 @@ describe("CryptoProvider", () => {
     secondView.unmount();
   });
 
-  it("keeps web encryption keys out of localStorage while reusing them in memory", async () => {
-    Platform.OS = "web";
-    mockAuthUserId = "web-crypto-test-user";
+  // On web the device identity lives in localStorage so that it survives a
+  // page reload. Session-only keys were tried once and made every refresh
+  // register a new key, which forced a reset that superseded the account's
+  // phones (see the storage helpers in contexts/CryptoContext.tsx). A reload
+  // is simulated by remounting the provider against the same storage.
+  describe("on web", () => {
+    const webUserId = "web-crypto-test-user";
+    const webDeviceKeyStorageKey = `devstudio_device_keypair_v1:${webUserId}`;
+    const webRoomKeyStorageKey = `devstudio_roomkey:${webUserId}:room-42`;
+    let browserStorage: MemoryStorage;
 
-    const firstView = await renderCryptoProvider();
-    const firstPublicKey = cryptoValue?.publicKeyB64;
-    expect(firstPublicKey).toBeTruthy();
-    expect(globalThis.localStorage?.length ?? 0).toBe(0);
-
-    firstView.unmount();
-    await renderCryptoProvider();
-
-    expect(cryptoValue?.publicKeyB64).toBe(firstPublicKey);
-    expect(globalThis.localStorage?.length ?? 0).toBe(0);
-  });
-
-  it("removes legacy cleartext web crypto entries instead of recovering them", async () => {
-    Platform.OS = "web";
-    mockAuthUserId = "web-crypto-test-user";
-    const legacySecretKey = new Uint8Array(nacl.box.secretKeyLength).fill(99);
-    const legacyPublicKey = encodeBase64(
-      nacl.box.keyPair.fromSecretKey(legacySecretKey).publicKey,
-    );
-    globalThis.localStorage?.setItem(
-      "devstudio_device_keypair_v1:web-crypto-test-user",
-      JSON.stringify({ secretKey: encodeBase64(legacySecretKey), registrationVersion: 3 }),
-    );
-    globalThis.localStorage?.setItem(
-      "devstudio_roomkey:web-crypto-test-user:room-42",
-      encodeBase64(new Uint8Array(nacl.secretbox.keyLength).fill(7)),
-    );
-
-    await renderCryptoProvider();
-
-    expect(cryptoValue?.publicKeyB64).not.toBe(legacyPublicKey);
-    expect(globalThis.localStorage?.getItem("devstudio_device_keypair_v1:web-crypto-test-user")).toBeFalsy();
-    expect(globalThis.localStorage?.getItem("devstudio_roomkey:web-crypto-test-user:room-42")).toBeFalsy();
-    await act(async () => {
-      await cryptoValue?.loadRoomKey("room-42");
+    beforeEach(() => {
+      Platform.OS = "web";
+      mockAuthUserId = webUserId;
+      browserStorage = installBrowserStorage();
     });
-    expect(cryptoValue?.getRoomKey("room-42")).toBeNull();
+
+    afterEach(() => {
+      uninstallBrowserStorage();
+    });
+
+    it("keeps the device key across a reload", async () => {
+      const firstView = await renderCryptoProvider();
+      const firstPublicKey = cryptoValue?.publicKeyB64;
+      expect(firstPublicKey).toBeTruthy();
+      const saved = browserStorage.getItem(webDeviceKeyStorageKey);
+      expect(saved).toBeTruthy();
+      expect(JSON.parse(saved!)).toEqual({
+        secretKey: expect.any(String),
+        registrationVersion: 1,
+      });
+      expect(mockSecureStore.size).toBe(0);
+
+      firstView.unmount();
+      forgetCryptoProbe();
+      const reloadedView = await renderCryptoProvider();
+      expect(cryptoValue?.publicKeyB64).toBe(firstPublicKey);
+
+      // Without the saved entry the reload would have produced a new device,
+      // so the match above is not an artifact of the deterministic test PRNG.
+      reloadedView.unmount();
+      forgetCryptoProbe();
+      browserStorage.clear();
+      await renderCryptoProvider();
+      expect(cryptoValue?.publicKeyB64).not.toBe(firstPublicKey);
+    });
+
+    it("recovers a previously saved device key and room key", async () => {
+      const savedSecretKey = new Uint8Array(nacl.box.secretKeyLength).fill(99);
+      const savedPublicKey = encodeBase64(
+        nacl.box.keyPair.fromSecretKey(savedSecretKey).publicKey,
+      );
+      const savedRoomKey = new Uint8Array(nacl.secretbox.keyLength).fill(7);
+      browserStorage.setItem(
+        webDeviceKeyStorageKey,
+        JSON.stringify({ secretKey: encodeBase64(savedSecretKey), registrationVersion: 3 }),
+      );
+      browserStorage.setItem(webRoomKeyStorageKey, encodeBase64(savedRoomKey));
+
+      await renderCryptoProvider();
+
+      expect(cryptoValue?.publicKeyB64).toBe(savedPublicKey);
+      // A saved identity is reused, never rewritten under a new version.
+      expect(JSON.parse(browserStorage.getItem(webDeviceKeyStorageKey)!)).toEqual({
+        secretKey: encodeBase64(savedSecretKey),
+        registrationVersion: 3,
+      });
+      await act(async () => {
+        await cryptoValue?.loadRoomKey("room-42");
+      });
+      expect(cryptoValue?.getRoomKey("room-42")).toEqual(savedRoomKey);
+      expect(mockSecureStore.size).toBe(0);
+    });
+
+    it("reports a missing browser storage instead of silently running on a fresh identity", async () => {
+      uninstallBrowserStorage();
+      const warn = jest.spyOn(console, "warn").mockImplementation();
+
+      await renderCryptoProvider();
+
+      expect(cryptoValue?.publicKeyB64).toBeTruthy();
+      expect(warn).toHaveBeenCalledWith(
+        "Device encryption identity could not be loaded from or saved to secure storage",
+        "Browser storage is unavailable.",
+      );
+      warn.mockRestore();
+    });
   });
 
   it("saves and restores keys for account and room identifiers outside the secure-store alphabet", async () => {

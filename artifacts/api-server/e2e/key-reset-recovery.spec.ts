@@ -381,13 +381,21 @@ test("a member recovers a live encrypted room after resetting their device key",
     await test.step(
       RECOVERY_PHASE_NAMES.confirmReloadRecovery,
       async () => {
-        // A document load starts a new JS session without the in-memory
-        // device and room keys. The server still holds the replacement key,
-        // so the reloaded session is superseded and the room stays closed
-        // until an explicit reset takes over again; the creator then delivers
-        // another fresh envelope and the history decrypts once more.
+        // Web deliberately persists device and room keys across document
+        // loads. Remove only this test account's E2EE storage to simulate a
+        // fresh device while keeping the signed-in Clerk session intact. The
+        // new device key is then superseded by the replacement key already
+        // registered above, and the room stays closed until an explicit reset
+        // takes over again; the creator then delivers another fresh envelope.
         const recoveredEnvelope = await readMemberEnvelope(roomId, users[1]!.id);
         expect(recoveredEnvelope).toBeTruthy();
+        await resetSession.page.evaluate(
+          ({ userId, roomId: currentRoomId }) => {
+            localStorage.removeItem(`devstudio_device_keypair_v1:${userId}`);
+            localStorage.removeItem(`devstudio_roomkey:${userId}:${currentRoomId}`);
+          },
+          { userId: users[1]!.id, roomId },
+        );
         await resetSession.page.reload();
         await expect(
           resetSession.page.getByTestId("room-key-superseded"),

@@ -58,8 +58,8 @@ export default function ProfileScreen() {
   const buildIdentity = getBuildIdentity();
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  // The tab bar overlays this screen (see-through, but whatever scrolls under
-  // it is dimmed and out of reach), so the end of the scroll content must
+  // The tab bar overlays this screen (whatever scrolls under it is covered or
+  // dimmed and out of reach), so the end of the scroll content must
   // clear its full height, not just the inset.
   const bottomContentInset = useTabBarContentInset(24);
   const { username, avatarEmoji, userId, isAdmin, setUsername, setAvatarEmoji } = useApp();

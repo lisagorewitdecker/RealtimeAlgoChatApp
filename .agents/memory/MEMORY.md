@@ -66,13 +66,13 @@
 - [Shared hook transaction locks](shared-hook-transaction-locks.md) — publish, release, and reclaim cross-process hook locks with atomic renames; preserve prior registrations on rollback.
 - [Playwright runtime setup](playwright-runtime-setup.md) — declare Chromium libraries through Replit Nix and launch once before diagnostics so setup failures are unmistakable.
 - [Evidence metadata duplicate detection](evidence-duplicate-detection.md) — detect duplicate keys generically (no allowlists) and mirror the producer's full field set in fixtures.
-- [Task merge against a swapped main](task-merge-unrelated-main.md) — a rebase whose first pick is not your commit (or starts at "Initial commit") means main HEAD moved; abandon and retry, never resolve.
+- [Task merge against a transient main](task-merge-unrelated-main.md) — no merge base, or a related tip that fails its own tests and contradicts GitHub main: abandon and retry, never resolve.
 - [Account-access lookup deadline](account-access-retry-budget.md) — one hard deadline for waits and in-flight Clerk requests, under Socket.IO’s 45 s connect timeout; pass capped hints to clients.
 - [Relocatable Pino bundles](relocatable-pino-bundles.md) — esbuild-plugin-pino can bake the build machine’s absolute output path into workers; rewrite and validate bundle-relative paths.
 - [Browser E2E phase budgets](e2e-phase-budgets.md) — bound and label external setup, navigation, assertions, and teardown separately so stalls identify their real phase.
 - [Chat App script tests need explicit wiring](chat-app-script-tests.md) — Jest ignores `scripts/` and `.mjs`; a node:test file there runs only via its own package script chained into `test`.
 - [Chat App source-rule checks](chat-app-source-rule-checks.md) — conventions hidden by mocked dependencies need fast AST-based source rules with explicit diagnostics.
-- [Web crypto storage is session-only](web-crypto-storage-session-only.md) — web device and room keys are intentionally scoped to one browser session; recovery handles reload supersession explicitly.
+- [Web E2EE key persistence](web-key-persistence.md) — web keys stay in localStorage by owner decision (accepted scan risk); jest-expo has no localStorage, so stub it in tests.
 - [.replit merge regressions](replit-config-merge-regressions.md) — task merges can drop validation workflows and the post-merge timeout; an untracked `.replit` stub in a task env gets committed.
 - [Generated-check test controls](generated-check-fault-controls.md) — test-only environment faults and fixture paths require explicit, separate subprocess opt-ins.
 - [Worktree-local state vs shared Git config](shared-git-config-worktree-records.md) — worktrees share local git config; shared single-valued records let siblings impersonate each other.
@@ -84,11 +84,11 @@
 - [GitHub ruleset status checks](github-ruleset-status-checks.md) — required checks accept an omitted integration ID; sending JSON null is rejected by the ruleset API.
 - [Publish failure messages can be stale](publish-failure-card-staleness.md) — repeated "build failed" messages may reference one old build; confirm a newer build exists before re-diagnosing.
 - [expo-router vendored react-navigation](expo-router-vendored-navigation.md) — read tab-bar height from the `expo-router/js-tabs` context (inset fallback); never add `@react-navigation/*`.
-- [expo-blur Android blur prerequisites](expo-blur-android.md) — Android blur needs a `BlurTargetView` ref or it silently becomes a ~0.69-alpha tint; the tab bar ships a palette panel, and web screenshots need Profile for scroll-under content.
+- [expo-blur Android blur prerequisites](expo-blur-android.md) — Android blur needs a `BlurTargetView` ref or it silently becomes a ~0.69-alpha tint; Android ships an opaque bar by owner decision.
 - [Clerk Expo iOS builds](clerk-expo-ios-build.md) — keep the `@clerk/expo` plugin in app.json: it lifts iOS to 17.0 so the ClerkExpo pod links; otherwise pod install dies on a nil SPM target.
 - [GitHub edited-event evidence](github-edited-event-evidence.md) — REST timelines may omit PR body edits; retain the edit timestamp, unchanged head SHA, and subsequent run creation time.
-- [jest-expo platform projects](jest-expo-platform-projects.md) — the default preset also matches `*.test.android.tsx`; use explicit per-project testMatch lists and guard the Android project's `Platform.OS`.
-- [Message deletion reconciliation](message-deletion-reconciliation.md) — tombstones need both bounded persistence cursors and client-side live-deletion guards to prevent stale recovery resurrection.
+- [jest-expo platform projects](jest-expo-platform-projects.md) — the default preset also matches `*.test.android.tsx`; list testMatch per project and guard the Android project's `Platform.OS`.
+- [Message deletion reconciliation](message-deletion-reconciliation.md) — tombstones need both bounded persistence cursors and client-side live-deletion guards so stale recovery cannot revive them.
 - [Sentry native upload policy](sentry-native-upload-policy.md) — declare `@sentry/cli` in the app (pnpm) and apply the Sentry Expo plugin only when a token exists; iOS phase cannot soft-fail.
 - [GitHub candidate ID migration](github-candidate-id-migration.md) — secret values cannot be read through the API; migrate only from exact installed-device build records.
 - [macOS scripts on bash 3.2](macos-script-bash-compat.md) — Mac-run scripts must avoid bash 4+ constructs; Linux tests cannot catch them, so grep before shipping.

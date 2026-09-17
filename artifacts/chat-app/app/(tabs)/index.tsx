@@ -84,8 +84,8 @@ export default function ChatsScreen() {
 
   const topPad =
     Platform.OS === "web" ? 67 : insets.top;
-  // The tab bar overlays the bottom of this screen (see-through, but whatever
-  // scrolls under it is dimmed and out of reach), so the end of the list
+  // The tab bar overlays the bottom of this screen (whatever scrolls under it
+  // is covered or dimmed and out of reach), so the end of the list
   // reserves the bar's measured height instead of a constant that a taller
   // bar would outgrow. The breathing room beyond the
   // bar keeps the spacing the list had while it reserved a flat 90pt over the
