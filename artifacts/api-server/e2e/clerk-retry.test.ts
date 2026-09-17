@@ -252,14 +252,14 @@ describe("key-reset recovery Playwright diagnostics", () => {
     },
     {
       phase: "recover a fresh room-key envelope after reset",
-      action: "page.goto",
+      action: "locator.click",
     },
     {
       phase: "decrypt history and a new message with recovered key",
       action: "locator.fill",
     },
     {
-      phase: "reload room and reuse recovered key",
+      phase: "reload room after resetting the session key",
       action: "page.reload",
     },
     {

@@ -54,7 +54,7 @@ const PHASE_TIMEOUTS = {
   resetMemberKey: 60_000,
   recoverFreshEnvelope: 45_000,
   confirmDecryption: 20_000,
-  confirmReloadPersistence: 30_000,
+  confirmReloadRecovery: 60_000,
   confirmRoomReentry: 30_000,
 } as const;
 
@@ -65,7 +65,7 @@ const RECOVERY_PHASE_NAMES = {
   resetMemberKey: "reset member device key in a second session",
   recoverFreshEnvelope: "recover a fresh room-key envelope after reset",
   confirmDecryption: "decrypt history and a new message with recovered key",
-  confirmReloadPersistence: "reload room and reuse recovered key",
+  confirmReloadRecovery: "reload room after resetting the session key",
   confirmRoomReentry: "leave and reopen room with recovered key",
 } as const;
 type RecoveryPhaseName =
@@ -296,7 +296,11 @@ test("a member recovers a live encrypted room after resetting their device key",
       RECOVERY_PHASE_NAMES.resetMemberKey,
       async () => {
         // Keep the first member session in the room so the reset session's
-        // later join takes the explicit user-key-changed recovery path.
+        // later join takes the explicit user-key-changed recovery path. This
+        // session never held the room key: on web, device and room keys live
+        // only in memory for the current JS session (contexts/CryptoContext.tsx),
+        // so every navigation below stays in-app -- a document load would
+        // discard the replacement key and register this session as superseded.
         resetSession = await createSignedInPage(
           browser,
           users[1]!,
@@ -320,28 +324,21 @@ test("a member recovers a live encrypted room after resetting their device key",
         await expect(
           resetSession.page.getByTestId("device-key-status"),
         ).toHaveText("Registered with your account");
-
-        await resetSession.page.evaluate(
-          ({ memberId, recoveredRoomId }) => {
-            globalThis.localStorage.removeItem(
-              `devstudio_roomkey:${memberId}:${recoveredRoomId}`,
-            );
-          },
-          { memberId: users[1]!.id, recoveredRoomId: roomId },
-        );
-        await resetSession.page.reload();
-        await expect(
-          resetSession.page.getByTestId("device-key-status"),
-        ).toHaveText("Registered with your account");
       },
       { timeout: PHASE_TIMEOUTS.resetMemberKey },
     );
 
+    const openRecoveredRoom = async () => {
+      await resetSession.page.getByRole("tab", { name: /Chats/ }).click();
+      const recoveredRoomCard = roomJoinButton(resetSession.page, roomName);
+      await expect(recoveredRoomCard).toBeVisible();
+      await recoveredRoomCard.click();
+    };
+
     await test.step(
       RECOVERY_PHASE_NAMES.recoverFreshEnvelope,
       async () => {
-        const recoveryRoomUrl = `${chatUrl}/room/${encodeURIComponent(roomId)}?roomName=${encodeURIComponent(roomName)}`;
-        await resetSession.page.goto(recoveryRoomUrl);
+        await openRecoveredRoom();
         await expect(
           resetSession.page.getByTestId("room-key-waiting"),
         ).toBeHidden({ timeout: 15_000 });
@@ -382,12 +379,50 @@ test("a member recovers a live encrypted room after resetting their device key",
     );
 
     await test.step(
-      RECOVERY_PHASE_NAMES.confirmReloadPersistence,
+      RECOVERY_PHASE_NAMES.confirmReloadRecovery,
       async () => {
+        // A document load starts a new JS session without the in-memory
+        // device and room keys. The server still holds the replacement key,
+        // so the reloaded session is superseded and the room stays closed
+        // until an explicit reset takes over again; the creator then delivers
+        // another fresh envelope and the history decrypts once more.
+        const recoveredEnvelope = await readMemberEnvelope(roomId, users[1]!.id);
+        expect(recoveredEnvelope).toBeTruthy();
         await resetSession.page.reload();
+        await expect(
+          resetSession.page.getByTestId("room-key-superseded"),
+        ).toBeVisible({ timeout: 15_000 });
+        await resetSession.page
+          .getByTestId("room-key-superseded-profile")
+          .click();
+        await expect(
+          resetSession.page.getByTestId("device-key-status"),
+        ).toHaveText("Replaced by another device or session");
+        const fingerprint = resetSession.page.getByTestId(
+          "device-key-fingerprint",
+        );
+        const supersededFingerprint = await fingerprint.innerText();
+
+        resetSession.page.once("dialog", (dialog) => dialog.accept());
+        await resetSession.page.getByTestId("reset-device-key-button").click();
+        await expect(
+          resetSession.page.getByTestId("device-key-feedback"),
+        ).toContainText("New device key created");
+        await expect(fingerprint).not.toHaveText(supersededFingerprint);
+        await expect(
+          resetSession.page.getByTestId("device-key-status"),
+        ).toHaveText("Registered with your account");
+
+        await openRecoveredRoom();
         await expect(
           resetSession.page.getByTestId("room-key-waiting"),
         ).toBeHidden({ timeout: 15_000 });
+        await expect
+          .poll(
+            async () =>
+              (await readMemberEnvelope(roomId, users[1]!.id))?.ciphertext,
+          )
+          .not.toBe(recoveredEnvelope!.ciphertext);
         await expect(
           resetSession.page.getByText(historyMessage, { exact: true }),
         ).toBeVisible();
@@ -398,7 +433,7 @@ test("a member recovers a live encrypted room after resetting their device key",
           resetSession.page.getByText("Unable to decrypt this message."),
         ).toHaveCount(0);
       },
-      { timeout: PHASE_TIMEOUTS.confirmReloadPersistence },
+      { timeout: PHASE_TIMEOUTS.confirmReloadRecovery },
     );
 
     await test.step(
@@ -527,13 +562,12 @@ const diagnosticActions: Record<
     await page.getByTestId("reset-device-key-button").click();
   },
   [RECOVERY_PHASE_NAMES.recoverFreshEnvelope]: async (page: Page) => {
-    await page.route("**/*", () => new Promise<void>(() => {}));
-    await page.goto("http://recovery-diagnostic.invalid/");
+    await page.getByRole("tab", { name: "Chats" }).click();
   },
   [RECOVERY_PHASE_NAMES.confirmDecryption]: async (page: Page) => {
     await page.getByTestId("room-composer-input").fill("diagnostic");
   },
-  [RECOVERY_PHASE_NAMES.confirmReloadPersistence]: async (page: Page) => {
+  [RECOVERY_PHASE_NAMES.confirmReloadRecovery]: async (page: Page) => {
     let requestCount = 0;
     await page.route("http://recovery-diagnostic.invalid/", async (route) => {
       requestCount += 1;

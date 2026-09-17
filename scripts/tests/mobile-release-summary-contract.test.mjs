@@ -1015,6 +1015,20 @@ test("native evidence downloads retry without exposing evidence contents", () =>
     "${{ steps.download-android-native-smoke.outcome == 'success' && 'success' || steps.retry-android-native-smoke.outcome }}",
     "the Android checker must receive the successful initial or retry outcome",
   );
+
+  const publishEvidenceStep = workflow.jobs["mobile-publish"].steps.find(
+    (step) => step.name === "Require approved iOS and Android evidence",
+  );
+  assert.equal(
+    publishEvidenceStep?.env?.NATIVE_IOS_EVIDENCE_DOWNLOAD_RESULT,
+    "${{ steps.download-publish-ios-native-smoke.outcome == 'success' && 'success' || steps.retry-publish-ios-native-smoke.outcome }}",
+    "strict publish validation must receive the successful iOS initial or retry outcome",
+  );
+  assert.equal(
+    publishEvidenceStep?.env?.NATIVE_ANDROID_EVIDENCE_DOWNLOAD_RESULT,
+    "${{ steps.download-publish-android-native-smoke.outcome == 'success' && 'success' || steps.retry-publish-android-native-smoke.outcome }}",
+    "strict publish validation must receive the successful Android initial or retry outcome",
+  );
 });
 
 test("hosted native evidence regression proves a transient download recovers", () => {
@@ -1056,6 +1070,11 @@ test("hosted native evidence regression proves a transient download recovers", (
   );
   assert.match(
     recoveryStep.run,
+    /NATIVE_EVIDENCE_REQUIRE_APPROVAL=1[\s\S]*NATIVE_IOS_EVIDENCE_DOWNLOAD_RESULT=success/,
+    "the hosted recovery must exercise strict publish evidence validation after retry",
+  );
+  assert.match(
+    recoveryStep.run,
     /NATIVE_IOS_EVIDENCE_DOWNLOAD_RESULT=failure[\s\S]*check-native-large-text-evidence\.sh "\$recovery_root"/,
     "the hosted regression must prove a failed retry remains blocking",
   );
@@ -1063,6 +1082,16 @@ test("hosted native evidence regression proves a transient download recovers", (
     recoveryStep.run,
     /The native evidence checker passed despite a failed retry\./,
     "the hosted regression must fail if the checker accepts a failed retry",
+  );
+  assert.match(
+    recoveryStep.run,
+    /simulate_store_submission "\$recovered_submission_marker"[\s\S]*if \[\[ ! -e "\$recovered_submission_marker" \]\]/,
+    "the hosted recovery must prove a successful strict check reaches the submission boundary",
+  );
+  assert.match(
+    recoveryStep.run,
+    /simulate_store_submission "\$failed_submission_marker"[\s\S]*if \[\[ -e "\$failed_submission_marker" \]\]/,
+    "the hosted recovery must prove a failed retry cannot reach submission",
   );
   assert.match(
     recoveryStep.run,

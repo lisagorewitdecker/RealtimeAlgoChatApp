@@ -65,11 +65,13 @@
 - [Shared hook transaction locks](shared-hook-transaction-locks.md) — publish, release, and reclaim cross-process hook locks with atomic renames; preserve prior registrations on rollback.
 - [Playwright runtime setup](playwright-runtime-setup.md) — declare Chromium libraries through Replit Nix and launch once before diagnostics so setup failures are unmistakable.
 - [Evidence metadata duplicate detection](evidence-duplicate-detection.md) — detect duplicate keys generically (no allowlists) and mirror the producer's full field set in fixtures.
-- [Task merge against an unrelated main](task-merge-unrelated-main.md) — a rebase replaying from "Initial commit" means main HEAD was transiently swapped; abandon and retry, never resolve.
+- [Task merge against a swapped main](task-merge-unrelated-main.md) — a rebase whose first pick is not your commit (or starts at "Initial commit") means main HEAD moved; abandon and retry, never resolve.
 - [Account-access lookup deadline](account-access-retry-budget.md) — one hard deadline for waits and in-flight Clerk requests, under Socket.IO’s 45 s connect timeout; pass capped hints to clients.
 - [Relocatable Pino bundles](relocatable-pino-bundles.md) — esbuild-plugin-pino can bake the build machine’s absolute output path into workers; rewrite and validate bundle-relative paths.
 - [Browser E2E phase budgets](e2e-phase-budgets.md) — bound and label external setup, navigation, assertions, and teardown separately so stalls identify their real phase.
 - [Chat App script tests need explicit wiring](chat-app-script-tests.md) — Jest ignores `scripts/` and `.mjs`; a node:test file there runs only via its own package script chained into `test`.
+- [Chat App source-rule checks](chat-app-source-rule-checks.md) — conventions hidden by mocked dependencies need fast AST-based source rules with explicit diagnostics.
+- [Web crypto storage is session-only](web-crypto-storage-session-only.md) — web device and room keys are intentionally scoped to one browser session; recovery handles reload supersession explicitly.
 - [.replit merge regressions](replit-config-merge-regressions.md) — task merges can drop validation workflows and the post-merge timeout; an untracked `.replit` stub in a task env gets committed.
 - [Generated-check test controls](generated-check-fault-controls.md) — test-only environment faults and fixture paths require explicit, separate subprocess opt-ins.
 - [Worktree-local state vs shared Git config](shared-git-config-worktree-records.md) — worktrees share local git config; shared single-valued records let siblings impersonate each other.

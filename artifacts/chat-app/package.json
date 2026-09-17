@@ -11,7 +11,8 @@
     "serve": "node server/serve.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "validate:preview-startup": "pnpm run test:preview-loader-compatibility && pnpm run test:preview-live-timeout && node scripts/validate-preview-startup.mjs",
-    "test": "jest --passWithNoTests --runInBand && pnpm run test:build-preflight && pnpm run test:branding && pnpm run test:sentry-upload-policy && pnpm run test:preview-startup && pnpm run test:request-evidence",
+    "test": "pnpm run test:keyboard-strategy && jest --passWithNoTests --runInBand && pnpm run test:build-preflight && pnpm run test:branding && pnpm run test:sentry-upload-policy && pnpm run test:preview-startup && pnpm run test:request-evidence",
+    "test:keyboard-strategy": "node --test scripts/validate-keyboard-strategy.test.mjs",
     "test:build-preflight": "node --test scripts/build.test.js",
     "test:sentry-upload-policy": "node --test plugins/withSentryNativeUpload.test.mjs",
     "test:preview-loader-compatibility": "node --test scripts/validate-preview-startup-runtime-diagnostic.test.mjs",
@@ -22,6 +23,7 @@
     "test:request-evidence": "node --test scripts/metro-request-evidence.test.mjs && node --test scripts/save-ios-preview-evidence.test.mjs",
     "save:ios-preview-evidence": "node scripts/save-ios-preview-evidence.mjs",
     "validate:branding": "node scripts/validate-branding.mjs",
+    "validate:keyboard-strategy": "node scripts/validate-keyboard-strategy.mjs",
     "validate:branding:native": "node scripts/validate-branding.mjs --native",
     "test:native-large-text": "bash e2e/native-large-text/run.sh",
     "test:native-sentry": "bash e2e/sentry-source-map/run.sh"
