@@ -1739,8 +1739,16 @@ test("Android preview evidence keeps its pull-request validation and privacy con
       mkdirSync(path.dirname(validatorPath), { recursive: true });
       writeFileSync(validatorPath, "// contract fixture\n");
     }
-    for (const [index, { text, baseText }] of recordDefinitions.entries()) {
-      if (
+    for (const [
+      index,
+      { text, baseText, preflight, deleted },
+    ] of recordDefinitions.entries()) {
+      if (deleted) {
+        writeFileSync(baseRecordPaths[index], baseText ?? text);
+        if (preflight !== undefined) {
+          writeFileSync(basePreflightPaths[index], blockedPreflight);
+        }
+      } else if (
         recordModes[index] === "sidecar-only" ||
         recordModes[index] === "paired"
       ) {
@@ -1767,12 +1775,18 @@ test("Android preview evidence keeps its pull-request validation and privacy con
     git([
       "add",
       "README.md",
-      ...recordDefinitions.flatMap((_, index) =>
-        recordModes[index] === "sidecar-only" ||
-        recordModes[index] === "paired"
+      ...recordDefinitions.flatMap(({ preflight, deleted }, index) => {
+        if (deleted) {
+          return [
+            baseRecordPaths[index],
+            ...(preflight === undefined ? [] : [basePreflightPaths[index]]),
+          ];
+        }
+        return recordModes[index] === "sidecar-only" ||
+          recordModes[index] === "paired"
           ? [baseRecordPaths[index], basePreflightPaths[index]]
-          : [],
-      ),
+          : [];
+      }),
       ...(!missingValidator ? [validatorPath] : []),
     ]);
     git(["commit", "--quiet", "-m", "base"]);
@@ -1791,7 +1805,19 @@ test("Android preview evidence keeps its pull-request validation and privacy con
         renameSync(basePreflightPaths[index], preflightPaths[index]);
       }
     }
-    for (const [index, { text, preflight }] of recordDefinitions.entries()) {
+    for (const [
+      index,
+      { text, preflight, deleted },
+    ] of recordDefinitions.entries()) {
+      if (deleted) {
+        rmSync(baseRecordPaths[index]);
+        changedPaths.push(baseRecordPaths[index]);
+        if (preflight !== undefined) {
+          rmSync(basePreflightPaths[index]);
+          changedPaths.push(basePreflightPaths[index]);
+        }
+        continue;
+      }
       if (
         recordModes[index] === "record-only" ||
         recordModes[index] === "paired"
@@ -1983,6 +2009,12 @@ test("Android preview evidence keeps its pull-request validation and privacy con
       preflight: changedBlockedPreflight,
     },
     {
+      timestamp: "20260915T121000Z",
+      baseText: blockedRecord,
+      text: blockedRecord,
+      deleted: true,
+    },
+    {
       timestamp: "20260915T121500Z",
       text: blockedRecord.replace(
         "No physical phone was available.",
@@ -1994,20 +2026,20 @@ test("Android preview evidence keeps its pull-request validation and privacy con
   assert.notEqual(
     multiRecord.result.status,
     0,
-    "a mismatched Android preview sidecar must fail only its record",
+    "a mismatched or deleted Android preview record must fail only its record",
   );
   assert.match(
     multiRecord.summary,
-    /- Changed records checked: \*\*2\*\*/,
-    "the summary must count both changed Android preview records",
+    /- Changed records checked: \*\*3\*\*/,
+    "the summary must count every changed Android preview record",
   );
   assert.deepEqual(
     multiRecord.checkerArgs,
     [
       [multiRecord.recordPaths[0], multiRecord.preflightPaths[0]],
-      [multiRecord.recordPaths[1], multiRecord.preflightPaths[1]],
+      [multiRecord.recordPaths[2], multiRecord.preflightPaths[2]],
     ],
-    "each changed Android preflight sidecar must be passed to the checker with its sibling record",
+    "each present changed Android preflight sidecar must be passed to the checker even after a deleted record",
   );
   for (const recordPath of multiRecord.recordPaths) {
     const escapedPath = recordPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -2047,16 +2079,32 @@ test("Android preview evidence keeps its pull-request validation and privacy con
   assert.match(
     multiRecord.summary,
     new RegExp(
-      `### \\[${multiRecord.recordPaths[1].replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\][\\s\\S]*- Validation: \\*\\*FAIL\\*\\*[\\s\\S]*Missing-boundary reason[\\s\\S]*preflight JSON public manifest boundary does not match the Markdown record\\.`,
+      `### \\[${multiRecord.recordPaths[2].replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\][\\s\\S]*- Validation: \\*\\*FAIL\\*\\*[\\s\\S]*Missing-boundary reason[\\s\\S]*preflight JSON public manifest boundary does not match the Markdown record\\.`,
     ),
     "the mismatched record must contribute its sanitized checker reason",
+  );
+  assert.match(
+    multiRecord.summary,
+    new RegExp(
+      `### \\[${multiRecord.recordPaths[1].replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\][\\s\\S]*- Validation: \\*\\*FAIL\\*\\*[\\s\\S]*Missing-boundary reason[\\s\\S]*changed Android preview validation record is missing from the checked-out commit\\.`,
+    ),
+    "the deleted record must contribute the fixed missing-record reason",
+  );
+  assert.ok(
+    multiRecord.summary.indexOf(
+      `### [${multiRecord.recordPaths[1]}]`,
+    ) <
+      multiRecord.summary.indexOf(
+        `### [${multiRecord.recordPaths[2]}]`,
+      ),
+    "a record changed after the deletion must remain visible after the missing-record section",
   );
   assert.equal(
     multiRecord.summary.match(
       /- Validation: \*\*FAIL\*\*/g,
     )?.length ?? 0,
-    1,
-    "the summary must preserve the failure status only for the affected record",
+    2,
+    "the summary must preserve the failure status for the invalid and deleted records",
   );
   assert.doesNotMatch(
     multiRecord.summary,
