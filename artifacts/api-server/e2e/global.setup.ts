@@ -10,5 +10,7 @@ setup("obtain a Clerk testing token", async () => {
     process.env["E2E_RECOVERY_DIAGNOSTIC_CONTRACT"] === "1",
     "The recovery diagnostic contract does not use Clerk",
   );
-  await withClerkSetupRetry(() => clerkSetup());
+  if (process.env["TASK_264_CONTROLLED_FAILURE"] !== "true") {
+    await withClerkSetupRetry(() => clerkSetup());
+  }
 });
