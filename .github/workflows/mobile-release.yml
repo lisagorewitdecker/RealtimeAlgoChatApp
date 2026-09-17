@@ -1289,7 +1289,30 @@ jobs:
       - name: Install workspace dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Determine idle-profile secret configuration
+        id: idle-profile-config
+        env:
+          E2E_CHAT_URL: ${{ secrets.E2E_CHAT_URL }}
+          E2E_API_URL: ${{ secrets.E2E_API_URL }}
+          CLERK_PUBLISHABLE_KEY: ${{ secrets.CLERK_PUBLISHABLE_KEY }}
+          CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          set -euo pipefail
+          if [[ -n "${E2E_CHAT_URL:-}" && -n "${E2E_API_URL:-}" ]]; then
+            echo "browser_targets_configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "browser_targets_configured=false" >> "$GITHUB_OUTPUT"
+          fi
+          if [[ -n "${E2E_CHAT_URL:-}" && -n "${E2E_API_URL:-}" && -n "${CLERK_PUBLISHABLE_KEY:-}" && -n "${CLERK_SECRET_KEY:-}" && -n "${DATABASE_URL:-}" ]]; then
+            echo "release_check_configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "release_check_configured=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Verify idle-profile browser targets
+        id: idle-profile-preflight
+        if: ${{ steps.idle-profile-config.outputs.browser_targets_configured == 'true' }}
         env:
           E2E_CHAT_URL: ${{ secrets.E2E_CHAT_URL }}
           E2E_API_URL: ${{ secrets.E2E_API_URL }}
@@ -1320,6 +1343,7 @@ jobs:
 
       - name: Run idle-profile registration release check
         id: idle-profile-check
+        if: ${{ steps.idle-profile-config.outputs.release_check_configured == 'true' }}
         env:
           E2E_CHAT_URL: ${{ secrets.E2E_CHAT_URL }}
           E2E_API_URL: ${{ secrets.E2E_API_URL }}
@@ -1354,6 +1378,7 @@ jobs:
       - name: Summarize idle-profile registration check
         if: ${{ always() }}
         env:
+          IDLE_PROFILE_PREFLIGHT_RESULT: ${{ steps.idle-profile-preflight.outcome }}
           IDLE_PROFILE_RESULT: ${{ steps.idle-profile-check.outcome }}
         run: |
           set -euo pipefail
@@ -1363,6 +1388,12 @@ jobs:
             if [[ "$IDLE_PROFILE_RESULT" == "success" ]]; then
               echo "- Status: **PASS**"
               echo "- Result: the idle client did not repeat \`PUT /api/profile\` after token refresh."
+            elif [[ "$IDLE_PROFILE_PREFLIGHT_RESULT" != "success" ]]; then
+              echo "- Status: **FAIL**"
+              echo "- Result: release is blocked because idle-profile browser target preflight failed."
+            elif [[ "$IDLE_PROFILE_RESULT" == "skipped" ]]; then
+              echo "- Status: **SKIP**"
+              echo "- Result: check was skipped because idle-profile secrets are not configured."
             else
               echo "- Status: **FAIL**"
               echo "- Result: release is blocked because the idle-profile registration check did not pass."
