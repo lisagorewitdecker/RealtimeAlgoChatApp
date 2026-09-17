@@ -1,5 +1,12 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { execFileSync, spawnSync } from "node:child_process";
+import {
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
@@ -25,6 +32,11 @@ const workflowText = readFileSync(
   ),
   "utf8",
 );
+const fixturePath = path.join(
+  workspaceRoot,
+  "scripts/tests/native-evidence-summary-regression-fixture.sh",
+);
+const fixtureText = readFileSync(fixturePath, "utf8");
 
 test("hosted summary regression checks only the reviewed ref", () => {
   assert.deepEqual(Object.keys(workflow.on), [
@@ -35,6 +47,7 @@ test("hosted summary regression checks only the reviewed ref", () => {
     ".github/workflows/native-evidence-summary-regression.yml",
     "scripts/check-native-large-text-evidence.sh",
     "scripts/run-untrusted-checker.sh",
+    "scripts/tests/native-evidence-summary-regression-fixture.sh",
   ]);
   assert.equal(
     workflow.on.workflow_dispatch.inputs.reviewed_ref.required,
@@ -66,39 +79,40 @@ test("hosted summary regression checks only the reviewed ref", () => {
     REVIEWED_REF:
       "${{ github.event.pull_request.head.sha || inputs.reviewed_ref }}",
   });
-  assert.match(
-    verification,
-    /resolved_commit_sha="\$\(git rev-parse --verify HEAD\)"/,
+  assert.equal(
+    verification.trim(),
+    "bash scripts/tests/native-evidence-summary-regression-fixture.sh \\\n  bash scripts/check-native-large-text-evidence.sh",
   );
-  assert.match(verification, /Checked ref: `%s`/);
-  assert.match(verification, /Resolved commit SHA: `%s`/);
-  assert.match(verification, /"\$GITHUB_STEP_SUMMARY"/);
+  assert.match(fixtureText, /resolved_commit_sha="\$\(git .*rev-parse --verify HEAD\)"/);
+  assert.match(fixtureText, /Checked ref: `%s`/);
+  assert.match(fixtureText, /Resolved commit SHA: `%s`/);
+  assert.match(fixtureText, /"\$GITHUB_STEP_SUMMARY"/);
   assert.match(
-    verification,
-    /scripts\/run-untrusted-checker\.sh bash scripts\/check-native-large-text-evidence\.sh/,
+    fixtureText,
+    /scripts\/run-untrusted-checker\.sh" "\$@" "\$blocked_root"/,
   );
-  const revisionMetadataIndex = verification.indexOf(
+  const revisionMetadataIndex = fixtureText.indexOf(
     'echo "## Reviewed release revision"',
   );
-  const checkerIndex = verification.indexOf(
-    'if GITHUB_STEP_SUMMARY="$summary_path" bash scripts/run-untrusted-checker.sh',
+  const checkerIndex = fixtureText.indexOf(
+    'if GITHUB_STEP_SUMMARY="$summary_path" bash',
   );
   assert.ok(
     revisionMetadataIndex >= 0 && revisionMetadataIndex < checkerIndex,
     "trusted revision metadata must be written before the checker can fail",
   );
-  assert.match(verification, /Missing result directory: \$blocked_root\/ios/);
+  assert.match(fixtureText, /Missing result directory: \$blocked_root\/ios/);
   assert.match(
-    verification,
+    fixtureText,
     /Missing result directory: \$blocked_root\/android/,
   );
   assert.match(
-    verification,
+    fixtureText,
     /Expected exactly one platform-specific blocking finding/,
   );
-  assert.match(verification, /\$GITHUB_STEP_SUMMARY/);
+  assert.match(fixtureText, /\$GITHUB_STEP_SUMMARY/);
   assert.doesNotMatch(
-    verification,
+    fixtureText,
     /summary_path.*(?:REVIEWED_REF|resolved_commit_sha)|(?:REVIEWED_REF|resolved_commit_sha).*summary_path/,
   );
   assert.doesNotMatch(workflowText, /\$\{\{\s*secrets\./);
@@ -112,4 +126,78 @@ test("hosted summary regression cannot publish or start native jobs", () => {
     /EAS_TOKEN|candidate_build_id|NATIVE_SMOKE/,
   );
   assert.doesNotMatch(workflowText, /runs-on:\s*.*(?:macos|self-hosted)/i);
+});
+
+test("hosted summary keeps revision metadata when the checker fails", () => {
+  const fixtureRoot = mkdtempSync(
+    path.join(tmpdir(), "native-evidence-summary-regression-"),
+  );
+  const summaryPath = path.join(fixtureRoot, "job-summary.md");
+  const checkerPath = path.join(fixtureRoot, "synthetic-checker.sh");
+  const reviewedRef = "synthetic-reviewed-ref";
+  const resolvedCommitSha = execFileSync(
+    "git",
+    ["rev-parse", "--verify", "HEAD"],
+    { cwd: workspaceRoot, encoding: "utf8" },
+  ).trim();
+
+  try {
+    writeFileSync(
+      checkerPath,
+      [
+        "#!/usr/bin/env bash",
+        "set -euo pipefail",
+        'blocked_root="$1"',
+        "{",
+        '  echo "<!-- synthetic checker output -->"',
+        '  echo "## iOS native large-text evidence"',
+        '  echo "- Status: **FAIL**"',
+        '  echo "- Validated run directory: **Unavailable**"',
+        '  echo "- Detailed evidence report: **Unavailable**"',
+        '  echo "### Blocking evidence findings"',
+        "  printf -- '- `Missing result directory: %s/ios. Run the ios native large-text gate and upload its timestamped result directory.`\\n' \"$blocked_root\"",
+        '  echo "## Android native large-text evidence"',
+        '  echo "- Status: **FAIL**"',
+        '  echo "- Validated run directory: **Unavailable**"',
+        '  echo "- Detailed evidence report: **Unavailable**"',
+        '  echo "### Blocking evidence findings"',
+        "  printf -- '- `Missing result directory: %s/android. Run the android native large-text gate and upload its timestamped result directory.`\\n' \"$blocked_root\"",
+        '} >> "$GITHUB_STEP_SUMMARY"',
+        "exit 41",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+    const result = spawnSync(
+      "bash",
+      [fixturePath, "bash", checkerPath],
+      {
+        cwd: workspaceRoot,
+        env: {
+          ...process.env,
+          GITHUB_STEP_SUMMARY: summaryPath,
+          REVIEWED_REF: reviewedRef,
+        },
+        encoding: "utf8",
+      },
+    );
+
+    assert.equal(result.status, 0, result.stderr);
+    const summary = readFileSync(summaryPath, "utf8");
+    assert.match(
+      summary,
+      new RegExp(`- Checked ref: \`${reviewedRef}\``),
+    );
+    assert.match(summary, new RegExp(`- Resolved commit SHA: \`${resolvedCommitSha}\``));
+    assert.match(summary, /<!-- synthetic checker output -->/);
+    assert.match(summary, /## iOS native large-text evidence/);
+    assert.match(summary, /## Android native large-text evidence/);
+    assert.ok(
+      summary.indexOf("## Reviewed release revision") <
+        summary.indexOf("<!-- synthetic checker output -->"),
+      "trusted revision metadata must precede appended checker findings",
+    );
+  } finally {
+    rmSync(fixtureRoot, { recursive: true, force: true });
+  }
 });
