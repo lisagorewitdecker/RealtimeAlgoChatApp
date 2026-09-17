@@ -20,6 +20,7 @@ import {
   formatDevServerSignIn,
   formatHandoffPreflight,
   getPublicPreviewManifestUrl,
+  MAX_PREVIEW_TIMEOUT_MS,
   manifestHasSignedInDeveloper,
   parsePreviewTimeout,
   requestLocalHandoffProbe,
@@ -59,6 +60,32 @@ test("accepts positive finite preview timeout values", () => {
     ["PREVIEW_PUBLIC_TIMEOUT_MS", "25.5"],
   ]) {
     assert.equal(parsePreviewTimeout(name, value, 999), Number(value));
+  }
+});
+
+test("rejects preview timeout values above the safe limit without echoing them", () => {
+  const oversizedValue = "999999999999999999999";
+
+  for (const name of [
+    "PREVIEW_STARTUP_TIMEOUT_MS",
+    "PREVIEW_HANDOFF_TIMEOUT_MS",
+    "PREVIEW_PUBLIC_TIMEOUT_MS",
+  ]) {
+    assert.equal(
+      parsePreviewTimeout(name, String(MAX_PREVIEW_TIMEOUT_MS), 999),
+      MAX_PREVIEW_TIMEOUT_MS,
+    );
+    assert.throws(
+      () => parsePreviewTimeout(name, oversizedValue, 999),
+      (error) => {
+        assert.equal(
+          error.message,
+          `${name} must be between 1 and ${MAX_PREVIEW_TIMEOUT_MS} milliseconds.`,
+        );
+        assert.doesNotMatch(error.message, new RegExp(oversizedValue));
+        return true;
+      },
+    );
   }
 });
 

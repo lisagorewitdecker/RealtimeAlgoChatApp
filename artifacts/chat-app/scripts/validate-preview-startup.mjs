@@ -8,6 +8,9 @@ import { findDuplicateJsonObjectKeys } from "../../../scripts/find-duplicate-jso
 const DEFAULT_TIMEOUT_MS = 30_000;
 const DEFAULT_HANDOFF_TIMEOUT_MS = 60_000;
 const DEFAULT_PUBLIC_PREVIEW_TIMEOUT_MS = 15_000;
+// Five minutes is long enough for a cold CI preview while preventing a
+// misconfigured job from waiting indefinitely.
+export const MAX_PREVIEW_TIMEOUT_MS = 5 * 60_000;
 const STARTUP_FAILURE_GRACE_MS = 250;
 const MAX_STARTUP_DIAGNOSTIC_LENGTH = 512;
 const MAX_STARTUP_FAILURE_LINE_LENGTH = 320;
@@ -889,6 +892,11 @@ export function parsePreviewTimeout(name, value, defaultValue) {
   if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
     throw new Error(
       `${name} must be a positive finite number of milliseconds.`,
+    );
+  }
+  if (timeoutMs > MAX_PREVIEW_TIMEOUT_MS) {
+    throw new Error(
+      `${name} must be between 1 and ${MAX_PREVIEW_TIMEOUT_MS} milliseconds.`,
     );
   }
 
