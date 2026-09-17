@@ -45,6 +45,7 @@ const compatibilityStep = steps.find(
   (step) => step.name === "Check API contract compatibility",
 );
 const generatedClientFixturePath = "lib/api-client-react/src/generated/api.ts";
+const pushTrigger = workflow.on?.push;
 const pullRequestTrigger = workflow.on?.pull_request;
 
 function resolveRootPackageScript(command) {
@@ -85,6 +86,18 @@ function resolveApiSpecPackageScript(command) {
   return resolvedCommand;
 }
 
+test("API codegen workflow runs after pushes to development", () => {
+  assert.ok(
+    pushTrigger,
+    "the API codegen workflow must define a push trigger",
+  );
+  assert.deepEqual(
+    pushTrigger.branches,
+    ["development"],
+    "the API codegen workflow push trigger must target the development branch",
+  );
+});
+
 test("API codegen workflow runs for the complete development pull-request event set", () => {
   assert.ok(
     pullRequestTrigger,
@@ -99,6 +112,25 @@ test("API codegen workflow runs for the complete development pull-request event 
     pullRequestTrigger.types,
     ["opened", "synchronize", "reopened", "edited"],
     "the API codegen workflow pull_request trigger must include opened, synchronize, reopened, and edited events",
+  );
+});
+
+test("API codegen workflow checks out full history for generated-client validation", () => {
+  const checkoutStep = steps.find((step) => step.id === "checkout");
+
+  assert.ok(
+    checkoutStep,
+    "the API codegen workflow must keep a checkout step because full history is required for generated-client validation",
+  );
+  assert.equal(
+    checkoutStep.uses,
+    "actions/checkout@v4",
+    "the API codegen workflow checkout step must use actions/checkout",
+  );
+  assert.equal(
+    checkoutStep.with?.["fetch-depth"],
+    0,
+    "the API codegen workflow checkout must use fetch-depth: 0 because full history is required for generated-client validation",
   );
 });
 

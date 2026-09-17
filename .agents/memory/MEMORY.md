@@ -87,3 +87,4 @@
 - [jest-expo platform projects](jest-expo-platform-projects.md) — the default preset also matches `*.test.android.tsx`; use explicit per-project testMatch lists and guard the Android project's `Platform.OS`.
 - [Message deletion reconciliation](message-deletion-reconciliation.md) — tombstones need both bounded persistence cursors and client-side live-deletion guards to prevent stale recovery resurrection.
 - [Sentry native upload policy](sentry-native-upload-policy.md) — declare `@sentry/cli` in the app (pnpm) and apply the Sentry Expo plugin only when a token exists; iOS phase cannot soft-fail.
+- [GitHub candidate ID migration](github-candidate-id-migration.md) — secret values cannot be read through the API; migrate only from exact installed-device build records.

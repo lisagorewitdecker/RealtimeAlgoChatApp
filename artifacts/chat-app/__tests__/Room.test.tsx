@@ -775,6 +775,32 @@ describe("room ban handling", () => {
     expect(mockRetryRoomKeyPersistence).toHaveBeenCalledWith("room-42");
   });
 
+  it("keeps recovery available when retrying the room key save fails again", async () => {
+    mockRoomKeyPersistenceFailures.set("room-42", {
+      roomId: "room-42",
+      kind: "save",
+      message: "Keep this room open and retry before sending messages.",
+    });
+    mockRetryRoomKeyPersistence.mockRejectedValueOnce(
+      new Error("Secure storage is still unavailable"),
+    );
+    const view = render(<RoomScreen />);
+
+    await act(async () => {
+      fireEvent.press(view.getByTestId("retry-room-key-save-button"));
+    });
+
+    expect(mockRetryRoomKeyPersistence).toHaveBeenCalledWith("room-42");
+    expect(view.getByTestId("room-key-storage-warning")).toBeTruthy();
+    expect(
+      view.getByText("Keep this room open and retry before sending messages."),
+    ).toBeTruthy();
+    expect(view.getByText("Retry saving key")).toBeTruthy();
+    expect(view.getByTestId("retry-room-key-save-button").props.disabled).not.toBe(
+      true,
+    );
+  });
+
   it("still opens the room when saved-key hydration rejects instead of waiting forever", async () => {
     // Reproduces the published-build hang seen on a phone: the secure-store
     // read threw, the join waited on that promise, and "Opening room…" never
