@@ -18,6 +18,10 @@ import { createIpRateLimit } from "../middlewares/rateLimit";
 
 const router = Router();
 const MODERATION_HISTORY_WINDOW_MS = 60 * 1_000;
+const MODERATION_DELETE_MESSAGE_LIMITER = createIpRateLimit({
+  windowMs: 60 * 1_000,
+  max: 30,
+});
 const MODERATION_HISTORY_PER_USER_WINDOW = 30;
 const MODERATION_HISTORY_PER_IP_WINDOW = 120;
 const MODERATION_HISTORY_TRACKING_KEY_LIMIT = 10_000;
@@ -136,7 +140,7 @@ router.post("/:roomId/kick", async (req, res) => {
   res.status(403).json({ error: "Room creator permission required." });
 });
 
-router.delete("/:roomId/messages/:messageId", async (req, res, next) => {
+router.delete("/:roomId/messages/:messageId", MODERATION_DELETE_MESSAGE_LIMITER, async (req, res, next) => {
   const actorId = await requireAuthorizedUser(req, res);
   if (!actorId) return;
   const roomId = req.params["roomId"];
