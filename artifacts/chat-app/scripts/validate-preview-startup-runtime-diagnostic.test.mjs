@@ -666,30 +666,54 @@ test("CI summaries retain bounded long-path loader diagnostics and library ident
   }
 });
 
-test("CI summaries name the malformed selected preview setting without its value", () => {
+test("CI summaries preserve direct preview-setting rejection reasons without values", () => {
   const temporaryDirectory = mkdtempSync(
-    join(tmpdir(), "chat-preview-malformed-setting-summary-"),
+    join(tmpdir(), "chat-preview-setting-rejection-summary-"),
   );
-  const summaryPath = join(temporaryDirectory, "summary.md");
-  const malformedValue = "https://[preview-setting-secret";
+  const cases = [
+    {
+      name: "malformed selected setting",
+      value: "https://[preview-setting-secret",
+      expectedReason:
+        /Public Expo preview manifest URL configuration from PREVIEW_PUBLIC_URL is invalid/,
+    },
+    {
+      name: "non-HTTPS selected setting",
+      value: "http://preview-setting-secret.example.test/expo",
+      expectedReason: /Public Expo preview manifest URL must use HTTPS/,
+    },
+    {
+      name: "credential-bearing selected setting",
+      value:
+        "https://preview-user:preview-password@credential-preview.example.test/expo",
+      expectedReason:
+        /Public Expo preview manifest URL must not contain credentials/,
+    },
+  ];
 
   try {
-    const result = runNodeScript([validatorPath], {
-      GITHUB_STEP_SUMMARY: summaryPath,
-      PREVIEW_PUBLIC_URL: malformedValue,
-      REPLIT_EXPO_DEV_DOMAIN: "fallback-preview.example.test",
-      PREVIEW_PUBLIC_TIMEOUT_MS: "25",
-      PREVIEW_STARTUP_TIMEOUT_MS: "2000",
-      PREVIEW_STARTUP_TEST_FIXTURE: "handoff-server",
-    });
+    for (const [index, previewValue] of cases.entries()) {
+      const summaryPath = join(
+        temporaryDirectory,
+        `summary-${index}.md`,
+      );
+      const result = runNodeScript([validatorPath], {
+        GITHUB_STEP_SUMMARY: summaryPath,
+        PREVIEW_PUBLIC_URL: previewValue.value,
+        REPLIT_EXPO_DEV_DOMAIN: "fallback-preview.example.test",
+        PREVIEW_PUBLIC_TIMEOUT_MS: "25",
+        PREVIEW_STARTUP_TIMEOUT_MS: "2000",
+        PREVIEW_STARTUP_TEST_FIXTURE: "handoff-server",
+      });
 
-    assert.equal(result.status, 1);
-    const summary = readFileSync(summaryPath, "utf8");
-    assert.match(
-      summary,
-      /Public Expo preview manifest URL configuration from PREVIEW_PUBLIC_URL is invalid/,
-    );
-    assert.ok(!summary.includes(malformedValue));
+      assert.equal(result.status, 1, previewValue.name);
+      const summary = readFileSync(summaryPath, "utf8");
+      assert.match(summary, previewValue.expectedReason, previewValue.name);
+      assert.ok(
+        !summary.includes(previewValue.value),
+        `${previewValue.name} leaked its configured value`,
+      );
+    }
   } finally {
     rmSync(temporaryDirectory, { recursive: true, force: true });
   }
