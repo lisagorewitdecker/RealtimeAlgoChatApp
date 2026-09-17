@@ -16,6 +16,7 @@
     "test:build-preflight": "node --test scripts/build.test.js",
     "test:sentry-upload-policy": "node --test plugins/withSentryNativeUpload.test.mjs",
     "test:preview-loader-compatibility": "node --test scripts/validate-preview-startup-runtime-diagnostic.test.mjs",
+    "refresh:preview-loader-evidence": "node scripts/refresh-preview-startup-runtime-library-fixture.mjs",
     "test:preview-live-timeout": "node --test --test-name-pattern=\"live Metro\" scripts/validate-preview-startup.test.mjs",
     "test:preview-preflight": "pnpm run test:preview-loader-compatibility && node --test scripts/validate-preview-startup.test.mjs",
     "test:branding": "node --test scripts/validate-branding.test.mjs",

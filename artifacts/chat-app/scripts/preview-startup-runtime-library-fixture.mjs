@@ -1,57 +1,76 @@
 import { createServer } from "node:http";
 import { fileURLToPath } from "node:url";
 
+// BEGIN GENERATED PREVIEW LOADER EVIDENCE
 export const CAPTURED_EXPO_TOOLING = Object.freeze({
-  expoCli: "57.0.20",
-  reactNative: "0.86.3",
+  "expoCli": "57.0.20",
+  "reactNative": "0.86.3"
 });
+
+export const REQUIRED_LOADER_PLATFORMS = Object.freeze([
+  "linux",
+  "macos",
+  "windows"
+]);
 
 export const CAPTURED_LOADER_SAMPLES = Object.freeze([
   Object.freeze({
-    name: "Linux shared-library loader",
-    fixture: "missing-runtime-library",
+    "name": "Linux shared-library loader",
+    "platform": "linux",
+    "fixture": "missing-runtime-library"
   }),
   Object.freeze({
-    name: "macOS dyld loader",
-    fixture: "missing-runtime-library-dyld",
+    "name": "macOS dyld loader",
+    "platform": "macos",
+    "fixture": "missing-runtime-library-dyld"
   }),
   Object.freeze({
-    name: "Windows loader",
-    fixture: "missing-runtime-library-windows",
+    "name": "Windows loader",
+    "platform": "windows",
+    "fixture": "missing-runtime-library-windows"
   }),
   Object.freeze({
-    name: "Linux shared-library loader with a long path",
-    fixture: "missing-runtime-library-long-path",
+    "name": "Linux shared-library loader with a long path",
+    "platform": "linux",
+    "fixture": "missing-runtime-library-long-path"
   }),
   Object.freeze({
-    name: "macOS dyld loader with a long path",
-    fixture: "missing-runtime-library-dyld-long-path",
+    "name": "macOS dyld loader with a long path",
+    "platform": "macos",
+    "fixture": "missing-runtime-library-dyld-long-path"
   }),
   Object.freeze({
-    name: "Windows loader with a long path",
-    fixture: "missing-runtime-library-windows-long-path",
+    "name": "Windows loader with a long path",
+    "platform": "windows",
+    "fixture": "missing-runtime-library-windows-long-path"
   }),
   Object.freeze({
-    name: "Linux shared-library loader with spaces",
-    fixture: "missing-runtime-library-spaced",
+    "name": "Linux shared-library loader with spaces",
+    "platform": "linux",
+    "fixture": "missing-runtime-library-spaced"
   }),
   Object.freeze({
-    name: "macOS dyld loader with a quoted path",
-    fixture: "missing-runtime-library-dyld-quoted",
+    "name": "macOS dyld loader with a quoted path",
+    "platform": "macos",
+    "fixture": "missing-runtime-library-dyld-quoted"
   }),
   Object.freeze({
-    name: "Windows loader with a quoted path",
-    fixture: "missing-runtime-library-windows-quoted",
+    "name": "Windows loader with a quoted path",
+    "platform": "windows",
+    "fixture": "missing-runtime-library-windows-quoted"
   }),
   Object.freeze({
-    name: "macOS dyld loader with a quoted long path",
-    fixture: "missing-runtime-library-dyld-quoted-long-path",
+    "name": "macOS dyld loader with a quoted long path",
+    "platform": "macos",
+    "fixture": "missing-runtime-library-dyld-quoted-long-path"
   }),
   Object.freeze({
-    name: "Windows loader with a quoted long path",
-    fixture: "missing-runtime-library-windows-quoted-long-path",
-  }),
+    "name": "Windows loader with a quoted long path",
+    "platform": "windows",
+    "fixture": "missing-runtime-library-windows-quoted-long-path"
+  })
 ]);
+// END GENERATED PREVIEW LOADER EVIDENCE
 
 const longLinuxLibraryPath =
   `/opt/expo/${"react-native-devtools-cache/".repeat(16)}` +
@@ -64,54 +83,23 @@ const longWindowsLibraryPath =
   `C:\\Program Files\\Expo\\${"react native devtools cache\\".repeat(12)}` +
   "libgtk-3-0.dll";
 
+// BEGIN GENERATED PREVIEW LOADER OUTPUT
 export const fixtureOutput = Object.freeze({
-  "missing-runtime-library":
-    "Error: /opt/expo/react-native-devtools: error while loading shared " +
-    "libraries: libgtk-3.so.0: cannot open shared object file: No such file " +
-    "or directory\n",
-  "missing-runtime-library-dyld":
-    "dyld[12345]: Library not loaded: /opt/homebrew/lib/libgtk-3.dylib\n" +
-    "  Referenced from: /opt/expo/react-native-devtools\n" +
-    "  Reason: tried: '/opt/homebrew/lib/libgtk-3.dylib' (no such file)\n",
-  "missing-runtime-library-windows":
-    "Error: The code execution cannot proceed because libgtk-3-0.dll was " +
-    "not found. Reinstalling the program may fix this problem.\n",
-  "missing-runtime-library-long-path":
-    `Error: /opt/expo/react-native-devtools: error while loading shared ` +
-    `libraries: ${longLinuxLibraryPath}: cannot open shared object file: ` +
-    "No such file or directory\n",
-  "missing-runtime-library-dyld-long-path":
-    `dyld[12345]: Library not loaded: ${longDyldLibraryPath}\n` +
-    "  Referenced from: /opt/expo/react-native-devtools\n" +
-    `  Reason: tried: '${longDyldLibraryPath}' (no such file)\n`,
-  "missing-runtime-library-windows-long-path":
-    `Error: The code execution cannot proceed because ${longWindowsLibraryPath} ` +
-    "was not found. Reinstalling the program may fix this problem.\n",
-  "missing-runtime-library-spaced":
-    "Error: /opt/expo/react native devtools: error while loading shared " +
-    "libraries: /opt/expo/React Native DevTools/libgtk-3.so.0: cannot open " +
-    "shared object file: No such file or directory\n" +
-    "unrelated log text \u001b[31mshould not be included\u001b[0m\n",
-  "missing-runtime-library-dyld-quoted":
-    "dyld[12345]: Library not loaded: " +
-    "'/opt/homebrew/Library/Application Support/Expo/libgtk-3.dylib'\n" +
-    "  Referenced from: /opt/expo/react-native-devtools\n" +
-    "  unrelated log text should not be included\n",
-  "missing-runtime-library-windows-quoted":
-    'Error: The code execution cannot proceed because "C:\\Program Files\\' +
-    'Expo\\React Native DevTools\\libgtk-3-0.dll" was not found. ' +
-    "Reinstalling the program may fix this problem.\n" +
-    "unrelated log text should not be included\n",
-  "missing-runtime-library-dyld-quoted-long-path":
-    `dyld[12345]: Library not loaded: '${longDyldLibraryPath}'\n` +
-    "  Referenced from: /opt/expo/react-native-devtools\n" +
-    `  Reason: tried: '${longDyldLibraryPath}' (no such file)\n`,
-  "missing-runtime-library-windows-quoted-long-path":
-    `Error: The code execution cannot proceed because "${longWindowsLibraryPath}" ` +
-    "was not found. Reinstalling the program may fix this problem.\n",
-  "unsupported-loader-wording":
-    "React Native DevTools launcher exited with status 127\n",
+  "missing-runtime-library": "Error: /opt/expo/react-native-devtools: error while loading shared libraries: libgtk-3.so.0: cannot open shared object file: No such file or directory\n",
+  "missing-runtime-library-dyld": "dyld[12345]: Library not loaded: /opt/homebrew/lib/libgtk-3.dylib\n  Referenced from: /opt/expo/react-native-devtools\n  Reason: tried: '/opt/homebrew/lib/libgtk-3.dylib' (no such file)\n",
+  "missing-runtime-library-windows": "Error: The code execution cannot proceed because libgtk-3-0.dll was not found. Reinstalling the program may fix this problem.\n",
+  "missing-runtime-library-long-path": "Error: /opt/expo/react-native-devtools: error while loading shared libraries: /opt/expo/react-native-devtools-cache/react-native-devtools-cache/react-native-devtools-cache/react-native-devtools-cache/react-native-devtools-cache/react-native-devtools-cache/react-native-devtools-cache/react-native-devtools-cache/react-native-devtools-cache/react-native-devtools-cache/react-native-devtools-cache/react-native-devtools-cache/react-native-devtools-cache/react-native-devtools-cache/react-native-devtools-cache/react-native-devtools-cache/libgtk-3.so.0: cannot open shared object file: No such file or directory\n",
+  "missing-runtime-library-dyld-long-path": "dyld[12345]: Library not loaded: /opt/homebrew/Library/Application Support/Expo/react native devtools cache/react native devtools cache/react native devtools cache/react native devtools cache/react native devtools cache/react native devtools cache/react native devtools cache/react native devtools cache/react native devtools cache/react native devtools cache/react native devtools cache/react native devtools cache/libgtk-3.dylib\n  Referenced from: /opt/expo/react-native-devtools\n  Reason: tried: '/opt/homebrew/Library/Application Support/Expo/react native devtools cache/react native devtools cache/react native devtools cache/react native devtools cache/react native devtools cache/react native devtools cache/react native devtools cache/react native devtools cache/react native devtools cache/react native devtools cache/react native devtools cache/react native devtools cache/libgtk-3.dylib' (no such file)\n",
+  "missing-runtime-library-windows-long-path": "Error: The code execution cannot proceed because C:\\Program Files\\Expo\\react native devtools cache\\react native devtools cache\\react native devtools cache\\react native devtools cache\\react native devtools cache\\react native devtools cache\\react native devtools cache\\react native devtools cache\\react native devtools cache\\react native devtools cache\\react native devtools cache\\react native devtools cache\\libgtk-3-0.dll was not found. Reinstalling the program may fix this problem.\n",
+  "missing-runtime-library-spaced": "Error: /opt/expo/react native devtools: error while loading shared libraries: /opt/expo/React Native DevTools/libgtk-3.so.0: cannot open shared object file: No such file or directory\nunrelated log text \u001b[31mshould not be included\u001b[0m\n",
+  "missing-runtime-library-dyld-quoted": "dyld[12345]: Library not loaded: '/opt/homebrew/Library/Application Support/Expo/libgtk-3.dylib'\n  Referenced from: /opt/expo/react-native-devtools\n  unrelated log text should not be included\n",
+  "missing-runtime-library-windows-quoted": "Error: The code execution cannot proceed because \"C:\\Program Files\\Expo\\React Native DevTools\\libgtk-3-0.dll\" was not found. Reinstalling the program may fix this problem.\nunrelated log text should not be included\n",
+  "missing-runtime-library-dyld-quoted-long-path": "dyld[12345]: Library not loaded: '/opt/homebrew/Library/Application Support/Expo/react native devtools cache/react native devtools cache/react native devtools cache/react native devtools cache/react native devtools cache/react native devtools cache/react native devtools cache/react native devtools cache/react native devtools cache/react native devtools cache/react native devtools cache/react native devtools cache/libgtk-3.dylib'\n  Referenced from: /opt/expo/react-native-devtools\n  Reason: tried: '/opt/homebrew/Library/Application Support/Expo/react native devtools cache/react native devtools cache/react native devtools cache/react native devtools cache/react native devtools cache/react native devtools cache/react native devtools cache/react native devtools cache/react native devtools cache/react native devtools cache/react native devtools cache/react native devtools cache/libgtk-3.dylib' (no such file)\n",
+  "missing-runtime-library-windows-quoted-long-path": "Error: The code execution cannot proceed because \"C:\\Program Files\\Expo\\react native devtools cache\\react native devtools cache\\react native devtools cache\\react native devtools cache\\react native devtools cache\\react native devtools cache\\react native devtools cache\\react native devtools cache\\react native devtools cache\\react native devtools cache\\react native devtools cache\\react native devtools cache\\libgtk-3-0.dll\" was not found. Reinstalling the program may fix this problem.\n",
+  "unsupported-loader-wording": "React Native DevTools launcher exited with status 127\n"
 });
+// END GENERATED PREVIEW LOADER OUTPUT
+
 if (fileURLToPath(import.meta.url) === process.argv[1]) {
   const fixtureName =
     process.env.PREVIEW_STARTUP_TEST_FIXTURE ?? "missing-runtime-library";

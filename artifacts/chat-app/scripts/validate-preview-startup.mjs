@@ -86,7 +86,8 @@ const UNRECOGNIZED_LOADER_FAILURES = [
 export const LOADER_COMPATIBILITY_MAINTENANCE_MESSAGE =
   "Expo preview loader wording changed. Update STARTUP_FAILURES and " +
   "MISSING_LIBRARY_PATTERNS, then refresh the versioned loader samples " +
-  "before relying on this diagnostic.";
+  "with pnpm run refresh:preview-loader-evidence before relying on this " +
+  "diagnostic.";
 const STARTUP_TEST_FIXTURES = new Set([
   "handoff-server",
   "handoff-server-stall-manifest",

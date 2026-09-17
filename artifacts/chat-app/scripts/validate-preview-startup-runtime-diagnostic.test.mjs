@@ -1,10 +1,17 @@
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
-import { readFileSync, writeFileSync, mkdtempSync, rmSync } from "node:fs";
+import {
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+  mkdtempSync,
+  rmSync,
+} from "node:fs";
 import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { pathToFileURL } from "node:url";
 
 import {
   CAPTURED_EXPO_TOOLING,
@@ -18,6 +25,10 @@ const validatorPath = join(scriptsDirectory, "validate-preview-startup.mjs");
 const fixturePath = join(
   scriptsDirectory,
   "preview-startup-runtime-library-fixture.mjs",
+);
+const refreshPath = join(
+  scriptsDirectory,
+  "refresh-preview-startup-runtime-library-fixture.mjs",
 );
 const packageRequire = createRequire(join(packageRoot, "package.json"));
 
@@ -52,6 +63,34 @@ function containsControlCharacters(value) {
 function installedPackageVersion(packageName) {
   const packageJsonPath = packageRequire.resolve(`${packageName}/package.json`);
   return JSON.parse(readFileSync(packageJsonPath, "utf8")).version;
+}
+
+function writeIndependentCaptureArtifacts(directory, suffix = "") {
+  mkdirSync(directory, { recursive: true });
+  for (const platform of ["linux", "macos", "windows"]) {
+    const samples = Object.fromEntries(
+      CAPTURED_LOADER_SAMPLES.filter(
+        (sample) => sample.platform === platform,
+      ).map((sample) => [
+        sample.fixture,
+        `${fixtureOutput[sample.fixture]}${suffix}${platform}\n`,
+      ]),
+    );
+    writeFileSync(
+      join(directory, `${platform}.json`),
+      JSON.stringify(
+        {
+          platform,
+          expoCli: installedPackageVersion("@expo/cli"),
+          reactNative: installedPackageVersion("react-native"),
+          samples,
+        },
+        null,
+        2,
+      ) + "\n",
+      "utf8",
+    );
+  }
 }
 
 const capturedLoaderSampleNames = CAPTURED_LOADER_SAMPLES.map(
@@ -242,6 +281,131 @@ test("versioned loader samples match the installed Expo tooling", () => {
       /unsupported loader wording/i,
       fixtureName,
     );
+  }
+});
+
+test("loader evidence includes every required platform and a captured output", () => {
+  const requiredPlatforms = ["linux", "macos", "windows"];
+  const platforms = new Set(
+    CAPTURED_LOADER_SAMPLES.map(({ platform }) => platform),
+  );
+  assert.deepEqual(
+    [...platforms].sort(),
+    [...requiredPlatforms].sort(),
+    "refresh evidence must include Linux, macOS, and Windows samples",
+  );
+
+  for (const sample of CAPTURED_LOADER_SAMPLES) {
+    assert.equal(
+      typeof fixtureOutput[sample.fixture],
+      "string",
+      `${sample.name} is missing captured loader output`,
+    );
+    assert.ok(
+      fixtureOutput[sample.fixture].length > 0,
+      `${sample.name} has empty captured loader output`,
+    );
+  }
+});
+
+test("refresh command updates tooling metadata, inventory, and outputs together", async () => {
+  const temporaryDirectory = mkdtempSync(
+    join(tmpdir(), "chat-preview-loader-refresh-"),
+  );
+  const captureDirectory = join(temporaryDirectory, "captures");
+  const refreshedFixturePath = join(
+    temporaryDirectory,
+    "preview-startup-runtime-library-fixture.mjs",
+  );
+
+  try {
+    writeIndependentCaptureArtifacts(captureDirectory, "independent-");
+    const result = runNodeScript(
+      [
+        refreshPath,
+        "--capture-dir",
+        captureDirectory,
+        "--output",
+        refreshedFixturePath,
+      ],
+    );
+    assert.equal(result.status, 0, result.output);
+
+    const refreshedSource = readFileSync(refreshedFixturePath, "utf8");
+    assert.match(
+      refreshedSource,
+      /BEGIN GENERATED PREVIEW LOADER EVIDENCE[\s\S]+END GENERATED PREVIEW LOADER EVIDENCE/,
+    );
+    assert.match(
+      refreshedSource,
+      /BEGIN GENERATED PREVIEW LOADER OUTPUT[\s\S]+END GENERATED PREVIEW LOADER OUTPUT/,
+    );
+
+    const refreshed = await import(
+      `${pathToFileURL(refreshedFixturePath).href}?refresh-test`
+    );
+    assert.deepEqual(refreshed.CAPTURED_EXPO_TOOLING, {
+      expoCli: installedPackageVersion("@expo/cli"),
+      reactNative: installedPackageVersion("react-native"),
+    });
+    assert.deepEqual(
+      refreshed.CAPTURED_LOADER_SAMPLES,
+      CAPTURED_LOADER_SAMPLES,
+    );
+    for (const sample of refreshed.CAPTURED_LOADER_SAMPLES) {
+      assert.equal(
+        refreshed.fixtureOutput[sample.fixture],
+        `${fixtureOutput[sample.fixture]}independent-${sample.platform}\n`,
+        sample.name,
+      );
+      assert.notEqual(
+        refreshed.fixtureOutput[sample.fixture],
+        fixtureOutput[sample.fixture],
+        `${sample.name} was not replaced by independent capture output`,
+      );
+    }
+  } finally {
+    rmSync(temporaryDirectory, { recursive: true, force: true });
+  }
+});
+
+test("refresh command leaves the existing fixture untouched when a platform capture is missing", () => {
+  const temporaryDirectory = mkdtempSync(
+    join(tmpdir(), "chat-preview-loader-refresh-incomplete-"),
+  );
+  const captureDirectory = join(temporaryDirectory, "captures");
+  const outputPath = join(
+    temporaryDirectory,
+    "preview-startup-runtime-library-fixture.mjs",
+  );
+  const existingFixture = readFileSync(fixturePath, "utf8");
+
+  try {
+    mkdirSync(captureDirectory);
+    const completeDirectory = join(temporaryDirectory, "complete");
+    writeIndependentCaptureArtifacts(completeDirectory);
+    for (const platform of ["linux", "macos"]) {
+      const sourcePath = join(completeDirectory, `${platform}.json`);
+      writeFileSync(
+        join(captureDirectory, `${platform}.json`),
+        readFileSync(sourcePath),
+      );
+    }
+    writeFileSync(outputPath, existingFixture, "utf8");
+
+    const result = runNodeScript([
+      refreshPath,
+      "--capture-dir",
+      captureDirectory,
+      "--output",
+      outputPath,
+    ]);
+
+    assert.equal(result.status, 1);
+    assert.match(result.output, /Could not read windows capture/);
+    assert.equal(readFileSync(outputPath, "utf8"), existingFixture);
+  } finally {
+    rmSync(temporaryDirectory, { recursive: true, force: true });
   }
 });
 
