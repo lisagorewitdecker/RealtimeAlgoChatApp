@@ -207,6 +207,24 @@ const releaseEvidenceSourceDirectories = [
   path.join(workspaceRoot, "artifacts/chat-app/scripts"),
   path.join(workspaceRoot, "scripts"),
 ];
+const releaseEvidenceExcludedDirectoryNames = new Set([
+  "__tests__",
+  "fixture",
+  "fixtures",
+  "node_modules",
+  "test",
+  "test-fixtures",
+  "tests",
+  "tooling",
+  "tools",
+]);
+const releaseEvidenceExcludedDirectories = new Set([
+  path.join(workspaceRoot, "scripts/src"),
+  path.join(workspaceRoot, "scripts/tests"),
+]);
+const releaseEvidenceScriptPattern = /\.(?:mjs|sh)$/;
+const releaseEvidenceExcludedFilePattern =
+  /\.(?:fixture|test)\.(?:mjs|sh)$/;
 
 const nonEvidenceJsonParseArguments = {
   "artifacts/chat-app/scripts/validate-branding.mjs": new Set([
@@ -423,17 +441,30 @@ function jsonParseMatches(filePath) {
 
 function releaseCheckEntryPaths() {
   const entries = [];
-  for (const directory of releaseEvidenceSourceDirectories) {
-    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+  function visit(directory) {
+    for (const entry of readdirSync(directory, { withFileTypes: true }).sort(
+      (left, right) => left.name.localeCompare(right.name),
+    )) {
+      const filePath = path.join(directory, entry.name);
+      if (entry.isDirectory()) {
+        if (
+          releaseEvidenceExcludedDirectoryNames.has(entry.name) ||
+          releaseEvidenceExcludedDirectories.has(filePath)
+        ) {
+          continue;
+        }
+        visit(filePath);
+        continue;
+      }
+
       if (
         !entry.isFile() ||
-        !/\.(?:mjs|sh)$/.test(entry.name) ||
-        entry.name.endsWith(".test.mjs")
+        !releaseEvidenceScriptPattern.test(entry.name) ||
+        releaseEvidenceExcludedFilePattern.test(entry.name)
       ) {
         continue;
       }
 
-      const filePath = path.join(directory, entry.name);
       const relativePath = path.relative(workspaceRoot, filePath);
       if (relativePath === "scripts/find-duplicate-json-object-keys.mjs") {
         continue;
@@ -441,6 +472,11 @@ function releaseCheckEntryPaths() {
       entries.push(filePath);
     }
   }
+
+  for (const directory of releaseEvidenceSourceDirectories) {
+    visit(directory);
+  }
+
   return entries;
 }
 
