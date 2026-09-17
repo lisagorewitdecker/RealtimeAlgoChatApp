@@ -602,6 +602,37 @@ assert_not_contains "$multiline_rejected_output" "unterminated notes block"
 assert_not_contains "$multiline_rejected_output" "The \`Send\` button overlaps"
 assert_not_contains "$multiline_rejected_output" "screenshots/screen-11.png"
 
+# Blank lines immediately before the closing delimiter are valid note content,
+# not an unterminated block. Bash command substitution strips trailing
+# newlines when the checker captures notes, so this coverage is specifically
+# about the delimiter-adjacent boundary rather than internal blank lines
+# (already covered above).
+trailing_blank_notes_root="$TEST_ROOT/trailing-blank-notes"
+write_valid_run "$trailing_blank_notes_root" ios
+write_valid_run "$trailing_blank_notes_root" android
+write_review_record "$trailing_blank_notes_root" ios APPROVED
+printf '%s\n' \
+  'platform=android' \
+  'reviewer=Ada Reviewer' \
+  'reviewed_at_utc=2026-09-09T13:00:00Z' \
+  'candidate_build_id=build-android' \
+  'decision=REJECTED' \
+  'notes<<END_NOTES' \
+  '- The `Send` button overlaps the final line.' \
+  '' \
+  '' \
+  'END_NOTES' \
+  > "$trailing_blank_notes_root/android/20260909T120000Z/review-record.txt"
+if trailing_blank_notes_output="$(bash "$CHECKER" "$trailing_blank_notes_root" 2>&1)"; then
+  echo "trailing blank notes rejected review case unexpectedly passed" >&2
+  exit 1
+fi
+assert_contains "$trailing_blank_notes_output" "[android] The review record at $trailing_blank_notes_root/android/20260909T120000Z/review-record.txt records a rejected decision."
+assert_contains "$trailing_blank_notes_output" "[android] Review notes were supplied but are omitted from automated release output."
+assert_contains "$trailing_blank_notes_output" "completeness check FAILED with 1 issue(s)"
+assert_not_contains "$trailing_blank_notes_output" "unterminated notes block"
+assert_not_contains "$trailing_blank_notes_output" "The \`Send\` button overlaps"
+
 privacy_rejected_root="$TEST_ROOT/privacy-rejected"
 write_valid_run "$privacy_rejected_root" ios
 write_valid_run "$privacy_rejected_root" android
