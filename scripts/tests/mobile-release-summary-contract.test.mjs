@@ -171,9 +171,10 @@ const scriptContracts = {
 
 /**
  * Inventory of JSON readers that consume release evidence. The source scan
- * below intentionally discovers JSON.parse calls in release-check scripts
- * rather than trusting this list alone: adding a reader without adding the
- * shared duplicate-key check must fail this contract.
+ * below intentionally discovers JSON.parse calls in release-check scripts and
+ * their local helper modules rather than trusting this list alone: adding a
+ * reader without adding the shared duplicate-key check must fail this
+ * contract.
  */
 const releaseEvidenceReaderContracts = {
   "artifacts/chat-app/scripts/validate-branding.mjs": {
@@ -345,10 +346,83 @@ function assertNoProblems(problems, heading) {
   );
 }
 
-function discoverReleaseEvidenceJsonParses() {
-  const parsePattern = /\bJSON\.parse\(\s*([A-Za-z_$][\w$]*)\s*\)/g;
-  const discovered = [];
+const localModuleImportPatterns = [
+  /\bimport\s+(?:[\s\S]*?\s+from\s+)?["']([^"']+)["']/g,
+  /\bexport\s+(?:[\s\S]*?\s+from\s+)["']([^"']+)["']/g,
+  /\bimport\s*\(\s*["']([^"']+)["']\s*\)/g,
+];
+const localModuleExtensions = ["", ".mjs", ".js", ".cjs"];
 
+function resolveLocalModule(filePath, specifier) {
+  if (!specifier.startsWith(".")) {
+    return null;
+  }
+
+  const modulePath = path.resolve(path.dirname(filePath), specifier);
+  const candidates = [
+    ...localModuleExtensions.map((extension) => `${modulePath}${extension}`),
+    ...localModuleExtensions.map((extension) =>
+      path.join(modulePath, `index${extension}`),
+    ),
+  ];
+
+  for (const candidate of candidates) {
+    if (
+      candidate.startsWith(`${workspaceRoot}${path.sep}`) &&
+      !candidate.includes(`${path.sep}node_modules${path.sep}`) &&
+      existsSync(candidate) &&
+      statSync(candidate).isFile()
+    ) {
+      return candidate;
+    }
+  }
+  return null;
+}
+
+function discoverLocalModuleClosure(entryPath) {
+  const discovered = new Set();
+  const queue = [entryPath];
+
+  while (queue.length > 0) {
+    const filePath = queue.shift();
+    if (discovered.has(filePath)) {
+      continue;
+    }
+    discovered.add(filePath);
+
+    if (!/\.(?:mjs|js|cjs)$/.test(filePath)) {
+      continue;
+    }
+
+    const source = readFileSync(filePath, "utf8");
+    for (const pattern of localModuleImportPatterns) {
+      for (const [, specifier] of source.matchAll(pattern)) {
+        const importedPath = resolveLocalModule(filePath, specifier);
+        if (importedPath && !discovered.has(importedPath)) {
+          queue.push(importedPath);
+        }
+      }
+    }
+  }
+
+  return discovered;
+}
+
+function jsonParseMatches(filePath) {
+  const parsePattern = /\bJSON\.parse\(\s*([A-Za-z_$][\w$]*)\s*\)/g;
+  const relativePath = path.relative(workspaceRoot, filePath);
+  const ignoredArguments =
+    nonEvidenceJsonParseArguments[relativePath] ?? new Set();
+  const source = readFileSync(filePath, "utf8");
+
+  return [...source.matchAll(parsePattern)]
+    .map(([, argument]) => argument)
+    .filter((argument) => !ignoredArguments.has(argument))
+    .map((argument) => ({ filePath, argument }));
+}
+
+function releaseCheckEntryPaths() {
+  const entries = [];
   for (const directory of releaseEvidenceSourceDirectories) {
     for (const entry of readdirSync(directory, { withFileTypes: true })) {
       if (
@@ -364,19 +438,57 @@ function discoverReleaseEvidenceJsonParses() {
       if (relativePath === "scripts/find-duplicate-json-object-keys.mjs") {
         continue;
       }
+      entries.push(filePath);
+    }
+  }
+  return entries;
+}
 
-      const ignoredArguments =
-        nonEvidenceJsonParseArguments[relativePath] ?? new Set();
-      const source = readFileSync(filePath, "utf8");
-      for (const [, argument] of source.matchAll(parsePattern)) {
-        if (!ignoredArguments.has(argument)) {
-          discovered.push(`${relativePath}::${argument}`);
-        }
+function discoverReleaseEvidenceJsonParses(
+  entryFilePaths = releaseCheckEntryPaths(),
+) {
+  const importedHelpers = new Set();
+  const closures = new Map();
+
+  for (const entryFilePath of entryFilePaths) {
+    const closure = discoverLocalModuleClosure(entryFilePath);
+    closures.set(entryFilePath, closure);
+    for (const importedPath of closure) {
+      if (importedPath !== entryFilePath) {
+        importedHelpers.add(importedPath);
       }
     }
   }
 
-  return discovered.sort();
+  const discovered = [];
+  for (const [entryFilePath, closure] of closures) {
+    if (importedHelpers.has(entryFilePath)) {
+      continue;
+    }
+
+    const entryPath = path.relative(workspaceRoot, entryFilePath);
+    for (const filePath of closure) {
+      if (
+        path.relative(workspaceRoot, filePath) ===
+        "scripts/find-duplicate-json-object-keys.mjs"
+      ) {
+        continue;
+      }
+      for (const match of jsonParseMatches(filePath)) {
+        discovered.push({
+          entryPath,
+          parserPath: path.relative(workspaceRoot, match.filePath),
+          argument: match.argument,
+        });
+      }
+    }
+  }
+
+  return discovered.sort((left, right) =>
+    `${left.entryPath}::${left.argument}::${left.parserPath}`.localeCompare(
+      `${right.entryPath}::${right.argument}::${right.parserPath}`,
+    ),
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -1764,29 +1876,53 @@ test("every summary-writing script the release workflow invokes has a contract",
   );
 });
 
-test("every release JSON evidence reader rejects duplicate fields with fixed diagnostics", () => {
+function releaseEvidenceReaderInventory(discovered) {
+  return [
+    ...new Set(
+      discovered.map(
+        ({ entryPath, argument }) => `${entryPath}::${argument}`,
+      ),
+    ),
+  ].sort();
+}
+
+function assertReleaseEvidenceReaderInventory(discovered) {
   const inventory = Object.entries(releaseEvidenceReaderContracts)
     .map(([relativePath, contract]) => `${relativePath}::${contract.argument}`)
     .sort();
-  const discovered = discoverReleaseEvidenceJsonParses();
+  const discoveredInventory = releaseEvidenceReaderInventory(discovered);
 
   assert.deepEqual(
-    discovered,
+    discoveredInventory,
     inventory,
     [
       "The release evidence JSON reader inventory must cover every JSON.parse call in release-check scripts.",
-      `  discovered: ${JSON.stringify(discovered)}`,
+      `  discovered: ${JSON.stringify(discoveredInventory)}`,
       `  inventory:  ${JSON.stringify(inventory)}`,
       "Add the reader to the inventory and make it use findDuplicateJsonObjectKeys before JSON.parse.",
     ].join("\n"),
   );
+}
 
-  for (const [relativePath, contract] of Object.entries(
-    releaseEvidenceReaderContracts,
-  )) {
-    const source = scriptSource(relativePath);
-    const scannerIndex = source.indexOf(contract.scannerCall);
-    const parseIndex = source.indexOf(`JSON.parse(${contract.argument})`);
+test("every release JSON evidence reader rejects duplicate fields with fixed diagnostics", () => {
+  const discovered = discoverReleaseEvidenceJsonParses();
+  assertReleaseEvidenceReaderInventory(discovered);
+
+  for (const { entryPath, parserPath, argument } of discovered) {
+    const contract = releaseEvidenceReaderContracts[entryPath];
+    assert.ok(
+      contract,
+      `The release evidence JSON reader ${entryPath} must have an inventory contract.`,
+    );
+    const source = scriptSource(parserPath);
+    const scannerCall = contract.scannerCall.replace(
+      /\([^)]*\)$/,
+      `(${argument})`,
+    );
+    const scannerIndex = source.indexOf(scannerCall);
+    const parseIndex = source.search(
+      new RegExp(`JSON\\.parse\\(\\s*${argument}\\s*\\)`),
+    );
 
     assert.ok(
       scannerIndex >= 0,
@@ -1805,6 +1941,40 @@ test("every release JSON evidence reader rejects duplicate fields with fixed dia
       contract.duplicateFailure,
       `${contract.name} must keep duplicate-field failures fixed and redacted.`,
     );
+  }
+});
+
+test("release evidence discovery catches an un-inventoried nested helper reader", () => {
+  const fixtureDirectory = mkdtempSync(
+    path.join(workspaceRoot, ".mobile-release-summary-contract-"),
+  );
+  const entryPath = path.join(fixtureDirectory, "release-check.mjs");
+  const helperPath = path.join(fixtureDirectory, "nested", "reader.mjs");
+  mkdirSync(path.dirname(helperPath), { recursive: true });
+  writeFileSync(
+    entryPath,
+    'import { readEvidence } from "./nested/reader.mjs";\nreadEvidence();\n',
+  );
+  writeFileSync(
+    helperPath,
+    [
+      "export function readEvidence() {",
+      "  return JSON.parse(evidence);",
+      "}",
+    ].join("\n"),
+  );
+
+  try {
+    const discovered = discoverReleaseEvidenceJsonParses([entryPath]);
+    assert.deepEqual(releaseEvidenceReaderInventory(discovered), [
+      `${path.relative(workspaceRoot, entryPath)}::evidence`,
+    ]);
+    assert.throws(
+      () => assertReleaseEvidenceReaderInventory(discovered),
+      /The release evidence JSON reader inventory must cover every JSON\.parse call in release-check scripts\./,
+    );
+  } finally {
+    rmSync(fixtureDirectory, { recursive: true, force: true });
   }
 });
 
