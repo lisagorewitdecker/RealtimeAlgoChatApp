@@ -117,8 +117,12 @@ if (fileURLToPath(import.meta.url) === process.argv[1]) {
     const port = Number(process.env.PORT);
     const server = createServer((request, response) => {
       if (request.url === "/") {
-        if (stallManifest) return;
-        response.setHeader("content-type", "application/json");
+        response.writeHead(200, { "content-type": "application/json" });
+        if (stallManifest) {
+          response.flushHeaders();
+          response.write('{"launchAsset":');
+          return;
+        }
         response.end(
           JSON.stringify({
             launchAsset: {
@@ -129,8 +133,12 @@ if (fileURLToPath(import.meta.url) === process.argv[1]) {
         return;
       }
 
-      if (stallBundle) return;
-      response.setHeader("content-type", "application/javascript");
+      response.writeHead(200, { "content-type": "application/javascript" });
+      if (stallBundle) {
+        response.flushHeaders();
+        response.write("console.log('partial preview validation fixture');");
+        return;
+      }
       response.end("console.log('preview validation fixture');");
     });
 

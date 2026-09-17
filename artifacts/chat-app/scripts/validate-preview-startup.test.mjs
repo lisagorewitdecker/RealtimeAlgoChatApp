@@ -165,7 +165,10 @@ globalThis.fetch = async (url, options = {}) => {
     assert.match(output, /local_handoff_probe=FAIL/);
     assert.match(output, expectedResource);
     assert.match(output, /40ms configured local handoff deadline/);
-    assert.match(output, /request aborted by deadline/);
+    assert.match(
+      output,
+      /response headers received but body did not complete/,
+    );
     assert.match(
       output,
       /Restart or repair the managed Chat App\/Expo workflow/,
@@ -1096,7 +1099,7 @@ test(
   () =>
     runLiveMetroTimeoutFixture(
       "handoff-server-stall-manifest",
-      /manifest request did not complete/,
+      /manifest response headers received but body did not complete/,
     ),
 );
 
@@ -1106,7 +1109,7 @@ test(
   () =>
     runLiveMetroTimeoutFixture(
       "handoff-server-stall-bundle",
-      /bundle request did not complete/,
+      /bundle response headers received but body did not complete/,
     ),
 );
 

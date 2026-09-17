@@ -628,6 +628,7 @@ export async function requestPublicPreviewManifest(
       deadline,
       (manifestResponse) => manifestResponse.text(),
       `${timeoutMs}ms configured public preview deadline`,
+      "public manifest",
     ));
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
@@ -690,6 +691,7 @@ async function requestWithDeadline(
   deadline,
   readBody,
   deadlineDescription = "configured request deadline",
+  resourceDescription = "request",
 ) {
   const remainingMs = deadline - Date.now();
   if (remainingMs <= 0) {
@@ -716,15 +718,25 @@ async function requestWithDeadline(
     controller.abort(deadlineAbortError);
   }, remainingMs);
 
+  let headersReceived = false;
   try {
     const response = await Promise.race([
       fetch(url, { ...options, signal: controller.signal }),
       abortPromise,
     ]);
+    headersReceived = true;
     const body = await Promise.race([readBody(response), abortPromise]);
     return { response, body };
   } catch (error) {
-    if (deadlineAbortError) throw deadlineAbortError;
+    if (deadlineAbortError) {
+      if (headersReceived) {
+        throw new Error(
+          `${resourceDescription} response headers received but body did not ` +
+            `complete before ${deadlineDescription}: ${deadlineAbortError.message}`,
+        );
+      }
+      throw deadlineAbortError;
+    }
     throw error;
   } finally {
     clearTimeout(abortTimer);
@@ -763,6 +775,7 @@ export async function requestLocalHandoffProbe(
         deadline,
         (response) => response.text(),
         `${timeoutMs}ms configured local handoff deadline`,
+        "manifest",
       );
       const { response: manifestResponse, body: manifestBody } =
         manifestRequest;
@@ -794,6 +807,7 @@ export async function requestLocalHandoffProbe(
         deadline,
         (response) => response.arrayBuffer(),
         `${timeoutMs}ms configured local handoff deadline`,
+        "bundle",
       );
       const { response: bundleResponse, body: bundleBody } = bundleRequest;
       outcome.bundle = formatRequestOutcome(
