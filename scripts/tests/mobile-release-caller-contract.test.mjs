@@ -702,6 +702,11 @@ test("workflow hardening pins actions, narrows pull requests, and bounds duplica
     "native-android must have an explicit timeout",
   );
   assert.equal(
+    workflow.jobs?.["idle-profile-registration"]?.["timeout-minutes"],
+    20,
+    "idle-profile-registration must have an explicit timeout",
+  );
+  assert.equal(
     workflow.jobs?.["mobile-publish"]?.["timeout-minutes"],
     45,
     "mobile-publish must have an explicit timeout",

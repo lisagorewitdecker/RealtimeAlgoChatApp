@@ -1244,6 +1244,7 @@ jobs:
     needs:
       - mobile-release-node-range
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     environment:
       name: mobile-release
     steps:
