@@ -92,6 +92,12 @@ describe("home screen", () => {
     expect(getByText("RealtimeAlgoChatApp").props.style.fontSize).toBeCloseTo(42);
     expect(getByText("welcome back").props.style.fontSize).toBeCloseTo(33.6);
   });
+
+  it("allows an intentional console error only when its full call is expected", () => {
+    expectConsoleError("Expected test error", { source: "home-test" });
+
+    console.error("Expected test error", { source: "home-test" });
+  });
 });
 
 describe("home screen tab bar reservation", () => {

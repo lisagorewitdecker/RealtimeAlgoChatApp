@@ -1,5 +1,5 @@
 import React from "react";
-import { act, fireEvent, render } from "@testing-library/react-native";
+import { act, cleanup, fireEvent, render } from "@testing-library/react-native";
 import { Alert, StyleSheet } from "react-native";
 import RoomScreen from "../app/room/[roomId]";
 
@@ -193,6 +193,7 @@ describe("room ban handling", () => {
 
   afterEach(async () => {
     await act(async () => {
+      cleanup();
       await Promise.resolve();
     });
     alertSpy.mockRestore();
@@ -1015,6 +1016,7 @@ describe("room device-key registration ordering", () => {
 
   afterEach(async () => {
     await act(async () => {
+      cleanup();
       await Promise.resolve();
     });
   });
@@ -1527,6 +1529,7 @@ describe("room composer layout", () => {
 
   afterEach(async () => {
     await act(async () => {
+      cleanup();
       await Promise.resolve();
     });
   });
