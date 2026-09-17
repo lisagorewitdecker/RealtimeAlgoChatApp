@@ -1374,36 +1374,59 @@ jobs:
             echo "release_check_configured=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Verify idle-profile browser targets
-        id: idle-profile-preflight
+      - name: Verify idle-profile Chat App target
+        id: idle-profile-chat-preflight
         if: ${{ steps.idle-profile-config.outputs.browser_targets_configured == 'true' }}
         env:
           E2E_CHAT_URL: ${{ secrets.E2E_CHAT_URL }}
+        run: |
+          set -euo pipefail
+          if ! curl \
+            --fail \
+            --silent \
+            --connect-timeout 5 \
+            --max-time 10 \
+            --output /dev/null \
+            "$E2E_CHAT_URL"; then
+            echo "Chat App target is unavailable or unhealthy." >&2
+            exit 2
+          fi
+          echo "Chat App target is ready."
+
+      - name: Verify idle-profile API target
+        id: idle-profile-api-preflight
+        if: ${{ steps.idle-profile-config.outputs.browser_targets_configured == 'true' }}
+        env:
           E2E_API_URL: ${{ secrets.E2E_API_URL }}
         run: |
           set -euo pipefail
-          check_target() {
-            local label="$1"
-            local url="$2"
-            if ! curl \
-              --fail \
-              --silent \
-              --connect-timeout 5 \
-              --max-time 10 \
-              --output /dev/null \
-              "$url"; then
-              echo "${label} target is unavailable or unhealthy." >&2
-              exit 2
-            fi
-            echo "${label} target is ready."
-          }
-
-          if [[ -z "${E2E_CHAT_URL:-}" || -z "${E2E_API_URL:-}" ]]; then
-            echo "Idle-profile browser target configuration is incomplete." >&2
+          if ! curl \
+            --fail \
+            --silent \
+            --connect-timeout 5 \
+            --max-time 10 \
+            --output /dev/null \
+            "${E2E_API_URL%/}/api/healthz"; then
+            echo "API target is unavailable or unhealthy." >&2
             exit 2
           fi
-          check_target "Chat App" "$E2E_CHAT_URL"
-          check_target "API" "${E2E_API_URL%/}/api/healthz"
+          echo "API target is ready."
+
+      - name: Record idle-profile browser target preflight
+        id: idle-profile-preflight
+        if: ${{ always() && steps.idle-profile-config.outputs.browser_targets_configured == 'true' }}
+        env:
+          IDLE_PROFILE_CHAT_PREFLIGHT_RESULT: ${{ steps.idle-profile-chat-preflight.outcome }}
+          IDLE_PROFILE_API_PREFLIGHT_RESULT: ${{ steps.idle-profile-api-preflight.outcome }}
+        run: |
+          set -euo pipefail
+          if [[ "$IDLE_PROFILE_CHAT_PREFLIGHT_RESULT" != "success" ]]; then
+            echo "failure_reason=chat-app-target-unavailable" >> "$GITHUB_OUTPUT"
+          elif [[ "$IDLE_PROFILE_API_PREFLIGHT_RESULT" != "success" ]]; then
+            echo "failure_reason=api-target-unavailable" >> "$GITHUB_OUTPUT"
+          else
+            echo "failure_reason=" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Run idle-profile registration release check
         id: idle-profile-check
@@ -1442,7 +1465,7 @@ jobs:
       - name: Summarize idle-profile registration check
         if: ${{ always() }}
         env:
-          IDLE_PROFILE_PREFLIGHT_RESULT: ${{ steps.idle-profile-preflight.outcome }}
+          IDLE_PROFILE_PREFLIGHT_FAILURE_REASON: ${{ steps.idle-profile-preflight.outputs.failure_reason }}
           IDLE_PROFILE_RESULT: ${{ steps.idle-profile-check.outcome }}
         run: |
           set -euo pipefail
@@ -1452,9 +1475,19 @@ jobs:
             if [[ "$IDLE_PROFILE_RESULT" == "success" ]]; then
               echo "- Status: **PASS**"
               echo "- Result: the idle client did not repeat \`PUT /api/profile\` after token refresh."
-            elif [[ "$IDLE_PROFILE_PREFLIGHT_RESULT" != "success" ]]; then
+            elif [[ -n "$IDLE_PROFILE_PREFLIGHT_FAILURE_REASON" ]]; then
               echo "- Status: **FAIL**"
-              echo "- Result: release is blocked because idle-profile browser target preflight failed."
+              case "$IDLE_PROFILE_PREFLIGHT_FAILURE_REASON" in
+                chat-app-target-unavailable)
+                  echo "- Result: release is blocked because the Chat App target is unavailable or unhealthy."
+                  ;;
+                api-target-unavailable)
+                  echo "- Result: release is blocked because the API target is unavailable or unhealthy."
+                  ;;
+                *)
+                  echo "- Result: release is blocked because idle-profile browser target preflight failed."
+                  ;;
+              esac
             elif [[ "$IDLE_PROFILE_RESULT" == "skipped" ]]; then
               echo "- Status: **SKIP**"
               echo "- Result: check was skipped because idle-profile secrets are not configured."

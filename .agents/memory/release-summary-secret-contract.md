@@ -9,6 +9,12 @@ Rule: EAS candidate build IDs are non-secret configuration and may appear litera
 
 **How to apply:** the contract test in `scripts/tests` inventories every summary writer and rejects credential or private-ID expansion. Candidate build IDs must originate from `vars.*` or reusable-workflow inputs, never `secrets.*`; summaries may render them and their fingerprints. Never `cat` arbitrary evidence or metadata into a summary—render only explicitly approved fields and link the detailed report. Prefer denylist-style assertions over snapshots because several tasks extend the same summary step concurrently.
 
+Summary steps must not consume outputs from a step that receives secrets, even when an output is intended to contain only a fixed status code.
+
+**Why:** The workflow contract cannot prove that a secret-bearing step will always keep its outputs fixed; allowing one output creates a path for secret values to reach the summary.
+
+**How to apply:** Split target-specific secret checks into separate steps, then let a secret-free recorder map only their GitHub outcomes to fixed reason codes. Summaries may consume the recorder output and map it to fixed text.
+
 For hosted summary regression fixtures, isolate the validator's summary file from the real job summary, verify healthy output leaves it untouched, and compare the failing file byte-for-byte with the approved bounded fragment before publishing it.
 
 **Why:** A local formatter test can pass while workflow plumbing accidentally publishes raw child-process output or a private value; exact comparison tests the boundary that reviewers actually see.

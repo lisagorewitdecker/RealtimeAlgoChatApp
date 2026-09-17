@@ -673,41 +673,84 @@ test("idle-profile registration check blocks release and reports its result", ()
     /echo "release_check_configured=true" >> "\$GITHUB_OUTPUT"/,
   );
 
-  const preflightStep = idleJob.steps.find(
-    (step) => step.name === "Verify idle-profile browser targets",
+  const chatPreflightStep = idleJob.steps.find(
+    (step) => step.name === "Verify idle-profile Chat App target",
+  );
+  const apiPreflightStep = idleJob.steps.find(
+    (step) => step.name === "Verify idle-profile API target",
+  );
+  const preflightRecordStep = idleJob.steps.find(
+    (step) => step.name === "Record idle-profile browser target preflight",
   );
   assert.ok(
-    preflightStep,
-    "idle-profile job must preflight its browser targets",
+    chatPreflightStep,
+    "idle-profile job must preflight its Chat App target",
+  );
+  assert.ok(apiPreflightStep, "idle-profile job must preflight its API target");
+  assert.ok(
+    preflightRecordStep,
+    "idle-profile job must record a secret-free preflight reason",
   );
   assert.equal(
-    preflightStep.if,
+    chatPreflightStep.if,
     "${{ steps.idle-profile-config.outputs.browser_targets_configured == 'true' }}",
-    "preflight must run only when browser target configuration is present",
+    "Chat App preflight must run only when browser target configuration is present",
   );
-  assert.equal(preflightStep.env.E2E_CHAT_URL, "${{ secrets.E2E_CHAT_URL }}");
-  assert.equal(preflightStep.env.E2E_API_URL, "${{ secrets.E2E_API_URL }}");
+  assert.equal(
+    apiPreflightStep.if,
+    "${{ steps.idle-profile-config.outputs.browser_targets_configured == 'true' }}",
+    "API preflight must run only when browser target configuration is present",
+  );
+  assert.deepEqual(chatPreflightStep.env, {
+    E2E_CHAT_URL: "${{ secrets.E2E_CHAT_URL }}",
+  });
+  assert.deepEqual(apiPreflightStep.env, {
+    E2E_API_URL: "${{ secrets.E2E_API_URL }}",
+  });
   assert.match(
-    preflightStep.run,
-    /check_target "Chat App" "\$E2E_CHAT_URL"/,
+    chatPreflightStep.run,
+    /--output \/dev\/null[\s\\]*"\$E2E_CHAT_URL"/,
     "preflight must identify and check the configured Chat App target",
   );
   assert.match(
-    preflightStep.run,
-    /check_target "API" "\$\{E2E_API_URL%\/\}\/api\/healthz"/,
+    apiPreflightStep.run,
+    /--output \/dev\/null[\s\\]*"\$\{E2E_API_URL%\/\}\/api\/healthz"/,
     "preflight must check the API public health route",
   );
-  assert.match(preflightStep.run, /--connect-timeout 5/);
-  assert.match(preflightStep.run, /--max-time 10/);
-  assert.match(
-    preflightStep.run,
-    /\$\{label\} target is unavailable or unhealthy\./,
-    "preflight failures must clearly identify the unavailable target",
+  for (const [label, step] of [
+    ["Chat App", chatPreflightStep],
+    ["API", apiPreflightStep],
+  ]) {
+    assert.match(step.run, /--connect-timeout 5/);
+    assert.match(step.run, /--max-time 10/);
+    assert.match(
+      step.run,
+      new RegExp(`${label} target is unavailable or unhealthy\\.`),
+      "preflight failures must clearly identify the unavailable target",
+    );
+    assert.doesNotMatch(
+      step.run,
+      /echo[^\n]*(?:E2E_CHAT_URL|E2E_API_URL)/,
+      "preflight diagnostics must not print configured target URLs",
+    );
+  }
+  assert.equal(
+    preflightRecordStep.if,
+    "${{ always() && steps.idle-profile-config.outputs.browser_targets_configured == 'true' }}",
   );
-  assert.doesNotMatch(
-    preflightStep.run,
-    /echo[^\n]*(?:E2E_CHAT_URL|E2E_API_URL|"\$url")/,
-    "preflight diagnostics must not print configured target URLs",
+  assert.deepEqual(preflightRecordStep.env, {
+    IDLE_PROFILE_CHAT_PREFLIGHT_RESULT:
+      "${{ steps.idle-profile-chat-preflight.outcome }}",
+    IDLE_PROFILE_API_PREFLIGHT_RESULT:
+      "${{ steps.idle-profile-api-preflight.outcome }}",
+  });
+  assert.match(
+    preflightRecordStep.run,
+    /IDLE_PROFILE_CHAT_PREFLIGHT_RESULT" != "success"[\s\S]*failure_reason=chat-app-target-unavailable/,
+  );
+  assert.match(
+    preflightRecordStep.run,
+    /IDLE_PROFILE_API_PREFLIGHT_RESULT" != "success"[\s\S]*failure_reason=api-target-unavailable/,
   );
 
   const runStep = idleJob.steps.find(
@@ -720,7 +763,12 @@ test("idle-profile registration check blocks release and reports its result", ()
     "idle-profile Playwright check must run only when release-check configuration is present",
   );
   assert.ok(
-    idleJob.steps.indexOf(preflightStep) < idleJob.steps.indexOf(runStep),
+    idleJob.steps.indexOf(chatPreflightStep) <
+      idleJob.steps.indexOf(apiPreflightStep) &&
+      idleJob.steps.indexOf(apiPreflightStep) <
+        idleJob.steps.indexOf(preflightRecordStep) &&
+      idleJob.steps.indexOf(preflightRecordStep) <
+        idleJob.steps.indexOf(runStep),
     "both browser targets must be verified before Playwright starts",
   );
   assert.match(
@@ -797,10 +845,22 @@ test("idle-profile registration check blocks release and reports its result", ()
   );
   assert.ok(summaryStep, "idle-profile job must write a release summary");
   assert.equal(summaryStep.if, "${{ always() }}");
+  assert.equal(
+    summaryStep.env.IDLE_PROFILE_PREFLIGHT_FAILURE_REASON,
+    "${{ steps.idle-profile-preflight.outputs.failure_reason }}",
+  );
   assert.match(summaryStep.run, /## Idle profile registration/);
   assert.match(summaryStep.run, /Status: \*\*PASS\*\*/);
   assert.match(summaryStep.run, /Status: \*\*SKIP\*\*/);
   assert.match(summaryStep.run, /Status: \*\*FAIL\*\*/);
+  assert.match(
+    summaryStep.run,
+    /chat-app-target-unavailable\)[\s\S]*Chat App target is unavailable or unhealthy\./,
+  );
+  assert.match(
+    summaryStep.run,
+    /api-target-unavailable\)[\s\S]*API target is unavailable or unhealthy\./,
+  );
 
   const gate = workflow.jobs["mobile-release-gate"];
   assert.ok(
@@ -833,6 +893,147 @@ test("idle-profile registration check blocks release and reports its result", ()
     /\$SUMMARY_REGRESSION_RESULT" != "success"/,
     "the final gate must reject a failed hosted summary regression",
   );
+});
+
+test("idle-profile summary reports fixed browser target outages without leaking URLs", () => {
+  const idleJob = workflow.jobs["idle-profile-registration"];
+  const chatPreflightStep = idleJob.steps.find(
+    (step) => step.name === "Verify idle-profile Chat App target",
+  );
+  const apiPreflightStep = idleJob.steps.find(
+    (step) => step.name === "Verify idle-profile API target",
+  );
+  const preflightRecordStep = idleJob.steps.find(
+    (step) => step.name === "Record idle-profile browser target preflight",
+  );
+  const summaryStep = idleJob.steps.find(
+    (step) => step.name === "Summarize idle-profile registration check",
+  );
+  assert.ok(chatPreflightStep);
+  assert.ok(apiPreflightStep);
+  assert.ok(preflightRecordStep);
+  assert.ok(summaryStep);
+
+  const fixtureRoot = mkdtempSync(
+    path.join(tmpdir(), "idle-profile-target-summary-"),
+  );
+  const binDirectory = path.join(fixtureRoot, "bin");
+  mkdirSync(binDirectory);
+  writeFileSync(
+    path.join(binDirectory, "curl"),
+    [
+      "#!/usr/bin/env bash",
+      "set -euo pipefail",
+      "exit 22",
+      "",
+    ].join("\n"),
+    { mode: 0o755 },
+  );
+
+  const chatUrl = "https://PRIVATE_IDLE_CHAT_TARGET.example/preview";
+  const apiUrl = "https://PRIVATE_IDLE_API_TARGET.example";
+  const scenarios = [
+    {
+      name: "Chat App",
+      preflightStep: chatPreflightStep,
+      preflightEnv: { E2E_CHAT_URL: chatUrl },
+      chatOutcome: "failure",
+      apiOutcome: "skipped",
+      reason: "chat-app-target-unavailable",
+      summaryText: "the Chat App target is unavailable or unhealthy.",
+    },
+    {
+      name: "API",
+      preflightStep: apiPreflightStep,
+      preflightEnv: { E2E_API_URL: apiUrl },
+      chatOutcome: "success",
+      apiOutcome: "failure",
+      reason: "api-target-unavailable",
+      summaryText: "the API target is unavailable or unhealthy.",
+    },
+  ];
+
+  try {
+    for (const scenario of scenarios) {
+      const preflight = spawnSync(
+        bashPath,
+        ["-c", scenario.preflightStep.run],
+        {
+          cwd: workspaceRoot,
+          encoding: "utf8",
+          env: {
+            ...process.env,
+            ...scenario.preflightEnv,
+            PATH: `${binDirectory}:${process.env.PATH}`,
+          },
+        },
+      );
+      const preflightOutput = `${preflight.stdout}${preflight.stderr}`;
+      assert.equal(
+        preflight.status,
+        2,
+        `${scenario.name} preflight should fail with the fixed unavailable-target status:\n${preflightOutput}`,
+      );
+      assert.match(
+        preflightOutput,
+        new RegExp(`${scenario.name} target is unavailable or unhealthy\\.`),
+      );
+
+      const outputPath = path.join(fixtureRoot, `${scenario.name}.output`);
+      const recorder = spawnSync(bashPath, ["-c", preflightRecordStep.run], {
+        cwd: workspaceRoot,
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          GITHUB_OUTPUT: outputPath,
+          IDLE_PROFILE_CHAT_PREFLIGHT_RESULT: scenario.chatOutcome,
+          IDLE_PROFILE_API_PREFLIGHT_RESULT: scenario.apiOutcome,
+        },
+      });
+      const recorderOutput = `${recorder.stdout}${recorder.stderr}`;
+      assert.equal(recorder.status, 0, recorderOutput);
+      const failureReason = readFileSync(outputPath, "utf8").match(
+        /^failure_reason=(.+)$/m,
+      )?.[1];
+      assert.equal(failureReason, scenario.reason);
+
+      const summaryPath = path.join(fixtureRoot, `${scenario.name}.summary.md`);
+      const summary = spawnSync(bashPath, ["-c", summaryStep.run], {
+        cwd: workspaceRoot,
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          GITHUB_STEP_SUMMARY: summaryPath,
+          IDLE_PROFILE_PREFLIGHT_FAILURE_REASON: failureReason,
+          IDLE_PROFILE_RESULT: "skipped",
+        },
+      });
+      const summaryOutput = `${summary.stdout}${summary.stderr}`;
+      assert.equal(summary.status, 0, summaryOutput);
+      const summaryText = readFileSync(summaryPath, "utf8");
+      assert.match(summaryText, /- Status: \*\*FAIL\*\*/);
+      assert.ok(
+        summaryText.includes(scenario.summaryText),
+        `${scenario.name} summary should name the failed target:\n${summaryText}`,
+      );
+
+      for (const [surface, contents] of [
+        ["preflight log", preflightOutput],
+        ["preflight recorder log", recorderOutput],
+        ["summary log", summaryOutput],
+        ["job summary", summaryText],
+        ["preflight output", readFileSync(outputPath, "utf8")],
+      ]) {
+        assert.equal(
+          contents.includes(chatUrl) || contents.includes(apiUrl),
+          false,
+          `${scenario.name} ${surface} must not expose secret-backed target URLs`,
+        );
+      }
+    }
+  } finally {
+    rmSync(fixtureRoot, { recursive: true, force: true });
+  }
 });
 
 test("failed native evidence checks remain reviewable before blocking release", () => {
