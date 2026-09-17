@@ -24,14 +24,6 @@ on:
     tags:
       - "mobile-v*"
   pull_request:
-    paths:
-      - .github/workflows/mobile-release.yml
-      - scripts/check-android-preview-evidence.sh
-      - scripts/check-ios-preview-evidence.sh
-      - artifacts/chat-app/scripts/validate-preview-startup.mjs
-      - artifacts/chat-app/test-results/encrypted-room-recovery/android/**/validation-record.md
-      - artifacts/chat-app/test-results/encrypted-room-recovery/android/**/android-preview-preflight.json
-      - artifacts/chat-app/test-results/encrypted-room-recovery/ios/**/validation-record.md
   workflow_call:
     inputs:
       native_smoke_ios_build_id:

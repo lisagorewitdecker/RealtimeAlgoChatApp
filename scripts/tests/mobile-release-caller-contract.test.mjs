@@ -54,16 +54,6 @@ const pinnedCheckoutAction =
   "actions/checkout@11d5960a326750d5838078e36cf38b85af677262";
 const pinnedSetupNodeAction =
   "actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020";
-const expectedPullRequestPaths = [
-  ".github/workflows/mobile-release.yml",
-  "scripts/check-android-preview-evidence.sh",
-  "scripts/check-ios-preview-evidence.sh",
-  "artifacts/chat-app/scripts/validate-preview-startup.mjs",
-  "artifacts/chat-app/test-results/encrypted-room-recovery/android/**/validation-record.md",
-  "artifacts/chat-app/test-results/encrypted-room-recovery/android/**/android-preview-preflight.json",
-  "artifacts/chat-app/test-results/encrypted-room-recovery/ios/**/validation-record.md",
-];
-
 function resolveWorkflowEnvExpression(value, workflowEnv, jobEnv, stepEnv) {
   const match = String(value).trim().match(/^\$\{\{\s*env\.([A-Z0-9_]+)\s*\}\}$/);
   if (!match) {
@@ -635,16 +625,16 @@ test("blocked release diagnostics identify the supported Node range safely", () 
   );
 });
 
-test("workflow hardening pins actions, narrows pull requests, and bounds duplicate release work", () => {
+test("workflow hardening pins actions, runs for every pull request, and bounds duplicate release work", () => {
   assert.deepEqual(
-    workflow.on?.pull_request?.paths,
-    expectedPullRequestPaths,
-    "pull_request runs must be limited to the mobile release workflow and preview-evidence inputs",
+    workflow.on?.pull_request,
+    null,
+    "pull_request runs must stay unscoped so the required Android preview evidence check is always created",
   );
   assert.equal(
     workflow.on?.pull_request?.["paths-ignore"],
     undefined,
-    "the workflow should narrow pull requests with explicit paths instead of ignore rules",
+    "the workflow should not use pull_request paths-ignore rules",
   );
   assert.equal(
     workflow.concurrency?.group,
@@ -803,14 +793,8 @@ test("Android preview evidence runs for every pull request", () => {
     Object.prototype.hasOwnProperty.call(workflow.on ?? {}, "pull_request"),
     "mobile release workflow must support pull_request",
   );
-  const pullRequest = workflow.on.pull_request ?? {};
-  assert.deepEqual(
-    pullRequest.paths,
-    expectedPullRequestPaths,
-    "the Android preview evidence check must use the shared preview-evidence path filter",
-  );
   assert.equal(
-    pullRequest["paths-ignore"],
+    workflow.on.pull_request?.["paths-ignore"],
     undefined,
     "the Android preview evidence check must not use pull_request paths-ignore rules",
   );
@@ -828,14 +812,8 @@ test("iOS preview evidence runs for every pull request", () => {
     Object.prototype.hasOwnProperty.call(workflow.on ?? {}, "pull_request"),
     "mobile release workflow must support pull_request",
   );
-  const pullRequest = workflow.on.pull_request ?? {};
-  assert.deepEqual(
-    pullRequest.paths,
-    expectedPullRequestPaths,
-    "the iOS preview evidence check must use the shared preview-evidence path filter",
-  );
   assert.equal(
-    pullRequest["paths-ignore"],
+    workflow.on.pull_request?.["paths-ignore"],
     undefined,
     "the iOS preview evidence check must not use pull_request paths-ignore rules",
   );
