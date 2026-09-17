@@ -6,9 +6,17 @@
 import { Router } from "express";
 import type { Request, Response } from "express";
 import { requireAuth } from "../middlewares/requireAuth";
+import { createIpRateLimit } from "../middlewares/rateLimit";
 import { anthropic } from "@workspace/integrations-anthropic-ai";
 
 const router = Router();
+const aiRateLimit = createIpRateLimit({
+  scope: "ai-code-assist",
+  windowMs: 60_000,
+  maxRequests: 20,
+});
+
+router.use(aiRateLimit);
 
 interface ChatMessage {
   role: "user" | "assistant";

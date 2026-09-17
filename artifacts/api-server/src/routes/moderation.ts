@@ -14,12 +14,18 @@ import {
   kickRoomMember,
   kickRoomUser,
 } from "../socket";
+import { createIpRateLimit } from "../middlewares/rateLimit";
 
 const router = Router();
 const MODERATION_HISTORY_WINDOW_MS = 60 * 1_000;
 const MODERATION_HISTORY_PER_USER_WINDOW = 30;
 const MODERATION_HISTORY_PER_IP_WINDOW = 120;
 const MODERATION_HISTORY_TRACKING_KEY_LIMIT = 10_000;
+const moderationRateLimit = createIpRateLimit({
+  scope: "moderation-routes",
+  windowMs: 60_000,
+  maxRequests: 120,
+});
 
 interface ModerationHistoryWindow {
   startedAt: number;
@@ -28,6 +34,8 @@ interface ModerationHistoryWindow {
 
 const moderationHistoryByUser = new Map<string, ModerationHistoryWindow>();
 const moderationHistoryByIp = new Map<string, ModerationHistoryWindow>();
+
+router.use(moderationRateLimit);
 
 function makeId() {
   return `${Date.now()}-${Math.random().toString(36).slice(2)}`;

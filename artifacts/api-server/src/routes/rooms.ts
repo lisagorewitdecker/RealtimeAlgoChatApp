@@ -10,12 +10,18 @@ import { createRoomAccessCapability, type RoomAccessPurpose } from "../lib/roomA
 import { requireAuthorizedUser } from "../lib/requireAccountAccess";
 import { getRooms } from "../socket";
 import { getRoomEnvelope } from "../lib/e2eePersistence";
+import { createIpRateLimit } from "../middlewares/rateLimit";
 
 const router = Router();
 const ROOM_DOCUMENT_WINDOW_MS = 60 * 1_000;
 const ROOM_DOCUMENTS_PER_USER_WINDOW = 30;
 const ROOM_DOCUMENTS_PER_IP_WINDOW = 120;
 const ROOM_DOCUMENT_TRACKING_KEY_LIMIT = 10_000;
+const roomsRateLimit = createIpRateLimit({
+  scope: "rooms-routes",
+  windowMs: 60_000,
+  maxRequests: 180,
+});
 
 interface IssuanceWindow {
   startedAt: number;
@@ -24,6 +30,8 @@ interface IssuanceWindow {
 
 const roomDocumentsByUser = new Map<string, IssuanceWindow>();
 const roomDocumentsByIp = new Map<string, IssuanceWindow>();
+
+router.use(roomsRateLimit);
 
 router.get("/", async (req, res) => {
   if (!(await requireAuthorizedUser(req, res))) return;
