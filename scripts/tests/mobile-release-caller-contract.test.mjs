@@ -946,3 +946,15 @@ test("routine unit validation runs the caller contract check", () => {
     "the root test:unit script must run the mobile release caller contract check",
   );
 });
+
+test("routine unit validation checks mobile release workflow syntax", () => {
+  const command = "pnpm run validate:mobile-release-workflow";
+  const unitCommands = String(rootPackage.scripts?.["test:unit"] ?? "")
+    .split("&&")
+    .map((entry) => entry.trim());
+
+  assert.ok(
+    unitCommands.includes(command),
+    "the root test:unit script must run the mobile release workflow syntax check",
+  );
+});
