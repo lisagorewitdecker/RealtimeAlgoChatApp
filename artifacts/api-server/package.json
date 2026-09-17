@@ -12,6 +12,7 @@
     "test:browser:setup": "playwright install chromium && node e2e/check-playwright-runtime.mjs",
     "test:browser:runtime-contract": "playwright install chromium && node e2e/check-playwright-runtime-contract.mjs",
     "test:browser:clean-runtime": "node e2e/check-playwright-clean-runtime.mjs",
+    "test:clerk-retry": "vitest run e2e/clerk-retry.test.ts --testNamePattern='^(withClerkRetry|withClerkSetupRetry)' --maxWorkers=1",
     "test": "pnpm run test:browser:setup && vitest run src e2e/clerk-retry.test.ts --maxWorkers=1",
     "test:e2e:banned-room": "pnpm run test:browser:setup && playwright test e2e/banned-room.spec.ts --config e2e/playwright.config.ts",
     "test:e2e:key-reset-recovery": "pnpm run test:browser:setup && playwright test e2e/key-reset-recovery.spec.ts --config e2e/playwright.config.ts",
