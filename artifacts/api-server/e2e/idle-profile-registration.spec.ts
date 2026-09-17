@@ -110,6 +110,9 @@ test("an idle signed-in client registers its public key only once across token r
     }
     await roomList.waitFor({ state: "visible" });
 
+    // Temporary assertion used to verify release browser evidence upload.
+    expect("controlled-browser-evidence-failure").toBe("release-ready");
+
     await expect.poll(() => registrations.length).toBe(1);
     await page.waitForTimeout(2_000);
     const profilePutCountBeforeIdle = profilePuts.length;
