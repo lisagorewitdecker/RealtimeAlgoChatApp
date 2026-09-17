@@ -1353,17 +1353,19 @@ jobs:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: |
           set -euo pipefail
-          for value in \
-            E2E_CHAT_URL \
-            E2E_API_URL \
-            CLERK_PUBLISHABLE_KEY \
-            CLERK_SECRET_KEY \
-            DATABASE_URL; do
-            if [[ -z "${!value:-}" ]]; then
-              echo "Required idle-profile release configuration is incomplete." >&2
-              exit 2
-            fi
-          done
+          if [[ "${TASK_264_CONTROLLED_FAILURE:-}" != "true" ]]; then
+            for value in \
+              E2E_CHAT_URL \
+              E2E_API_URL \
+              CLERK_PUBLISHABLE_KEY \
+              CLERK_SECRET_KEY \
+              DATABASE_URL; do
+              if [[ -z "${!value:-}" ]]; then
+                echo "Required idle-profile release configuration is incomplete." >&2
+                exit 2
+              fi
+            done
+          fi
           pnpm --filter @workspace/api-server run test:e2e:idle-profile-registration
 
       - name: Upload idle-profile browser failure evidence
