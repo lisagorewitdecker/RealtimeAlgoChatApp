@@ -42,10 +42,22 @@ test("an idle signed-in client registers its public key only once across token r
   browser,
 }) => {
   test.setTimeout(180_000);
+  const controlledFailure = process.env["TASK_264_CONTROLLED_FAILURE"] === "true";
   test.skip(
-    !chatUrl || !apiUrl || !publishableKey || !secretKey,
+    !controlledFailure && (!chatUrl || !apiUrl || !publishableKey || !secretKey),
     "E2E_CHAT_URL, E2E_API_URL, and Clerk development keys are required",
   );
+
+  if (controlledFailure) {
+    const page = await browser.newPage();
+    await page.setContent(
+      "<main><h1>Controlled browser evidence fixture</h1><p>Release evidence capture is active.</p></main>",
+    );
+    await expect(page.getByRole("heading", { name: "Controlled browser evidence fixture" })).toHaveText(
+      "Expected release success marker",
+    );
+    return;
+  }
 
   const suffix = crypto.randomUUID().replaceAll("-", "").slice(0, 16);
   const email = `idle-profile-${suffix}+clerk_test@example.com`;
