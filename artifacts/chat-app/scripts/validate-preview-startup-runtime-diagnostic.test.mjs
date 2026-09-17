@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 import {
   mkdirSync,
+  existsSync,
   readFileSync,
   writeFileSync,
   mkdtempSync,
@@ -37,6 +38,9 @@ function runNodeScript(args, env = {}) {
   if (!Object.hasOwn(env, "GITHUB_STEP_SUMMARY")) {
     delete childEnvironment.GITHUB_STEP_SUMMARY;
   }
+  if (!Object.hasOwn(env, "PREVIEW_STARTUP_LIVE_START_MARKER")) {
+    delete childEnvironment.PREVIEW_STARTUP_LIVE_START_MARKER;
+  }
   const result = spawnSync(process.execPath, args, {
     encoding: "utf8",
     env: childEnvironment,
@@ -58,6 +62,10 @@ function containsControlCharacters(value) {
     const code = character.charCodeAt(0);
     return code <= 0x1f || code === 0x7f;
   });
+}
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function installedPackageVersion(packageName) {
@@ -255,16 +263,22 @@ test("live and captured preview validation report the same diagnosis for every l
 });
 
 test("versioned loader samples match the installed Expo tooling", () => {
+  const capturedExpoCliVersion =
+    process.env.PREVIEW_STARTUP_TEST_CAPTURED_EXPO_CLI_VERSION ??
+    CAPTURED_EXPO_TOOLING.expoCli;
+  const capturedReactNativeVersion =
+    process.env.PREVIEW_STARTUP_TEST_CAPTURED_REACT_NATIVE_VERSION ??
+    CAPTURED_EXPO_TOOLING.reactNative;
   const mismatches = [
     capturedToolingVersionMismatch({
       displayName: "Expo CLI",
       packageName: "@expo/cli",
-      capturedVersion: CAPTURED_EXPO_TOOLING.expoCli,
+      capturedVersion: capturedExpoCliVersion,
     }),
     capturedToolingVersionMismatch({
       displayName: "React Native",
       packageName: "react-native",
-      capturedVersion: CAPTURED_EXPO_TOOLING.reactNative,
+      capturedVersion: capturedReactNativeVersion,
     }),
   ].filter(Boolean);
   if (mismatches.length > 0) {
@@ -408,6 +422,111 @@ test("refresh command leaves the existing fixture untouched when a platform capt
     rmSync(temporaryDirectory, { recursive: true, force: true });
   }
 });
+
+test(
+  "normal preview validation stops before live startup for stale tooling",
+  { skip: Boolean(process.env.PREVIEW_STARTUP_TOOLING_MISMATCH) },
+  () => {
+    const temporaryDirectory = mkdtempSync(
+      join(tmpdir(), "chat-preview-tooling-mismatch-"),
+    );
+
+    try {
+      const scenarios = [
+        {
+          displayName: "Expo CLI",
+          environmentName:
+            "PREVIEW_STARTUP_TEST_CAPTURED_EXPO_CLI_VERSION",
+          installedVersion: installedPackageVersion("@expo/cli"),
+        },
+        {
+          displayName: "React Native",
+          environmentName:
+            "PREVIEW_STARTUP_TEST_CAPTURED_REACT_NATIVE_VERSION",
+          installedVersion: installedPackageVersion("react-native"),
+        },
+      ];
+
+      for (const scenario of scenarios) {
+        const capturedVersion = "0.0.0";
+        assert.notEqual(
+          scenario.installedVersion,
+          capturedVersion,
+          `${scenario.displayName} fixture version must be stale`,
+        );
+        const markerPath = join(
+          temporaryDirectory,
+          `${scenario.displayName.toLowerCase().replaceAll(" ", "-")}.marker`,
+        );
+        const childEnvironment = {
+          ...process.env,
+          [scenario.environmentName]: capturedVersion,
+          PREVIEW_STARTUP_TOOLING_MISMATCH: scenario.displayName,
+          PREVIEW_STARTUP_LIVE_START_MARKER: markerPath,
+          PREVIEW_STARTUP_TEST_FIXTURE: "handoff-server",
+        };
+        delete childEnvironment.NODE_TEST_CONTEXT;
+        const result = spawnSync(
+          "pnpm",
+          ["run", "validate:preview-startup"],
+          {
+            cwd: packageRoot,
+            encoding: "utf8",
+            env: childEnvironment,
+            timeout: 60_000,
+          },
+        );
+        const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
+
+        assert.notEqual(
+          result.error?.code,
+          "ETIMEDOUT",
+          `${scenario.displayName} mismatch validation did not terminate`,
+        );
+        assert.notEqual(result.status, 0, output);
+        assert.match(
+          output,
+          new RegExp(
+            `${scenario.displayName} changed: loader samples were captured with ` +
+              escapeRegExp(capturedVersion),
+          ),
+        );
+        assert.match(
+          output,
+          new RegExp(
+            `but the installed version is ${escapeRegExp(
+              scenario.installedVersion,
+            )}`,
+          ),
+        );
+        assert.match(output, /Affected captured loader samples:/);
+        assert.match(output, /Linux shared-library loader/);
+        assert.match(output, /Windows loader with a quoted long path/);
+        assert.match(
+          output,
+          /preview-startup-runtime-library-fixture\.mjs/,
+        );
+        assert.match(output, /validate-preview-startup\.mjs/);
+        assert.equal(
+          existsSync(markerPath),
+          false,
+          `${scenario.displayName} mismatch continued into live preview startup`,
+        );
+        assert.equal(
+          installedPackageVersion(
+            scenario.displayName === "Expo CLI"
+              ? "@expo/cli"
+              : "react-native",
+          ),
+          scenario.installedVersion,
+          `${scenario.displayName} mismatch test changed installed dependencies`,
+        );
+      }
+    } finally {
+      rmSync(temporaryDirectory, { recursive: true, force: true });
+    }
+  },
+);
 
 test("unsupported loader wording fails with a maintenance message", () => {
   const temporaryDirectory = mkdtempSync(

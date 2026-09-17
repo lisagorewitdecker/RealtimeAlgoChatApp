@@ -1,3 +1,4 @@
+import { appendFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { fileURLToPath } from "node:url";
 
@@ -108,6 +109,9 @@ if (fileURLToPath(import.meta.url) === process.argv[1]) {
     fixtureName === "handoff-server-stall-manifest" ||
     fixtureName === "handoff-server-stall-bundle"
   ) {
+    if (process.env.PREVIEW_STARTUP_LIVE_START_MARKER) {
+      appendFileSync(process.env.PREVIEW_STARTUP_LIVE_START_MARKER, "started\n");
+    }
     const stallManifest = fixtureName === "handoff-server-stall-manifest";
     const stallBundle = fixtureName === "handoff-server-stall-bundle";
     const port = Number(process.env.PORT);
