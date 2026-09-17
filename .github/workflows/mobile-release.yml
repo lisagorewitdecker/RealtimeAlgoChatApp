@@ -1289,9 +1289,30 @@ jobs:
       - name: Install workspace dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Determine idle-profile secret configuration
+        id: idle-profile-config
+        env:
+          E2E_CHAT_URL: ${{ secrets.E2E_CHAT_URL }}
+          E2E_API_URL: ${{ secrets.E2E_API_URL }}
+          CLERK_PUBLISHABLE_KEY: ${{ secrets.CLERK_PUBLISHABLE_KEY }}
+          CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          set -euo pipefail
+          if [[ -n "${E2E_CHAT_URL:-}" && -n "${E2E_API_URL:-}" ]]; then
+            echo "browser_targets_configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "browser_targets_configured=false" >> "$GITHUB_OUTPUT"
+          fi
+          if [[ -n "${E2E_CHAT_URL:-}" && -n "${E2E_API_URL:-}" && -n "${CLERK_PUBLISHABLE_KEY:-}" && -n "${CLERK_SECRET_KEY:-}" && -n "${DATABASE_URL:-}" ]]; then
+            echo "release_check_configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "release_check_configured=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Verify idle-profile browser targets
         id: idle-profile-preflight
-        if: ${{ secrets.E2E_CHAT_URL != '' && secrets.E2E_API_URL != '' }}
+        if: ${{ steps.idle-profile-config.outputs.browser_targets_configured == 'true' }}
         env:
           E2E_CHAT_URL: ${{ secrets.E2E_CHAT_URL }}
           E2E_API_URL: ${{ secrets.E2E_API_URL }}
@@ -1322,14 +1343,7 @@ jobs:
 
       - name: Run idle-profile registration release check
         id: idle-profile-check
-        if: >-
-          ${{
-            secrets.E2E_CHAT_URL != '' &&
-            secrets.E2E_API_URL != '' &&
-            secrets.CLERK_PUBLISHABLE_KEY != '' &&
-            secrets.CLERK_SECRET_KEY != '' &&
-            secrets.DATABASE_URL != ''
-          }}
+        if: ${{ steps.idle-profile-config.outputs.release_check_configured == 'true' }}
         env:
           E2E_CHAT_URL: ${{ secrets.E2E_CHAT_URL }}
           E2E_API_URL: ${{ secrets.E2E_API_URL }}
