@@ -45,6 +45,7 @@ const compatibilityStep = steps.find(
   (step) => step.name === "Check API contract compatibility",
 );
 const generatedClientFixturePath = "lib/api-client-react/src/generated/api.ts";
+const pushTrigger = workflow.on?.push;
 const pullRequestTrigger = workflow.on?.pull_request;
 
 function resolveRootPackageScript(command) {
@@ -84,6 +85,18 @@ function resolveApiSpecPackageScript(command) {
   );
   return resolvedCommand;
 }
+
+test("API codegen workflow runs after pushes to development", () => {
+  assert.ok(
+    pushTrigger,
+    "the API codegen workflow must define a push trigger",
+  );
+  assert.deepEqual(
+    pushTrigger.branches,
+    ["development"],
+    "the API codegen workflow push trigger must target the development branch",
+  );
+});
 
 test("API codegen workflow runs for the complete development pull-request event set", () => {
   assert.ok(
