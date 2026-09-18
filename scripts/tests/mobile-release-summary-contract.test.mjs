@@ -2658,6 +2658,7 @@ test("Android preview evidence keeps its pull-request validation and privacy con
       timestamp: "20260915T121000Z",
       baseText: blockedRecord,
       text: blockedRecord,
+      preflight: blockedPreflight,
       deleted: true,
     },
     {
@@ -2738,6 +2739,13 @@ test("Android preview evidence keeps its pull-request validation and privacy con
       `### \\[${multiRecord.recordPaths[1].replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\][\\s\\S]*- Validation: \\*\\*FAIL\\*\\*[\\s\\S]*Missing-boundary reason[\\s\\S]*changed Android preview validation record is missing from the checked-out commit\\.`,
     ),
     "the deleted record must contribute the fixed missing-record reason",
+  );
+  assert.equal(
+    multiRecord.summary.match(
+      /changed Android preview validation record is missing from the checked-out commit\./g,
+    )?.length ?? 0,
+    1,
+    "deleting a record and its paired sidecar must contribute one fixed missing-record reason",
   );
   assert.ok(
     multiRecord.summary.indexOf(
