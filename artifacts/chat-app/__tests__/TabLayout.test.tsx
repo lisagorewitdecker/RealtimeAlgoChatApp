@@ -45,10 +45,13 @@ jest.mock("expo-blur", () => {
   };
 });
 
-// The real navigator pulls in expo-router's ESM-only dependencies, which Jest
-// cannot parse. This stand-in applies `tabBarStyle` and renders
-// `tabBarBackground` the way the classic bottom tab bar does: the background
-// element fills the bar behind the tab items.
+// The real navigator only renders inside expo-router's root, and under Jest it
+// also needs a stand-in for one ESM-only dependency. This stand-in applies
+// `tabBarStyle` and renders `tabBarBackground` the way the classic bottom tab
+// bar does: the background element fills the bar behind the tab items.
+// __tests__/VendoredBottomTabBar.test.tsx renders expo-router's real vendored
+// bar with the same options and fails when an Expo upgrade stops it behaving
+// this way, so keep the two in step.
 jest.mock("expo-router", () => {
   const mockReact = require("react");
   const RN = require("react-native");
