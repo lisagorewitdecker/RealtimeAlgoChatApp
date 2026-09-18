@@ -262,6 +262,78 @@ test("live and captured preview validation report the same diagnosis for every l
   }
 });
 
+test("real-platform capture records macOS and Windows loader output safely", () => {
+  const temporaryDirectory = mkdtempSync(
+    join(tmpdir(), "chat-preview-real-platform-capture-"),
+  );
+  const cases = [
+    {
+      name: "macOS",
+      fixture: "missing-runtime-library-dyld",
+      output:
+        "dyld[12345]: Library not loaded: /Users/reviewer/Library/" +
+        "Application Support/Expo/react native devtools/libgtk-3.dylib\n" +
+        "  Reason: Authorization: Bearer TOP_SECRET_VALUE\n",
+      libraryIdentifier: "libgtk-3.dylib",
+    },
+    {
+      name: "Windows",
+      fixture: "missing-runtime-library-windows",
+      output:
+        "Error: The code execution cannot proceed because " +
+        "C:\\Users\\reviewer\\AppData\\Local\\Expo\\libgtk-3-0.dll " +
+        "was not found. password=TOP_SECRET_VALUE\n",
+      libraryIdentifier: "libgtk-3-0.dll",
+    },
+  ];
+
+  try {
+    for (const fixtureCase of cases) {
+      const recordPath = join(
+        temporaryDirectory,
+        `${fixtureCase.name.toLowerCase()}.log`,
+      );
+      const live = runNodeScript(
+        [validatorPath, "--record-log", recordPath],
+        {
+          PREVIEW_STARTUP_TEST_FIXTURE: fixtureCase.fixture,
+          PREVIEW_STARTUP_TEST_OUTPUT: fixtureCase.output,
+        },
+      );
+
+      assert.equal(live.status, 1, fixtureCase.name);
+      const recordedOutput = readFileSync(recordPath, "utf8");
+      assert.doesNotMatch(recordedOutput, /\/Users\/reviewer|C:\\Users\\reviewer/);
+      assert.doesNotMatch(recordedOutput, /TOP_SECRET_VALUE/);
+      assert.match(recordedOutput, new RegExp(fixtureCase.libraryIdentifier));
+
+      const captured = runNodeScript([
+        validatorPath,
+        "--log-file",
+        recordPath,
+      ]);
+      assert.equal(captured.status, 1, fixtureCase.name);
+      const liveDiagnostic = findDiagnostic(live.output);
+      const capturedDiagnostic = findDiagnostic(captured.output);
+      assert.ok(liveDiagnostic, fixtureCase.name);
+      assert.ok(capturedDiagnostic, fixtureCase.name);
+      assert.match(liveDiagnostic, new RegExp(fixtureCase.libraryIdentifier));
+      assert.match(
+        capturedDiagnostic,
+        new RegExp(fixtureCase.libraryIdentifier),
+        fixtureCase.name,
+      );
+      assert.match(
+        capturedDiagnostic,
+        /Expo preview startup error:/,
+        fixtureCase.name,
+      );
+    }
+  } finally {
+    rmSync(temporaryDirectory, { recursive: true, force: true });
+  }
+});
+
 test("versioned loader samples match the installed Expo tooling", () => {
   const capturedExpoCliVersion =
     process.env.PREVIEW_STARTUP_TEST_CAPTURED_EXPO_CLI_VERSION ??

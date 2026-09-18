@@ -5,6 +5,7 @@ export const roomsTable = pgTable("rooms", {
   name: text("name").notNull(),
   createdBy: text("created_by").notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
+  lastAccessedAt: timestamp("last_accessed_at").defaultNow().notNull(),
   isActive: boolean("is_active").default(true).notNull(),
 });
 

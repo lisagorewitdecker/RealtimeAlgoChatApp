@@ -163,7 +163,8 @@ if (fileURLToPath(import.meta.url) === process.argv[1]) {
       process.stdout.write("Starting Metro Bundler\n");
     });
   } else {
-    const output = fixtureOutput[fixtureName];
+    const output =
+      process.env.PREVIEW_STARTUP_TEST_OUTPUT ?? fixtureOutput[fixtureName];
     if (!output) {
       throw new Error(`Unknown preview startup fixture: ${fixtureName}`);
     }

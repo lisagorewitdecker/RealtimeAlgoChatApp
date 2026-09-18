@@ -52,6 +52,7 @@ import {
   disconnectBannedUser,
   getRooms,
   kickRoomMember,
+  setRoomActiveForModeration,
   setupSocketIO,
 } from "./socket.js";
 
@@ -171,6 +172,27 @@ async function expectNoEvent(
 }
 
 describe("room Socket.IO lifecycle", () => {
+  it("lists rooms only while they remain active", async () => {
+    const roomId = `active-room-${Date.now()}`;
+    const client = createRoomClient("token-ada");
+    await waitForEvent(client, "connect");
+
+    const joined = waitForEvent(client, "room-joined");
+    client.emit("join-room", { roomId });
+    await joined;
+    expect(getRooms()).toEqual([
+      expect.objectContaining({ id: roomId, userCount: 1 }),
+    ]);
+
+    setRoomActiveForModeration(roomId, false);
+    expect(getRooms()).toEqual([]);
+
+    setRoomActiveForModeration(roomId, true);
+    expect(getRooms()).toEqual([
+      expect.objectContaining({ id: roomId, userCount: 1 }),
+    ]);
+  });
+
   it("relays only encrypted chat and sandbox payloads and delivers key envelopes", async () => {
     const roomId = `encrypted-room-${Date.now()}`;
     mockGetPublicKey.mockImplementation(async (userId: string) =>

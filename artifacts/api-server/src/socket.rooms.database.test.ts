@@ -30,7 +30,12 @@ import {
   roomsTable,
 } from "@workspace/db";
 import { loadEncryptedMessagesAfter } from "./lib/e2eePersistence.js";
-import { resetSocketRoomStateForTest, setupSocketIO } from "./socket.js";
+import {
+  resetSocketRoomStateForTest,
+  ROOM_INACTIVITY_TIMEOUT_MS,
+  setRoomLastAccessedAtForTest,
+  setupSocketIO,
+} from "./socket.js";
 
 interface RunningServer {
   httpServer: HttpServer;
@@ -215,6 +220,116 @@ describe("database-backed Socket.IO message recovery", () => {
       .map((message) => message.id);
     expect(page.messages.map((message) => message.id)).toEqual(expected);
     expect(page.messages).toHaveLength(expected.length);
+  });
+
+  it("rejects a room after 24 hours without access and persists the expiry", async () => {
+    const roomId = `inactive-room-${Date.now()}-${process.pid}`;
+    roomIds.add(roomId);
+    await db.insert(roomsTable).values({
+      id: roomId,
+      name: "Inactive room",
+      createdBy: "user-ada",
+      lastAccessedAt: new Date(Date.now() - ROOM_INACTIVITY_TIMEOUT_MS - 1),
+    });
+
+    runningServer = await startServer();
+    const client = createRoomClient(runningServer.url);
+    await waitForEvent(client, "connect");
+    const error = waitForEvent<{ code: string }>(client, "error");
+    client.emit("join-room", { roomId, createIfMissing: false });
+
+    await expect(error).resolves.toMatchObject({ code: "ROOM_INACTIVE" });
+    const [room] = await db
+      .select({ isActive: roomsTable.isActive })
+      .from(roomsTable)
+      .where(eq(roomsTable.id, roomId))
+      .limit(1);
+    expect(room?.isActive).toBe(false);
+  });
+
+  it("expires a room that is still resident in memory and refuses to revive it", async () => {
+    const roomId = `occupied-expiry-${Date.now()}-${process.pid}`;
+    roomIds.add(roomId);
+    await db.insert(roomsTable).values({
+      id: roomId,
+      name: "Occupied room",
+      createdBy: "user-ada",
+    });
+
+    runningServer = await startServer();
+    const member = createRoomClient(runningServer.url);
+    await waitForEvent(member, "connect");
+    const joined = waitForEvent(member, "room-joined");
+    member.emit("join-room", { roomId, createIfMissing: false });
+    await expect(joined).resolves.toMatchObject({ roomId });
+
+    // The room is now held in memory, so only an in-memory age check can close
+    // it. Age the resident room past the window instead of mocking the clock,
+    // which would also stall the Socket.IO transport this test depends on.
+    const expiredAccess = Date.now() - ROOM_INACTIVITY_TIMEOUT_MS - 1;
+    setRoomLastAccessedAtForTest(roomId, expiredAccess);
+
+    // An action from the still-connected member must not refresh the window.
+    const ignoredBroadcast = new Promise<boolean>((resolve) => {
+      member.once("message", () => resolve(true));
+      setTimeout(() => resolve(false), 250);
+    });
+    member.emit("message", {
+      roomId,
+      ciphertext: "ciphertext-after-expiry",
+      nonce: "nonce-after-expiry",
+    });
+    await expect(ignoredBroadcast).resolves.toBe(false);
+
+    const rejoinError = waitForEvent<{ code: string }>(member, "error");
+    member.emit("join-room", { roomId, createIfMissing: false });
+    await expect(rejoinError).resolves.toMatchObject({
+      code: "ROOM_INACTIVE",
+    });
+
+    const [room] = await db
+      .select({ isActive: roomsTable.isActive })
+      .from(roomsTable)
+      .where(eq(roomsTable.id, roomId))
+      .limit(1);
+    expect(room?.isActive).toBe(false);
+  });
+
+  it("refreshes the inactivity window on a successful room join", async () => {
+    const roomId = `accessed-room-${Date.now()}-${process.pid}`;
+    roomIds.add(roomId);
+    const previousAccess = new Date(
+      Date.now() - ROOM_INACTIVITY_TIMEOUT_MS + 60_000,
+    );
+    await db.insert(roomsTable).values({
+      id: roomId,
+      name: "Recently accessed room",
+      createdBy: "user-ada",
+      lastAccessedAt: previousAccess,
+    });
+
+    runningServer = await startServer();
+    const client = createRoomClient(runningServer.url);
+    await waitForEvent(client, "connect");
+    const joined = waitForEvent(client, "room-joined");
+    client.emit("join-room", { roomId, createIfMissing: false });
+
+    await expect(joined).resolves.toMatchObject({ roomId });
+    let room: { lastAccessedAt: Date } | undefined;
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      [room] = await db
+        .select({ lastAccessedAt: roomsTable.lastAccessedAt })
+        .from(roomsTable)
+        .where(eq(roomsTable.id, roomId))
+        .limit(1);
+      if (room && room.lastAccessedAt.getTime() > previousAccess.getTime()) {
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    expect(room?.lastAccessedAt.getTime()).toBeGreaterThan(
+      previousAccess.getTime(),
+    );
   });
 
   it("recovers every active message in keyset order after restart and stops after revocation", async () => {

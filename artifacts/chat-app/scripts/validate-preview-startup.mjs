@@ -1,5 +1,6 @@
 import { createServer } from "node:net";
 import { appendFile, readFile, writeFile } from "node:fs/promises";
+import { writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { spawn } from "node:child_process";
 import { setTimeout as delay } from "node:timers/promises";
@@ -16,6 +17,8 @@ const MAX_STARTUP_DIAGNOSTIC_LENGTH = 512;
 const MAX_STARTUP_FAILURE_LINE_LENGTH = 320;
 const MAX_STARTUP_SUMMARY_LENGTH = 512;
 const MAX_STARTUP_LIBRARY_DETAIL_LENGTH = 192;
+const MAX_RECORDED_STARTUP_OUTPUT_LENGTH = 16_384;
+const MAX_RECORDED_STARTUP_LINE_LENGTH = 1_024;
 const STARTUP_DIAGNOSTIC_PREFIX = "Expo preview startup error: ";
 const HANDOFF_PLATFORM_CONFIG = {
   android: {
@@ -244,6 +247,43 @@ function sanitizeStartupSummaryDiagnostic(value) {
     )
     .replace(/[`*]/g, "")
     .slice(0, MAX_STARTUP_SUMMARY_LENGTH);
+}
+
+function sanitizeRecordedStartupOutput(value) {
+  const sanitizedLines = value
+    .split(/\r?\n/)
+    .map((line) =>
+      sanitizeStartupSummaryDiagnostic(line)
+        .replace(/\/(?:Users|home)\/[^\r\n]+/g, (path) => {
+          const prefix = path.startsWith("/Users/") ? "/Users/" : "/home/";
+          const libraryName = path.match(
+            /[^/\\\s]+?\.(?:dylib|so(?:\.\d+)?|dll)\b/i,
+          )?.[0];
+          if (!libraryName) return `${prefix}[redacted]`;
+          const suffix = path.slice(path.indexOf(libraryName) + libraryName.length);
+          return `${prefix}[redacted]/${libraryName}${suffix}`;
+        })
+        .replace(
+          /[A-Za-z]:\\(?:Users|home)\\[^\r\n]+/g,
+          (path) => {
+            const libraryName = path.match(
+              /[^/\\\s]+?\.(?:dylib|so(?:\.\d+)?|dll)\b/i,
+            )?.[0];
+            if (!libraryName) return `${path.slice(0, 3)}[redacted]`;
+            const suffix = path.slice(path.indexOf(libraryName) + libraryName.length);
+            return `${path.slice(0, 3)}[redacted]\\${libraryName}${suffix}`;
+          },
+        )
+        .slice(0, MAX_RECORDED_STARTUP_LINE_LENGTH),
+    )
+    .join("\n");
+
+  return sanitizedLines.slice(0, MAX_RECORDED_STARTUP_OUTPUT_LENGTH);
+}
+
+function recordStartupOutput(recordLog, output) {
+  if (!recordLog) return;
+  writeFileSync(resolve(recordLog), sanitizeRecordedStartupOutput(output), "utf8");
 }
 
 function formatStartupFailureSummary(error) {
@@ -928,6 +968,7 @@ export function parsePreviewTimeouts(environment = process.env) {
 function parseArgs(argv) {
   const platformIndex = argv.indexOf("--platform");
   const logFileIndex = argv.indexOf("--log-file");
+  const recordLogIndex = argv.indexOf("--record-log");
   const recordOutputIndex = argv.indexOf("--record-output");
   const platform =
     platformIndex === -1 ? "android" : argv[platformIndex + 1];
@@ -948,9 +989,18 @@ function parseArgs(argv) {
   ) {
     throw new Error("--record-output requires a path to a JSON output file.");
   }
+  const recordLog =
+    recordLogIndex === -1 ? null : argv[recordLogIndex + 1];
+  if (
+    recordLogIndex !== -1 &&
+    (!recordLog || recordLog.startsWith("--"))
+  ) {
+    throw new Error("--record-log requires a path to captured startup output.");
+  }
   return {
     platform,
     logFile: logFileIndex === -1 ? null : argv[logFileIndex + 1],
+    recordLog,
     recordOutput,
     ...parsePreviewTimeouts(),
   };
@@ -972,6 +1022,7 @@ async function validateLivePreview(
   timeoutMs,
   handoffTimeoutMs,
   publicPreviewTimeoutMs,
+  recordLog,
   recordOutput,
 ) {
   getPublicPreviewManifestUrl(process.env);
@@ -988,6 +1039,11 @@ async function validateLivePreview(
             ),
           ],
         }
+      : process.env.PREVIEW_STARTUP_REAL_LAUNCHER === "1"
+        ? {
+            command: "pnpm",
+            args: ["exec", "expo", "start", "--localhost", "--port", String(port)],
+          }
       : { command: "pnpm", args: ["run", "dev"] };
   const child = spawn(startupCommand.command, startupCommand.args, {
     cwd: resolve(import.meta.dirname, ".."),
@@ -1056,6 +1112,7 @@ async function validateLivePreview(
           if (!completeFailure) return;
           finish(() => {
             stopChild();
+            recordStartupOutput(recordLog, output.join(""));
             rejectResult(new Error(completeFailure));
           });
         }, STARTUP_FAILURE_GRACE_MS);
@@ -1074,6 +1131,7 @@ async function validateLivePreview(
     child.once("error", (error) => {
       finish(() => {
         stopChild();
+        recordStartupOutput(recordLog, output.join(""));
         rejectResult(error);
       });
     });
@@ -1081,6 +1139,7 @@ async function validateLivePreview(
       if (settled) return;
       finish(() => {
         const combinedOutput = output.join("");
+        recordStartupOutput(recordLog, combinedOutput);
         const startupFailure = formatStartupFailure(combinedOutput);
         if (startupFailure) {
           rejectResult(new Error(startupFailure));
@@ -1153,6 +1212,7 @@ async function validateLivePreview(
           );
           finish(() => {
             stopChild();
+            recordStartupOutput(recordLog, output.join(""));
             console.log(
               `Expo preview reached Metro running status on port ${port}.`,
             );
@@ -1193,6 +1253,7 @@ async function validateLivePreview(
           }
           finish(() => {
             stopChild();
+            recordStartupOutput(recordLog, output.join(""));
             rejectResult(finalError);
           });
         }
@@ -1233,6 +1294,7 @@ async function main() {
     timeoutMs,
     handoffTimeoutMs,
     publicPreviewTimeoutMs,
+    recordLog,
     recordOutput,
   } = parseArgs(process.argv.slice(2));
   if (logFile) await validateCapturedLog(logFile);
@@ -1242,6 +1304,7 @@ async function main() {
       timeoutMs,
       handoffTimeoutMs,
       publicPreviewTimeoutMs,
+      recordLog,
       recordOutput,
     );
 }

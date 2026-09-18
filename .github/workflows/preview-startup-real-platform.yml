@@ -1,0 +1,163 @@
+name: Preview startup real platform launcher
+
+on:
+  workflow_dispatch:
+    inputs:
+      reviewed_ref:
+        description: Git branch, tag, or commit SHA to verify
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  verify-real-launcher:
+    name: Verify Expo launcher on ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Check out reviewed revision
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.reviewed_ref }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
+        with:
+          version: 10.26.1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install workspace dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Capture and revalidate real Expo launcher output
+        shell: bash
+        env:
+          PREVIEW_STARTUP_REAL_LAUNCHER: "1"
+          PREVIEW_STARTUP_TIMEOUT_MS: "45000"
+          PREVIEW_HANDOFF_TIMEOUT_MS: "2000"
+          PREVIEW_PUBLIC_TIMEOUT_MS: "2000"
+        run: |
+          set -euo pipefail
+          log_path="$RUNNER_TEMP/expo-startup-${{ matrix.os }}.log"
+          console_path="$RUNNER_TEMP/expo-startup-${{ matrix.os }}.console.log"
+          record_status=0
+
+          set +e
+          node artifacts/chat-app/scripts/validate-preview-startup.mjs \
+            --record-log "$log_path" \
+            >"$console_path" 2>&1
+          record_status=$?
+          set -e
+
+          if [[ ! -s "$log_path" ]]; then
+            echo "The real Expo launcher did not produce a captured startup log." >&2
+            cat "$console_path" >&2
+            exit 1
+          fi
+
+          if grep -Eiq \
+            'authorization|proxy-authorization|password|passwd|secret|token|https?://[^[:space:]]+:[^[:space:]]+@' \
+            "$log_path"; then
+            echo "The captured launcher output contains credentials or a private URL." >&2
+            exit 1
+          fi
+
+          set +e
+          node artifacts/chat-app/scripts/validate-preview-startup.mjs \
+            --log-file "$log_path" \
+            >"$RUNNER_TEMP/expo-startup-${{ matrix.os }}.revalidated.log" 2>&1
+          revalidation_status=$?
+          set -e
+
+          if [[ "$record_status" -eq 0 && "$revalidation_status" -ne 0 ]]; then
+            echo "Captured healthy launcher output did not remain healthy when revalidated." >&2
+            cat "$RUNNER_TEMP/expo-startup-${{ matrix.os }}.revalidated.log" >&2
+            exit 1
+          fi
+
+          loader_failure=0
+          if grep -Eiq \
+            'shared libraries|library not loaded|cannot proceed because .* was not found|react native devtools.*(error|failed|unable|cannot)' \
+            "$log_path"; then
+            loader_failure=1
+          fi
+
+          # A launcher failure is only acceptable evidence when it is a loader
+          # failure the validator diagnoses. Any other nonzero status means the
+          # run proved nothing about launcher compatibility, so fail loudly
+          # instead of publishing a green summary.
+          if [[ "$record_status" -ne 0 && "$loader_failure" -eq 0 ]]; then
+            echo "The real Expo launcher failed without a recognized loader diagnosis." >&2
+            echo "Initial validator status: $record_status" >&2
+            cat "$console_path" >&2
+            exit 1
+          fi
+
+          if [[ "$revalidation_status" -ne 0 && "$loader_failure" -eq 0 ]]; then
+            echo "Revalidating the captured output failed without a recognized loader diagnosis." >&2
+            echo "Revalidation status: $revalidation_status" >&2
+            cat "$RUNNER_TEMP/expo-startup-${{ matrix.os }}.revalidated.log" >&2
+            exit 1
+          fi
+
+          if [[ "$loader_failure" -eq 1 ]]; then
+            live_diagnostic="$(
+              sed -n 's/^Expo preview startup error: //p' "$console_path" | head -n 1
+            )"
+            captured_diagnostic="$(
+              sed -n 's/^Expo preview startup error: //p' \
+                "$RUNNER_TEMP/expo-startup-${{ matrix.os }}.revalidated.log" | head -n 1
+            )"
+            if [[ -z "$live_diagnostic" || -z "$captured_diagnostic" ]]; then
+              echo "The loader failure did not produce a validator diagnosis in both runs." >&2
+              cat "$console_path" >&2
+              cat "$RUNNER_TEMP/expo-startup-${{ matrix.os }}.revalidated.log" >&2
+              exit 1
+            fi
+            live_library="$(
+              grep -Eo 'libgtk-3(-0)?\.(dylib|so(\.[0-9]+)?|dll)' <<<"$live_diagnostic" |
+                head -n 1
+            )"
+            captured_library="$(
+              grep -Eo 'libgtk-3(-0)?\.(dylib|so(\.[0-9]+)?|dll)' <<<"$captured_diagnostic" |
+                head -n 1
+            )"
+            if [[ -z "$live_library" || "$live_library" != "$captured_library" ]]; then
+              echo "The recorded loader output produced a different useful diagnosis." >&2
+              printf 'live: %s\ncaptured: %s\n' "$live_diagnostic" "$captured_diagnostic" >&2
+              exit 1
+            fi
+          fi
+
+          {
+            echo "## Real platform launcher capture"
+            echo "- Runner: \`${{ matrix.os }}\`"
+            echo "- Captured output: **PASS** (redacted before persistence)"
+            if [[ "$loader_failure" -eq 1 ]]; then
+              echo "- Launcher result: diagnosed loader failure (matched in both runs)"
+            else
+              echo "- Launcher result: healthy startup"
+            fi
+            echo "- Initial validator status: \`$record_status\`"
+            echo "- Revalidation status: \`$revalidation_status\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload redacted launcher capture
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: preview-startup-${{ matrix.os }}
+          path: ${{ runner.temp }}/expo-startup-${{ matrix.os }}.log
+          if-no-files-found: error
