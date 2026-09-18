@@ -25,6 +25,12 @@ const workflow = YAML.parse(
     "utf8",
   ),
 );
+const mobileReleaseWorkflow = YAML.parse(
+  readFileSync(
+    path.join(workspaceRoot, ".github/workflows/mobile-release.yml"),
+    "utf8",
+  ),
+);
 const workflowText = readFileSync(
   path.join(
     workspaceRoot,
@@ -37,6 +43,12 @@ const fixturePath = path.join(
   "scripts/tests/native-evidence-summary-regression-fixture.sh",
 );
 const fixtureText = readFileSync(fixturePath, "utf8");
+
+function schedulesHostedSummaryFor(changedPaths) {
+  return changedPaths.some((changedPath) =>
+    workflow.on.pull_request.paths.includes(changedPath),
+  );
+}
 
 test("hosted summary regression checks only the reviewed ref", () => {
   assert.deepEqual(Object.keys(workflow.on), [
@@ -175,6 +187,53 @@ test("hosted summary regression checks only the reviewed ref", () => {
   assert.match(
     oversizedStep.run,
     /Oversized evidence payload leaked into hosted output/,
+  );
+});
+
+test("hosted summary path filtering leaves mobile release ownership intact", () => {
+  const unrelatedMobileReleaseChanges = [
+    [".github/workflows/mobile-release.yml"],
+    ["scripts/provision-android-runner.sh"],
+    ["scripts/provision-ios-runner.sh"],
+    ["scripts/check-android-release-runner-health.sh"],
+    [
+      ".github/workflows/mobile-release.yml",
+      "scripts/provision-android-runner.sh",
+    ],
+  ];
+
+  for (const changedPaths of unrelatedMobileReleaseChanges) {
+    assert.equal(
+      schedulesHostedSummaryFor(changedPaths),
+      false,
+      `hosted summary must stay unscheduled for ${changedPaths.join(", ")}`,
+    );
+  }
+
+  for (const scopedPath of workflow.on.pull_request.paths) {
+    assert.equal(
+      schedulesHostedSummaryFor([scopedPath]),
+      true,
+      `hosted summary must schedule for its scoped path ${scopedPath}`,
+    );
+  }
+
+  assert.deepEqual(
+    Object.keys(mobileReleaseWorkflow.jobs).filter((jobId) =>
+      [
+        "android-release-runner-health",
+        "native-ios",
+        "native-android",
+        "mobile-publish",
+      ].includes(jobId),
+    ),
+    [
+      "android-release-runner-health",
+      "native-ios",
+      "native-android",
+      "mobile-publish",
+    ],
+    "mobile release workflow must retain native runner and publishing ownership",
   );
 });
 
