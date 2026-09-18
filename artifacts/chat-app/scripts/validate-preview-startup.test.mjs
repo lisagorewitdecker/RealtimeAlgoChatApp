@@ -327,6 +327,7 @@ globalThis.fetch = async (url, options = {}) => {
 
 function runMalformedPreviewConfigurationCli(setting, value) {
   const directory = mkdtempSync(join(tmpdir(), "preview-malformed-config-cli-"));
+  const metroMarkerPath = join(directory, "metro-started.marker");
   const markerPath = join(directory, "unexpected-public-request.marker");
   const preloadPath = join(directory, "reject-public-request.mjs");
 
@@ -355,6 +356,7 @@ globalThis.fetch = async () => {
       PREVIEW_HANDOFF_TIMEOUT_MS: "1000",
       PREVIEW_STARTUP_TIMEOUT_MS: "1000",
       PREVIEW_STARTUP_TEST_FIXTURE: "handoff-server",
+      PREVIEW_STARTUP_LIVE_START_MARKER: metroMarkerPath,
     };
     delete environment.PREVIEW_PUBLIC_URL;
     delete environment.REPLIT_EXPO_DEV_DOMAIN;
@@ -381,6 +383,11 @@ globalThis.fetch = async () => {
       ),
     );
     assert.match(output, new RegExp(`\\b${setting}\\b`));
+    assert.equal(
+      existsSync(metroMarkerPath),
+      false,
+      `${setting} started Metro before reporting its malformed configuration`,
+    );
     assert.equal(
       existsSync(markerPath),
       false,

@@ -972,6 +972,7 @@ async function validateLivePreview(
   publicPreviewTimeoutMs,
   recordOutput,
 ) {
+  getPublicPreviewManifestUrl(process.env);
   const port = await findFreePort();
   const output = [];
   const startupCommand =
