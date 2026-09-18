@@ -999,7 +999,19 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Clear prior iOS evidence from this runner
+        if: ${{ always() }}
         run: rm -rf test-results/native-large-text/ios
+
+      - name: Check iOS release prerequisites
+        env:
+          NATIVE_SMOKE_IOS_APP_ID: ${{ secrets.NATIVE_SMOKE_IOS_APP_ID }}
+          NATIVE_SMOKE_EMAIL: ${{ secrets.NATIVE_SMOKE_EMAIL }}
+          NATIVE_SMOKE_PASSWORD: ${{ secrets.NATIVE_SMOKE_PASSWORD }}
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          NATIVE_SMOKE_IOS_SENTRY_RELEASE: ${{ secrets.NATIVE_SMOKE_IOS_SENTRY_RELEASE }}
+          NATIVE_SMOKE_IOS_SENTRY_DIST: ${{ secrets.NATIVE_SMOKE_IOS_SENTRY_DIST }}
+          NATIVE_SMOKE_IOS_BUILD_ID: ${{ env.NATIVE_SMOKE_IOS_BUILD_ID }}
+        run: bash scripts/check-ios-release-prerequisites.sh
 
       - name: Set up pnpm
         id: setup-pnpm

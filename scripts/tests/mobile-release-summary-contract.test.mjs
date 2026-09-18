@@ -92,6 +92,7 @@ assert.ok(
 );
 
 const iosGateScript = "artifacts/chat-app/e2e/native-large-text/run.sh";
+const iosPreflightScript = "scripts/check-ios-release-prerequisites.sh";
 const androidPreflightScript = "scripts/check-android-release-prerequisites.sh";
 const nativeEvidenceCheckerScript =
   "scripts/check-native-large-text-evidence.sh";
@@ -147,6 +148,18 @@ const scriptContracts = {
     summaryFunction: "write_ios_readiness_summary",
     // Audited candidate identifiers may be written to evidence files here.
     evidenceDirectoryVariable: "RESULTS_DIR",
+  },
+  [iosPreflightScript]: {
+    diagnosticFunction: "record_failure",
+    diagnosticVariableAllowlist: [
+      "command",
+      "name",
+      "java_version",
+      "pnpm_version",
+      "PNPM_VERSION",
+    ],
+    summaryFunction: "write_summary",
+    evidenceDirectoryVariable: null,
   },
   [androidPreflightScript]: {
     diagnosticFunction: "record_failure",
@@ -801,6 +814,51 @@ test("candidate build IDs use non-secret variables or reusable-workflow inputs",
   assert.doesNotMatch(
     JSON.stringify(workflow),
     /secrets\.NATIVE_SMOKE_(?:IOS|ANDROID)_BUILD_ID/,
+  );
+});
+
+test("iOS preflight clears stale evidence before it can block unconditional uploads", () => {
+  const iosJob = workflow.jobs["native-ios"];
+  assert.ok(iosJob, "release workflow must define the native-ios job");
+  const preflightStep = iosJob.steps.find(
+    (step) => step.name === "Check iOS release prerequisites",
+  );
+  assert.ok(preflightStep, "native-ios must run the iOS prerequisite preflight");
+  const cleanupStep = iosJob.steps.find(
+    (step) => step.name === "Clear prior iOS evidence from this runner",
+  );
+  assert.ok(cleanupStep, "native-ios must clear prior iOS evidence");
+  assert.match(
+    cleanupStep.run,
+    /^rm -rf test-results\/native-large-text\/ios$/,
+    "stale iOS evidence must be cleared by a fixed cleanup command",
+  );
+
+  const preflightIndex = iosJob.steps.indexOf(preflightStep);
+  assert.ok(
+    iosJob.steps.indexOf(cleanupStep) < preflightIndex,
+    "stale iOS evidence must be cleared before the preflight can fail",
+  );
+  for (const stepName of [
+    "Summarize iOS readiness",
+    "Upload iOS native smoke artifacts",
+    "Summarize iOS native branding",
+  ]) {
+    const step = iosJob.steps.find((candidate) => candidate.name === stepName);
+    assert.ok(step, `native-ios must define "${stepName}"`);
+    assert.ok(
+      iosJob.steps.indexOf(step) > preflightIndex,
+      `"${stepName}" must run after the stale-evidence cleanup and preflight`,
+    );
+  }
+
+  const uploadStep = iosJob.steps.find(
+    (step) => step.name === "Upload iOS native smoke artifacts",
+  );
+  assert.equal(
+    uploadStep.if,
+    "always()",
+    "the unconditional upload must be safe after the preflight clears stale evidence",
   );
 });
 
