@@ -28,6 +28,22 @@ const MAX_STARTUP_LIBRARY_DETAIL_LENGTH = 192;
 const MAX_RECORDED_STARTUP_OUTPUT_LENGTH = 16_384;
 const MAX_RECORDED_STARTUP_LINE_LENGTH = 1_024;
 const STARTUP_DIAGNOSTIC_PREFIX = "Expo preview startup error: ";
+const HANDOFF_FAILURE_PHASES = Object.freeze([
+  {
+    label: "public manifest",
+    matches: [
+      "Public Expo preview manifest check failed",
+      "Preview handoff preflight failed at the public manifest probe.",
+    ],
+  },
+  {
+    label: "local handoff",
+    matches: [
+      "Local Expo Go manifest/bundle probe failed",
+      "Preview handoff preflight failed at the local manifest/bundle probe.",
+    ],
+  },
+]);
 const HANDOFF_PLATFORM_CONFIG = {
   android: {
     schema: "android-preview-handoff-preflight/v1",
@@ -293,8 +309,25 @@ function recordStartupOutput(recordLog, output) {
   writeFileSync(resolve(recordLog), sanitizeRecordedStartupOutput(output), "utf8");
 }
 
-function formatStartupFailureSummary(error) {
+function getHandoffFailurePhase(message) {
+  return (
+    HANDOFF_FAILURE_PHASES.find(({ matches }) =>
+      matches.some((prefix) => message.startsWith(prefix)),
+    )?.label ?? null
+  );
+}
+
+export function formatStartupFailureSummary(error) {
   const message = error instanceof Error ? error.message : String(error);
+  const handoffFailurePhase = getHandoffFailurePhase(message);
+  if (handoffFailurePhase) {
+    return (
+      "### Expo preview startup\n\n" +
+      "**Status:** FAIL\n\n" +
+      `**Failed phase:** ${handoffFailurePhase}\n\n`
+    );
+  }
+
   const startupFailure =
     message.startsWith("Expo preview startup error:") ||
     message.startsWith("Public Expo preview manifest URL ")

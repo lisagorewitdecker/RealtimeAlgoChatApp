@@ -19,6 +19,7 @@ import {
   createHandoffPreflightRecord,
   formatDevServerSignIn,
   formatHandoffPreflight,
+  formatStartupFailureSummary,
   getPublicPreviewManifestUrl,
   MAX_PREVIEW_TIMEOUT_MS,
   manifestHasSignedInDeveloper,
@@ -40,6 +41,46 @@ const validatorPath = join(
   "validate-preview-startup.mjs",
 );
 const packageRoot = join(import.meta.dirname, "..");
+
+test("CI summaries identify a failed public-manifest handoff without raw details", () => {
+  const summary = formatStartupFailureSummary(
+    new Error(
+      "Public Expo preview manifest check failed: public manifest HTTP 502 " +
+        "(128 bytes). https://private.example.test/expo?token=private-secret " +
+        "child process output: private-child-output",
+    ),
+  );
+
+  assert.match(summary, /^### Expo preview startup/m);
+  assert.match(summary, /\*\*Status:\*\* FAIL/);
+  assert.match(summary, /\*\*Failed phase:\*\* public manifest/);
+  assert.doesNotMatch(summary, /\*\*Diagnosis:\*\*/);
+  assert.doesNotMatch(
+    summary,
+    /502|128 bytes|https?:\/\/|private-secret|private-child-output/i,
+  );
+  assert.ok(summary.length <= 700, "summary exceeded its bounded size");
+});
+
+test("CI summaries identify a failed local handoff without raw details", () => {
+  const summary = formatStartupFailureSummary(
+    new Error(
+      "Local Expo Go manifest/bundle probe failed: manifest HTTP 200 " +
+        "(64 bytes); bundle request did not complete; " +
+        "http://127.0.0.1:4321/_expo/static/js/bundle?token=private-secret " +
+        "child process output: private-child-output",
+    ),
+  );
+
+  assert.match(summary, /\*\*Status:\*\* FAIL/);
+  assert.match(summary, /\*\*Failed phase:\*\* local handoff/);
+  assert.doesNotMatch(summary, /\*\*Diagnosis:\*\*/);
+  assert.doesNotMatch(
+    summary,
+    /200|64 bytes|https?:\/\/|private-secret|private-child-output/i,
+  );
+  assert.ok(summary.length <= 700, "summary exceeded its bounded size");
+});
 
 test("uses defaults only when preview timeout environment values are absent", () => {
   assert.deepEqual(parsePreviewTimeouts({}), {
