@@ -490,6 +490,16 @@ Do not replace `secrets: inherit` while making this change. The authentication,
 test-account, Sentry, Clerk, and database values listed below still cross the
 reusable-workflow secrets boundary.
 
+The called workflow validates these credentials in one hosted setup preflight.
+When required credentials are absent, the preflight reports every missing key
+together before native runners or release regressions start. It names keys only,
+never values. GitHub's reusable-workflow declarations leave the secrets
+syntactically optional so this aggregate diagnostic can run; the preflight list
+below is the blocking required contract. `NATIVE_SMOKE_DISPLAY_NAME` remains
+optional and is not included in that failure. The publish-only `EAS_TOKEN` also
+stays out of this preflight and remains available only after approval from the
+protected `mobile-store-submission` environment.
+
 Store the following values as **secrets** in the GitHub Actions
 `mobile-release` environment. Authentication values are injected only into the process that
 needs them and are never written to the repository or printed by the workflow.
@@ -498,7 +508,6 @@ tested candidate can be audited by the publish job:
 
 #### Required reusable-workflow secrets
 
-- `EAS_TOKEN` — EAS authentication token used only by the publish job
 - `SENTRY_AUTH_TOKEN` — a masked Sentry token with release-upload and
   event-read access for organization `lisagorewitdecker-06`, project
   `react-native`; store the same token in the EAS release build environment and
@@ -521,6 +530,11 @@ tested candidate can be audited by the publish job:
 
 - `NATIVE_SMOKE_DISPLAY_NAME` — reusable display name for the smoke account; the
   test flow can register the account without a preconfigured value
+
+#### Publish-only secret
+
+- `EAS_TOKEN` — EAS authentication token used only by the publish job; store it
+  in the protected `mobile-store-submission` environment, not `mobile-release`
 
 Build each candidate with `SENTRY_DSN`, `SENTRY_AUTH_TOKEN`, `SENTRY_RELEASE`,
 and `SENTRY_DIST` in its EAS release environment. EAS supplies `EAS_BUILD_ID`;

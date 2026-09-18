@@ -187,7 +187,7 @@ function documentedCallerJob() {
 
 function documentedCallerSecrets() {
   const section = callerDocumentation.match(
-    /#### Required reusable-workflow secrets\n([\s\S]*?)\n#### Optional reusable-workflow secrets\n([\s\S]*?)\n\nBuild each candidate with/,
+    /#### Required reusable-workflow secrets\n([\s\S]*?)\n#### Optional reusable-workflow secrets\n([\s\S]*?)\n#### Publish-only secret\n([\s\S]*?)\n\nBuild each candidate with/,
   );
   assert.ok(
     section,
@@ -208,7 +208,19 @@ function documentedCallerSecrets() {
   return {
     required: parseSecretList(section[1], "required"),
     optional: parseSecretList(section[2], "optional"),
+    publishOnly: parseSecretList(section[3], "publish-only"),
   };
+}
+
+function credentialPreflight() {
+  const job = workflow.jobs?.["mobile-release-credentials"];
+  assert.ok(job, "mobile release must validate caller credentials in a dedicated job");
+  const step = job.steps?.find(
+    (candidate) =>
+      candidate.name === "Report every missing required release credential",
+  );
+  assert.ok(step, "the credential preflight must report missing required credentials");
+  return { job, step };
 }
 
 function mobileReleaseNodeSetupEntries(releaseWorkflow) {
@@ -371,8 +383,8 @@ test("release credentials remain in the reusable workflow secrets contract", () 
     const contract = workflow.on.workflow_call.secrets[secret];
     assert.equal(
       contract.required,
-      secret !== "NATIVE_SMOKE_DISPLAY_NAME",
-      `${secret} has an unexpected workflow_call required setting`,
+      false,
+      `${secret} must let the aggregate credential preflight report the full missing set`,
     );
   }
 });
@@ -380,13 +392,14 @@ test("release credentials remain in the reusable workflow secrets contract", () 
 test("caller setup documentation lists every reusable workflow secret with its required setting", () => {
   const workflowSecrets = workflow.on.workflow_call.secrets ?? {};
   const documentedSecrets = documentedCallerSecrets();
-  const requiredSecrets = Object.entries(workflowSecrets)
-    .filter(([, contract]) => contract.required === true)
-    .map(([secret]) => secret)
-    .sort();
-  const optionalSecrets = Object.entries(workflowSecrets)
-    .filter(([, contract]) => contract.required !== true)
-    .map(([secret]) => secret)
+  const { step } = credentialPreflight();
+  const requiredSecrets = Object.keys(step.env ?? {}).sort();
+  const optionalSecrets = Object.keys(workflowSecrets)
+    .filter(
+      (secret) =>
+        !requiredSecrets.includes(secret) &&
+        !documentedSecrets.publishOnly.includes(secret),
+    )
     .sort();
 
   assert.deepEqual(
@@ -398,6 +411,113 @@ test("caller setup documentation lists every reusable workflow secret with its r
     documentedSecrets.optional,
     optionalSecrets,
     "the documented optional secrets must exactly match optional workflow_call secrets",
+  );
+});
+
+test("credential preflight reports every missing required caller key together without exposing values", () => {
+  const workflowSecrets = workflow.on.workflow_call.secrets ?? {};
+  const { job, step } = credentialPreflight();
+  const requiredSecrets = Object.keys(step.env ?? {}).sort();
+  const documentedSecrets = documentedCallerSecrets();
+
+  assert.deepEqual(
+    requiredSecrets,
+    documentedSecrets.required,
+    "the credential preflight must stay aligned with the documented required workflow_call secrets",
+  );
+  assert.deepEqual(
+    Object.keys(workflowSecrets).sort(),
+    [
+      ...requiredSecrets,
+      ...documentedSecrets.optional,
+      ...documentedSecrets.publishOnly,
+    ].sort(),
+    "the preflight, optional, and publish-only sets must cover every workflow_call secret",
+  );
+  assert.equal(
+    step.env?.NATIVE_SMOKE_DISPLAY_NAME,
+    undefined,
+    "the optional display name must not block release setup",
+  );
+  assert.equal(
+    step.env?.EAS_TOKEN,
+    undefined,
+    "the publish-only EAS token must not be injected into the evidence-release preflight",
+  );
+  for (const secret of requiredSecrets) {
+    assert.equal(
+      step.env[secret],
+      `\${{ secrets.${secret} }}`,
+      `${secret} must enter the preflight only through its matching secret expression`,
+    );
+    assert.match(
+      step.run,
+      new RegExp(`^\\s*${secret}$`, "m"),
+      `${secret} must be included in the aggregate required credential list`,
+    );
+  }
+  assert.match(
+    step.run,
+    /missing_credentials\+=\("\$credential"\)/,
+    "the preflight must collect missing keys instead of failing on the first one",
+  );
+  assert.match(
+    step.run,
+    /printf -- '- %s\\n' "\$\{missing_credentials\[@\]\}" >&2/,
+    "the setup failure must name every missing credential key",
+  );
+  assert.doesNotMatch(
+    step.run,
+    /printf[\s\S]*\$\{!credential\}/,
+    "the preflight must never print credential values",
+  );
+  assert.deepEqual(
+    job.needs,
+    ["mobile-release-node-range"],
+    "credential validation must run immediately after the Node guard",
+  );
+
+  for (const [jobId, releaseJob] of Object.entries(workflow.jobs ?? {})) {
+    if (
+      jobId === "mobile-release-node-range" ||
+      jobId === "mobile-release-credentials" ||
+      jobId === "android-preview-evidence" ||
+      jobId === "ios-preview-evidence" ||
+      jobId === "mobile-publish"
+    ) {
+      continue;
+    }
+    if (releaseJob.if?.includes("github.event_name != 'pull_request'")) {
+      assert.ok(
+        (releaseJob.needs ?? []).includes("mobile-release-credentials"),
+        `${jobId} must wait for the aggregate credential preflight`,
+      );
+    }
+  }
+  assert.match(
+    String(workflow.jobs?.["mobile-release-gate"]?.if),
+    /needs\.mobile-release-credentials\.result == 'success'/,
+    "the release gate must remain blocked when credential setup fails",
+  );
+
+  const publishJob = workflow.jobs?.["mobile-publish"];
+  assert.equal(
+    publishJob?.environment?.name,
+    "mobile-store-submission",
+    "publish-only credentials must remain behind the protected submission environment",
+  );
+  const publishInputStep = publishJob?.steps?.find(
+    (candidate) => candidate.name === "Verify publishing inputs",
+  );
+  assert.equal(
+    publishInputStep?.env?.EAS_TOKEN,
+    "${{ secrets.EAS_TOKEN }}",
+    "the publish job must validate its EAS token from the protected environment",
+  );
+  assert.match(
+    publishInputStep?.run,
+    /Set EAS_TOKEN in the protected mobile-store-submission environment\./,
+    "a missing publish token must name the protected environment that owns it",
   );
 });
 

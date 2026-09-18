@@ -40,37 +40,37 @@ on:
         type: string
     secrets:
       EAS_TOKEN:
-        required: true
+        required: false
       SENTRY_AUTH_TOKEN:
-        required: true
+        required: false
       NATIVE_SMOKE_IOS_APP_ID:
-        required: true
+        required: false
       NATIVE_SMOKE_ANDROID_APP_ID:
-        required: true
+        required: false
       NATIVE_SMOKE_EMAIL:
-        required: true
+        required: false
       NATIVE_SMOKE_PASSWORD:
-        required: true
+        required: false
       NATIVE_SMOKE_DISPLAY_NAME:
         required: false
       NATIVE_SMOKE_IOS_SENTRY_RELEASE:
-        required: true
+        required: false
       NATIVE_SMOKE_IOS_SENTRY_DIST:
-        required: true
+        required: false
       NATIVE_SMOKE_ANDROID_SENTRY_RELEASE:
-        required: true
+        required: false
       NATIVE_SMOKE_ANDROID_SENTRY_DIST:
-        required: true
+        required: false
       E2E_CHAT_URL:
-        required: true
+        required: false
       E2E_API_URL:
-        required: true
+        required: false
       CLERK_PUBLISHABLE_KEY:
-        required: true
+        required: false
       CLERK_SECRET_KEY:
-        required: true
+        required: false
       DATABASE_URL:
-        required: true
+        required: false
 
 permissions:
   actions: read
@@ -165,6 +165,65 @@ jobs:
             exit 1
           fi
           echo "Mobile release Node range is valid: $(sanitize_workflow_text "$NODE_RANGE")"
+
+  mobile-release-credentials:
+    name: Validate mobile release credentials
+    if: ${{ github.event_name != 'pull_request' }}
+    needs:
+      - mobile-release-node-range
+    runs-on: ubuntu-latest
+    environment:
+      name: mobile-release
+    steps:
+      - name: Report every missing required release credential
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          NATIVE_SMOKE_IOS_APP_ID: ${{ secrets.NATIVE_SMOKE_IOS_APP_ID }}
+          NATIVE_SMOKE_ANDROID_APP_ID: ${{ secrets.NATIVE_SMOKE_ANDROID_APP_ID }}
+          NATIVE_SMOKE_EMAIL: ${{ secrets.NATIVE_SMOKE_EMAIL }}
+          NATIVE_SMOKE_PASSWORD: ${{ secrets.NATIVE_SMOKE_PASSWORD }}
+          NATIVE_SMOKE_IOS_SENTRY_RELEASE: ${{ secrets.NATIVE_SMOKE_IOS_SENTRY_RELEASE }}
+          NATIVE_SMOKE_IOS_SENTRY_DIST: ${{ secrets.NATIVE_SMOKE_IOS_SENTRY_DIST }}
+          NATIVE_SMOKE_ANDROID_SENTRY_RELEASE: ${{ secrets.NATIVE_SMOKE_ANDROID_SENTRY_RELEASE }}
+          NATIVE_SMOKE_ANDROID_SENTRY_DIST: ${{ secrets.NATIVE_SMOKE_ANDROID_SENTRY_DIST }}
+          E2E_CHAT_URL: ${{ secrets.E2E_CHAT_URL }}
+          E2E_API_URL: ${{ secrets.E2E_API_URL }}
+          CLERK_PUBLISHABLE_KEY: ${{ secrets.CLERK_PUBLISHABLE_KEY }}
+          CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          set -euo pipefail
+          required_credentials=(
+            SENTRY_AUTH_TOKEN
+            NATIVE_SMOKE_IOS_APP_ID
+            NATIVE_SMOKE_ANDROID_APP_ID
+            NATIVE_SMOKE_EMAIL
+            NATIVE_SMOKE_PASSWORD
+            NATIVE_SMOKE_IOS_SENTRY_RELEASE
+            NATIVE_SMOKE_IOS_SENTRY_DIST
+            NATIVE_SMOKE_ANDROID_SENTRY_RELEASE
+            NATIVE_SMOKE_ANDROID_SENTRY_DIST
+            E2E_CHAT_URL
+            E2E_API_URL
+            CLERK_PUBLISHABLE_KEY
+            CLERK_SECRET_KEY
+            DATABASE_URL
+          )
+          missing_credentials=()
+          for credential in "${required_credentials[@]}"; do
+            if [[ -z "${!credential:-}" ]]; then
+              missing_credentials+=("$credential")
+            fi
+          done
+
+          if ((${#missing_credentials[@]} > 0)); then
+            echo "Mobile release setup is missing required credential keys:" >&2
+            printf -- '- %s\n' "${missing_credentials[@]}" >&2
+            echo "Add every listed key to the mobile-release environment, then retry." >&2
+            exit 1
+          fi
+
+          echo "All required mobile release credential keys are configured."
 
   android-preview-evidence:
     # Keep this display name synchronized with the required check in the repository ruleset.
@@ -529,6 +588,7 @@ jobs:
     if: ${{ github.event_name != 'pull_request' }}
     needs:
       - mobile-release-node-range
+      - mobile-release-credentials
     permissions:
       actions: write
       contents: read
@@ -1039,6 +1099,7 @@ jobs:
     if: ${{ github.event_name != 'pull_request' }}
     needs:
       - mobile-release-node-range
+      - mobile-release-credentials
     permissions:
       actions: write
       contents: read
@@ -1155,6 +1216,7 @@ jobs:
       contents: read
     needs:
       - mobile-release-node-range
+      - mobile-release-credentials
     outputs:
       native_evidence_artifact_url: ${{ steps.upload-ios-native-smoke.outputs.artifact-url }}
       native_evidence_digest_manifest: ${{ steps.ios-native-evidence-digest.outputs.native_evidence_digest_manifest }}
@@ -1446,6 +1508,7 @@ jobs:
     if: ${{ github.event_name != 'pull_request' }}
     needs:
       - mobile-release-node-range
+      - mobile-release-credentials
     runs-on:
       - self-hosted
       - linux
@@ -1478,6 +1541,7 @@ jobs:
       native_evidence_digest_manifest: ${{ steps.android-native-evidence-digest.outputs.native_evidence_digest_manifest }}
     needs:
       - mobile-release-node-range
+      - mobile-release-credentials
       - android-prerequisite-preflight
     runs-on:
       - self-hosted
@@ -1687,6 +1751,7 @@ jobs:
       contents: read
     needs:
       - mobile-release-node-range
+      - mobile-release-credentials
     runs-on: ubuntu-latest
     timeout-minutes: 20
     environment:
@@ -1857,7 +1922,7 @@ jobs:
 
   mobile-release-gate:
     name: Mobile release gate
-    if: ${{ github.event_name != 'pull_request' && needs.mobile-release-node-range.result == 'success' && needs.native-ios.result == 'success' && needs.native-android.result == 'success' && needs.idle-profile-registration.result == 'success' && needs.native-evidence-summary-regression.result == 'success' && needs.native-evidence-tamper-regression.result == 'success' }}
+    if: ${{ github.event_name != 'pull_request' && needs.mobile-release-node-range.result == 'success' && needs.mobile-release-credentials.result == 'success' && needs.native-ios.result == 'success' && needs.native-android.result == 'success' && needs.idle-profile-registration.result == 'success' && needs.native-evidence-summary-regression.result == 'success' && needs.native-evidence-tamper-regression.result == 'success' }}
     outputs:
       ios_native_evidence_artifact_url: ${{ needs.native-ios.outputs.native_evidence_artifact_url }}
       android_native_evidence_artifact_url: ${{ needs.native-android.outputs.native_evidence_artifact_url }}
@@ -1865,6 +1930,7 @@ jobs:
       android_native_evidence_digest_manifest: ${{ needs.native-android.outputs.native_evidence_digest_manifest }}
     needs:
       - mobile-release-node-range
+      - mobile-release-credentials
       - native-ios
       - native-android
       - idle-profile-registration
@@ -2224,7 +2290,7 @@ jobs:
           ANDROID_BUILD_ID: ${{ env.NATIVE_SMOKE_ANDROID_BUILD_ID }}
         run: |
           set -euo pipefail
-          : "${EAS_TOKEN:?Set EAS_TOKEN in the mobile-release environment.}"
+          : "${EAS_TOKEN:?Set EAS_TOKEN in the protected mobile-store-submission environment.}"
           : "${IOS_BUILD_ID:?Set the NATIVE_SMOKE_IOS_BUILD_ID repository variable.}"
           : "${ANDROID_BUILD_ID:?Set the NATIVE_SMOKE_ANDROID_BUILD_ID repository variable.}"
 
