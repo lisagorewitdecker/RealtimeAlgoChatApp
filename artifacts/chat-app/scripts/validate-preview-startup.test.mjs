@@ -27,6 +27,7 @@ import {
   requestLocalHandoffProbe,
   requestPublicPreviewManifest,
   readAndValidateHandoffPreflight,
+  validatePreviewOutput,
   validateHandoffPreflightRecord,
   writeHandoffPreflight,
 } from "./validate-preview-startup.mjs";
@@ -117,6 +118,75 @@ test("rejects malformed and non-positive preview timeout values", () => {
   }
 });
 
+test("keeps the missing library when a DevTools wrapper precedes the loader line", () => {
+  const output = [
+    "\u001b[31mReact Native DevTools launcher exited with code 1\u001b[0m",
+    "\u001b[31mError while loading shared libraries: libgtk-3.so.0: cannot open shared object file\u0007\u001b[0m",
+  ].join("\n");
+
+  assert.throws(
+    () => validatePreviewOutput(output),
+    (error) => {
+      assert.match(
+        error.message,
+        /Expo preview startup error: .*libgtk-3\.so\.0/,
+      );
+      assert.doesNotMatch(error.message, /[\u0000-\u001f\u007f]/);
+      assert.ok(
+        error.message.length <= 512,
+        "startup diagnostic exceeded its bounded length",
+      );
+      return true;
+    },
+  );
+});
+
+test("validates captured startup logs with a bounded, sanitized library diagnostic", () => {
+  const longLibraryPath =
+    `/opt/${"nested-directory/".repeat(30)}libgtk-3.so.0`;
+  const capturedOutput = [
+    "\u001b[31mReact Native DevTools launcher failed to start\u001b[0m",
+    `\u001b[31mError while loading shared libraries: ${longLibraryPath}: cannot open shared object file\u0007\u001b[0m`,
+    "unrelated captured output ".repeat(200),
+  ].join("\n");
+  const validation = runCapturedPreviewValidation(capturedOutput);
+
+  try {
+    assert.equal(validation.result.status, 1, validation.output);
+    const diagnostic = startupDiagnostic(validation.output);
+    assert.ok(diagnostic, "captured-log validation omitted its diagnostic");
+    assert.match(diagnostic, /missing runtime library: .*libgtk-3\.so\.0/);
+    assert.ok(
+      diagnostic.length <= 512,
+      "captured startup diagnostic exceeded its bounded length",
+    );
+    assert.doesNotMatch(diagnostic, /[\u0000-\u001f\u007f]/);
+    assert.doesNotMatch(diagnostic, /unrelated captured output/);
+  } finally {
+    rmSync(validation.directory, { recursive: true, force: true });
+  }
+});
+
+test("reports a DevTools failure without inventing a missing library", () => {
+  const output =
+    "\u001b[31mReact Native DevTools launcher failed to start: " +
+    `${"diagnostic detail ".repeat(100)}\u001b[0m`;
+
+  assert.throws(
+    () => validatePreviewOutput(output),
+    (error) => {
+      assert.match(error.message, /Expo preview startup error: .*DevTools/);
+      assert.doesNotMatch(error.message, /missing runtime library/i);
+      assert.doesNotMatch(error.message, /[\u0000-\u001f\u007f]/);
+      assert.ok(
+        error.message.length <= 512,
+        "startup diagnostic exceeded its bounded length",
+      );
+      return true;
+    },
+  );
+});
+
 test(
   "workflow entry points reject malformed and non-positive preview timeouts before live work",
   { skip: process.env.PREVIEW_TIMEOUT_ENTRYPOINT_TEST === "1" },
@@ -162,6 +232,34 @@ function mockFetch(response) {
 
 function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function startupDiagnostic(output) {
+  return output
+    .split(/\r?\n/)
+    .find((line) => line.startsWith("Expo preview startup error:"));
+}
+
+function runCapturedPreviewValidation(capturedOutput) {
+  const directory = mkdtempSync(join(tmpdir(), "preview-startup-diagnostic-"));
+  const logPath = join(directory, "expo-startup.log");
+  writeFileSync(logPath, capturedOutput, "utf8");
+
+  const result = spawnSync(
+    process.execPath,
+    [validatorPath, "--log-file", logPath],
+    {
+      cwd: packageRoot,
+      env: { ...process.env },
+      encoding: "utf8",
+    },
+  );
+
+  return {
+    directory,
+    output: `${result.stdout ?? ""}${result.stderr ?? ""}`,
+    result,
+  };
 }
 
 function runPreviewTimeoutEntryPoint(entryPoint, setting, value) {
