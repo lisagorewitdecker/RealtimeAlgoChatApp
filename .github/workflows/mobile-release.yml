@@ -1577,6 +1577,8 @@ jobs:
           E2E_API_URL: ${{ secrets.E2E_API_URL }}
         run: |
           set -euo pipefail
+          # Release checks need database-backed readiness. Deployment health
+          # and the Sentry uptime monitor intentionally use /api/livez.
           if ! curl \
             --fail \
             --silent \

@@ -29,5 +29,5 @@ PORT = "8080"
 NODE_ENV = "production"
 
 [services.production.health.startup]
-# Canonical API readiness check; /api only points callers here.
-path = "/api/healthz"
+# Deployment liveness check; database-backed readiness remains /api/healthz.
+path = "/api/livez"

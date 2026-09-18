@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { createServer } from "node:net";
+import { createServer, type Server, type Socket } from "node:net";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
@@ -22,6 +22,12 @@ const missingModuleArgs = [
   "./artifacts/api-server/dist/index.mjs",
 ];
 
+type StalledDatabase = {
+  server: Server;
+  sockets: Set<Socket>;
+  port: number;
+};
+
 function validEnvironment(port: number): NodeJS.ProcessEnv {
   if (!process.env["DATABASE_URL"]) {
     throw new Error(
@@ -41,6 +47,44 @@ function validEnvironment(port: number): NodeJS.ProcessEnv {
     CLERK_SECRET_KEY: "sk_test_startup-regression-placeholder",
     SENTRY_DSN: "",
   };
+}
+
+async function startStalledDatabase(): Promise<StalledDatabase> {
+  const sockets = new Set<Socket>();
+  const server = createServer((socket) => {
+    // Accept the connection but never complete the PostgreSQL handshake. This
+    // exercises the production pool timeout without requiring a real database
+    // to be stopped or reconfigured.
+    sockets.add(socket);
+    socket.once("close", () => sockets.delete(socket));
+  });
+
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => resolve());
+  });
+  const address = server.address();
+  if (!address || typeof address === "string") {
+    server.close();
+    throw new Error("Failed to start the stalled database fixture.");
+  }
+
+  return { server, sockets, port: address.port };
+}
+
+async function stopStalledDatabase({
+  server,
+  sockets,
+}: StalledDatabase): Promise<void> {
+  for (const socket of sockets) {
+    socket.destroy();
+  }
+  await new Promise<void>((resolve, reject) => {
+    server.close((error) => {
+      if (error) reject(error);
+      else resolve();
+    });
+  });
 }
 
 async function availablePort(): Promise<number> {
@@ -132,7 +176,7 @@ afterEach(async () => {
 
 describe("built production server startup", () => {
   it(
-    "serves every public readiness route with valid configuration",
+    "serves the public liveness and readiness routes with valid configuration",
     async () => {
       const port = await availablePort();
       const child = execFile(process.execPath, productionArgs, {
@@ -143,10 +187,16 @@ describe("built production server startup", () => {
 
       const firstResponse = await waitForResponse(
         child,
-        `http://127.0.0.1:${port}/api/healthz`,
+        `http://127.0.0.1:${port}/api/livez`,
       );
       expect(firstResponse.status).toBe(200);
       expect(await firstResponse.json()).toEqual({ status: "ok" });
+
+      const readinessResponse = await fetch(
+        `http://127.0.0.1:${port}/api/healthz`,
+      );
+      expect(readinessResponse.status).toBe(200);
+      expect(await readinessResponse.json()).toEqual({ status: "ok" });
 
       for (const path of ["/", "/api"]) {
         const response = await fetch(`http://127.0.0.1:${port}${path}`);
@@ -154,7 +204,53 @@ describe("built production server startup", () => {
         expect(await response.json()).toMatchObject({
           status: "ready",
           healthCheck: "/api/healthz",
+          livenessCheck: "/api/livez",
         });
+      }
+    },
+    90_000,
+  );
+
+  it(
+    "keeps liveness available while database-backed readiness times out",
+    async () => {
+      const stalledDatabase = await startStalledDatabase();
+      const port = await availablePort();
+      const env = validEnvironment(port);
+      env["DATABASE_URL"] =
+        `postgresql://127.0.0.1:${stalledDatabase.port}/readiness-timeout`;
+      const child = execFile(process.execPath, productionArgs, {
+        cwd: workspaceRoot,
+        env,
+      });
+      runningProcesses.add(child);
+
+      try {
+        const livenessResponse = await waitForResponse(
+          child,
+          `http://127.0.0.1:${port}/api/livez`,
+        );
+        expect(livenessResponse.status).toBe(200);
+        expect(await livenessResponse.json()).toEqual({ status: "ok" });
+
+        const readinessResponsePromise = fetch(
+          `http://127.0.0.1:${port}/api/healthz`,
+        );
+        const livenessDuringReadinessTimeout = await fetch(
+          `http://127.0.0.1:${port}/api/livez`,
+        );
+        expect(livenessDuringReadinessTimeout.status).toBe(200);
+        expect(await livenessDuringReadinessTimeout.json()).toEqual({
+          status: "ok",
+        });
+
+        const readinessResponse = await readinessResponsePromise;
+        expect(readinessResponse.status).toBe(503);
+        expect(await readinessResponse.json()).toEqual({
+          status: "unavailable",
+        });
+      } finally {
+        await stopStalledDatabase(stalledDatabase);
       }
     },
     90_000,

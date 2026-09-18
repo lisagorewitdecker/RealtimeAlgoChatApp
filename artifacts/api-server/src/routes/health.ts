@@ -6,6 +6,12 @@ import { createIpRateLimit } from "../middlewares/rateLimit";
 
 const router: IRouter = Router();
 const READINESS_QUERY_TIMEOUT_MS = 5_000;
+
+const livenessRateLimit = createIpRateLimit({
+  scope: "health-liveness",
+  windowMs: 60_000,
+  maxRequests: 60,
+});
 const timeoutErrorCodes = new Set(["ETIMEDOUT", "57014"]);
 const connectionErrorCodes = new Set([
   "ECONNREFUSED",
@@ -18,7 +24,7 @@ const connectionErrorCodes = new Set([
   "57P02",
   "57P03",
 ]);
-const healthRateLimit = createIpRateLimit({
+const readinessRateLimit = createIpRateLimit({
   scope: "health-readiness",
   windowMs: 60_000,
   maxRequests: 60,
@@ -100,3 +106,9 @@ router.get("/healthz", healthRateLimit, async (_req, res) => {
 });
 
 export default router;
+
+const readinessRateLimit = createIpRateLimit({
+  scope: "health-readiness",
+  windowMs: 60_000,
+  maxRequests: 60,
+});
