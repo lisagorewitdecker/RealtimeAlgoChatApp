@@ -269,7 +269,11 @@ jobs:
 
           overall_status=0
           for record_path in "${changed_records[@]}"; do
-            record_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/blob/${GITHUB_SHA}/${record_path}"
+            record_revision="$GITHUB_SHA"
+            if [[ ! -f "$record_path" ]]; then
+              record_revision="$ANDROID_PREVIEW_BASE_SHA"
+            fi
+            record_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/blob/${record_revision}/${record_path}"
             record_result=""
             validation_output=""
             validation_status=0

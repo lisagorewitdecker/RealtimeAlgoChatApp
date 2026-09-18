@@ -2182,8 +2182,8 @@ test("Android preview evidence keeps its pull-request validation and privacy con
   );
   assert.match(
     validationStep.run,
-    /record_url="\$\{GITHUB_SERVER_URL\}\/\$\{GITHUB_REPOSITORY\}\/blob\/\$\{GITHUB_SHA\}\/\$\{record_path\}"/,
-    "each changed record must receive a stable GitHub record link",
+    /record_revision="\$GITHUB_SHA"[\s\S]*if \[\[ ! -f "\$record_path" \]\][\s\S]*record_revision="\$ANDROID_PREVIEW_BASE_SHA"[\s\S]*record_url="\$\{GITHUB_SERVER_URL\}\/\$\{GITHUB_REPOSITORY\}\/blob\/\$\{record_revision\}\/\$\{record_path\}"/,
+    "each changed record must receive a GitHub link, using the base revision when the record was deleted",
   );
   assert.ok(
     validationStep.run.includes(
@@ -2428,6 +2428,8 @@ test("Android preview evidence keeps its pull-request validation and privacy con
     });
     return {
       result,
+      baseSha,
+      headSha,
       recordPath: path.relative(fixtureRoot, recordPath),
       recordPaths: recordPaths.map((record) => path.relative(fixtureRoot, record)),
       baseRecordPath: path.relative(fixtureRoot, baseRecordPaths[0]),
@@ -2595,12 +2597,15 @@ test("Android preview evidence keeps its pull-request validation and privacy con
   );
   for (const recordPath of multiRecord.recordPaths) {
     const escapedPath = recordPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const recordIndex = multiRecord.recordPaths.indexOf(recordPath);
+    const expectedRevision =
+      recordIndex === 1 ? multiRecord.baseSha : multiRecord.headSha;
     const recordLinkPattern = new RegExp(
-      `\\[${escapedPath}\\]\\(https://github\\.example/example/chat-app/blob/[^)]+/${escapedPath}\\)`,
+      `\\[${escapedPath}\\]\\(https://github\\.example/example/chat-app/blob/${expectedRevision}/${escapedPath}\\)`,
       "g",
     );
     const recordSectionPattern = new RegExp(
-      `### \\[${escapedPath}\\]\\(https://github\\.example/example/chat-app/blob/[^)]+/${escapedPath}\\)[\\s\\S]*?(?=\\n### |$)`,
+      `### \\[${escapedPath}\\]\\(https://github\\.example/example/chat-app/blob/${expectedRevision}/${escapedPath}\\)[\\s\\S]*?(?=\\n### |$)`,
       "g",
     );
     assert.equal(
@@ -2616,7 +2621,7 @@ test("Android preview evidence keeps its pull-request validation and privacy con
     assert.match(
       multiRecord.summary,
       new RegExp(
-        `### \\[${escapedPath}\\]\\(https://github\\.example/example/chat-app/blob/[^)]+/${escapedPath}\\)[\\s\\S]*?- Validation: \\*\\*(?:PASS|FAIL)\\*\\*`,
+        `### \\[${escapedPath}\\]\\(https://github\\.example/example/chat-app/blob/${expectedRevision}/${escapedPath}\\)[\\s\\S]*?- Validation: \\*\\*(?:PASS|FAIL)\\*\\*`,
       ),
       `the multi-record summary must include the validation result for ${recordPath}`,
     );
