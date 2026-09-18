@@ -18,3 +18,17 @@ like a redaction failure even when checker output is safe.
 Scan the downloaded job log for the raw probe values, require paired
 `stop-commands` markers and fixed release-blocking context, then delete the ref
 after capturing the run.
+
+For hosted native tamper regressions, create only controlled fixture values,
+move them through the real artifact upload/download actions, and invoke the
+existing test through the untrusted-checker wrapper. Report only fixed
+platform/status outcomes; never dump the downloaded evidence or its reviewer
+metadata.
+
+**Why:** A hosted artifact path check is useful only if it preserves the same
+workflow command boundary as the release gate while keeping fixture contents
+out of the log.
+
+**How to apply:** Keep the fixture run layout deterministic for the test
+harness, use a temporary fixture root, and make the release gate depend on the
+hosted regression result.

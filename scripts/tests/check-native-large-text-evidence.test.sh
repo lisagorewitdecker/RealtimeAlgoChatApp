@@ -4,6 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 CHECKER="$ROOT_DIR/scripts/check-native-large-text-evidence.sh"
 SAVED_TEST_STATUS="$ROOT_DIR/artifacts/api-server/test-results/.last-run.json"
+HOSTED_TAMPER_FIXTURES_ROOT="${NATIVE_EVIDENCE_TAMPER_FIXTURES_ROOT:-}"
 TEST_PARENT="$(mktemp -d)"
 TEST_ROOT="$TEST_PARENT/fixtures"
 CLEANUP_GUARD="$TEST_PARENT/cleanup-must-not-escape-fixtures"
@@ -79,7 +80,8 @@ write_review_record() {
   local reviewed_at="${4:-2026-09-09T13:00:00Z}"
   local build_id="${5:-build-$platform}"
   local reviewer="${6:-Ada Reviewer}"
-  cat > "$root/$platform/20260909T120000Z/review-record.txt" <<EOF
+  local run_timestamp="${7:-20260909T120000Z}"
+  cat > "$root/$platform/$run_timestamp/review-record.txt" <<EOF
 platform=$platform
 reviewer=$reviewer
 reviewed_at_utc=$reviewed_at
@@ -184,6 +186,19 @@ trusted_digest_manifest_for_run() {
           "${relative_path#./}"
       done
   )
+}
+
+prepare_hosted_tamper_root() {
+  local source_root="$1"
+  local destination_root="$2"
+
+  for platform in ios android; do
+    if [[ ! -d "$source_root/$platform" ]]; then
+      echo "Hosted tamper fixture is missing its $platform artifact directory" >&2
+      exit 1
+    fi
+    cp -a "$source_root/$platform" "$destination_root/$platform"
+  done
 }
 
 metadata_keys_of() {
@@ -1250,27 +1265,57 @@ for tampered_platform in ios android; do
   private_candidate_id="candidate-$tampered_platform-private-sentinel"
   private_reviewer="reviewer-$tampered_platform-private-sentinel"
 
-  write_valid_run "$tampered_root" ios "$private_candidate_id"
-  write_valid_run "$tampered_root" android "$private_candidate_id"
-  write_review_record \
-    "$tampered_root" \
-    ios \
-    APPROVED \
-    "2026-09-09T13:00:00Z" \
-    "$private_candidate_id" \
-    "$private_reviewer"
-  write_review_record \
-    "$tampered_root" \
-    android \
-    APPROVED \
-    "2026-09-09T13:00:00Z" \
-    "$private_candidate_id" \
-    "$private_reviewer"
+  if [[ -n "$HOSTED_TAMPER_FIXTURES_ROOT" ]]; then
+    mkdir -p "$tampered_root"
+    prepare_hosted_tamper_root "$HOSTED_TAMPER_FIXTURES_ROOT" "$tampered_root"
+    for fixture_platform in ios android; do
+      fixture_run_dir="$tampered_root/$fixture_platform/20260915T120000Z"
+      if [[ ! -d "$fixture_run_dir" ]]; then
+        echo "Hosted tamper fixture has an unexpected $fixture_platform run layout" >&2
+        exit 1
+      fi
+      printf '%s\n' "$private_candidate_id" > "$fixture_run_dir/candidate-build-id.txt"
+      sed -i "s/^candidate_build_id=.*/candidate_build_id=$private_candidate_id/" \
+        "$fixture_run_dir/runner-metadata.txt" \
+        "$fixture_run_dir/pass-fail-record.txt" \
+        "$fixture_run_dir/sentry-trigger.txt" \
+        "$fixture_run_dir/sentry-source-map-evidence.json"
+      write_review_record \
+        "$tampered_root" \
+        "$fixture_platform" \
+        APPROVED \
+        "2026-09-15T12:01:00Z" \
+        "$private_candidate_id" \
+        "$private_reviewer" \
+        "20260915T120000Z"
+    done
+  else
+    write_valid_run "$tampered_root" ios "$private_candidate_id"
+    write_valid_run "$tampered_root" android "$private_candidate_id"
+    write_review_record \
+      "$tampered_root" \
+      ios \
+      APPROVED \
+      "2026-09-09T13:00:00Z" \
+      "$private_candidate_id" \
+      "$private_reviewer"
+    write_review_record \
+      "$tampered_root" \
+      android \
+      APPROVED \
+      "2026-09-09T13:00:00Z" \
+      "$private_candidate_id" \
+      "$private_reviewer"
+  fi
 
-  ios_digest_manifest="$(trusted_digest_manifest_for_run "$tampered_root/ios/20260909T120000Z")"
-  android_digest_manifest="$(trusted_digest_manifest_for_run "$tampered_root/android/20260909T120000Z")"
-  tampered_run_dir="$tampered_root/$tampered_platform/20260909T120000Z"
-  cat > "$tampered_run_dir/pass-fail-record.txt" <<EOF
+  tampered_run_timestamp="$([[ -n "$HOSTED_TAMPER_FIXTURES_ROOT" ]] && printf '20260915T120000Z' || printf '20260909T120000Z')"
+  ios_digest_manifest="$(trusted_digest_manifest_for_run "$tampered_root/ios/$tampered_run_timestamp")"
+  android_digest_manifest="$(trusted_digest_manifest_for_run "$tampered_root/android/$tampered_run_timestamp")"
+  tampered_run_dir="$tampered_root/$tampered_platform/$tampered_run_timestamp"
+  if [[ -n "$HOSTED_TAMPER_FIXTURES_ROOT" ]]; then
+    sed -i 's/^status=.*/status=FAIL/' "$tampered_run_dir/pass-fail-record.txt"
+  else
+    cat > "$tampered_run_dir/pass-fail-record.txt" <<EOF
 platform=$tampered_platform
 run_mode=release-gate
 candidate_build_id=$private_candidate_id
@@ -1279,6 +1324,7 @@ native_screenshot_count=11
 call_surface_screenshot_count=2
 recorded_at_utc=2026-09-09T12:30:00Z
 EOF
+  fi
 
   fake_store_submission() {
     printf 'submitted\n' > "$submission_marker"
@@ -1311,6 +1357,9 @@ EOF
   assert_not_contains "$validation_output" "$private_reviewer"
   assert_not_contains "$(cat "$tampered_summary_path")" "$private_candidate_id"
   assert_not_contains "$(cat "$tampered_summary_path")" "$private_reviewer"
+  if [[ -n "$HOSTED_TAMPER_FIXTURES_ROOT" ]]; then
+    echo "Hosted tampered $tampered_platform evidence recorded BLOCKED without invoking the submission stub."
+  fi
 done
 
 # Screenshot files and Sentry evidence are downloaded separately from the
