@@ -8,6 +8,14 @@ on:
         required: true
         default: false
         type: boolean
+      native_smoke_ios_build_id:
+        description: Optional iOS candidate build ID override for the native smoke gate
+        required: false
+        type: string
+      native_smoke_android_build_id:
+        description: Optional Android candidate build ID override for the native smoke gate
+        required: false
+        type: string
       ios_review_candidate_build_id:
         description: Approved iOS candidate build ID (must match the tested build)
         required: false
