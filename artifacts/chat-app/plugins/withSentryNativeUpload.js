@@ -1,4 +1,4 @@
-/* jshint esversion: 6 */
+/* jshint esversion: 6, node: true */
 
 "use strict";
 
@@ -54,7 +54,7 @@ function dotenvDeclaresAuthToken(filePath) {
   try {
     contents = fs.readFileSync(filePath, "utf8");
   } catch (error) {
-    if (error?.code === "ENOENT") {
+    if (error && error.code === "ENOENT") {
       return false;
     }
     throw error;
@@ -94,7 +94,7 @@ function resolveSentryUploadPolicy({ env = process.env, projectRoot } = {}) {
 
 function assertPluginProps(props) {
   for (const key of REQUIRED_PROPS) {
-    if (!isNonEmptyString(props?.[key])) {
+    if (!isNonEmptyString(props && props[key])) {
       throw new Error(
         `${PLUGIN_NAME}: app.json must pass a non-empty "${key}" to this plugin ` +
           `(forwarded to ${SENTRY_EXPO_PLUGIN}); sentry-cli cannot upload without it.`,
@@ -112,7 +112,12 @@ function assertPluginProps(props) {
 
 function loadSentryExpoPlugin() {
   const loaded = require(SENTRY_EXPO_PLUGIN);
-  const plugin = loaded?.default ?? loaded?.withSentry ?? loaded;
+  const plugin =
+    loaded && loaded.default != null
+      ? loaded.default
+      : loaded && loaded.withSentry != null
+        ? loaded.withSentry
+        : loaded;
   if (typeof plugin !== "function") {
     throw new Error(
       `${PLUGIN_NAME}: ${SENTRY_EXPO_PLUGIN} did not export a config plugin function.`,
@@ -158,7 +163,7 @@ function withSkippedUploadWarning(config) {
 const withSentryNativeUpload = (config, props) => {
   assertPluginProps(props);
   const policy = resolveSentryUploadPolicy({
-    projectRoot: config._internal?.projectRoot,
+    projectRoot: config && config._internal ? config._internal.projectRoot : undefined,
   });
   if (!policy.upload) {
     return withSkippedUploadWarning(config);
