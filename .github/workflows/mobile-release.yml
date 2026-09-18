@@ -2277,6 +2277,19 @@ jobs:
               exit 1
             fi
             run_dir="${run_dirs[0]}"
+            if ! awk '
+              {
+                sub(/\r$/, "")
+                line_count++
+                if ($0 !~ /^[[:space:]]*$/) non_empty_count++
+              }
+              END {
+                exit !(line_count == 1 && non_empty_count == 1)
+              }
+            ' "$run_dir/candidate-build-id.txt"; then
+              echo "The ${platform} downloaded candidate build ID must contain exactly one non-empty identifier line." >&2
+              exit 1
+            fi
             tested_build_id="$(head -n 1 "$run_dir/candidate-build-id.txt" | tr -d '\r' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
             if [[ "$approved_build_id" != "$tested_build_id" ]]; then
               echo "The ${platform} approval is for a different candidate build than the downloaded evidence." >&2

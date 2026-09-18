@@ -1890,14 +1890,39 @@ test("publish requires candidate-bound approvals from the current run attempt", 
     "${{ needs.mobile-release-gate.outputs.android_native_evidence_artifact_url }}",
     "publish evidence validation must retain the Android artifact link",
   );
+  const approvalScript = publishSteps[approvalIndex].run;
+  const candidateFileValidationIndex = approvalScript.indexOf(
+    "line_count == 1 && non_empty_count == 1",
+  );
+  const candidateFileReadIndex = approvalScript.indexOf(
+    'tested_build_id="$(head -n 1 "$run_dir/candidate-build-id.txt"',
+  );
   assert.ok(
-    publishSteps[approvalIndex].run.includes(
+    candidateFileValidationIndex >= 0,
+    "publish approval intake must reject multi-line and empty candidate build ID files itself",
+  );
+  assert.ok(
+    candidateFileReadIndex > candidateFileValidationIndex,
+    "publish approval intake must validate the complete candidate build ID file before selecting its first line",
+  );
+  assert.match(
+    approvalScript,
+    /downloaded candidate build ID must contain exactly one non-empty identifier line/,
+    "publish approval intake must explain the candidate file shape without exposing its contents",
+  );
+  assert.doesNotMatch(
+    approvalScript,
+    /(?:echo|printf)[^\n]*(?:tested_build_id|candidate-build-id\.txt)/,
+    "publish approval diagnostics must not print candidate identifier contents or the downloaded file",
+  );
+  assert.ok(
+    approvalScript.includes(
       'if [[ "$approved_build_id" != "$tested_build_id" ]]',
     ),
     "publish approval intake must match approval and evidence candidate IDs",
   );
   assert.ok(
-    publishSteps[approvalIndex].run.includes(
+    approvalScript.includes(
       'if [[ "$submit_build_id" != "$tested_build_id" ]]',
     ),
     "publish approval intake must bind submitted build IDs to validated evidence",
