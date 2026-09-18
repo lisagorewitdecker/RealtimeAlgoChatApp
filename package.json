@@ -24,6 +24,7 @@
     "validate:ios-preview-evidence": "bash scripts/check-ios-preview-evidence.sh",
     "test:ios-preview-evidence": "bash scripts/tests/check-ios-preview-evidence.test.sh",
     "save:ios-preview-evidence": "pnpm --filter @workspace/chat-app run save:ios-preview-evidence",
+    "save:android-preview-evidence": "pnpm --filter @workspace/chat-app run save:android-preview-evidence",
     "validate:native-large-text-evidence": "bash scripts/check-native-large-text-evidence.sh",
     "validate:mobile-release-workflow": "actionlint -shellcheck= -oneline .github/workflows/mobile-release.yml",
     "test:native-large-text-evidence": "bash scripts/tests/check-native-large-text-evidence.test.sh",

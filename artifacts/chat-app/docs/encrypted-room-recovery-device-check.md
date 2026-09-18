@@ -84,12 +84,7 @@ For either option:
    1,000 lines in this file: a truncation notice plus the newest 999 request
    lines once the limit is reached. Each new request replaces the oldest
    retained request line. Console diagnostics continue for every request after
-   the file reaches that limit. To retain the evidence directly in the timestamped
-   record instead, set
-   `EXPO_DEV_REQUEST_EVIDENCE_FILE` to
-   `test-results/encrypted-room-recovery/android/<UTC timestamp>/logs/metro-request-evidence.txt`
-   before restarting. This path is relative to the Chat App package root used
-   by the managed workflow. The file's lines contain only status, timing,
+   the file reaches that limit. The file's lines contain only status, timing,
    `platform`, a client class, `user-agent=[redacted]`, and a coarse resource
    class; they never contain a host, URL, query string, credentials, account
    data, or message content. After the workflow reports that Metro is ready,
@@ -112,15 +107,26 @@ For either option:
    message content cropped or blurred. Treat the launch as observed only when
    both the phone screen and
    server-side request evidence are available. A native request has no
-   browser `OPTIONS` preflight. Filter the retained file to the native Android
-   marker before adding it to the record:
+   browser `OPTIONS` preflight. After the phone session, create the timestamped
+   handoff directory and save the retained Metro file plus its filtered native
+   Android evidence with one command:
 
    ```sh
-   grep 'platform=android client=Expo Go' \
-     artifacts/chat-app/test-results/encrypted-room-recovery/android/<UTC timestamp>/logs/metro-request-evidence.txt \
-     | grep -v ' OPTIONS ' \
-     > artifacts/chat-app/test-results/encrypted-room-recovery/android/<UTC timestamp>/logs/native-android-request-evidence.txt
+   pnpm run save:android-preview-evidence -- \
+     --timestamp "$(date -u +%Y%m%dT%H%M%SZ)"
    ```
+
+   The command reads the retained `.expo/dev-request-evidence.log` by default,
+   or the path in `EXPO_DEV_REQUEST_EVIDENCE_FILE`; `--source <path>` can
+   override either. Use `--handoff-dir
+   artifacts/chat-app/test-results/encrypted-room-recovery/android/<UTC timestamp>`
+   when the timestamp directory already exists. It creates the `logs/`
+   directory, copies only lines that match the redacted Metro contract into
+   `metro-request-evidence.txt`, and writes
+   `native-android-request-evidence.txt` with only
+   `platform=android client=Expo Go` requests, excluding `OPTIONS`. Missing or
+   non-redacted source evidence fails before anything is saved. Do not set a
+   handoff path outside the Android evidence directory.
 
    Reference `logs/native-android-request-evidence.txt` in the
    **Server-side native request evidence** row. Copy only the marker
