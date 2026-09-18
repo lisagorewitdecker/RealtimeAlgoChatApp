@@ -100,6 +100,8 @@ const androidPreflightScript = "scripts/check-android-release-prerequisites.sh";
 const nativeEvidenceCheckerScript =
   "scripts/check-native-large-text-evidence.sh";
 const untrustedCheckerWrapperScript = "scripts/run-untrusted-checker.sh";
+const workflowOutputSafetyScript = "scripts/workflow-output-safety.sh";
+const nativeBrandingSummaryScript = "scripts/summarize-native-branding.sh";
 const nativeRecoveryContractScript =
   "scripts/native-release-recovery-contract.sh";
 const pinnedUploadArtifactAction =
@@ -2496,6 +2498,17 @@ test("Android preview evidence keeps its pull-request validation and privacy con
       "pnpm",
       `set -euo pipefail\ntouch ${shellQuote(pnpmCalledPath)}\nchecker_args=()\nfound_separator=0\nfor arg in "$@"; do\n  if [[ "$arg" == "--" ]]; then\n    found_separator=1\n    continue\n  fi\n  if ((found_separator)); then\n    checker_args+=("$arg")\n  fi\ndone\nprintf '%s\\t%s\\n' "\${checker_args[0]}" "\${checker_args[1]:-}" >> "$ANDROID_PREVIEW_ARGS_LOG"\nexec bash "$ANDROID_PREVIEW_CHECKER" "\${checker_args[@]}"`,
     );
+    mkdirSync(path.join(fixtureRoot, "scripts"), { recursive: true });
+    writeFileSync(
+      path.join(fixtureRoot, untrustedCheckerWrapperScript),
+      readFileSync(path.join(workspaceRoot, untrustedCheckerWrapperScript)),
+    );
+    chmodSync(path.join(fixtureRoot, untrustedCheckerWrapperScript), 0o755);
+    writeFileSync(
+      path.join(fixtureRoot, workflowOutputSafetyScript),
+      readFileSync(path.join(workspaceRoot, workflowOutputSafetyScript)),
+    );
+    chmodSync(path.join(fixtureRoot, workflowOutputSafetyScript), 0o755);
     writeFileSync(runnerPath, `#!${bashPath}\n${validationStep.run}\n`);
     chmodSync(runnerPath, 0o755);
 
@@ -3159,7 +3172,7 @@ test("iOS preview evidence covers renamed records and blocks malformed changes",
   );
   assert.match(
     validationStep.run,
-    /pnpm run validate:ios-preview-evidence -- "\$\{checker_args\[@\]\}"/,
+    /bash scripts\/run-untrusted-checker\.sh pnpm run validate:ios-preview-evidence -- "\$\{checker_args\[@\]\}"/,
     "changed iOS records must run the focused checker",
   );
 
@@ -3311,6 +3324,17 @@ test("iOS preview evidence covers renamed records and blocks malformed changes",
       "pnpm",
       'set -euo pipefail\nshift 3\nexec bash "$IOS_PREVIEW_CHECKER" "$@"',
     );
+    mkdirSync(path.join(fixtureRoot, "scripts"), { recursive: true });
+    writeFileSync(
+      path.join(fixtureRoot, untrustedCheckerWrapperScript),
+      readFileSync(path.join(workspaceRoot, untrustedCheckerWrapperScript)),
+    );
+    chmodSync(path.join(fixtureRoot, untrustedCheckerWrapperScript), 0o755);
+    writeFileSync(
+      path.join(fixtureRoot, workflowOutputSafetyScript),
+      readFileSync(path.join(workspaceRoot, workflowOutputSafetyScript)),
+    );
+    chmodSync(path.join(fixtureRoot, workflowOutputSafetyScript), 0o755);
     writeFileSync(runnerPath, `#!${bashPath}\n${validationStep.run}\n`);
     chmodSync(runnerPath, 0o755);
 
@@ -5733,6 +5757,63 @@ test("native evidence checker output is isolated from workflow commands", () => 
     /::stop-commands::[0-9a-f-]+\n::warning::untrusted checker output\n::[0-9a-f-]+::/,
     "the wrapper must keep checker output visible between the command-boundary markers",
   );
+});
+
+test("release summary writers encode workflow-command sentinels", () => {
+  const sentinel = "::error::summary-control-input";
+  const safetyProbe = spawnSync(
+    bashPath,
+    [
+      "-c",
+      'source "$1"; sanitize_workflow_text "$2"',
+      "workflow-output-safety",
+      path.join(workspaceRoot, workflowOutputSafetyScript),
+      sentinel,
+    ],
+    { cwd: workspaceRoot, encoding: "utf8" },
+  );
+  assert.equal(safetyProbe.status, 0, safetyProbe.stderr);
+  assert.equal(
+    safetyProbe.stdout,
+    "&#58;&#58;error&#58;&#58;summary-control-input",
+  );
+  assert.doesNotMatch(safetyProbe.stdout, /::error::/);
+
+  const resultsDir = path.join(testRoot, "workflow-command-sentinel-results");
+  const summaryPath = path.join(
+    testRoot,
+    "workflow-command-sentinel-summary.md",
+  );
+  mkdirSync(resultsDir, { recursive: true });
+  writeFileSync(
+    path.join(resultsDir, "native-branding-summary.md"),
+    [
+      "## iOS native branding",
+      "",
+      `- Native label: ${sentinel}`,
+      "- Detailed report: [report](__NATIVE_BRANDING_REPORT_URL__)",
+      "",
+    ].join("\n"),
+  );
+
+  const brandingResult = spawnSync(
+    bashPath,
+    [path.join(workspaceRoot, nativeBrandingSummaryScript), "ios"],
+    {
+      cwd: workspaceRoot,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        GITHUB_STEP_SUMMARY: summaryPath,
+        NATIVE_SMOKE_RESULTS_DIR: resultsDir,
+        NATIVE_BRANDING_ARTIFACT_URL: "https://github.example/artifact",
+      },
+    },
+  );
+  assert.equal(brandingResult.status, 0, brandingResult.stderr);
+  const summary = readFileSync(summaryPath, "utf8");
+  assert.doesNotMatch(summary, /::error::/);
+  assert.match(summary, /&#58;&#58;error&#58;&#58;summary-control-input/);
 });
 
 test("hosted native evidence summaries record the checked revision before untrusted checks", () => {

@@ -44,6 +44,8 @@ jobs:
           healthy_log="$(mktemp)"
           trap 'rm -f "$summary_path" "$setting_summary_path" "$healthy_log"' EXIT
           resolved_commit_sha="$(git rev-parse --verify HEAD)"
+          source scripts/workflow-output-safety.sh
+          safe_reviewed_ref="$(sanitize_workflow_text "$REVIEWED_REF")"
 
           printf 'Starting Metro Bundler\n' > "$healthy_log"
           healthy_output="$(
@@ -152,7 +154,7 @@ jobs:
 
           {
             echo "## Reviewed preview startup revision"
-            printf -- '- Checked ref: `%s`\n' "$REVIEWED_REF"
+            printf -- '- Checked ref: `%s`\n' "$safe_reviewed_ref"
             printf -- '- Resolved commit SHA: `%s`\n' "$resolved_commit_sha"
             echo
             echo "## Preview startup summary regression"

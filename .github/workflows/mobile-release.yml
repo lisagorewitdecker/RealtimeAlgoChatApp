@@ -150,19 +150,21 @@ jobs:
           RESOLVE_RESULT: ${{ steps.resolve-node-range.outcome }}
         run: |
           set -euo pipefail
+          source scripts/workflow-output-safety.sh
           if [[ "$RESOLVE_RESULT" != "success" ]]; then
+            safe_node_range="$(sanitize_workflow_text "$NODE_RANGE")"
             {
               echo "## Mobile release Node range"
               echo
               echo "- Status: **FAIL**"
               echo "- Failure: release checks were not started."
-              echo "- package.json engines.node: \`$(printf '%s' "$NODE_RANGE" | sed 's/`/\\\\`/g')\`"
+              echo "- package.json engines.node: \`$safe_node_range\`"
               echo "- The configured Node range is unsupported; provide a valid semver range."
             } >> "$GITHUB_STEP_SUMMARY"
-            echo "Mobile release blocked before release checks: package.json engines.node contains an unsupported range: $(printf '%q' "$NODE_RANGE")" >&2
+            echo "Mobile release blocked before release checks: package.json engines.node contains an unsupported range: $safe_node_range" >&2
             exit 1
           fi
-          echo "Mobile release Node range is valid: $(printf '%q' "$NODE_RANGE")"
+          echo "Mobile release Node range is valid: $(sanitize_workflow_text "$NODE_RANGE")"
 
   android-preview-evidence:
     # Keep this display name synchronized with the required check in the repository ruleset.
@@ -194,6 +196,7 @@ jobs:
           ANDROID_PREVIEW_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
+          source scripts/workflow-output-safety.sh
 
           summary_header="## Android preview evidence"
           diff_output=""
@@ -301,7 +304,7 @@ jobs:
               if [[ -n "$preflight_path" ]]; then
                 checker_args+=("$preflight_path")
               fi
-              if validation_output="$(pnpm run validate:android-preview-evidence -- "${checker_args[@]}" 2>&1)"; then
+              if validation_output="$(bash scripts/run-untrusted-checker.sh pnpm run validate:android-preview-evidence -- "${checker_args[@]}" 2>&1)"; then
                 :
               else
                 validation_status=$?
@@ -315,10 +318,13 @@ jobs:
                 reasons="- The Android preview evidence record did not satisfy the validation contract."
               fi
             fi
+            safe_record_path="$(sanitize_workflow_text "$record_path")"
+            safe_record_url="$(sanitize_workflow_text "$record_url")"
+            safe_reasons="$(sanitize_workflow_text "$reasons")"
 
             {
               echo
-              echo "### [${record_path}](${record_url})"
+              echo "### [${safe_record_path}](${safe_record_url})"
               if ((validation_status == 0)); then
                 echo "- Validation: **PASS**"
                 if [[ "$record_result" == "BLOCKED" ]]; then
@@ -331,12 +337,12 @@ jobs:
                 echo "- Record result: **${record_result:-Unavailable}**"
                 echo
                 echo "#### Missing-boundary reason"
-                printf '%s\n' "$reasons"
+                printf '%s\n' "$safe_reasons"
               fi
             } >> "$GITHUB_STEP_SUMMARY"
 
             if ((validation_status != 0)); then
-              printf '%s\n' "$reasons" >&2
+              printf '%s\n' "$safe_reasons" >&2
             fi
           done
 
@@ -364,6 +370,7 @@ jobs:
           IOS_PREVIEW_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
+          source scripts/workflow-output-safety.sh
 
           summary_header="## iOS preview evidence"
           diff_output=""
@@ -456,7 +463,7 @@ jobs:
               if [[ -n "$preflight_path" ]]; then
                 checker_args+=("$preflight_path")
               fi
-              if validation_output="$(pnpm run validate:ios-preview-evidence -- "${checker_args[@]}" 2>&1)"; then
+              if validation_output="$(bash scripts/run-untrusted-checker.sh pnpm run validate:ios-preview-evidence -- "${checker_args[@]}" 2>&1)"; then
                 :
               else
                 validation_status=$?
@@ -470,10 +477,13 @@ jobs:
                 reasons="- The iOS preview evidence record did not satisfy the validation contract."
               fi
             fi
+            safe_record_path="$(sanitize_workflow_text "$record_path")"
+            safe_record_url="$(sanitize_workflow_text "$record_url")"
+            safe_reasons="$(sanitize_workflow_text "$reasons")"
 
             {
               echo
-              echo "### [${record_path}](${record_url})"
+              echo "### [${safe_record_path}](${safe_record_url})"
               if ((validation_status == 0)); then
                 echo "- Validation: **PASS**"
                 case "$record_result" in
@@ -492,12 +502,12 @@ jobs:
                 echo "- Record result: **${record_result:-Unavailable}**"
                 echo
                 echo "#### Missing-boundary reason"
-                printf '%s\n' "$reasons"
+                printf '%s\n' "$safe_reasons"
               fi
             } >> "$GITHUB_STEP_SUMMARY"
 
             if ((validation_status != 0)); then
-              printf '%s\n' "$reasons" >&2
+              printf '%s\n' "$safe_reasons" >&2
             fi
           done
 
@@ -660,14 +670,16 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          source scripts/workflow-output-safety.sh
           blocked_root="$(mktemp -d)"
           summary_path="$(mktemp)"
           trap 'rm -rf "$blocked_root" "$summary_path"' EXIT
           resolved_commit_sha="$(git rev-parse --verify HEAD)"
+          safe_reviewed_ref="$(sanitize_workflow_text "$REVIEWED_REF")"
 
           {
             echo "## Reviewed release revision"
-            printf -- '- Checked ref: `%s`\n' "$REVIEWED_REF"
+            printf -- '- Checked ref: `%s`\n' "$safe_reviewed_ref"
             printf -- '- Resolved commit SHA: `%s`\n' "$resolved_commit_sha"
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -728,15 +740,17 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          source scripts/workflow-output-safety.sh
           source scripts/native-release-recovery-contract.sh
           failed_download_root="$(mktemp -d)"
           summary_path="$(mktemp)"
           trap 'rm -rf "$failed_download_root" "$summary_path"' EXIT
           resolved_commit_sha="$(git rev-parse --verify HEAD)"
+          safe_reviewed_ref="$(sanitize_workflow_text "$REVIEWED_REF")"
 
           {
             echo "## Reviewed release revision"
-            printf -- '- Checked ref: `%s`\n' "$REVIEWED_REF"
+            printf -- '- Checked ref: `%s`\n' "$safe_reviewed_ref"
             printf -- '- Resolved commit SHA: `%s`\n' "$resolved_commit_sha"
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -805,15 +819,17 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          source scripts/workflow-output-safety.sh
           source scripts/native-release-recovery-contract.sh
           failed_download_root="$(mktemp -d)"
           summary_path="$(mktemp)"
           trap 'rm -rf "$failed_download_root" "$summary_path"' EXIT
           resolved_commit_sha="$(git rev-parse --verify HEAD)"
+          safe_reviewed_ref="$(sanitize_workflow_text "$REVIEWED_REF")"
 
           {
             echo "## Reviewed release revision"
-            printf -- '- Checked ref: `%s`\n' "$REVIEWED_REF"
+            printf -- '- Checked ref: `%s`\n' "$safe_reviewed_ref"
             printf -- '- Resolved commit SHA: `%s`\n' "$resolved_commit_sha"
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -878,6 +894,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          source scripts/workflow-output-safety.sh
           recovery_root="$(mktemp -d)"
           pass_summary_path="$(mktemp)"
           failed_retry_summary_path="$(mktemp)"
@@ -886,10 +903,11 @@ jobs:
           failed_submission_marker="$recovery_root/failed-submission-command-ran"
           trap 'rm -rf "$recovery_root" "$pass_summary_path" "$failed_retry_summary_path"' EXIT
           resolved_commit_sha="$(git rev-parse --verify HEAD)"
+          safe_reviewed_ref="$(sanitize_workflow_text "$REVIEWED_REF")"
 
           {
             echo "## Reviewed release revision"
-            printf -- '- Checked ref: `%s`\n' "$REVIEWED_REF"
+            printf -- '- Checked ref: `%s`\n' "$safe_reviewed_ref"
             printf -- '- Resolved commit SHA: `%s`\n' "$resolved_commit_sha"
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -1156,7 +1174,7 @@ jobs:
           NATIVE_SMOKE_IOS_SENTRY_RELEASE: ${{ secrets.NATIVE_SMOKE_IOS_SENTRY_RELEASE }}
           NATIVE_SMOKE_IOS_SENTRY_DIST: ${{ secrets.NATIVE_SMOKE_IOS_SENTRY_DIST }}
           NATIVE_SMOKE_IOS_BUILD_ID: ${{ env.NATIVE_SMOKE_IOS_BUILD_ID }}
-        run: bash scripts/check-ios-release-prerequisites.sh
+        run: bash scripts/run-untrusted-checker.sh bash scripts/check-ios-release-prerequisites.sh
 
       - name: Set up pnpm
         id: setup-pnpm
@@ -1177,7 +1195,7 @@ jobs:
 
       - name: Verify app branding
         id: app-branding
-        run: pnpm --filter @workspace/chat-app run validate:branding
+        run: bash scripts/run-untrusted-checker.sh pnpm --filter @workspace/chat-app run validate:branding
 
       - name: Verify iOS release configuration
         id: ios-release-configuration
@@ -1212,6 +1230,7 @@ jobs:
         id: ios-simulator
         run: |
           set -euo pipefail
+          source scripts/workflow-output-safety.sh
           booted_devices="$(xcrun simctl list devices booted)"
           device_udid="$(
             sed -n 's/^[[:space:]]*iPhone SE (3rd generation) (\([0-9A-F-]\{8,\}\)) (Booted)[[:space:]]*$/\1/p' <<<"$booted_devices" |
@@ -1219,11 +1238,11 @@ jobs:
           )"
           if [[ -z "$device_udid" ]]; then
             echo "A booted iPhone SE (3rd generation) is required on the iOS runner." >&2
-            xcrun simctl list devices booted >&2
+            xcrun simctl list devices booted 2>&1 | sanitize_workflow_stream >&2 || true
             exit 2
           fi
           printf 'NATIVE_SMOKE_IOS_DEVICE_UDID=%s\n' "$device_udid" >> "$GITHUB_ENV"
-          echo "Prepared iPhone SE (3rd generation): $device_udid"
+          echo "Prepared iPhone SE (3rd generation): $(sanitize_workflow_text "$device_udid")"
 
       - name: Inspect installed iOS native branding
         id: ios-native-branding
@@ -1251,7 +1270,7 @@ jobs:
           echo "Verified crash-reporting preflight evidence in the installed iOS candidate."
           metadata_path="$NATIVE_SMOKE_RESULTS_DIR/native-info.json"
           plutil -convert json -o "$metadata_path" "$app_container/Info.plist"
-          pnpm --filter @workspace/chat-app run validate:branding:native -- \
+          bash scripts/run-untrusted-checker.sh pnpm --filter @workspace/chat-app run validate:branding:native -- \
             --platform ios \
             --metadata "$metadata_path" \
             --build-id "$NATIVE_SMOKE_BUILD_ID" \
@@ -1271,7 +1290,7 @@ jobs:
           NATIVE_SMOKE_BUILD_ID: ${{ env.NATIVE_SMOKE_IOS_BUILD_ID }}
           NATIVE_SMOKE_IOS_DEVICE_UDID: ${{ env.NATIVE_SMOKE_IOS_DEVICE_UDID }}
           NATIVE_SMOKE_SUMMARY_DEFER: "1"
-        run: pnpm --filter @workspace/chat-app test:native-large-text ios
+        run: bash scripts/run-untrusted-checker.sh pnpm --filter @workspace/chat-app test:native-large-text ios
 
       - name: Send controlled iOS JavaScript error
         id: ios-sentry-trigger
@@ -1280,7 +1299,7 @@ jobs:
           NATIVE_SMOKE_BUILD_ID: ${{ env.NATIVE_SMOKE_IOS_BUILD_ID }}
           NATIVE_SMOKE_IOS_DEVICE_UDID: ${{ env.NATIVE_SMOKE_IOS_DEVICE_UDID }}
           NATIVE_SENTRY_MARKER: native-${{ github.run_id }}-${{ github.run_attempt }}-ios
-        run: pnpm --filter @workspace/chat-app test:native-sentry ios
+        run: bash scripts/run-untrusted-checker.sh pnpm --filter @workspace/chat-app test:native-sentry ios
 
       - name: Verify readable iOS source maps in Sentry
         id: ios-sentry-verification
@@ -1292,7 +1311,7 @@ jobs:
           SENTRY_EXPECTED_DIST: ${{ secrets.NATIVE_SMOKE_IOS_SENTRY_DIST }}
           SENTRY_PROBE_MARKER: native-${{ github.run_id }}-${{ github.run_attempt }}-ios
           SENTRY_EVIDENCE_PATH: ${{ env.NATIVE_SMOKE_RESULTS_DIR }}/sentry-source-map-evidence.json
-        run: node scripts/verify-sentry-native-event.mjs
+        run: bash scripts/run-untrusted-checker.sh node scripts/verify-sentry-native-event.mjs
 
       - name: Summarize iOS readiness
         if: always()
@@ -1310,6 +1329,7 @@ jobs:
           IOS_SENTRY_VERIFICATION_RESULT: ${{ steps.ios-sentry-verification.outcome }}
         run: |
           set -euo pipefail
+          source scripts/workflow-output-safety.sh
           status="READY"
           blockers=()
           checks=()
@@ -1355,7 +1375,7 @@ jobs:
               if [[ -n "$diagnostics" ]]; then
                 echo
                 echo "### Readiness diagnostics"
-                printf '%s\n' "$diagnostics"
+                printf '%s\n' "$diagnostics" | sanitize_workflow_stream
               fi
             fi
             if ((${#blockers[@]})); then
@@ -1434,7 +1454,7 @@ jobs:
           NATIVE_SMOKE_EMAIL: ${{ secrets.NATIVE_SMOKE_EMAIL }}
           NATIVE_SMOKE_PASSWORD: ${{ secrets.NATIVE_SMOKE_PASSWORD }}
           NATIVE_SMOKE_DISPLAY_NAME: ${{ secrets.NATIVE_SMOKE_DISPLAY_NAME }}
-        run: bash scripts/check-android-release-prerequisites.sh
+        run: bash scripts/run-untrusted-checker.sh bash scripts/check-android-release-prerequisites.sh
 
   native-android:
     name: Native large-text smoke (Android)
@@ -1480,7 +1500,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Verify app branding
-        run: pnpm --filter @workspace/chat-app run validate:branding
+        run: bash scripts/run-untrusted-checker.sh pnpm --filter @workspace/chat-app run validate:branding
 
       - name: Verify prepared smallest Android emulator
         run: |
@@ -1565,7 +1585,7 @@ jobs:
             label === undefined ? { permissions } : { applicationLabel: label, permissions };
           writeFileSync(metadataPath, `${JSON.stringify(metadata, null, 2)}\n`);
           NODE
-          pnpm --filter @workspace/chat-app run validate:branding:native -- \
+          bash scripts/run-untrusted-checker.sh pnpm --filter @workspace/chat-app run validate:branding:native -- \
             --platform android \
             --metadata "$metadata_path" \
             --build-id "$NATIVE_SMOKE_BUILD_ID" \
@@ -1582,7 +1602,7 @@ jobs:
           NATIVE_SMOKE_PASSWORD: ${{ secrets.NATIVE_SMOKE_PASSWORD }}
           NATIVE_SMOKE_DISPLAY_NAME: ${{ secrets.NATIVE_SMOKE_DISPLAY_NAME }}
           NATIVE_SMOKE_BUILD_ID: ${{ env.NATIVE_SMOKE_ANDROID_BUILD_ID }}
-        run: pnpm --filter @workspace/chat-app test:native-large-text android
+        run: bash scripts/run-untrusted-checker.sh pnpm --filter @workspace/chat-app test:native-large-text android
 
       - name: Send controlled Android JavaScript error
         id: android-sentry-trigger
@@ -1590,7 +1610,7 @@ jobs:
           NATIVE_SMOKE_APP_ID: ${{ secrets.NATIVE_SMOKE_ANDROID_APP_ID }}
           NATIVE_SMOKE_BUILD_ID: ${{ env.NATIVE_SMOKE_ANDROID_BUILD_ID }}
           NATIVE_SENTRY_MARKER: native-${{ github.run_id }}-${{ github.run_attempt }}-android
-        run: pnpm --filter @workspace/chat-app test:native-sentry android
+        run: bash scripts/run-untrusted-checker.sh pnpm --filter @workspace/chat-app test:native-sentry android
 
       - name: Verify readable Android source maps in Sentry
         id: android-sentry-verification
@@ -1602,7 +1622,7 @@ jobs:
           SENTRY_EXPECTED_DIST: ${{ secrets.NATIVE_SMOKE_ANDROID_SENTRY_DIST }}
           SENTRY_PROBE_MARKER: native-${{ github.run_id }}-${{ github.run_attempt }}-android
           SENTRY_EVIDENCE_PATH: ${{ env.NATIVE_SMOKE_RESULTS_DIR }}/sentry-source-map-evidence.json
-        run: node scripts/verify-sentry-native-event.mjs
+        run: bash scripts/run-untrusted-checker.sh node scripts/verify-sentry-native-event.mjs
 
       - name: Create trusted Android native evidence digest manifest
         id: android-native-evidence-digest
@@ -1777,7 +1797,7 @@ jobs:
               exit 2
             fi
           done
-          pnpm --filter @workspace/api-server run test:e2e:idle-profile-registration
+          bash scripts/run-untrusted-checker.sh pnpm --filter @workspace/api-server run test:e2e:idle-profile-registration
 
       - name: Upload idle-profile browser failure evidence
         if: ${{ always() }}
@@ -1907,11 +1927,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          source scripts/workflow-output-safety.sh
           resolved_commit_sha="$(git rev-parse --verify HEAD)"
+          safe_reviewed_ref="$(sanitize_workflow_text "$REVIEWED_REF")"
 
           {
             echo "## Reviewed release revision"
-            printf -- '- Checked ref: `%s`\n' "$REVIEWED_REF"
+            printf -- '- Checked ref: `%s`\n' "$safe_reviewed_ref"
             printf -- '- Resolved commit SHA: `%s`\n' "$resolved_commit_sha"
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -1928,6 +1950,7 @@ jobs:
           EVIDENCE_RESULT: ${{ steps.evidence-completeness.outcome }}
         run: |
           set -euo pipefail
+          source scripts/workflow-output-safety.sh
           supported_node_range="$(
             node --input-type=module -e '
             import { readFileSync } from "node:fs";
@@ -1949,6 +1972,7 @@ jobs:
             }
             '
           )"
+          safe_supported_node_range="$(sanitize_workflow_text "$supported_node_range")"
           {
             echo "## Mobile release gate"
             echo
@@ -1958,10 +1982,10 @@ jobs:
             echo "- Idle profile registration: **${IDLE_PROFILE_RESULT^^}**"
             echo "- Native evidence summary regression: **${SUMMARY_REGRESSION_RESULT^^}**"
             echo "- Native evidence tamper regression: **${TAMPER_REGRESSION_RESULT^^}**"
-            echo "- Supported Node.js range: ${supported_node_range}"
+            echo "- Supported Node.js range: ${safe_supported_node_range}"
           } >> "$GITHUB_STEP_SUMMARY"
           if [[ "$EVIDENCE_RESULT" != "success" || "$IOS_RESULT" != "success" || "$ANDROID_RESULT" != "success" || "$IDLE_PROFILE_RESULT" != "success" || "$SUMMARY_REGRESSION_RESULT" != "success" || "$TAMPER_REGRESSION_RESULT" != "success" ]]; then
-            echo "Mobile release blocked: evidence=$EVIDENCE_RESULT iOS=$IOS_RESULT Android=$ANDROID_RESULT idle-profile=$IDLE_PROFILE_RESULT summary-regression=$SUMMARY_REGRESSION_RESULT. tamper-regression=$TAMPER_REGRESSION_RESULT Supported Node.js range from package.json engines.node: ${supported_node_range} (must be a valid semver range)." >&2
+            echo "Mobile release blocked: evidence=$EVIDENCE_RESULT iOS=$IOS_RESULT Android=$ANDROID_RESULT idle-profile=$IDLE_PROFILE_RESULT summary-regression=$SUMMARY_REGRESSION_RESULT. tamper-regression=$TAMPER_REGRESSION_RESULT Supported Node.js range from package.json engines.node: ${safe_supported_node_range} (must be a valid semver range)." >&2
             exit 1
           fi
           echo "Mobile release gate passed native accessibility and idle-profile registration checks."
@@ -2045,7 +2069,7 @@ jobs:
 
       - name: Run native large-text evidence privacy and submission-boundary regression
         id: native-evidence-privacy
-        run: pnpm run test:native-large-text-evidence
+        run: bash scripts/run-untrusted-checker.sh pnpm run test:native-large-text-evidence
 
       - name: Summarize native evidence privacy regression
         if: ${{ always() }}
@@ -2170,11 +2194,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          source scripts/workflow-output-safety.sh
           resolved_commit_sha="$(git rev-parse --verify HEAD)"
+          safe_reviewed_ref="$(sanitize_workflow_text "$REVIEWED_REF")"
 
           {
             echo "## Reviewed release revision"
-            printf -- '- Checked ref: `%s`\n' "$REVIEWED_REF"
+            printf -- '- Checked ref: `%s`\n' "$safe_reviewed_ref"
             printf -- '- Resolved commit SHA: `%s`\n' "$resolved_commit_sha"
           } >> "$GITHUB_STEP_SUMMARY"
 

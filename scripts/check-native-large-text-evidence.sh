@@ -45,7 +45,7 @@ record_summary_notice() {
 
 summary_safe_text() {
   local value="$1"
-  value="$(printf '%s' "$value" | LC_ALL=C tr '\000-\011\013-\037\177' ' ' | tr '\140' "'")"
+  value="$(printf '%s' "$value" | LC_ALL=C tr '\000-\011\013-\037\177' ' ' | tr '\140' "'" | sed 's/::/\&#58;\&#58;/g')"
   printf '%s' "$value"
 }
 

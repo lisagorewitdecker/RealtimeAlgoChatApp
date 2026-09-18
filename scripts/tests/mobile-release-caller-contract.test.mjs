@@ -887,9 +887,9 @@ test("publish job runs the evidence privacy and submission-boundary regression b
     privacyIndex >= 0,
     "mobile-publish must run the native evidence privacy regression",
   );
-  assert.equal(
+  assert.match(
     publishSteps[privacyIndex].run,
-    "pnpm run test:native-large-text-evidence",
+    /^bash scripts\/run-untrusted-checker\.sh pnpm run test:native-large-text-evidence$/,
     "mobile-publish must use the focused native evidence privacy regression command",
   );
   assert.equal(

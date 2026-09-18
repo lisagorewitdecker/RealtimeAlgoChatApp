@@ -104,3 +104,4 @@
 - [Expo inspector observability](expo-inspector-observability.md) — inspector connect/close exist only on stderr via DEBUG=Metro:InspectorProxy; launch evidence must follow the session's own bundle 200.
 - [Native report retention](native-report-retention.md) — durable release summaries keep bounded native review evidence usable after artifact links expire.
 - [Native artifact outage summary](native-artifact-outage-summary.md) — inspect download step outcomes and validate checker sections in a private summary before publishing.
+- [Workflow output safety](workflow-output-safety.md) — summary values need sentinel encoding and untrusted checker logs need a stop-command guard.
