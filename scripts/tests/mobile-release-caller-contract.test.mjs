@@ -476,13 +476,8 @@ test("invalid Node range guard blocks release jobs before setup or publish work"
   );
   assert.match(
     String(workflow.jobs?.["mobile-release-gate"]?.if),
-    /needs\.native-ios\.result == 'success'/,
-    "the release gate must only start after the iOS native smoke job succeeds",
-  );
-  assert.match(
-    String(workflow.jobs?.["mobile-release-gate"]?.if),
-    /needs\.native-android\.result == 'success'/,
-    "the release gate must only start after the Android native smoke job succeeds",
+    /needs\.mobile-release-configuration\.result == 'success'/,
+    "the release gate must not start before mobile release configuration is evaluated",
   );
   assert.match(
     String(workflow.jobs?.["mobile-release-gate"]?.if),
@@ -493,6 +488,11 @@ test("invalid Node range guard blocks release jobs before setup or publish work"
     String(workflow.jobs?.["mobile-release-gate"]?.if),
     /needs\.native-evidence-summary-regression\.result == 'success'/,
     "the release gate must only start after hosted summary regression succeeds",
+  );
+  assert.doesNotMatch(
+    String(workflow.jobs?.["mobile-release-gate"]?.if),
+    /needs\.native-ios\.result == 'success'|needs\.native-android\.result == 'success'/,
+    "the release gate must still run when native jobs are skipped for missing release configuration",
   );
   assert.doesNotMatch(
     rejectStep?.run,
@@ -649,6 +649,11 @@ test("blocked release diagnostics identify the supported Node range safely", () 
     blockStep.run,
     /package\.json is not valid JSON/,
     "malformed package.json output must remain actionable",
+  );
+  assert.match(
+    blockStep.run,
+    /configuration=\$RELEASE_CONFIGURATION_RESULT/,
+    "blocked release output must include the centralized configuration result",
   );
   assert.match(
     blockStep.run,

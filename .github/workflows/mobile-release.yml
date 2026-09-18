@@ -849,14 +849,80 @@ jobs:
           grep -Fq -- "- Artifact download: **FAIL**" "$failed_retry_summary_path"
           cat "$pass_summary_path" >> "$GITHUB_STEP_SUMMARY"
 
+  mobile-release-configuration:
+    name: Mobile release configuration
+    if: ${{ github.event_name != 'pull_request' }}
+    needs:
+      - mobile-release-node-range
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment:
+      name: mobile-release
+    outputs:
+      ios_configured: ${{ steps.release-config.outputs.ios_configured }}
+      android_configured: ${{ steps.release-config.outputs.android_configured }}
+    steps:
+      - name: Determine mobile release configuration
+        id: release-config
+        env:
+          EAS_TOKEN: ${{ secrets.EAS_TOKEN }}
+          NATIVE_SMOKE_IOS_APP_ID: ${{ secrets.NATIVE_SMOKE_IOS_APP_ID }}
+          NATIVE_SMOKE_ANDROID_APP_ID: ${{ secrets.NATIVE_SMOKE_ANDROID_APP_ID }}
+          NATIVE_SMOKE_IOS_BUILD_ID: ${{ env.NATIVE_SMOKE_IOS_BUILD_ID }}
+          NATIVE_SMOKE_ANDROID_BUILD_ID: ${{ env.NATIVE_SMOKE_ANDROID_BUILD_ID }}
+          NATIVE_SMOKE_EMAIL: ${{ secrets.NATIVE_SMOKE_EMAIL }}
+          NATIVE_SMOKE_PASSWORD: ${{ secrets.NATIVE_SMOKE_PASSWORD }}
+          NATIVE_SMOKE_IOS_SENTRY_RELEASE: ${{ secrets.NATIVE_SMOKE_IOS_SENTRY_RELEASE }}
+          NATIVE_SMOKE_IOS_SENTRY_DIST: ${{ secrets.NATIVE_SMOKE_IOS_SENTRY_DIST }}
+          NATIVE_SMOKE_ANDROID_SENTRY_RELEASE: ${{ secrets.NATIVE_SMOKE_ANDROID_SENTRY_RELEASE }}
+          NATIVE_SMOKE_ANDROID_SENTRY_DIST: ${{ secrets.NATIVE_SMOKE_ANDROID_SENTRY_DIST }}
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+        run: |
+          set -euo pipefail
+          ios_configured=true
+          android_configured=true
+
+          for value in \
+           EAS_TOKEN \
+           NATIVE_SMOKE_IOS_APP_ID \
+           NATIVE_SMOKE_IOS_BUILD_ID \
+           NATIVE_SMOKE_EMAIL \
+           NATIVE_SMOKE_PASSWORD \
+           NATIVE_SMOKE_IOS_SENTRY_RELEASE \
+           NATIVE_SMOKE_IOS_SENTRY_DIST \
+           SENTRY_AUTH_TOKEN; do
+           if [[ -z "${!value:-}" ]]; then
+             ios_configured=false
+           fi
+          done
+
+          for value in \
+           EAS_TOKEN \
+           NATIVE_SMOKE_ANDROID_APP_ID \
+           NATIVE_SMOKE_ANDROID_BUILD_ID \
+           NATIVE_SMOKE_EMAIL \
+           NATIVE_SMOKE_PASSWORD \
+           NATIVE_SMOKE_ANDROID_SENTRY_RELEASE \
+           NATIVE_SMOKE_ANDROID_SENTRY_DIST \
+           SENTRY_AUTH_TOKEN; do
+           if [[ -z "${!value:-}" ]]; then
+             android_configured=false
+           fi
+          done
+
+          echo "ios_configured=$ios_configured" >> "$GITHUB_OUTPUT"
+          echo "android_configured=$android_configured" >> "$GITHUB_OUTPUT"
+
   native-ios:
     name: Native large-text smoke (iOS)
+    if: ${{ github.event_name != 'pull_request' && needs.mobile-release-configuration.outputs.ios_configured == 'true' }}
     if: ${{ github.event_name != 'pull_request' && needs.native-release-configuration.outputs.ios_release_configured == 'true' }}
     permissions:
       actions: write
       contents: read
     needs:
       - mobile-release-node-range
+      - mobile-release-configuration
       - native-release-configuration
     outputs:
       native_evidence_artifact_url: ${{ steps.upload-ios-native-smoke.outputs.artifact-url }}
@@ -1111,6 +1177,10 @@ jobs:
 
   android-prerequisite-preflight:
     name: Android release runner preflight
+    if: ${{ github.event_name != 'pull_request' && needs.mobile-release-configuration.outputs.android_configured == 'true' }}
+    needs:
+      - mobile-release-node-range
+      - mobile-release-configuration
     if: ${{ github.event_name != 'pull_request' && needs.native-release-configuration.outputs.android_release_configured == 'true' }}
     needs:
       - mobile-release-node-range
@@ -1493,12 +1563,13 @@ jobs:
 
   mobile-release-gate:
     name: Mobile release gate
-    if: ${{ github.event_name != 'pull_request' && needs.mobile-release-node-range.result == 'success' && needs.native-ios.result == 'success' && needs.native-android.result == 'success' && needs.idle-profile-registration.result == 'success' && needs.native-evidence-summary-regression.result == 'success' }}
+    if: ${{ github.event_name != 'pull_request' && needs.mobile-release-node-range.result == 'success' && needs.mobile-release-configuration.result == 'success' && needs.idle-profile-registration.result == 'success' && needs.native-evidence-summary-regression.result == 'success' }}
     outputs:
       ios_native_evidence_artifact_url: ${{ needs.native-ios.outputs.native_evidence_artifact_url }}
       android_native_evidence_artifact_url: ${{ needs.native-android.outputs.native_evidence_artifact_url }}
     needs:
       - mobile-release-node-range
+      - mobile-release-configuration
       - native-ios
       - native-android
       - idle-profile-registration
@@ -1566,6 +1637,9 @@ jobs:
       - name: Block release unless both native checks pass
         if: ${{ always() }}
         env:
+          RELEASE_CONFIGURATION_RESULT: ${{ needs.mobile-release-configuration.result }}
+          IOS_CONFIGURATION_READY: ${{ needs.mobile-release-configuration.outputs.ios_configured }}
+          ANDROID_CONFIGURATION_READY: ${{ needs.mobile-release-configuration.outputs.android_configured }}
           IOS_RESULT: ${{ needs.native-ios.result }}
           ANDROID_RESULT: ${{ needs.native-android.result }}
           IDLE_PROFILE_RESULT: ${{ needs.idle-profile-registration.result }}
@@ -1597,15 +1671,29 @@ jobs:
           {
             echo "## Mobile release gate"
             echo
+            echo "- Mobile release configuration: **${RELEASE_CONFIGURATION_RESULT^^}**"
+            if [[ "$IOS_CONFIGURATION_READY" == "true" ]]; then
+              echo "- iOS release configuration: **READY**"
+            else
+              echo "- iOS release configuration: **BLOCKED**"
+            fi
+            if [[ "$ANDROID_CONFIGURATION_READY" == "true" ]]; then
+              echo "- Android release configuration: **READY**"
+            else
+              echo "- Android release configuration: **BLOCKED**"
+            fi
             echo "- Native evidence completeness: **${EVIDENCE_RESULT^^}**"
             echo "- iOS native smoke: **${IOS_RESULT^^}**"
             echo "- Android native smoke: **${ANDROID_RESULT^^}**"
             echo "- Idle profile registration: **${IDLE_PROFILE_RESULT^^}**"
             echo "- Native evidence summary regression: **${SUMMARY_REGRESSION_RESULT^^}**"
             echo "- Supported Node.js range: ${supported_node_range}"
+            if [[ "$IOS_CONFIGURATION_READY" != "true" || "$ANDROID_CONFIGURATION_READY" != "true" ]]; then
+              echo "- Fix: provide the native smoke build IDs and protected release secrets before rerunning the workflow."
+            fi
           } >> "$GITHUB_STEP_SUMMARY"
-          if [[ "$EVIDENCE_RESULT" != "success" || "$IOS_RESULT" != "success" || "$ANDROID_RESULT" != "success" || "$IDLE_PROFILE_RESULT" != "success" || "$SUMMARY_REGRESSION_RESULT" != "success" ]]; then
-            echo "Mobile release blocked: evidence=$EVIDENCE_RESULT iOS=$IOS_RESULT Android=$ANDROID_RESULT idle-profile=$IDLE_PROFILE_RESULT summary-regression=$SUMMARY_REGRESSION_RESULT. Supported Node.js range from package.json engines.node: ${supported_node_range} (must be a valid semver range)." >&2
+          if [[ "$RELEASE_CONFIGURATION_RESULT" != "success" || "$EVIDENCE_RESULT" != "success" || "$IOS_RESULT" != "success" || "$ANDROID_RESULT" != "success" || "$IDLE_PROFILE_RESULT" != "success" || "$SUMMARY_REGRESSION_RESULT" != "success" ]]; then
+            echo "Mobile release blocked: configuration=$RELEASE_CONFIGURATION_RESULT evidence=$EVIDENCE_RESULT iOS=$IOS_RESULT Android=$ANDROID_RESULT idle-profile=$IDLE_PROFILE_RESULT summary-regression=$SUMMARY_REGRESSION_RESULT. Supported Node.js range from package.json engines.node: ${supported_node_range} (must be a valid semver range)." >&2
             exit 1
           fi
           echo "Mobile release gate passed native accessibility and idle-profile registration checks."
