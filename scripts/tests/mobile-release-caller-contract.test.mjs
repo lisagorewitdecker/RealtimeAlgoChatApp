@@ -238,7 +238,11 @@ function assertMobileReleaseNodeVersions(releaseWorkflow, nodeRange) {
     "mobile-release.yml must configure Node with actions/setup-node",
   );
   for (const { jobId, configuredVersion } of configuredJobs) {
-    if (configuredVersion === undefined) {
+    if (
+      configuredVersion === undefined ||
+      configuredVersion === null ||
+      String(configuredVersion).trim() === ""
+    ) {
       diagnostics.push(
         `mobile-release job "${jobId}" must configure node-version; package.json engines.node range is ${JSON.stringify(
           nodeRange,
@@ -607,6 +611,51 @@ test("missing mobile release Node versions identify the affected job and require
       return true;
     },
   );
+});
+
+test("blank and whitespace-only mobile release Node versions identify the affected job and required configuration", () => {
+  const nodeRange = rootPackage.engines.node;
+  const jobId = "native-ios";
+  const yamlBlankNodeVersion = YAML.parse("node-version:\n")["node-version"];
+  assert.equal(
+    yamlBlankNodeVersion,
+    null,
+    "the blank YAML fixture must exercise YAML's native null value",
+  );
+
+  for (const configuredVersion of ["", yamlBlankNodeVersion, "   "]) {
+    const fixture = structuredClone(workflow);
+    const setupNodeStep = fixture.jobs[jobId].steps.find((step) =>
+      String(step.uses ?? "").startsWith("actions/setup-node@"),
+    );
+    assert.ok(
+      setupNodeStep,
+      `${jobId} fixture must configure Node with actions/setup-node`,
+    );
+    setupNodeStep.with["node-version"] = configuredVersion;
+
+    assert.throws(
+      () => assertMobileReleaseNodeVersions(fixture, nodeRange),
+      (error) => {
+        assert.ok(
+          error.message.includes(`mobile-release job "${jobId}"`),
+          "the failure must identify the mobile release job",
+        );
+        assert.ok(
+          error.message.includes("must configure node-version"),
+          "the failure must explain that node-version is required",
+        );
+        assert.ok(
+          error.message.includes(
+            `package.json engines.node range is ${JSON.stringify(nodeRange)}`,
+          ),
+          "the failure must identify the supported package.json Node range",
+        );
+        return true;
+      },
+      `the blank Node version ${JSON.stringify(configuredVersion)} must be rejected`,
+    );
+  }
 });
 
 test("combined mobile release Node diagnostics report every affected job and correction", () => {
