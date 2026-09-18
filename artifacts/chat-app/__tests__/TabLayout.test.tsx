@@ -14,6 +14,11 @@
 // - "classic tab bar surface" sets Platform.OS explicitly so all three
 //   branches, including web (which has no Jest project), are compared against
 //   each other in the same run.
+//
+// On iOS 26 the layout renders expo-router's NativeTabs (Liquid Glass) instead
+// of the classic bar. "iOS 26 native tab bar" flips the mocked
+// isLiquidGlassAvailable to true and pins the appearance props the layout
+// passes: none by default, and the opaque set with Reduce transparency on.
 import React from "react";
 import { render } from "@testing-library/react-native";
 import { Platform, StyleSheet, type StyleProp, type ViewStyle } from "react-native";
@@ -23,6 +28,7 @@ import { onTestPlatform } from "../test-utils/platform";
 
 let mockHighContrast = false;
 let mockReduceTransparency = false;
+let mockLiquidGlassAvailable = false;
 
 jest.mock("@expo/vector-icons", () => ({
   Feather: () => null,
@@ -33,7 +39,7 @@ jest.mock("expo-symbols", () => ({
 }));
 
 jest.mock("expo-glass-effect", () => ({
-  isLiquidGlassAvailable: () => false,
+  isLiquidGlassAvailable: () => mockLiquidGlassAvailable,
 }));
 
 jest.mock("expo-blur", () => {
@@ -79,9 +85,21 @@ jest.mock("expo-router", () => {
   return { Tabs };
 });
 
+// The native tab bar is drawn by UIKit, so the only thing the layout controls
+// is the props it hands NativeTabs. This stand-in records them on a host view
+// (and each trigger's route name) for the "iOS 26 native tab bar" suite.
 jest.mock("expo-router/unstable-native-tabs", () => {
-  const NativeTabs = () => null;
-  const Trigger = () => null;
+  const mockReact = require("react");
+  const RN = require("react-native");
+  const NativeTabs = ({
+    children,
+    ...props
+  }: {
+    children: React.ReactNode;
+    [prop: string]: unknown;
+  }) => mockReact.createElement(RN.View, { testID: "native-tabs", ...props }, children);
+  const Trigger = ({ name, children }: { name: string; children: React.ReactNode }) =>
+    mockReact.createElement(RN.View, { testID: "native-tab-trigger", name }, children);
   Trigger.Icon = () => null;
   Trigger.Label = () => null;
   NativeTabs.Trigger = Trigger;
@@ -437,6 +455,104 @@ describe("classic tab bar with Reduce transparency", () => {
 
     expect(tabBarStyle(view).backgroundColor).toBe("transparent");
     expect(surfaceStyle(view).backgroundColor).toBe(colors.dark.tabBarBackground);
+  });
+});
+
+// On iOS 26 (expo-glass-effect reports Liquid Glass available) the layout
+// renders expo-router's NativeTabs and UIKit draws the bar. iOS's own Reduce
+// Transparency setting solidifies that glass by itself, but the in-app toggle
+// is a preference the system never sees, so the layout has to pass the opaque
+// appearance explicitly: `backgroundColor` fills the bar with the palette
+// background, `blurEffect="none"` removes the material behind it, and
+// `disableTransparentOnScrollEdge` keeps that background at the scroll edge,
+// where expo-router otherwise clears the bar. With the toggle off none of them
+// may be passed, or the tabs lose their default Liquid Glass look.
+describe("iOS 26 native tab bar", () => {
+  const originalPlatform = Platform.OS;
+  const appearanceProps = [
+    "backgroundColor",
+    "blurEffect",
+    "disableTransparentOnScrollEdge",
+    "shadowColor",
+  ] as const;
+
+  beforeEach(() => {
+    Platform.OS = "ios";
+    mockLiquidGlassAvailable = true;
+  });
+
+  afterEach(() => {
+    Platform.OS = originalPlatform;
+    mockLiquidGlassAvailable = false;
+    mockHighContrast = false;
+    mockReduceTransparency = false;
+  });
+
+  function nativeTabsProps(view: Rendered) {
+    return view.getByTestId("native-tabs").props as Record<string, unknown>;
+  }
+
+  function expectLiquidGlass(view: Rendered) {
+    const props = nativeTabsProps(view);
+    for (const prop of appearanceProps) {
+      expect(props[prop]).toBeUndefined();
+    }
+  }
+
+  function expectOpaqueNativeBar(view: Rendered, palette: Palette) {
+    const props = nativeTabsProps(view);
+    expect(props.backgroundColor).toBe(palette.background);
+    expect(parseColor(palette.background).alpha).toBe(1);
+    expect(props.blurEffect).toBe("none");
+    expect(props.disableTransparentOnScrollEdge).toBe(true);
+    expect(props.shadowColor).toBe(palette.border);
+  }
+
+  it("renders the native tabs for both routes instead of the classic bar", () => {
+    const view = render(<TabLayout />);
+
+    expect(view.queryByTestId("tab-bar")).toBeNull();
+    expect(
+      view.getAllByTestId("native-tab-trigger").map((trigger) => trigger.props.name),
+    ).toEqual(["index", "profile"]);
+  });
+
+  it("leaves the default Liquid Glass look alone while Reduce transparency is off", () => {
+    expectLiquidGlass(render(<TabLayout />));
+  });
+
+  it("asks for an opaque bar while Reduce transparency is on", () => {
+    mockReduceTransparency = true;
+
+    expectOpaqueNativeBar(render(<TabLayout />), colors.dark);
+  });
+
+  it("keeps Liquid Glass with high contrast alone", () => {
+    // High contrast alone never makes a surface opaque — that is Reduce
+    // transparency's job, and the two settings stay distinct (the classic
+    // bar keeps a see-through panel in the same situation).
+    mockHighContrast = true;
+
+    expectLiquidGlass(render(<TabLayout />));
+  });
+
+  it("uses the high-contrast palette for the opaque bar when both options are on", () => {
+    mockHighContrast = true;
+    mockReduceTransparency = true;
+
+    expectOpaqueNativeBar(render(<TabLayout />), colors.highContrast);
+  });
+
+  it("returns to Liquid Glass when Reduce transparency is turned off again", () => {
+    mockReduceTransparency = true;
+    const view = render(<TabLayout />);
+    expectOpaqueNativeBar(view, colors.dark);
+
+    mockReduceTransparency = false;
+    view.rerender(<TabLayout />);
+
+    expectLiquidGlass(view);
+    expect(view.queryByTestId("tab-bar")).toBeNull();
   });
 });
 

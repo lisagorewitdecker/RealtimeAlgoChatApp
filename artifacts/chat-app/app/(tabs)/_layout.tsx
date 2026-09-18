@@ -10,9 +10,38 @@ import { Platform, StyleSheet, View, useColorScheme } from "react-native";
 import { useAccessibilityOptional } from "@/contexts/AccessibilityContext";
 import { useColors } from "@/hooks/useColors";
 
+/**
+ * iOS 26 draws the native tab bar with Liquid Glass, and expo-router's
+ * NativeTabs leaves the bar's background to the system unless told otherwise.
+ * iOS's own Reduce Transparency setting solidifies that glass at the OS
+ * level, but the in-app toggle is a separate preference the system never
+ * sees, so the layout has to ask for the opaque bar itself:
+ *
+ * - `backgroundColor` fills the bar with the opaque palette background.
+ * - `blurEffect="none"` removes the material behind it (UITabBarAppearance's
+ *   `backgroundEffect = nil`) so nothing shows through.
+ * - `disableTransparentOnScrollEdge` applies the same background at the scroll
+ *   edge, where expo-router otherwise clears the bar entirely.
+ * - `shadowColor` keeps the classic bar's top border on the solid bar.
+ *
+ * With the toggle off none of these are passed, so the tabs keep their default
+ * Liquid Glass look (and the system setting still solidifies it on its own).
+ */
 function NativeTabLayout() {
+  const colors = useColors();
+  const { reduceTransparency } = useAccessibilityOptional();
+
   return (
-    <NativeTabs>
+    <NativeTabs
+      {...(reduceTransparency
+        ? {
+            backgroundColor: colors.background,
+            blurEffect: "none" as const,
+            disableTransparentOnScrollEdge: true,
+            shadowColor: colors.border,
+          }
+        : {})}
+    >
       <NativeTabs.Trigger name="index">
         <NativeTabs.Trigger.Icon
           sf={{ default: "message.circle", selected: "message.circle.fill" }}
