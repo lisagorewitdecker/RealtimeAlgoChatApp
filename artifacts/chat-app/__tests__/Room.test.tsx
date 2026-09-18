@@ -1,5 +1,6 @@
 import React from "react";
 import { act, cleanup, fireEvent, render } from "@testing-library/react-native";
+import * as Sentry from "@sentry/react-native";
 import { Alert, StyleSheet } from "react-native";
 import RoomScreen from "../app/room/[roomId]";
 
@@ -19,6 +20,7 @@ const mockSocket = {
 };
 const mockGetToken = jest.fn();
 const mockRetryRoomKeyPersistence = jest.fn();
+const mockCaptureMessage = jest.mocked(Sentry.captureMessage);
 const defaultRoomKey = new Uint8Array(32).fill(7);
 const mockGetRoomKey = jest.fn<Uint8Array | null, []>(() => defaultRoomKey);
 const loadedRoomKey = {
@@ -160,6 +162,7 @@ function resetRoomMocks() {
   mockSocket.emit.mockClear();
   mockGetToken.mockReset().mockResolvedValue("clerk-token");
   mockRetryRoomKeyPersistence.mockReset().mockResolvedValue(true);
+  mockCaptureMessage.mockReset();
   mockGetRoomKey.mockReset().mockReturnValue(defaultRoomKey);
   mockLoadRoomKey.mockReset().mockReturnValue(loadedRoomKey);
   mockDecryptMessage.mockReset();
@@ -774,16 +777,100 @@ describe("room ban handling", () => {
     });
 
     expect(mockRetryRoomKeyPersistence).toHaveBeenCalledWith("room-42");
+    expect(mockCaptureMessage).not.toHaveBeenCalled();
   });
 
   it("keeps recovery available when retrying the room key save fails again", async () => {
+    const privateRetryError =
+      "room-42 key=PRIVATE_KEY_BYTES ciphertext=PRIVATE_CIPHERTEXT secureStore=PRIVATE_VALUE";
     mockRoomKeyPersistenceFailures.set("room-42", {
       roomId: "room-42",
       kind: "save",
-      message: "Keep this room open and retry before sending messages.",
+      message: privateRetryError,
+    });
+    mockRetryRoomKeyPersistence.mockResolvedValueOnce(false);
+    const view = render(<RoomScreen />);
+
+    await act(async () => {
+      fireEvent.press(view.getByTestId("retry-room-key-save-button"));
+    });
+    mockRetryRoomKeyPersistence.mockResolvedValueOnce(false);
+    await act(async () => {
+      fireEvent.press(view.getByTestId("retry-room-key-save-button"));
+    });
+
+    expect(mockRetryRoomKeyPersistence).toHaveBeenCalledWith("room-42");
+    expect(view.getByTestId("room-key-storage-warning")).toBeTruthy();
+    expect(view.getByText(privateRetryError)).toBeTruthy();
+    expect(view.getByText("Retry saving key")).toBeTruthy();
+    expect(view.getByTestId("retry-room-key-save-button").props.disabled).not.toBe(
+      true,
+    );
+    expect(mockCaptureMessage).toHaveBeenCalledWith(
+      "Room key persistence retry failed",
+      {
+        level: "warning",
+        tags: { recovery_operation: "save" },
+      },
+    );
+    expect(JSON.stringify(mockCaptureMessage.mock.calls)).not.toContain(
+      privateRetryError,
+    );
+    expect(JSON.stringify(mockCaptureMessage.mock.calls)).not.toContain("room-42");
+    expect(JSON.stringify(mockCaptureMessage.mock.calls)).not.toContain(
+      "PRIVATE_KEY_BYTES",
+    );
+    expect(JSON.stringify(mockCaptureMessage.mock.calls)).not.toContain(
+      "PRIVATE_CIPHERTEXT",
+    );
+    expect(JSON.stringify(mockCaptureMessage.mock.calls)).not.toContain(
+      "PRIVATE_VALUE",
+    );
+    expect(mockCaptureMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it("identifies a rejected saved-key load retry without reporting private values", async () => {
+    mockGetRoomKey.mockReturnValue(null);
+    mockRoomKeyPersistenceFailures.set("room-42", {
+      roomId: "room-42",
+      kind: "load",
+      message: "This device could not read its saved encryption keys.",
+    });
+    mockRetryRoomKeyPersistence.mockResolvedValueOnce(false);
+    const view = render(<RoomScreen />);
+
+    await act(async () => {
+      fireEvent.press(view.getByTestId("retry-room-key-save-button"));
+    });
+
+    expect(mockCaptureMessage).toHaveBeenCalledWith(
+      "Room key persistence retry failed",
+      {
+        level: "warning",
+        tags: { recovery_operation: "load" },
+      },
+    );
+    expect(JSON.stringify(mockCaptureMessage.mock.calls)).toBe(
+      JSON.stringify([
+        [
+          "Room key persistence retry failed",
+          {
+            level: "warning",
+            tags: { recovery_operation: "load" },
+          },
+        ],
+      ]),
+    );
+  });
+
+  it("reports an unexpected room-key retry rejection without including its error", async () => {
+    mockRoomKeyPersistenceFailures.set("room-42", {
+      roomId: "room-42",
+      kind: "save",
+      message: "Retry before continuing.",
     });
     mockRetryRoomKeyPersistence.mockRejectedValueOnce(
-      new Error("Secure storage is still unavailable"),
+      new Error("room-42 key=PRIVATE_UNEXPECTED_KEY"),
     );
     const view = render(<RoomScreen />);
 
@@ -791,14 +878,15 @@ describe("room ban handling", () => {
       fireEvent.press(view.getByTestId("retry-room-key-save-button"));
     });
 
-    expect(mockRetryRoomKeyPersistence).toHaveBeenCalledWith("room-42");
-    expect(view.getByTestId("room-key-storage-warning")).toBeTruthy();
-    expect(
-      view.getByText("Keep this room open and retry before sending messages."),
-    ).toBeTruthy();
-    expect(view.getByText("Retry saving key")).toBeTruthy();
-    expect(view.getByTestId("retry-room-key-save-button").props.disabled).not.toBe(
-      true,
+    expect(mockCaptureMessage).toHaveBeenCalledWith(
+      "Room key persistence retry failed",
+      {
+        level: "warning",
+        tags: { recovery_operation: "save" },
+      },
+    );
+    expect(JSON.stringify(mockCaptureMessage.mock.calls)).not.toContain(
+      "PRIVATE_UNEXPECTED_KEY",
     );
   });
 

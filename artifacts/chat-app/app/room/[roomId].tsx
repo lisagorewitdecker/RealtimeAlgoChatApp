@@ -28,6 +28,7 @@ import { useSocket } from "@/contexts/SocketContext";
 import { ScaledText as Text } from "@/components/ScaledText";
 import { ScaledTextInput } from "@/components/ScaledTextInput";
 import { useColors } from "@/hooks/useColors";
+import { Sentry } from "@/lib/sentry";
 import { textLengthBucket, trackEvent } from "@/utils/analytics";
 
 interface Message {
@@ -120,6 +121,7 @@ export default function RoomScreen() {
   const hasTrackedRoomJoin = useRef(false);
   const roomKeyLoadRef = useRef<Promise<void> | null>(null);
   const roomKeyEnvelopeRecoveryRef = useRef<Promise<boolean> | null>(null);
+  const reportedPersistenceRetryFailuresRef = useRef(new Set<"save" | "load">());
   const messagesRef = useRef<Message[]>([]);
   messagesRef.current = messages;
   const recoveryRequestRef = useRef<string | null>(null);
@@ -692,19 +694,39 @@ export default function RoomScreen() {
   );
 
   const retrySavingRoomKey = useCallback(async () => {
+    const reportRetryFailure = () => {
+      const recoveryOperation =
+        roomKeyPersistenceFailure?.kind === "load" ? "load" : "save";
+      if (!reportedPersistenceRetryFailuresRef.current.has(recoveryOperation)) {
+        reportedPersistenceRetryFailuresRef.current.add(recoveryOperation);
+        Sentry.captureMessage("Room key persistence retry failed", {
+          level: "warning",
+          tags: { recovery_operation: recoveryOperation },
+        });
+      }
+    };
+
     setRetryingRoomKey(true);
     try {
       const persisted = await retryRoomKeyPersistence(roomId);
       if (persisted) {
         setHasRoomKey(!!getRoomKey(roomId));
+      } else {
+        reportRetryFailure();
       }
     } catch {
+      reportRetryFailure();
       // The persistence failure remains in context so the warning stays visible
       // and the user can retry again after secure storage becomes available.
     } finally {
       setRetryingRoomKey(false);
     }
-  }, [getRoomKey, retryRoomKeyPersistence, roomId]);
+  }, [
+    getRoomKey,
+    retryRoomKeyPersistence,
+    roomId,
+    roomKeyPersistenceFailure?.kind,
+  ]);
 
   const openCall = useCallback(() => {
     if (roomKeyPersistenceFailure) return;
