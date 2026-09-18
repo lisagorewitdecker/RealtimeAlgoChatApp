@@ -106,3 +106,4 @@
 - [Native artifact outage summary](native-artifact-outage-summary.md) — inspect download step outcomes and validate checker sections in a private summary before publishing.
 - [Workflow output safety](workflow-output-safety.md) — summary values need sentinel encoding and untrusted checker logs need a stop-command guard.
 - [Hosted preview dependency diagnostics](hosted-preview-dependency-diagnostics.md) — platform evidence jobs should fail on missing shared validators before invoking record checkers.
+- [setup-node semver contract](setup-node-semver-contract.md) — pin the local Node-range matcher to the semver version bundled by the pinned setup-node action.

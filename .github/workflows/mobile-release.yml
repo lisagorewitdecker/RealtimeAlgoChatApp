@@ -154,6 +154,8 @@ jobs:
         continue-on-error: true
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
+          # Keep this resolver as the shared range contract. The local contract
+          # test pins semver to setup-node's tool-cache matcher (6.3.1).
           node-version: ${{ steps.read-node-range.outputs.node_range }}
 
       - name: Reject invalid Node range before release checks

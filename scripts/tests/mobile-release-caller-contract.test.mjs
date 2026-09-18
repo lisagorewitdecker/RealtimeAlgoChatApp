@@ -27,6 +27,12 @@ const callerDocumentation = readFileSync(
 const rootPackage = JSON.parse(
   readFileSync(path.join(workspaceRoot, "package.json"), "utf8"),
 );
+const installedSemverPackage = JSON.parse(
+  readFileSync(
+    path.join(workspaceRoot, "node_modules/semver/package.json"),
+    "utf8",
+  ),
+);
 
 const buildIdInputs = [
   "native_smoke_android_build_id",
@@ -55,6 +61,7 @@ const pinnedCheckoutAction =
   "actions/checkout@11d5960a326750d5838078e36cf38b85af677262";
 const pinnedSetupNodeAction =
   "actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020";
+const setupNodeToolCacheSemverVersion = "6.3.1";
 function resolveWorkflowEnvExpression(value, workflowEnv, jobEnv, stepEnv) {
   const match = String(value).trim().match(/^\$\{\{\s*env\.([A-Z0-9_]+)\s*\}\}$/);
   if (!match) {
@@ -110,6 +117,9 @@ function nodeVersionSatisfiesRange(
 
 test("Node engine range validation accepts standard range forms", () => {
   const cases = [
+    ["24", "24.99.0", true],
+    ["24.0", "24.0.99", true],
+    ["24.0.0", "24.0.0", true],
     ["^24.0.0", "24.99.0", true],
     ["^24.0.0", "25.0.0", false],
     ["~24.2.0", "24.2.9", true],
@@ -140,10 +150,23 @@ test("Node engine range validation accepts standard range forms", () => {
   }
 });
 
+test("local Node range validation uses setup-node's tool-cache semver contract", () => {
+  assert.equal(
+    rootPackage.dependencies?.semver,
+    setupNodeToolCacheSemverVersion,
+    "the local semver dependency must stay pinned to setup-node's tool-cache matcher",
+  );
+  assert.equal(
+    installedSemverPackage.version,
+    setupNodeToolCacheSemverVersion,
+    "the contract test must execute the pinned setup-node-compatible semver implementation",
+  );
+});
+
 test("Node engine range validation rejects malformed and unsupported syntax", () => {
   const invalidRanges = [
-    ">= 24 <",
     "24.0.0.0",
+    ">= 24 <",
     "latest",
   ];
 
