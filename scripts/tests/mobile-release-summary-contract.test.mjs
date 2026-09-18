@@ -26,9 +26,9 @@
  *   7. Mixed record-only, sidecar-only, and paired Android preview changes are
  *      validated independently; one failure does not hide valid records or
  *      expose any record's evidence text.
- *   8. Malformed, schema-invalid, and duplicate Android preflight artifacts
- *      fail with the fixed redacted-schema message without exposing their
- *      markers or raw artifact content.
+ *   8. Malformed, schema-invalid, and duplicate Android and iOS preflight
+ *      artifacts fail with the fixed redacted-schema message without
+ *      exposing their markers or raw artifact content.
  *   9. A missing Android preflight validator produces a fixed dependency
  *      diagnostic without running the checker or exposing evidence content.
  *  10. A failed artifact extraction clears partial platform output before its
@@ -3337,10 +3337,7 @@ test("iOS preview evidence covers renamed records and blocks malformed changes",
     "the summary must identify the missing changed iOS record",
   );
 
-  const preflightOnly = runIosPreviewJob("preflight-only", {
-    recordText: blockedRecord,
-    baseRecordText: blockedRecord,
-    basePreflightText: `{
+  const iosBlockedPreflight = `{
   "schema": "ios-preview-handoff-preflight/v1",
   "platform": "ios",
   "boundaries": {
@@ -3362,7 +3359,86 @@ test("iOS preview evidence covers renamed records and blocks malformed changes",
     }
   }
 }
-`,
+`;
+  const malformedIosPreflight =
+    '{"schema":"ios-preview-handoff-preflight/v1","platform":"ios","boundaries":{"publicManifestReachability":{"status":"PASS","evidence":"MALFORMED_IOS_PREFLIGHT_SENTINEL raw-malformed-ios-preflight-content"}';
+  const schemaInvalidIosPreflight = iosBlockedPreflight.replace(
+    "public manifest HTTP 200 (128 bytes)",
+    "SCHEMA_INVALID_IOS_PREFLIGHT_SENTINEL raw-schema-invalid-ios-preflight-content",
+  );
+  const fixedIosRedactedSchemaMessage =
+    "The iOS preview preflight JSON artifact does not satisfy the redacted schema.";
+
+  for (const {
+    name,
+    preflight,
+    forbidden,
+    description,
+  } of [
+    {
+      name: "malformed-preflight",
+      preflight: malformedIosPreflight,
+      forbidden:
+        /MALFORMED_IOS_PREFLIGHT_SENTINEL|raw-malformed-ios-preflight-content/,
+      description: "malformed",
+    },
+    {
+      name: "schema-invalid-preflight",
+      preflight: schemaInvalidIosPreflight,
+      forbidden:
+        /SCHEMA_INVALID_IOS_PREFLIGHT_SENTINEL|raw-schema-invalid-ios-preflight-content/,
+      description: "schema-invalid",
+    },
+  ]) {
+    const run = runIosPreviewJob(name, {
+      recordText: blockedRecord,
+      baseRecordText: blockedRecord,
+      basePreflightText: iosBlockedPreflight,
+      preflightText: preflight,
+      updateOnlyPreflight: true,
+    });
+    const failure = [run.result.stdout, run.result.stderr].join("\n");
+
+    assert.notEqual(
+      run.result.status,
+      0,
+      `a ${description} iOS preflight artifact must fail the release validation job`,
+    );
+    assert.match(
+      run.summary,
+      new RegExp(
+        fixedIosRedactedSchemaMessage.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
+      ),
+      `the ${description} iOS job summary must use the fixed redacted-schema contract message`,
+    );
+    assert.match(
+      failure,
+      new RegExp(
+        fixedIosRedactedSchemaMessage.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
+      ),
+      `the ${description} iOS checker failure must use the fixed redacted-schema contract message`,
+    );
+    for (const [surfaceName, surface] of [
+      ["job summary", run.summary],
+      ["surfaced checker failure", failure],
+    ]) {
+      assert.doesNotMatch(
+        surface,
+        forbidden,
+        `the ${description} iOS ${surfaceName} must not expose the marker or raw artifact content`,
+      );
+      assert.doesNotMatch(
+        surface,
+        /public manifest HTTP 200 \(128 bytes\)/,
+        `the ${description} iOS ${surfaceName} must not expose valid preflight artifact content`,
+      );
+    }
+  }
+
+  const preflightOnly = runIosPreviewJob("preflight-only", {
+    recordText: blockedRecord,
+    baseRecordText: blockedRecord,
+    basePreflightText: iosBlockedPreflight,
     preflightText: `{
   "schema": "ios-preview-handoff-preflight/v1",
   "platform": "ios",
