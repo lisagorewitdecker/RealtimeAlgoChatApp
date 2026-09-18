@@ -105,3 +105,4 @@
 - [Native report retention](native-report-retention.md) — durable release summaries keep bounded native review evidence usable after artifact links expire.
 - [Native artifact outage summary](native-artifact-outage-summary.md) — inspect download step outcomes and validate checker sections in a private summary before publishing.
 - [Workflow output safety](workflow-output-safety.md) — summary values need sentinel encoding and untrusted checker logs need a stop-command guard.
+- [Hosted preview dependency diagnostics](hosted-preview-dependency-diagnostics.md) — platform evidence jobs should fail on missing shared validators before invoking record checkers.

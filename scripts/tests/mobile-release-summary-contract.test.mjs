@@ -29,8 +29,9 @@
  *   8. Malformed, schema-invalid, and duplicate Android and iOS preflight
  *      artifacts fail with the fixed redacted-schema message without
  *      exposing their markers or raw artifact content.
- *   9. A missing Android preflight validator produces a fixed dependency
- *      diagnostic without running the checker or exposing evidence content.
+ *   9. A missing Android or iOS preflight validator produces a fixed
+ *      dependency diagnostic without running the checker or exposing evidence
+ *      content.
  *  10. A failed artifact extraction clears partial platform output before its
  *      retry, while a permanently missing artifact still reaches the fixed
  *      platform-specific blocking summary.
@@ -3175,6 +3176,16 @@ test("iOS preview evidence covers renamed records and blocks malformed changes",
     /bash scripts\/run-untrusted-checker\.sh pnpm run validate:ios-preview-evidence -- "\$\{checker_args\[@\]\}"/,
     "changed iOS records must run the focused checker",
   );
+  assert.match(
+    validationStep.run,
+    /validator_directory="artifacts\/chat-app\/scripts"[\s\S]*validator_file="validate-preview-startup\.mjs"[\s\S]*validator_path="\$\{validator_directory\}\/\$\{validator_file\}"[\s\S]*if \[\[ ! -f "\$validator_path" \]\][\s\S]*validator_failure_reason=/,
+    "the iOS job must check its delegated validator dependency before checking changed records",
+  );
+  assert.match(
+    validationStep.run,
+    /elif \[\[ -n "\$validator_failure_reason" \]\][\s\S]*reasons="\$validator_failure_reason"[\s\S]*else[\s\S]*validation_output="\$\(/,
+    "a missing delegated iOS validator must produce a fixed reason without invoking the record checker",
+  );
 
   function runIosPreviewJob(
     name,
@@ -3186,6 +3197,7 @@ test("iOS preview evidence covers renamed records and blocks malformed changes",
       updateOnlyPreflight = false,
       deleteRecord = false,
       renameRecord = false,
+      missingValidator = false,
     },
   ) {
     const fixtureRoot = path.join(testRoot, `ios-preview-${name}`);
@@ -3236,10 +3248,18 @@ test("iOS preview evidence covers renamed records and blocks malformed changes",
     const summaryPath = path.join(fixtureRoot, "summary.md");
     const runnerPath = path.join(fixtureRoot, "run-job.sh");
     const binDirectory = path.join(fixtureRoot, "bin");
+    const validatorPath = path.join(
+      fixtureRoot,
+      "artifacts/chat-app/scripts/validate-preview-startup.mjs",
+    );
     for (const record of [...recordPaths, ...baseRecordPaths]) {
       mkdirSync(path.dirname(record), { recursive: true });
     }
     mkdirSync(binDirectory, { recursive: true });
+    if (!missingValidator) {
+      mkdirSync(path.dirname(validatorPath), { recursive: true });
+      writeFileSync(validatorPath, "// contract fixture\n");
+    }
     for (const [
       index,
       { text, baseText, basePreflight },
@@ -3271,6 +3291,7 @@ test("iOS preview evidence covers renamed records and blocks malformed changes",
       ...recordDefinitions.flatMap(({ basePreflight }, index) =>
         basePreflight === undefined ? [] : [basePreflightPaths[index]],
       ),
+      ...(!missingValidator ? [validatorPath] : []),
     ];
     git(["add", ...baseFiles]);
     git(["commit", "--quiet", "-m", "base iOS preview record"]);
@@ -3319,10 +3340,11 @@ test("iOS preview evidence covers renamed records and blocks malformed changes",
       encoding: "utf8",
     }).stdout.trim();
 
+    const checkerInvokedPath = path.join(fixtureRoot, "checker-invoked");
     writeStub(
       binDirectory,
       "pnpm",
-      'set -euo pipefail\nshift 3\nexec bash "$IOS_PREVIEW_CHECKER" "$@"',
+      `set -euo pipefail\ntouch ${shellQuote(checkerInvokedPath)}\nshift 3\nexec bash "$IOS_PREVIEW_CHECKER" "$@"`,
     );
     mkdirSync(path.join(fixtureRoot, "scripts"), { recursive: true });
     writeFileSync(
@@ -3367,6 +3389,7 @@ test("iOS preview evidence covers renamed records and blocks malformed changes",
         path.relative(fixtureRoot, record),
       ),
       summary: readFileSync(summaryPath, "utf8"),
+      checkerInvoked: existsSync(checkerInvokedPath),
     };
   }
 
@@ -3401,6 +3424,48 @@ test("iOS preview evidence covers renamed records and blocks malformed changes",
 | Expo Go launch on physical iPhone | BLOCKED | No physical phone was available. |
 | Server-side native request evidence | BLOCKED | No native request was available. |
 `;
+  const missingValidator = runIosPreviewJob("missing-validator", {
+    recordText: blockedRecord,
+    baseRecordText: blockedRecord,
+    renameRecord: true,
+    missingValidator: true,
+  });
+  const missingValidatorFailure = [
+    missingValidator.result.stdout,
+    missingValidator.result.stderr,
+  ].join("\n");
+  const fixedValidatorDependencyMessage =
+    "The iOS preview evidence check is missing its delegated validator dependency boundary: artifacts/chat-app/scripts/validate-preview-startup.mjs is not present in the checked-out commit. Restore that validator before changing the evidence record.";
+  assert.notEqual(
+    missingValidator.result.status,
+    0,
+    "a changed iOS record must fail when its delegated validator is missing",
+  );
+  assert.match(
+    missingValidator.summary,
+    new RegExp(
+      fixedValidatorDependencyMessage.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
+    ),
+    "the iOS summary must explain the missing delegated validator dependency",
+  );
+  assert.match(
+    missingValidatorFailure,
+    new RegExp(
+      fixedValidatorDependencyMessage.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
+    ),
+    "the missing delegated iOS validator diagnostic must be surfaced by the job",
+  );
+  assert.equal(
+    missingValidator.checkerInvoked,
+    false,
+    "the iOS job must report the missing delegated validator before invoking the checker",
+  );
+  assert.doesNotMatch(
+    missingValidatorFailure,
+    /Workspace curl returned HTTP 200|No physical phone was available/,
+    "the missing delegated iOS validator diagnostic must not expose evidence text",
+  );
+
   const blocked = runIosPreviewJob("blocked", {
     recordText: blockedRecord,
     baseRecordText: blockedRecord,

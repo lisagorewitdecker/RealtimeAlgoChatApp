@@ -436,6 +436,14 @@ jobs:
             echo "- Changed records checked: **${#changed_records[@]}**"
           } >> "$GITHUB_STEP_SUMMARY"
 
+          validator_directory="artifacts/chat-app/scripts"
+          validator_file="validate-preview-startup.mjs"
+          validator_path="${validator_directory}/${validator_file}"
+          validator_failure_reason=""
+          if [[ ! -f "$validator_path" ]]; then
+            validator_failure_reason="- The iOS preview evidence check is missing its delegated validator dependency boundary: ${validator_path} is not present in the checked-out commit. Restore that validator before changing the evidence record."
+          fi
+
           overall_status=0
           for record_path in "${changed_records[@]}"; do
             record_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/blob/${GITHUB_SHA}/${record_path}"
@@ -454,6 +462,9 @@ jobs:
             if [[ ! -f "$record_path" ]]; then
               validation_status=1
               reasons="- The changed iOS preview validation record is missing from the checked-out commit."
+            elif [[ -n "$validator_failure_reason" ]]; then
+              validation_status=1
+              reasons="$validator_failure_reason"
             else
               record_result="$(
                 sed -nE 's/^\*\*Result:[[:space:]]*(PASS|BLOCKED|FAIL).*/\1/p' "$record_path" |
