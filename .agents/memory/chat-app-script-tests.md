@@ -20,3 +20,9 @@ actual package validation pipeline.
 **How to apply:** When a test invokes a package script that itself runs
 `node --test`, clone the environment, delete `NODE_TEST_CONTEXT`, and strip any
 test-only controls from unrelated fixture subprocesses.
+
+The same applies to shell runs from an agent session: `NODE_TEST_CONTEXT= node --test …`
+(empty assignment) still counts as "present" for Node 24, prints only the
+"run() is being called recursively" warning, runs zero tests, and exits 0. Use
+`env -u NODE_TEST_CONTEXT node --test …` and treat a run without an `ℹ tests N`
+line as not having run at all.

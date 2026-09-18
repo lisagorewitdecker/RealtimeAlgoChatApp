@@ -88,9 +88,11 @@ published build is not a substitute.
    `artifacts/chat-app/.expo/devices.json` as launch evidence either: Expo Go
    57 on iOS sends no `expo-dev-client-id` header, so it stays empty even
    after the bundle was downloaded. The redacted Metro request log above is
-   the server-side marker; `DEBUG=Metro:InspectorProxy` in the development
-   environment additionally shows the Expo Go device connection and its close
-   code in the workflow log (see the Expo Go gotcha in `replit.md`).
+   the server-side marker; the Expo Go device connection and its close code
+   only appear in the workflow log while `DEBUG=Metro:InspectorProxy` is
+   active. Run the launch-evidence probe below instead of editing environment
+   variables: it enables both diagnostics for exactly one managed restart and
+   classifies the outcome (see the Expo Go gotcha in `replit.md`).
 
    Replit iPhone simulator, 2026-09-17 (SDK 57, Expo Go 57.0.5, dev server
    signed in, `dev_server_sign_in=SIGNED_IN`): the public manifest was
@@ -132,6 +134,70 @@ phone. The server-side native request row is the separate proof that the
 iPhone made the request. A public-edge `FAIL` means the phone handoff should
 not start; it is not a substitute for, or evidence of, a missing phone
 session.
+
+### Expo Go iOS launch-evidence probe
+
+The preview-startup preflight cannot tell whether Expo Go ran the bundle: on
+2026-09-17 every check passed (including `dev_server_sign_in=SIGNED_IN`) while
+Expo Go on Replit's iPhone simulator downloaded the bundle and quit about 4 s
+later. `scripts/preview-launch-evidence.mjs` closes that gap without anyone
+touching the simulator, because the simulator's Expo Go re-fetches the bundle
+after every Metro restart. The `dev` script always starts Expo through the
+script's `--launch` mode; unarmed, that is a transparent pass-through.
+
+1. Arm one restart (optional budgets: `PREVIEW_LAUNCH_DEVICE_TIMEOUT_MS`,
+   default 90000, how long to wait for the Expo Go iOS inspector connection
+   after Metro is ready; `PREVIEW_LAUNCH_SETTLE_TIMEOUT_MS`, default 30000, how
+   long the connection must stay open after the bundle; both plain decimal
+   milliseconds up to five minutes):
+
+   ```sh
+   pnpm --filter @workspace/chat-app run probe:preview-launch -- --arm
+   ```
+
+2. Restart the `artifacts/chat-app: expo` workflow once. That start consumes
+   the marker (`.expo/preview-launch-probe.armed`), runs Expo with
+   `EXPO_DEV_REQUEST_LOG=1` and `DEBUG=Metro:InspectorProxy` added for that
+   process only, mirrors the dev server output unchanged into the workflow
+   log, and prints `[preview-launch-probe]` lines when the outcome is known.
+   Later restarts run without the diagnostics; `--disarm` cancels an unused
+   marker.
+3. Read the result. The summary is in the workflow log and in
+   `.expo/preview-launch-evidence.json`; `--report` reprints it and exits 0
+   only for `RUNNING`. `--log-file <path>` classifies a saved workflow log the
+   same way.
+
+   ```sh
+   pnpm --filter @workspace/chat-app run probe:preview-launch -- --report
+   ```
+
+| `preview_launch_evidence` | Meaning | Handoff row |
+| --- | --- | --- |
+| `NO_DEVICE` | No `app=host.exp.Exponent` inspector connection within the device budget (Android Expo Go, DevTools, browser, and curl traffic do not count). Check the simulator is open on the preview and the manifest is signed in. | `Expo Go launch` = BLOCKED |
+| `BUNDLE_ONLY_THEN_CLOSED` | Expo Go iOS fetched the bundle (HTTP 200, `platform=ios client=Expo Go`), then the inspector connection closed abnormally (any code other than 1000/1001, e.g. 1006) with no `iOS  LOG` line or asset request in between: the app quit during startup. | `Expo Go launch` = FAIL, `Server-side native request evidence` = PASS |
+| `RUNNING` | The connection stayed open through the settle budget after the bundle and at least one iOS client log line or asset request followed, with no error-level client log. | `Expo Go launch` = PASS |
+| `INCONCLUSIVE` | Anything else; `reason=` names what was missing (normal close 1000/1001 = reload, close after app output, no bundle 200 in the window, error-level client logs, or no app output). Do not record a PASS. | Investigate first |
+
+The summary carries only statuses, counts, close codes, and seconds
+(`expo_go_ios_connections`, `ios_bundle_http_200`, `inspector_close_code`,
+`bundle_to_close_seconds`, `ios_client_log_lines`, `expo_go_asset_requests`,
+`ios_lines_before_bundle`, `request_log_lines`, `dev_server_exit`). It never
+contains a device name or id, host, URL, account, or session value, and the
+script never reads or echoes the dev script's `Logged in as` line; copy the
+summary lines into the record instead of quoting the workflow log. Only the
+latest Expo Go iOS session decides, so a relaunch after a crash is classified
+on its own, and only client logs and asset requests logged *after* that
+session's bundle HTTP 200 count as app evidence: output from a still-running
+earlier bundle is reported as `ios_lines_before_bundle` and cannot turn a
+startup failure into `RUNNING`.
+
+If the simulator's app instance survives the restart instead of relaunching,
+the result is `INCONCLUSIVE` with "no iOS Expo Go bundle HTTP 200 was logged";
+arm again and reopen the preview (or reload the app) during the device budget
+so a fresh bundle fetch is observed. Until the Expo Go 57 iOS startup crash
+follow-up lands, the expected result on the Replit iPhone simulator is
+`BUNDLE_ONLY_THEN_CLOSED`, and the probe must keep reporting it (non-zero
+exit) rather than passing.
 
 Run the focused checker before committing a timestamped record:
 

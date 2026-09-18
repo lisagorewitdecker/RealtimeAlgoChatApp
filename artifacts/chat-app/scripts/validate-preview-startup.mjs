@@ -5,13 +5,17 @@ import { resolve } from "node:path";
 import { spawn } from "node:child_process";
 import { setTimeout as delay } from "node:timers/promises";
 import { findDuplicateJsonObjectKeys } from "../../../scripts/find-duplicate-json-object-keys.mjs";
+import {
+  MAX_PREVIEW_TIMEOUT_MS,
+  READY_MARKERS,
+  parsePreviewTimeout,
+} from "./preview-startup-shared.mjs";
+
+export { MAX_PREVIEW_TIMEOUT_MS, READY_MARKERS, parsePreviewTimeout };
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 const DEFAULT_HANDOFF_TIMEOUT_MS = 60_000;
 const DEFAULT_PUBLIC_PREVIEW_TIMEOUT_MS = 15_000;
-// Five minutes is long enough for a cold CI preview while preventing a
-// misconfigured job from waiting indefinitely.
-export const MAX_PREVIEW_TIMEOUT_MS = 5 * 60_000;
 const STARTUP_FAILURE_GRACE_MS = 250;
 const MAX_STARTUP_DIAGNOSTIC_LENGTH = 512;
 const MAX_STARTUP_FAILURE_LINE_LENGTH = 320;
@@ -76,7 +80,6 @@ const DEV_SERVER_SIGN_IN_STATUSES = Object.freeze({
   signedIn: "SIGNED_IN",
   anonymous: "ANONYMOUS",
 });
-const READY_MARKERS = [/Starting Metro Bundler/i, /› Metro:/i];
 const STARTUP_FAILURES = [
   /error while loading shared libraries:/i,
   /cannot open shared object file/i,
@@ -925,24 +928,6 @@ async function findFreePort() {
       });
     });
   });
-}
-
-export function parsePreviewTimeout(name, value, defaultValue) {
-  if (value == null) return defaultValue;
-
-  const timeoutMs = Number(value);
-  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
-    throw new Error(
-      `${name} must be a positive finite number of milliseconds.`,
-    );
-  }
-  if (timeoutMs > MAX_PREVIEW_TIMEOUT_MS) {
-    throw new Error(
-      `${name} must be between 1 and ${MAX_PREVIEW_TIMEOUT_MS} milliseconds.`,
-    );
-  }
-
-  return timeoutMs;
 }
 
 export function parsePreviewTimeouts(environment = process.env) {

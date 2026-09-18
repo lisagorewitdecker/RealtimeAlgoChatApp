@@ -32,17 +32,15 @@ Expo Go to verify account match"), not in `extra.scopeKey` — the scope key sta
 never key a sign-in check on it. Diagnostic order: manifest with no `extra.expoGo.username` = the sign-in step is missing or
 failed (look for `Logged in as …` in the workflow log, restart the Expo workflow); the preview-startup validator fails on an
 anonymous manifest whenever the session secret is set. `artifacts/chat-app/.expo/devices.json` is NOT evidence: Expo Go 57 iOS
-sends no `expo-dev-client-id`, so it stays empty even when the app is downloaded (verified 2026-09-17). To see whether Expo Go
-reached Metro, set `EXPO_DEV_REQUEST_LOG=1` (writes the redacted `.expo/dev-request-evidence.log`; `platform=ios client=Expo
-Go` rows) and `DEBUG=Metro:InspectorProxy,expo:start:server:middleware:manifest` in the development environment and restart
-Expo: the simulator's Expo Go re-fetches the bundle after every Metro restart, so the workflow log shows `Got new device
-connection … app=host.exp.Exponent` and `iOS Bundled` without any user action. Remove both variables afterwards (they land in
-`.replit` `[userenv.development]`).
+sends no `expo-dev-client-id`, so it stays empty even when the app is downloaded. Whether Expo Go reached Metro and ran the
+bundle is only visible in the dev server's own output (see [Expo inspector observability](expo-inspector-observability.md));
+the Chat App ships a one-shot launch-evidence probe for that, and the simulator's Expo Go re-fetches the bundle after every
+Metro restart, so the probe needs no user action.
 
-**Observed 2026-09-17 (iPhone simulator, sign-in fixed):** manifest accepted → bundle 200 (~16 MB) → inspector connection
-closed with code 1006 ~4 s later, no `iOS LOG`, asset, lazy-bundle, or API request, simulator back on the iOS home screen.
-That is Expo Go quitting while starting the app (a startup crash in Expo Go 57 iOS, follow-up task), not a sign-in or
-launch-routing problem — do not spend more time on the login step for that symptom.
+**Startup-crash signature (sign-in already fixed):** manifest accepted → bundle 200 → inspector connection closed with an
+abnormal code (1006) a few seconds later, no `iOS LOG`, asset, lazy-bundle, or API request, simulator back on the iOS home
+screen. That is Expo Go quitting while starting the app, not a sign-in or launch-routing problem — do not spend more time on
+the login step for that symptom.
 
 ## Native secure storage failures never show up in the web preview
 `expo-secure-store` accepts only `[\w.-]` key names while web localStorage accepts anything, so a storage-key bug reaches

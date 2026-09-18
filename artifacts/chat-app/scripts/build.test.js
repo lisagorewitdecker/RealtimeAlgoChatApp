@@ -241,6 +241,12 @@ test("development entrypoint signs Expo CLI in from the managed session before s
     /mkdir -p "\$\{__UNSAFE_EXPO_HOME_DIRECTORY:-\$HOME\/\.expo\}" && pnpm exec create-launch login/,
   );
   assert.match(start, /pnpm exec expo start --localhost --port \$PORT$/);
+  // Expo starts through the launch-evidence launcher so an armed probe can
+  // instrument exactly one managed restart; unarmed it is a pass-through.
+  assert.match(
+    start,
+    / node scripts\/preview-launch-evidence\.mjs --launch -- pnpm exec expo start --localhost --port \$PORT$/,
+  );
   assert.equal(
     packageJson.devDependencies["create-launch"],
     "0.3.6",

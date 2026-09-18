@@ -111,6 +111,9 @@ if [[ "\${1:-}" == "simctl" && "\${2:-}" == "list" ]]; then
     printf '    iPhone 14 (00000000-0000-0000-0000-000000000000) (Booted)\n'
   elif [[ "\${IOS_DEVICE_MODE:-ready}" == "ready" ]]; then
     printf '    iPhone SE (3rd generation) (ABCDEF12-3456-7890-ABCD-EF1234567890) (Booted)\n'
+  elif [[ "\${IOS_DEVICE_MODE:-ready}" == "padded" ]]; then
+    # Real simctl output pads device rows with trailing spaces.
+    printf '    iPhone SE (3rd generation) (ABCDEF12-3456-7890-ABCD-EF1234567890) (Booted)   \n'
   fi
   exit 0
 fi
@@ -268,6 +271,25 @@ assert_contains \
   "$wrong_device_output" \
   "A booted iPhone SE (3rd generation) is required on the iOS runner."
 assert_not_contains "$wrong_device_output" "ios-app-id-secret-sentinel"
+
+padded_device_output="$(
+  run_case padded-device 0 "$ready_path" \
+    GITHUB_STEP_SUMMARY="$test_root/padded-device-summary.md" \
+    IOS_DEVICE_MODE=padded \
+    IOS_CANDIDATE_MODE=installed \
+    IOS_APP_CONTAINER="$candidate_container" \
+    NATIVE_SMOKE_IOS_APP_ID=ios-app-id-secret-sentinel \
+    NATIVE_SMOKE_EMAIL=smoke-email-secret-sentinel \
+    NATIVE_SMOKE_PASSWORD=smoke-password-secret-sentinel \
+    SENTRY_AUTH_TOKEN=sentry-auth-token-secret-sentinel \
+    NATIVE_SMOKE_IOS_SENTRY_RELEASE=ios-sentry-release-secret-sentinel \
+    NATIVE_SMOKE_IOS_SENTRY_DIST=ios-sentry-dist-secret-sentinel \
+    NATIVE_SMOKE_IOS_BUILD_ID=ios-build-id-secret-sentinel
+)"
+assert_contains "$padded_device_output" "IOS_RELEASE_PREFLIGHT=READY"
+assert_not_contains \
+  "$padded_device_output" \
+  "A booted iPhone SE (3rd generation) is required on the iOS runner."
 
 missing_candidate_output="$(
   run_case missing-candidate 2 "$ready_path" \

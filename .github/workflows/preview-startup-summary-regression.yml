@@ -8,6 +8,7 @@ on:
       - .replit
       - artifacts/chat-app/package.json
       - artifacts/chat-app/scripts/preview-startup-runtime-library-fixture.mjs
+      - artifacts/chat-app/scripts/preview-startup-shared.mjs
       - artifacts/chat-app/scripts/validate-preview-startup.mjs
       - artifacts/chat-app/scripts/validate-preview-startup-runtime-diagnostic.test.mjs
   workflow_dispatch:

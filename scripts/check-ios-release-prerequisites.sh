@@ -124,7 +124,7 @@ if command -v xcrun >/dev/null 2>&1; then
     simulator_check_complete=1
     device_udid="$(
       sed -n \
-        's/^[[:space:]]*iPhone SE (3rd generation) (\([0-9A-F-]\{8,\}\)) (Booted)$/\1/p' \
+        's/^[[:space:]]*iPhone SE (3rd generation) (\([0-9A-F-]\{8,\}\)) (Booted)[[:space:]]*$/\1/p' \
         <<<"$booted_devices" |
         head -n 1
     )"

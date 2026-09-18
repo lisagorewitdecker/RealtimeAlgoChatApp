@@ -201,6 +201,12 @@ const scriptContracts = {
  * contract.
  */
 const releaseEvidenceReaderContracts = {
+  "artifacts/chat-app/scripts/preview-launch-evidence.mjs": {
+    name: "iOS launch-evidence probe records",
+    argument: "contents",
+    scannerCall: "findDuplicateJsonObjectKeys(contents)",
+    duplicateFailure: /Launch-evidence probe JSON contains duplicate fields \(\$\{fileName\}\)\./,
+  },
   "artifacts/chat-app/scripts/validate-branding.mjs": {
     name: "native branding metadata",
     argument: "source",
