@@ -211,9 +211,8 @@ function documentedCallerSecrets() {
   };
 }
 
-function assertMobileReleaseNodeVersions(releaseWorkflow, nodeRange) {
+function mobileReleaseNodeSetupEntries(releaseWorkflow) {
   const configuredJobs = [];
-  const diagnostics = [];
   for (const [jobId, job] of Object.entries(releaseWorkflow.jobs ?? {})) {
     if (jobId === "mobile-release-node-range") {
       continue;
@@ -222,6 +221,7 @@ function assertMobileReleaseNodeVersions(releaseWorkflow, nodeRange) {
       if (String(step.uses ?? "").startsWith("actions/setup-node@")) {
         configuredJobs.push({
           jobId,
+          step,
           configuredVersion: resolveWorkflowEnvExpression(
             step.with?.["node-version"],
             releaseWorkflow.env,
@@ -232,6 +232,12 @@ function assertMobileReleaseNodeVersions(releaseWorkflow, nodeRange) {
       }
     }
   }
+  return configuredJobs;
+}
+
+function assertMobileReleaseNodeVersions(releaseWorkflow, nodeRange) {
+  const configuredJobs = mobileReleaseNodeSetupEntries(releaseWorkflow);
+  const diagnostics = [];
 
   assert.ok(
     configuredJobs.length > 0,
@@ -496,25 +502,22 @@ test("invalid Node range guard blocks release jobs before setup or publish work"
 test("out-of-range mobile release Node diagnostics identify every job and version", () => {
   const fixture = structuredClone(workflow);
   const nodeRange = rootPackage.engines.node;
-  const mismatches = [
-    ["native-ios", "23"],
-    ["native-android", "22"],
-  ];
-  for (const [jobId, configuredVersion] of mismatches) {
-    const setupNodeStep = fixture.jobs[jobId].steps.find((step) =>
-      String(step.uses ?? "").startsWith("actions/setup-node@"),
-    );
-    assert.ok(
-      setupNodeStep,
-      `${jobId} fixture must configure Node with actions/setup-node`,
-    );
-    setupNodeStep.with["node-version"] = configuredVersion;
+  const configuredJobs = mobileReleaseNodeSetupEntries(fixture);
+  const configuredVersion = "23";
+
+  assert.ok(
+    configuredJobs.length > 0,
+    "the mobile release fixture must have concrete Node entry points",
+  );
+  for (const { step } of configuredJobs) {
+    step.with ??= {};
+    step.with["node-version"] = configuredVersion;
   }
 
   assert.throws(
     () => assertMobileReleaseNodeVersions(fixture, nodeRange),
     (error) => {
-      for (const [jobId, configuredVersion] of mismatches) {
+      for (const { jobId } of configuredJobs) {
         assert.ok(
           error.message.includes(`mobile-release job "${jobId}"`),
           `the failure must identify the mobile release job ${jobId}`,
@@ -538,26 +541,22 @@ test("out-of-range mobile release Node diagnostics identify every job and versio
 test("malformed mobile release Node versions identify the affected job and required format", () => {
   const fixture = structuredClone(workflow);
   const nodeRange = rootPackage.engines.node;
-  const malformedValues = [
-    ["native-ios", "24."],
-    ["native-android", "lts"],
-  ];
+  const configuredJobs = mobileReleaseNodeSetupEntries(fixture);
+  const malformedVersion = "lts";
 
-  for (const [jobId, configuredVersion] of malformedValues) {
-    const setupNodeStep = fixture.jobs[jobId].steps.find((step) =>
-      String(step.uses ?? "").startsWith("actions/setup-node@"),
-    );
-    assert.ok(
-      setupNodeStep,
-      `${jobId} fixture must configure Node with actions/setup-node`,
-    );
-    setupNodeStep.with["node-version"] = configuredVersion;
+  assert.ok(
+    configuredJobs.length > 0,
+    "the mobile release fixture must have concrete Node entry points",
+  );
+  for (const { step } of configuredJobs) {
+    step.with ??= {};
+    step.with["node-version"] = malformedVersion;
   }
 
   assert.throws(
     () => assertMobileReleaseNodeVersions(fixture, nodeRange),
     (error) => {
-      for (const [jobId, configuredVersion] of malformedValues) {
+      for (const { jobId } of configuredJobs) {
         assert.ok(
           error.message.includes(`mobile-release job "${jobId}"`),
           `the failure must identify the mobile release job ${jobId}`,
@@ -566,11 +565,11 @@ test("malformed mobile release Node versions identify the affected job and requi
           error.message.includes(
             "must be a concrete Node major/minor/patch version",
           ),
-          "the failure must explain the required concrete Node version format",
+          `the failure for ${jobId} must explain the required concrete Node version format`,
         );
         assert.ok(
-          error.message.includes(JSON.stringify(configuredVersion)),
-          `the failure must identify the malformed Node version ${JSON.stringify(configuredVersion)}`,
+          error.message.includes(JSON.stringify(malformedVersion)),
+          `the failure must identify the malformed Node version ${JSON.stringify(malformedVersion)}`,
         );
       }
       return true;
