@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import {
   appendFileSync,
   copyFileSync,
@@ -87,10 +87,7 @@ function resolveApiSpecPackageScript(command) {
 }
 
 test("API codegen workflow runs after pushes to development", () => {
-  assert.ok(
-    pushTrigger,
-    "the API codegen workflow must define a push trigger",
-  );
+  assert.ok(pushTrigger, "the API codegen workflow must define a push trigger");
   assert.deepEqual(
     pushTrigger.branches,
     ["development"],
@@ -143,6 +140,62 @@ test("API compatibility receives the current pull request description", () => {
     compatibilityStep.env?.API_BREAKING_CHANGE_PR_BODY,
     "${{ github.event.pull_request.body }}",
     "the compatibility command must receive the current pull request body so description edits refresh its decision",
+  );
+});
+
+test("post-merge compatibility skips safely without pull request metadata", () => {
+  assert.ok(
+    compatibilityStep,
+    "expected the API codegen workflow to contain the compatibility step",
+  );
+
+  const childEnv = {
+    ...process.env,
+    GITHUB_EVENT_NAME: "push",
+  };
+  for (const key of [
+    "API_BREAKING_CHANGE_JUSTIFICATION",
+    "API_BREAKING_CHANGE_MIGRATION_PLAN",
+    "API_BREAKING_CHANGE_PR_BODY",
+    "GITHUB_STEP_SUMMARY",
+  ]) {
+    delete childEnv[key];
+  }
+
+  const result = spawnSync(
+    process.execPath,
+    [
+      path.join(
+        workspaceRoot,
+        "lib/api-spec/scripts/check-contract-compatibility.mjs",
+      ),
+      "--baseline-file",
+      "/missing/api-baseline.yaml",
+      "--current-file",
+      "/missing/api-current.yaml",
+    ],
+    {
+      cwd: workspaceRoot,
+      encoding: "utf8",
+      env: childEnv,
+    },
+  );
+  const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
+
+  assert.equal(
+    result.status,
+    0,
+    [
+      "push compatibility validation must remain successful without pull request metadata",
+      output,
+    ]
+      .filter(Boolean)
+      .join("\n"),
+  );
+  assert.match(
+    output,
+    /API contract compatibility enforcement is skipped on push events because breaking changes are reviewed and enforced on the pull request before merge\./,
+    "push compatibility validation must explain that pull request enforcement already happened before merge",
   );
 });
 
