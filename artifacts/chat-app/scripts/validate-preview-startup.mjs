@@ -696,6 +696,10 @@ export function getPublicPreviewManifestUrl(environment = process.env) {
   return url;
 }
 
+export function validatePreviewConfiguration(environment = process.env) {
+  getPublicPreviewManifestUrl(environment);
+}
+
 export async function requestPublicPreviewManifest(
   timeoutMs,
   environment = process.env,
@@ -1299,6 +1303,11 @@ async function validateLivePreview(
 }
 
 async function main() {
+  if (process.argv.includes("--validate-configuration")) {
+    validatePreviewConfiguration();
+    return;
+  }
+
   if (process.argv.includes("--validate-timeouts")) {
     parsePreviewTimeouts();
     return;

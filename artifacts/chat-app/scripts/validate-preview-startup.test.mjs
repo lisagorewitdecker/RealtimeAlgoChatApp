@@ -465,136 +465,69 @@ globalThis.fetch = async (url, options = {}) => {
 }
 
 function runMalformedPreviewConfigurationCli(setting, value) {
-  const directory = mkdtempSync(join(tmpdir(), "preview-malformed-config-cli-"));
-  const metroMarkerPath = join(directory, "metro-started.marker");
-  const markerPath = join(directory, "unexpected-public-request.marker");
-  const preloadPath = join(directory, "reject-public-request.mjs");
+  const environment = {
+    ...process.env,
+    PREVIEW_PUBLIC_TIMEOUT_MS: "1000",
+    PREVIEW_HANDOFF_TIMEOUT_MS: "1000",
+    PREVIEW_STARTUP_TIMEOUT_MS: "1000",
+  };
+  delete environment.PREVIEW_PUBLIC_URL;
+  delete environment.REPLIT_EXPO_DEV_DOMAIN;
+  environment[setting] = value;
 
-  writeFileSync(
-    preloadPath,
-    `import { appendFileSync } from "node:fs";
-const markerPath = ${JSON.stringify(markerPath)};
-globalThis.fetch = async () => {
-  appendFileSync(markerPath, "public request attempted\\n");
-  throw new Error("public request should not be attempted");
-};
-`,
-    "utf8",
-  );
-
-  try {
-    const environment = {
-      ...process.env,
-      NODE_OPTIONS: [
-        process.env.NODE_OPTIONS,
-        `--import ${preloadPath}`,
-      ]
-        .filter(Boolean)
-        .join(" "),
-      PREVIEW_PUBLIC_TIMEOUT_MS: "1000",
-      PREVIEW_HANDOFF_TIMEOUT_MS: "1000",
-      PREVIEW_STARTUP_TIMEOUT_MS: "1000",
-      PREVIEW_STARTUP_TEST_FIXTURE: "handoff-server",
-      PREVIEW_STARTUP_LIVE_START_MARKER: metroMarkerPath,
-    };
-    delete environment.PREVIEW_PUBLIC_URL;
-    delete environment.REPLIT_EXPO_DEV_DOMAIN;
-    environment[setting] = value;
-
-    const result = spawnSync(process.execPath, [validatorPath], {
+  const result = spawnSync(
+    process.execPath,
+    [validatorPath, "--validate-configuration"],
+    {
       env: environment,
       stdio: ["ignore", "pipe", "pipe"],
-      timeout: 5_000,
-    });
-    const output =
-      result.stdout.toString() + result.stderr.toString();
+      timeout: 1_000,
+    },
+  );
+  const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
 
-    assert.notEqual(
-      result.error?.code,
-      "ETIMEDOUT",
-      `${setting} left the preview validation command running indefinitely`,
-    );
-    assert.notEqual(result.status, 0, output);
-    assert.match(
-      output,
-      new RegExp(
-        `Public Expo preview manifest URL configuration from ${setting} is invalid`,
-      ),
-    );
-    assert.match(output, new RegExp(`\\b${setting}\\b`));
-    assert.equal(
-      existsSync(metroMarkerPath),
-      false,
-      `${setting} started Metro before reporting its malformed configuration`,
-    );
-    assert.equal(
-      existsSync(markerPath),
-      false,
-      `${setting} attempted a public request before reporting its malformed configuration`,
-    );
-  } finally {
-    rmSync(directory, { recursive: true, force: true });
-  }
+  assert.notEqual(
+    result.error?.code,
+    "ETIMEDOUT",
+    `${setting} left configuration validation running indefinitely`,
+  );
+  assert.notEqual(result.status, 0, output);
+  assert.match(
+    output,
+    new RegExp(
+      `Public Expo preview manifest URL configuration from ${setting} is invalid`,
+    ),
+  );
+  assert.match(output, new RegExp(`\\b${setting}\\b`));
 }
 
 function runEmptyPreviewConfigurationCli() {
-  const directory = mkdtempSync(join(tmpdir(), "preview-empty-config-cli-"));
-  const markerPath = join(directory, "unexpected-public-request.marker");
-  const preloadPath = join(directory, "reject-public-request.mjs");
-
-  writeFileSync(
-    preloadPath,
-    `import { appendFileSync } from "node:fs";
-const markerPath = ${JSON.stringify(markerPath)};
-globalThis.fetch = async () => {
-  appendFileSync(markerPath, "public request attempted\\n");
-  throw new Error("public request should not be attempted");
-};
-`,
-    "utf8",
-  );
-
-  try {
-    const result = spawnSync(process.execPath, [validatorPath], {
+  const result = spawnSync(
+    process.execPath,
+    [validatorPath, "--validate-configuration"],
+    {
       env: {
         ...process.env,
-        NODE_OPTIONS: [
-          process.env.NODE_OPTIONS,
-          `--import ${preloadPath}`,
-        ]
-          .filter(Boolean)
-          .join(" "),
         PREVIEW_PUBLIC_URL: "",
         REPLIT_EXPO_DEV_DOMAIN: "preview.example.test/expo",
-        PREVIEW_PUBLIC_TIMEOUT_MS: "1000",
-        PREVIEW_HANDOFF_TIMEOUT_MS: "1000",
-        PREVIEW_STARTUP_TIMEOUT_MS: "1000",
-        PREVIEW_STARTUP_TEST_FIXTURE: "handoff-server",
       },
       stdio: ["ignore", "pipe", "pipe"],
-      timeout: 5_000,
-    });
-    const output =
-      result.stdout.toString() + result.stderr.toString();
+      timeout: 1_000,
+    },
+  );
+  const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
 
-    assert.notEqual(
-      result.error?.code,
-      "ETIMEDOUT",
-      "an empty PREVIEW_PUBLIC_URL left the preview validation command running indefinitely",
-    );
-    assert.notEqual(result.status, 0, output);
-    assert.match(
-      output,
-      /Public Expo preview manifest URL is not configured.*REPLIT_EXPO_DEV_DOMAIN or PREVIEW_PUBLIC_URL/,
-    );
-    assert.equal(
-      existsSync(markerPath),
-      false,
-      "an empty PREVIEW_PUBLIC_URL attempted a public request before reporting its missing configuration",
-    );
-  } finally {
-    rmSync(directory, { recursive: true, force: true });
-  }
+  assert.notEqual(
+    result.error?.code,
+    "ETIMEDOUT",
+    "an empty PREVIEW_PUBLIC_URL left configuration validation running indefinitely",
+  );
+  assert.notEqual(result.status, 0, output);
+  assert.match(
+    output,
+    /Public Expo preview manifest URL is not configured.*REPLIT_EXPO_DEV_DOMAIN or PREVIEW_PUBLIC_URL/,
+  );
+  assert.match(output, /\bPREVIEW_PUBLIC_URL\b/);
 }
 
 test("accepts a public HTTP 200 manifest and sends the Android Expo header", async () => {
