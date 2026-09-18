@@ -61,13 +61,13 @@ jobs:
           fi
 
           if GITHUB_STEP_SUMMARY="$summary_path" \
-            PREVIEW_STARTUP_TEST_FIXTURE=missing-runtime-library \
+            PREVIEW_STARTUP_TEST_FIXTURE=missing-runtime-library-long-path \
             node artifacts/chat-app/scripts/validate-preview-startup.mjs > /tmp/preview-startup-failure.log 2>&1; then
-            echo "The missing-runtime-library preview startup scenario unexpectedly passed." >&2
+            echo "The missing-runtime-library-long-path preview startup scenario unexpectedly passed." >&2
             exit 1
           fi
 
-          expected_diagnosis="Expo preview startup error: Error: /opt/expo/react-native-devtools: error while loading shared libraries: libgtk-3.so.0: cannot open shared object file: No such file or directory"
+          expected_diagnosis="Expo preview startup error: Error: /opt/expo/react-native-devtools: error while loading shared libraries: /opt/expo/react-native-devtools-cache/react-native-devtools-cache/react-native-devtools-cache/react-native-devtools-cache/react-native-devtools-cache/react-native-devtools-cache/react-na (missing runtime library: /opt/expo/react-native-devtools-cache/react-native-devtools-cache/react-native-devtools-cache/react-native-devtools-cache/react-native-devtools-cache/react-native-devtools-cache…/libgtk-3.so.0)"
           if ! grep -Fq -- "### Expo preview startup" "$summary_path" ||
             ! grep -Fq -- "**Status:** FAIL" "$summary_path" ||
             ! grep -Fq -- "$expected_diagnosis" "$summary_path"; then
@@ -87,7 +87,7 @@ jobs:
 
           **Status:** FAIL
 
-          **Diagnosis:** Expo preview startup error: Error: /opt/expo/react-native-devtools: error while loading shared libraries: libgtk-3.so.0: cannot open shared object file: No such file or directory
+          **Diagnosis:** Expo preview startup error: Error: /opt/expo/react-native-devtools: error while loading shared libraries: /opt/expo/react-native-devtools-cache/react-native-devtools-cache/react-native-devtools-cache/react-native-devtools-cache/react-native-devtools-cache/react-native-devtools-cache/react-na (missing runtime library: /opt/expo/react-native-devtools-cache/react-native-devtools-cache/react-native-devtools-cache/react-native-devtools-cache/react-native-devtools-cache/react-native-devtools-cache…/libgtk-3.so.0)
 
           EOF
           if ! cmp -s "$summary_path" "$expected_summary_path"; then
