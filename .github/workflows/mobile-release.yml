@@ -375,6 +375,7 @@ jobs:
             record_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/blob/${record_revision}/${record_path}"
             record_result=""
             validation_output=""
+            screenshot_inspection_status=""
             validation_status=0
             reasons=""
             preflight_path=""
@@ -406,6 +407,11 @@ jobs:
                 validation_status=$?
                 reasons="$(printf '%s\n' "$validation_output" | sed -n '/^- /p')"
               fi
+              screenshot_inspection_status="$(
+                printf '%s\n' "$validation_output" |
+                  sed -nE 's/^Screenshot inspection status: (.*)$/\1/p' |
+                  tail -n 1
+              )"
             fi
 
             if ((validation_status != 0)); then
@@ -417,6 +423,7 @@ jobs:
             safe_record_path="$(sanitize_workflow_text "$record_path")"
             safe_record_url="$(sanitize_workflow_text "$record_url")"
             safe_reasons="$(sanitize_workflow_text "$reasons")"
+            safe_screenshot_inspection_status="$(sanitize_workflow_text "$screenshot_inspection_status")"
 
             {
               echo
@@ -434,6 +441,12 @@ jobs:
                 echo
                 echo "#### Missing-boundary reason"
                 printf '%s\n' "$safe_reasons"
+              fi
+              if [[ -n "$safe_screenshot_inspection_status" ]]; then
+                echo
+                echo "#### Screenshot inspection"
+                echo "- Status: \`${safe_screenshot_inspection_status}\`"
+                echo "- Review note: **Check the saved screenshot manually before approval; this status contains no image text or matched content.**"
               fi
             } >> "$GITHUB_STEP_SUMMARY"
 

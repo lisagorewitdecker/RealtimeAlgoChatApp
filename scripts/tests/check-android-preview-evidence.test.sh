@@ -488,6 +488,28 @@ sed -i \
   "$pass_record"
 pass_output="$(bash "$CHECKER" "$pass_record" "$pass_preflight" 2>&1)"
 assert_contains "$pass_output" "validation passed"
+assert_contains "$pass_output" \
+  "Screenshot inspection status: path=screenshots/preview-launch.png; metadata=COMPLETED; pixels=COMPLETED"
+assert_not_contains "$pass_output" "account identifiers, message content, tokens, and host details are absent"
+
+missing_ocr_bin="$TEST_PARENT/missing-ocr-bin"
+mkdir -p "$missing_ocr_bin"
+cat >"$missing_ocr_bin/tesseract" <<'EOF'
+#!/usr/bin/env bash
+exit 127
+EOF
+chmod +x "$missing_ocr_bin/tesseract"
+if missing_ocr_output="$(
+  PATH="$missing_ocr_bin:$PATH" bash "$CHECKER" "$pass_record" "$pass_preflight" 2>&1
+)"; then
+  printf 'PASS record unexpectedly passed without a working OCR runtime.\n' >&2
+  exit 1
+fi
+assert_contains "$missing_ocr_output" \
+  "Screenshot inspection status: path=screenshots/preview-launch.png; metadata=COMPLETED; pixels=NOT_COMPLETED"
+assert_contains "$missing_ocr_output" \
+  "The PASS record's screenshot pixel inspection could not run for screenshots/preview-launch.png."
+assert_not_contains "$missing_ocr_output" "preview-fixture"
 
 tampered_pass_preflight="$TEST_ROOT/pass-tampered-sidecar/android-preview-preflight.json"
 mkdir -p "$(dirname "$tampered_pass_preflight")"
@@ -507,6 +529,7 @@ sed \
   "$pass_record" >"$phone_error_record"
 phone_error_output="$(bash "$CHECKER" "$phone_error_record" 2>&1)"
 assert_contains "$phone_error_output" "validation passed"
+assert_not_contains "$phone_error_output" "Screenshot inspection status:"
 
 for field in "Device model" "Android version" "Expo Go version"; do
   for placeholder in TODO unknown none - placeholder pending blocked; do

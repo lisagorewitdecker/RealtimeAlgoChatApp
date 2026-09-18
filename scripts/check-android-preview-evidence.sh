@@ -20,6 +20,9 @@ if [[ -n "$PREFLIGHT_PATH" ]]; then
   PREFLIGHT_PATH_EXPLICIT=1
 fi
 FAILURES=()
+SCREENSHOT_INSPECTION_PATH=""
+SCREENSHOT_METADATA_INSPECTION_STATUS="NOT_RUN"
+SCREENSHOT_PIXEL_INSPECTION_STATUS="NOT_RUN"
 
 failure() {
   FAILURES+=("$1")
@@ -289,10 +292,15 @@ screenshot_contains_forbidden_text() {
   local image_path="$1"
   local pattern="$2"
   local ocr_text="$3"
+  local metadata_text
 
-  if strings -a -n 4 "$image_path" 2>/dev/null |
-    LC_ALL=C grep -Eiq -- "$pattern"; then
-    return 0
+  if metadata_text="$(strings -a -n 4 "$image_path" 2>/dev/null)"; then
+    SCREENSHOT_METADATA_INSPECTION_STATUS="COMPLETED"
+    if printf '%s\n' "$metadata_text" | LC_ALL=C grep -Eiq -- "$pattern"; then
+      return 0
+    fi
+  else
+    SCREENSHOT_METADATA_INSPECTION_STATUS="NOT_COMPLETED"
   fi
 
   printf '%s\n' "$ocr_text" |
@@ -304,11 +312,20 @@ validate_screenshot_redaction() {
   local screenshot_path="$2"
   local ocr_text
 
+  if strings -a -n 4 "$screenshot_file" >/dev/null 2>&1; then
+    SCREENSHOT_METADATA_INSPECTION_STATUS="COMPLETED"
+  else
+    SCREENSHOT_METADATA_INSPECTION_STATUS="NOT_COMPLETED"
+  fi
+
   if ! command -v tesseract >/dev/null 2>&1 ||
     ! ocr_text="$(tesseract "$screenshot_file" stdout --psm 11 -l eng 2>/dev/null)"; then
+    SCREENSHOT_PIXEL_INSPECTION_STATUS="NOT_COMPLETED"
     failure "The PASS record's screenshot pixel inspection could not run for ${screenshot_path}."
     return
   fi
+
+  SCREENSHOT_PIXEL_INSPECTION_STATUS="COMPLETED"
 
   if screenshot_contains_forbidden_text "$screenshot_file" \
     '[[:alnum:]][[:alnum:]._%+-]*@[[:alnum:].-]+\.[[:alpha:]]{2,}|(account|user(name)?|member|profile)[[:space:]_-]*(id|email|name)?[[:space:]]*[:=]' \
@@ -435,6 +452,7 @@ validate_pass_record() {
       ! is_supported_image_file "$screenshot_file"; then
       failure "The PASS record's redacted screenshot path must point to an existing non-empty supported image file."
     else
+      SCREENSHOT_INSPECTION_PATH="$screenshot_path"
       if [[ "$(boundary_status "Screenshot redaction review")" != "pass" ]]; then
         failure "PASS records with a screenshot require a separate Screenshot redaction review row marked PASS."
       fi
@@ -519,6 +537,13 @@ else
       failure "Evidence record has an unsupported result; use PASS or BLOCKED."
       ;;
   esac
+fi
+
+if [[ -n "$SCREENSHOT_INSPECTION_PATH" ]]; then
+  printf 'Screenshot inspection status: path=%s; metadata=%s; pixels=%s\n' \
+    "$SCREENSHOT_INSPECTION_PATH" \
+    "$SCREENSHOT_METADATA_INSPECTION_STATUS" \
+    "$SCREENSHOT_PIXEL_INSPECTION_STATUS"
 fi
 
 if ((${#FAILURES[@]})); then
