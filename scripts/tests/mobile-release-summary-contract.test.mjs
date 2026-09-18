@@ -837,6 +837,11 @@ test("native hosted release jobs skip cleanly when release configuration is abse
   assert.equal(configStep.id, "native-release-config");
   assert.equal(configStep.env.EAS_TOKEN, "${{ secrets.EAS_TOKEN }}");
   assert.equal(
+    configStep.env.GITHUB_EVENT_NAME,
+    "${{ github.event_name }}",
+    "native release configuration must distinguish optional manual dispatches from strict release events",
+  );
+  assert.equal(
     configStep.env.NATIVE_SMOKE_IOS_APP_ID,
     "${{ secrets.NATIVE_SMOKE_IOS_APP_ID }}",
   );
@@ -854,6 +859,22 @@ test("native hosted release jobs skip cleanly when release configuration is abse
     "${{ secrets.SENTRY_AUTH_TOKEN }}",
   );
   assert.equal(
+    configStep.env.NATIVE_SMOKE_IOS_SENTRY_RELEASE,
+    "${{ secrets.NATIVE_SMOKE_IOS_SENTRY_RELEASE }}",
+  );
+  assert.equal(
+    configStep.env.NATIVE_SMOKE_IOS_SENTRY_DIST,
+    "${{ secrets.NATIVE_SMOKE_IOS_SENTRY_DIST }}",
+  );
+  assert.equal(
+    configStep.env.NATIVE_SMOKE_ANDROID_SENTRY_RELEASE,
+    "${{ secrets.NATIVE_SMOKE_ANDROID_SENTRY_RELEASE }}",
+  );
+  assert.equal(
+    configStep.env.NATIVE_SMOKE_ANDROID_SENTRY_DIST,
+    "${{ secrets.NATIVE_SMOKE_ANDROID_SENTRY_DIST }}",
+  );
+  assert.equal(
     configStep.env.NATIVE_SMOKE_IOS_BUILD_ID,
     "${{ env.NATIVE_SMOKE_IOS_BUILD_ID }}",
   );
@@ -863,11 +884,16 @@ test("native hosted release jobs skip cleanly when release configuration is abse
   );
   assert.match(
     configStep.run,
-    /echo "ios_release_configured=true" >> "\$GITHUB_OUTPUT"/,
+    /echo "ios_release_configured=\$ios_release_configured" >> "\$GITHUB_OUTPUT"/,
   );
   assert.match(
     configStep.run,
-    /echo "android_release_configured=true" >> "\$GITHUB_OUTPUT"/,
+    /echo "android_release_configured=\$android_release_configured" >> "\$GITHUB_OUTPUT"/,
+  );
+  assert.match(
+    configStep.run,
+    /if \[\[ "\$\{GITHUB_EVENT_NAME:-\}" != "workflow_dispatch" && \( "\$ios_release_configured" != "true" \|\| "\$android_release_configured" != "true" \) \]\]; then/,
+    "strict tag and reusable-call runs must fail when native release configuration is incomplete",
   );
 
   const androidPreflight = workflow.jobs["android-prerequisite-preflight"];
