@@ -38,8 +38,9 @@ jobs:
         run: |
           set -euo pipefail
           summary_path="$(mktemp)"
+          setting_summary_path="$(mktemp)"
           healthy_log="$(mktemp)"
-          trap 'rm -f "$summary_path" "$healthy_log"' EXIT
+          trap 'rm -f "$summary_path" "$setting_summary_path" "$healthy_log"' EXIT
           resolved_commit_sha="$(git rev-parse --verify HEAD)"
 
           printf 'Starting Metro Bundler\n' > "$healthy_log"
@@ -102,6 +103,51 @@ jobs:
             exit 1
           fi
 
+          malformed_preview_setting="$(
+            printf '%s' 'aHR0cHM6Ly9bcHJldmlldy1zZXR0aW5nLXNlY3JldA==' | base64 --decode
+          )"
+          if GITHUB_STEP_SUMMARY="$setting_summary_path" \
+            PREVIEW_PUBLIC_URL="$malformed_preview_setting" \
+            REPLIT_EXPO_DEV_DOMAIN=fallback-preview.example.test \
+            PREVIEW_PUBLIC_TIMEOUT_MS=25 \
+            PREVIEW_STARTUP_TIMEOUT_MS=2000 \
+            PREVIEW_STARTUP_TEST_FIXTURE=handoff-server \
+            node artifacts/chat-app/scripts/validate-preview-startup.mjs > /tmp/preview-startup-setting-failure.log 2>&1; then
+            echo "The malformed PREVIEW_PUBLIC_URL preview startup scenario unexpectedly passed." >&2
+            exit 1
+          fi
+
+          expected_setting_diagnosis="Public Expo preview manifest URL configuration from PREVIEW_PUBLIC_URL is invalid. Set PREVIEW_PUBLIC_URL to a valid HTTPS URL before running the live preview handoff preflight."
+          if ! grep -Fq -- "### Expo preview startup" "$setting_summary_path" ||
+            ! grep -Fq -- "**Status:** FAIL" "$setting_summary_path" ||
+            ! grep -Fq -- "$expected_setting_diagnosis" "$setting_summary_path"; then
+            echo "The hosted summary did not retain the malformed preview-setting diagnosis." >&2
+            cat "$setting_summary_path" >&2
+            exit 1
+          fi
+          expected_setting_summary_path="$(mktemp)"
+          cat > "$expected_setting_summary_path" <<'EOF'
+          ### Expo preview startup
+
+          **Status:** FAIL
+
+          **Diagnosis:** Public Expo preview manifest URL configuration from PREVIEW_PUBLIC_URL is invalid. Set PREVIEW_PUBLIC_URL to a valid HTTPS URL before running the live preview handoff preflight.
+
+          EOF
+          if ! cmp -s "$setting_summary_path" "$expected_setting_summary_path"; then
+            echo "The malformed preview-setting summary contained output beyond the bounded diagnosis." >&2
+            diff -u "$expected_setting_summary_path" "$setting_summary_path" >&2 || true
+            rm -f "$expected_setting_summary_path"
+            exit 1
+          fi
+          rm -f "$expected_setting_summary_path"
+          if grep -Fq -- "$malformed_preview_setting" "$setting_summary_path" ||
+            grep -Eiq -- 'https?://|authorization|proxy-authorization|password|passwd|secret|token|credential' "$setting_summary_path"; then
+            echo "The malformed preview-setting summary contained private material." >&2
+            cat "$setting_summary_path" >&2
+            exit 1
+          fi
+
           {
             echo "## Reviewed preview startup revision"
             printf -- '- Checked ref: `%s`\n' "$REVIEWED_REF"
@@ -110,4 +156,6 @@ jobs:
             echo "## Preview startup summary regression"
             echo "- Healthy captured startup: **PASS** (success output retained; no failure section)"
             cat "$summary_path"
+            echo "- Malformed preview setting: **PASS** (configuration diagnosis retained; private material excluded)"
+            cat "$setting_summary_path"
           } >> "$GITHUB_STEP_SUMMARY"

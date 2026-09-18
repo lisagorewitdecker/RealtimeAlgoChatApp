@@ -713,6 +713,13 @@ test("CI summaries preserve direct preview-setting rejection reasons without val
         !summary.includes(previewValue.value),
         `${previewValue.name} leaked its configured value`,
       );
+      if (previewValue.name === "malformed selected setting") {
+        assert.doesNotMatch(
+          summary,
+          /https?:\/\/|authorization|proxy-authorization|password|passwd|secret|token/i,
+          `${previewValue.name} leaked credential-like text`,
+        );
+      }
     }
   } finally {
     rmSync(temporaryDirectory, { recursive: true, force: true });
