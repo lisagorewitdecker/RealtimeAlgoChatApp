@@ -36,6 +36,9 @@
  *      platform-specific blocking summary.
  *  11. A controlled hosted artifact outage recovers only after the retry
  *      succeeds, while a failed retry still blocks native evidence.
+ *  12. Native report artifacts use the maximum bounded retention window, and
+ *      an expired artifact download never leaves a dead report link in the
+ *      release summary.
  *
  * The static rules catch code paths no scenario exercises; the behavioral runs
  * inject sentinel values for every secret-backed variable and prove the real
@@ -4561,6 +4564,46 @@ test("workflow summaries show candidate build IDs without exposing private value
   }
 });
 
+test("native branding summaries keep a durable report snapshot after artifact removal", () => {
+  const summaryStep = summarySteps.find(
+    ({ step }) => step.run === "scripts/summarize-native-branding.sh ios",
+  );
+  assert.ok(summaryStep, "the iOS native branding summary step must exist");
+
+  const resultsDir = path.join(testRoot, "durable-branding-snapshot");
+  addBrandingEvidenceFixtures(resultsDir, "ios");
+  const { summary } = runSummaryStep(summaryStep, {
+    name: "durable-branding-snapshot",
+    resultsDir,
+    outcome: "success",
+  });
+
+  assert.match(
+    summary,
+    /Archived report snapshot: \[available in this summary\]\(#archived-native-branding-report-snapshot\)/,
+    "the native summary must expose a durable in-summary report location",
+  );
+  assert.match(
+    summary,
+    /### Archived native branding report snapshot[\s\S]*Candidate build fingerprint \(SHA-256\)/,
+    "the durable snapshot must contain the bounded branding result",
+  );
+  assert.match(
+    summary,
+    /Detailed report: preserved in this release summary; the artifact copy is linked above while retained\./,
+    "the durable snapshot must not depend on the artifact link",
+  );
+
+  // Historical step summaries are immutable after publication. Removing the
+  // source fixture models the later artifact-retention expiry boundary.
+  rmSync(resultsDir, { recursive: true, force: true });
+  assert.match(
+    summary,
+    /### Archived native branding report snapshot[\s\S]*Candidate build fingerprint \(SHA-256\)/,
+    "the already-published summary must remain reviewable after artifact removal",
+  );
+});
+
 test("native evidence summaries link only the fixed uploaded report", () => {
   const evidenceRoot = path.join(testRoot, "evidence-link-safety");
   mkdirSync(evidenceRoot, { recursive: true });
@@ -5437,6 +5480,82 @@ test("partial native reruns keep each platform linked to its own artifact", () =
     [...rerunSummary.matchAll(/\[native-branding-check\.md\]\(/g)].length,
     2,
     "the rerun summary should record exactly one fixed report link per platform",
+  );
+});
+
+test("expired native report artifacts are detected before a report link is published", () => {
+  for (const platform of ["ios", "android"]) {
+    const upload = workflow.jobs[`native-${platform}`].steps.find(
+      (step) => step.id === `upload-${platform}-native-smoke`,
+    );
+    assert.equal(
+      upload?.with?.["retention-days"],
+      90,
+      `${platform}: native report artifacts must use the maximum bounded retention window`,
+    );
+  }
+
+  const evidenceRoot = path.join(testRoot, "expired-native-report");
+  for (const platform of ["ios", "android"]) {
+    const runDir = path.join(evidenceRoot, platform, "expired-run");
+    mkdirSync(runDir, { recursive: true });
+    writeFileSync(
+      path.join(runDir, brandingReportFile),
+      "# Native branding validation\n\n- Status: **PASS**\n",
+    );
+  }
+
+  const summaryPath = path.join(
+    testRoot,
+    "expired-native-report-summary.md",
+  );
+  const iosArtifactUrl =
+    "https://github.example/example/chat-app/actions/runs/123/artifacts/456";
+  const androidArtifactUrl =
+    "https://github.example/example/chat-app/actions/runs/123/artifacts/789";
+  const result = spawnSync(
+    bashPath,
+    [
+      path.join(workspaceRoot, untrustedCheckerWrapperScript),
+      bashPath,
+      path.join(workspaceRoot, nativeEvidenceCheckerScript),
+      evidenceRoot,
+    ],
+    {
+      cwd: workspaceRoot,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        GITHUB_STEP_SUMMARY: summaryPath,
+        NATIVE_IOS_EVIDENCE_ARTIFACT_URL: iosArtifactUrl,
+        NATIVE_ANDROID_EVIDENCE_ARTIFACT_URL: androidArtifactUrl,
+        // GitHub reports an expired artifact as a failed download.
+        NATIVE_IOS_EVIDENCE_DOWNLOAD_RESULT: "failure",
+        NATIVE_ANDROID_EVIDENCE_DOWNLOAD_RESULT: "failure",
+      },
+    },
+  );
+  assert.notEqual(
+    result.status,
+    0,
+    "expired native report artifacts must keep release review blocked",
+  );
+
+  const summary = readFileSync(summaryPath, "utf8");
+  assert.match(
+    summary,
+    /- Artifact link check: \*\*EXPIRED OR UNAVAILABLE\*\*/,
+    "an expired artifact must be identified as unavailable instead of linked",
+  );
+  assert.match(
+    summary,
+    /artifact may have expired/,
+    "the summary must tell reviewers that expiry is one possible cause",
+  );
+  assert.doesNotMatch(
+    summary,
+    /github\.example|actions\/runs\/123\/artifacts\/(?:456|789)/,
+    "an expired artifact URL must not remain in the release summary",
   );
 });
 

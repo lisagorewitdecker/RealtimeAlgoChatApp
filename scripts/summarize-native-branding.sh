@@ -57,10 +57,37 @@ sed_replacement="${REPORT_URL//\\/\\\\}"
 sed_replacement="${sed_replacement//&/\\&}"
 sed_replacement="${sed_replacement//|/\\|}"
 
+render_summary_source() {
+  sed "s|__NATIVE_BRANDING_REPORT_URL__|${sed_replacement}|g" "$SUMMARY_SOURCE"
+}
+
+write_archived_snapshot() {
+  echo "- Archived report snapshot: [available in this summary](#archived-native-branding-report-snapshot)"
+  echo
+  echo "### Archived native branding report snapshot"
+  echo
+
+  if [[ -s "$SUMMARY_SOURCE" ]]; then
+    # The concise branding fragment is safe for reviewer-visible output. Keep
+    # its result, fingerprint, and permission finding in the durable summary,
+    # but replace the expiring artifact link with a local snapshot note.
+    render_summary_source |
+      sed -e '1d' \
+        -e 's|^- Detailed report:.*|- Detailed report: preserved in this release summary; the artifact copy is linked above while retained.|'
+  else
+    echo "- Status: **FAIL**"
+    echo "$FALLBACK_BUILD_LINE"
+    echo "- Native label: \`Unavailable\`"
+    echo "- ${PERMISSION_LABEL}: **UNAVAILABLE** (native metadata was not inspected)"
+    echo "- Detailed report: preserved in this release summary; the artifact copy was not generated."
+  fi
+  echo
+}
+
 write_summary() {
   {
     if [[ -s "$SUMMARY_SOURCE" ]]; then
-      sed "s|__NATIVE_BRANDING_REPORT_URL__|${sed_replacement}|g" "$SUMMARY_SOURCE"
+      render_summary_source
     else
       echo "## ${PLATFORM_LABEL} native branding"
       echo
@@ -71,6 +98,8 @@ write_summary() {
       echo "- Detailed report: \`native-branding-check.md\` was not generated; open the [${ARTIFACT_NAME} output](${REPORT_URL}) to find the failing step"
       echo
     fi
+
+    write_archived_snapshot
 
     if [[ -z "$ARTIFACT_URL" ]]; then
       echo "The \`${ARTIFACT_NAME}\` artifact was not uploaded, so the report link above opens the workflow run instead of the artifact download."

@@ -1255,7 +1255,11 @@ jobs:
           name: native-large-text-ios
           path: test-results/native-large-text/ios/**
           if-no-files-found: warn
-          retention-days: 30
+          # Native report links are used for historical release review. Keep
+          # the fixed artifact through GitHub's maximum supported retention
+          # window; the release gate still downloads it before publishing a
+          # link so expired artifacts cannot be presented as available.
+          retention-days: 90
           overwrite: true
 
       - name: Summarize iOS native branding
@@ -1490,7 +1494,10 @@ jobs:
           name: native-large-text-android
           path: test-results/native-large-text/android/**
           if-no-files-found: warn
-          retention-days: 30
+          # Keep the fixed native report link through the full historical
+          # review window. The release gate verifies availability before
+          # carrying the link into its summary.
+          retention-days: 90
           overwrite: true
 
       - name: Summarize Android native branding

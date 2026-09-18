@@ -100,7 +100,7 @@ record_download_status() {
   fi
 
   SUMMARY_DOWNLOAD_STATUS["$platform"]="FAIL"
-  issue "$platform" "The ${label} native evidence artifact download did not complete. The downloaded ${label} evidence is unavailable; rerun the release gate after the artifact is available."
+  issue "$platform" "The ${label} native evidence artifact download did not complete. The artifact may have expired; the downloaded ${label} evidence is unavailable; rerun the release gate after the artifact is available."
 }
 
 trusted_digest_manifest() {
@@ -950,6 +950,9 @@ write_evidence_summary() {
       echo "- Status: **${status}**"
       if [[ -n "$download_status" ]]; then
         echo "- Artifact download: **${download_status}**"
+        if [[ "$download_status" == "FAIL" ]]; then
+          echo "- Artifact link check: **EXPIRED OR UNAVAILABLE**"
+        fi
       fi
       if [[ -n "$run_dir" ]]; then
         echo "- Validated run directory: \`${safe_run_dir}\`"
