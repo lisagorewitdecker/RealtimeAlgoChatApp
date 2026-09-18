@@ -2,7 +2,9 @@
 
 **Result: BLOCKED — the automated coverage passes at the current revision,
 but no iPhone or iOS simulator was reachable from this workspace, so the live
-system-setting behaviour was not observed on a device.**
+system-setting behaviour was not observed on a device. A tester report was
+received later the same day; it is recorded below but could not be tied to
+the reviewed revision and is not accepted as device evidence.**
 
 This check confirms that the Chat App's "Reduce transparency" preference
 follows the iOS system setting (Settings → Accessibility → Display & Text Size
@@ -69,6 +71,46 @@ device draws.
 | System Reduce Transparency on before launch → classic tab bar opaque, Profile toggle reads "Reduce transparency: on" | **BLOCKED** | No device |
 | Toggling the system setting while the app is in the foreground flips the bar between see-through and solid without a restart | **BLOCKED** | No device |
 | After setting the in-app toggle by hand, the system setting no longer affects the bar, and the in-app choice survives a relaunch | **BLOCKED** | No device |
+
+## Tester report received 2026-09-18 (not accepted as evidence)
+
+After the procedure below was sent to the project owner, a form reply came
+back with these values. They are reproduced as reported; nothing here was
+observed by the workspace.
+
+| Field | Tester report |
+| --- | --- |
+| Device | "iPhone 17 Max Pro" |
+| iOS version | Not reported |
+| App container | Development build (build ID and native revision not reported) |
+| Tab bar seen | "Not sure" (classic or Liquid Glass) |
+| Scenario 1 (system setting on before launch) | Skipped |
+| Scenario 2 (system setting flipped while in the foreground) | "Changed only after a delay, tab switch, or scroll" — which of the three was not stated |
+| Scenario 3 (in-app toggle overrides and survives relaunch) | Pass |
+| Screenshots | None attached |
+| Free-text notes | None |
+
+Why this report does not change the BLOCKED rows:
+
+- The reply arrived about two minutes after the three-scenario procedure was
+  sent. During that window the workspace's Metro server (started
+  `2026-09-18T20:37:35Z`, the only source of the reviewed revision's
+  JavaScript) logged no bundle request, and the development API server logged
+  no request from an app session. The JavaScript that ran on the phone
+  therefore cannot be tied to revision `eba59d1c…`; a development build that
+  was not attached to this workspace ran whatever bundle it already had.
+- No iOS version, build ID, screenshots, or bar type were recorded, so the
+  scenario 2 observation cannot be attributed. On the Liquid Glass bar, iOS
+  solidifies the glass itself while the system setting is on, which would
+  make an older JavaScript bundle look partially correct.
+- Scenario 1 was skipped, so the launch-time default was not observed at all.
+
+The scenario 2 observation ("changed only after a delay, tab switch, or
+scroll") is retained as an unconfirmed lead for the next device pass: if a
+run at the reviewed revision reproduces it on the classic bar, that is a
+defect in live event handling or repainting; if it only reproduces on the
+Liquid Glass bar, record how long the delay was and whether the change waited
+for a layout pass.
 
 ## Manual pass procedure
 
