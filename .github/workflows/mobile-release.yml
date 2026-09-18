@@ -8,6 +8,14 @@ on:
         required: true
         default: false
         type: boolean
+      native_smoke_ios_build_id:
+        description: EAS build ID of the iOS candidate to test
+        required: false
+        type: string
+      native_smoke_android_build_id:
+        description: EAS build ID of the Android candidate to test
+        required: false
+        type: string
       ios_review_candidate_build_id:
         description: Approved iOS candidate build ID (must match the tested build)
         required: false
