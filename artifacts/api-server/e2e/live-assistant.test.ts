@@ -85,6 +85,7 @@ let httpServer: HttpServer;
 let socketServer: ReturnType<typeof setupSocketIO>;
 let serverUrl: string;
 let client: ClientSocket;
+const additionalClients: ClientSocket[] = [];
 
 function waitForEvent<T>(
   socket: ClientSocket,
@@ -135,6 +136,14 @@ function connectSandboxClient(): Promise<ClientSocket> {
   });
 }
 
+async function connectAndJoinSandboxClient(): Promise<ClientSocket> {
+  const nextClient = await connectSandboxClient();
+  const joined = waitForEvent(nextClient, "room-joined");
+  nextClient.emit("join-room", { roomId, createIfMissing: false });
+  await joined;
+  return nextClient;
+}
+
 beforeAll(async () => {
   process.env["NODE_ENV"] = "test";
   process.env["SESSION_SECRET"] = "live-assistant-test-session-secret";
@@ -172,15 +181,12 @@ beforeAll(async () => {
   await new Promise<void>((resolve) => httpServer.once("listening", resolve));
   const { port } = httpServer.address() as AddressInfo;
   serverUrl = `http://127.0.0.1:${port}`;
-  client = await connectSandboxClient();
-
-  const joined = waitForEvent(client, "room-joined");
-  client.emit("join-room", { roomId, createIfMissing: false });
-  await joined;
+  client = await connectAndJoinSandboxClient();
 });
 
 afterAll(async () => {
   client?.close();
+  additionalClients.splice(0).forEach((additionalClient) => additionalClient.close());
   await new Promise((resolve) => setTimeout(resolve, 10));
   socketServer?.close();
   await new Promise<void>((resolve) => httpServer?.close(() => resolve()));
@@ -216,6 +222,69 @@ describe("live sandbox assistant integration", () => {
     expect(chunks.length).toBeGreaterThan(0);
     expect(chunks.every((chunk) => chunk.requestId === requestId)).toBe(true);
     expect(chunks.map((chunk) => chunk.text).join("").trim()).not.toBe("");
+    expect(mockSaveEncryptedMessage).not.toHaveBeenCalled();
+    expect(mockSaveEncryptedSandboxState).not.toHaveBeenCalled();
+    expect(mockSaveRoomEnvelope).not.toHaveBeenCalled();
+  });
+
+  it("cancels a provider-backed response without late chunks or completion", async () => {
+    const cancellationClient = await connectAndJoinSandboxClient();
+    additionalClients.push(cancellationClient);
+
+    const chunks: AssistantChunkEvent[] = [];
+    const doneEvents: AssistantDoneEvent[] = [];
+    const errors: AssistantErrorEvent[] = [];
+    cancellationClient.on("assistant-chunk", (event: AssistantChunkEvent) => {
+      chunks.push(event);
+    });
+    cancellationClient.on("assistant-done", (event: AssistantDoneEvent) => {
+      doneEvents.push(event);
+    });
+    cancellationClient.on("assistant-error", (event: AssistantErrorEvent) => {
+      errors.push(event);
+    });
+
+    const requestId = "live-assistant-cancel-request";
+    const firstChunk = waitForEvent<AssistantChunkEvent>(
+      cancellationClient,
+      "assistant-chunk",
+    );
+    const done = waitForEvent<AssistantDoneEvent>(
+      cancellationClient,
+      "assistant-done",
+    );
+
+    cancellationClient.emit("assistant-request", {
+      requestId,
+      roomId,
+      prompt:
+        "Begin a long explanation of practical CSS layout improvements for this sandbox and continue with many concrete suggestions.",
+      files: {
+        html: "<main>Live cancellation check</main>",
+        css: "main { color: black; }",
+        js: "",
+      },
+      disclosureAcknowledged: true,
+    });
+
+    await firstChunk;
+    cancellationClient.emit("assistant-cancel", { requestId, roomId });
+
+    await expect(done).resolves.toEqual({
+      requestId,
+      cancelled: true,
+    });
+
+    const chunksAtCancellation = chunks.length;
+    const doneEventsAtCancellation = doneEvents.length;
+    await new Promise((resolve) => setTimeout(resolve, 500));
+
+    expect(errors).toEqual([]);
+    expect(chunks.length).toBe(chunksAtCancellation);
+    expect(doneEvents.length).toBe(doneEventsAtCancellation);
+    expect(doneEvents).toEqual([{ requestId, cancelled: true }]);
+    expect(chunks.length).toBeGreaterThan(0);
+    expect(chunks.every((chunk) => chunk.requestId === requestId)).toBe(true);
     expect(mockSaveEncryptedMessage).not.toHaveBeenCalled();
     expect(mockSaveEncryptedSandboxState).not.toHaveBeenCalled();
     expect(mockSaveRoomEnvelope).not.toHaveBeenCalled();
