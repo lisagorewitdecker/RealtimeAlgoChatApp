@@ -508,10 +508,151 @@ jobs:
     if: ${{ github.event_name != 'pull_request' }}
     needs:
       - mobile-release-node-range
+    permissions:
+      actions: write
+      contents: read
     runs-on: ubuntu-latest
     steps:
       - name: Check out release candidate
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Upload controlled Android artifact for missing iOS scenario
+        shell: bash
+        run: |
+          set -euo pipefail
+          fixture_root="$RUNNER_TEMP/native-evidence-summary-download-fixture"
+          rm -rf -- "$fixture_root"
+          mkdir -p -- "$fixture_root/android"
+          printf 'controlled Android artifact\n' > "$fixture_root/android/controlled-marker.txt"
+
+      - name: Store controlled Android artifact for missing iOS scenario
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: native-evidence-summary-controlled-android
+          path: ${{ runner.temp }}/native-evidence-summary-download-fixture/android/**
+          if-no-files-found: error
+
+      - name: Download controlled missing iOS artifact
+        if: ${{ always() }}
+        continue-on-error: true
+        id: download-controlled-ios
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: native-evidence-summary-controlled-ios
+          path: ${{ runner.temp }}/native-evidence-summary-downloads/ios
+
+      - name: Download controlled Android artifact after iOS failure
+        if: ${{ always() }}
+        continue-on-error: true
+        id: download-controlled-android
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: native-evidence-summary-controlled-android
+          path: ${{ runner.temp }}/native-evidence-summary-downloads/android
+
+      - name: Run checker after controlled artifact outage
+        if: ${{ always() }}
+        continue-on-error: true
+        id: controlled-artifact-check
+        env:
+          REVIEWED_REF: ${{ github.ref }}
+          NATIVE_IOS_EVIDENCE_ARTIFACT_URL: ""
+          NATIVE_ANDROID_EVIDENCE_ARTIFACT_URL: ""
+          NATIVE_IOS_EVIDENCE_DOWNLOAD_RESULT: ${{ steps.download-controlled-ios.outcome }}
+          NATIVE_ANDROID_EVIDENCE_DOWNLOAD_RESULT: ${{ steps.download-controlled-android.outcome }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          controlled_summary_path="$RUNNER_TEMP/native-evidence-summary-controlled.md"
+          rm -f -- "$controlled_summary_path"
+          resolved_commit_sha="$(git rev-parse --verify HEAD)"
+
+          {
+            echo "## Reviewed release revision"
+            echo
+            printf -- '- Checked ref: `%s`\n' "$REVIEWED_REF"
+            printf -- '- Resolved commit SHA: `%s`\n' "$resolved_commit_sha"
+            echo
+            echo "## Controlled native artifact outage"
+            echo "- Scenario: iOS artifact missing; Android artifact available"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          GITHUB_STEP_SUMMARY="$controlled_summary_path" \
+            bash scripts/run-untrusted-checker.sh bash scripts/check-native-large-text-evidence.sh \
+            "$RUNNER_TEMP/native-evidence-summary-downloads"
+
+      - name: Confirm controlled outage blocks promotion and preserves both sections
+        if: ${{ always() }}
+        env:
+          CHECK_RESULT: ${{ steps.controlled-artifact-check.outcome }}
+          IOS_DOWNLOAD_RESULT: ${{ steps.download-controlled-ios.outcome }}
+          ANDROID_DOWNLOAD_RESULT: ${{ steps.download-controlled-android.outcome }}
+          CONTROLLED_SUMMARY_PATH: ${{ runner.temp }}/native-evidence-summary-controlled.md
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$IOS_DOWNLOAD_RESULT" != "failure" ]]; then
+            echo "The controlled iOS artifact download unexpectedly succeeded." >&2
+            exit 1
+          fi
+          if [[ "$ANDROID_DOWNLOAD_RESULT" != "success" ]]; then
+            echo "The Android download did not continue successfully after the iOS failure." >&2
+            exit 1
+          fi
+          if [[ "$CHECK_RESULT" != "failure" ]]; then
+            echo "The native evidence checker did not block the controlled outage." >&2
+            exit 1
+          fi
+
+          ios_section="$(
+            awk '
+              /^## iOS native large-text evidence$/ { collecting=1 }
+              /^## Android native large-text evidence$/ { collecting=0 }
+              collecting { print }
+            ' "$CONTROLLED_SUMMARY_PATH"
+          )"
+          android_section="$(
+            awk '
+              /^## Android native large-text evidence$/ { collecting=1 }
+              collecting { print }
+            ' "$CONTROLLED_SUMMARY_PATH"
+          )"
+
+          require_contains() {
+            local section="$1"
+            local expected="$2"
+            if ! grep -Fq -- "$expected" <<< "$section"; then
+              echo "Expected controlled outage summary to contain: $expected" >&2
+              exit 1
+            fi
+          }
+
+          require_not_contains() {
+            local section="$1"
+            local unexpected="$2"
+            if grep -Fq -- "$unexpected" <<< "$section"; then
+              echo "Controlled outage summary contained cross-platform detail: $unexpected" >&2
+              exit 1
+            fi
+          }
+
+          require_contains "$ios_section" "- Status: **FAIL**"
+          require_contains "$ios_section" "- Artifact download: **FAIL**"
+          require_contains "$ios_section" "Rerun the iOS native large-text job"
+          require_not_contains "$ios_section" "$RUNNER_TEMP/native-evidence-summary-downloads/android"
+
+          require_contains "$android_section" "- Status: **FAIL**"
+          require_contains "$android_section" "- Artifact download: **PASS**"
+          require_contains "$android_section" "No timestamped evidence run directory exists"
+          require_not_contains "$android_section" "$RUNNER_TEMP/native-evidence-summary-downloads/ios"
+
+          {
+            echo
+            echo "- Download continuation: **PASS** (Android completed after the iOS failure)"
+            echo "- Promotion blocker: **PASS** (checker returned failure)"
+            echo "- Recovery: **Rerun the failed native job or make its artifact available, then rerun the mobile release gate.**"
+            cat "$CONTROLLED_SUMMARY_PATH"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Verify blocked native evidence summary
         env:
