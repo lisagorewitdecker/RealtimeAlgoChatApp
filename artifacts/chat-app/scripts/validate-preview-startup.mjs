@@ -653,27 +653,29 @@ export async function requestPublicPreviewManifest(
     );
   }
 
-  let signedInDeveloper;
+  let manifest;
   try {
-    const manifest = JSON.parse(body);
-    if (
-      !manifest ||
-      typeof manifest !== "object" ||
-      typeof manifest.launchAsset?.url !== "string" ||
-      manifest.launchAsset.url.length === 0
-    ) {
-      throw new Error("manifest did not provide a launch asset URL");
-    }
-    signedInDeveloper = manifestHasSignedInDeveloper(manifest);
-  } catch (error) {
-    const detail =
-      error instanceof Error ? error.message : "manifest returned invalid JSON";
+    manifest = JSON.parse(body);
+  } catch {
     throw new Error(
-      `Public Expo preview manifest check failed: ${outcome}; ${detail}. ` +
+      `Public Expo preview manifest check failed: ${outcome}; manifest returned invalid JSON. ` +
         publicPreviewRecoveryMessage(),
     );
   }
 
+  if (
+    !manifest ||
+    typeof manifest !== "object" ||
+    typeof manifest.launchAsset?.url !== "string" ||
+    manifest.launchAsset.url.length === 0
+  ) {
+    throw new Error(
+      `Public Expo preview manifest check failed: ${outcome}; manifest did not provide a launch asset URL. ` +
+        publicPreviewRecoveryMessage(),
+    );
+  }
+
+  const signedInDeveloper = manifestHasSignedInDeveloper(manifest);
   return { outcome, signedInDeveloper };
 }
 

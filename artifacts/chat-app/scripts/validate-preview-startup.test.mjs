@@ -1436,7 +1436,10 @@ test("reports the malformed higher-precedence preview setting when both are conf
 });
 
 test("rejects malformed public manifests with actionable recovery guidance", async () => {
-  const fetchMock = mockFetch(new Response("{not-json", { status: 200 }));
+  const parserMarker = "preview-parser-marker-private";
+  const fetchMock = mockFetch(
+    new Response(`{"launchAsset":{"url":"${parserMarker}",`, { status: 200 }),
+  );
 
   try {
     await assert.rejects(
@@ -1448,7 +1451,12 @@ test("rejects malformed public manifests with actionable recovery guidance", asy
         );
         assert.match(
           error.message,
-          /invalid JSON|Unexpected token|Expected property name/i,
+          /manifest returned invalid JSON/,
+        );
+        assert.doesNotMatch(error.message, new RegExp(parserMarker));
+        assert.doesNotMatch(
+          error.message,
+          /Unexpected token|Expected property name|position/i,
         );
         assert.match(
           error.message,
@@ -1459,6 +1467,34 @@ test("rejects malformed public manifests with actionable recovery guidance", asy
     );
   } finally {
     fetchMock.restore();
+  }
+});
+
+test("rejects malformed preflight JSON with a fixed reason", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "malformed-preflight-"));
+  const outputPath = join(directory, "android-preview-preflight.json");
+  const parserMarker = "preflight-parser-marker-private";
+  writeFileSync(
+    outputPath,
+    `{"schema":"android-preview-handoff-preflight/v1","marker":"${parserMarker}",`,
+    "utf8",
+  );
+
+  try {
+    await assert.rejects(
+      () => readAndValidateHandoffPreflight(outputPath),
+      (error) => {
+        assert.equal(
+          error.message,
+          "Preview handoff preflight JSON is not valid JSON.",
+        );
+        assert.doesNotMatch(error.message, new RegExp(parserMarker));
+        assert.doesNotMatch(error.message, /Unexpected token|position/i);
+        return true;
+      },
+    );
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
   }
 });
 

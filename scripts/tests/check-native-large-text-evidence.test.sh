@@ -1054,6 +1054,29 @@ assert_contains "$parser_error_sentry_evidence_output" "completeness check FAILE
 assert_not_contains "$parser_error_sentry_evidence_output" "$parser_error_ios_marker"
 assert_not_contains "$parser_error_sentry_evidence_output" "$parser_error_android_marker"
 
+# Malformed JUnit/XML evidence must report only the fixed structural reason;
+# the checker does not parse XML, so a marker in the malformed body must not
+# become part of its diagnostic.
+parser_error_junit_root="$TEST_ROOT/parser-error-junit"
+write_valid_run "$parser_error_junit_root" ios
+write_valid_run "$parser_error_junit_root" android
+parser_error_maestro_marker='maestro-parser-marker-private'
+parser_error_sentry_maestro_marker='sentry-maestro-parser-marker-private'
+printf '<junit><failure>%s</failure></junit>\n' "$parser_error_maestro_marker" \
+  > "$parser_error_junit_root/ios/20260909T120000Z/maestro-results.xml"
+printf '<junit><failure>%s</failure></junit>\n' "$parser_error_sentry_maestro_marker" \
+  > "$parser_error_junit_root/android/20260909T120000Z/sentry-maestro-results.xml"
+if parser_error_junit_output="$(bash "$CHECKER" "$parser_error_junit_root" 2>&1)"; then
+  echo "parser-error JUnit evidence case unexpectedly passed" >&2
+  exit 1
+fi
+assert_contains "$parser_error_junit_output" \
+  "The JUnit result at $parser_error_junit_root/ios/20260909T120000Z/maestro-results.xml is not a recognizable testsuite report."
+assert_contains "$parser_error_junit_output" \
+  "The controlled Sentry probe JUnit result at $parser_error_junit_root/android/20260909T120000Z/sentry-maestro-results.xml is not a recognizable testsuite report."
+assert_not_contains "$parser_error_junit_output" "$parser_error_maestro_marker"
+assert_not_contains "$parser_error_junit_output" "$parser_error_sentry_maestro_marker"
+
 # A duplicate only silences the checks for that field; the remaining
 # single-declaration fields are still validated by value.
 partial_duplicate_root="$TEST_ROOT/partial-duplicate"

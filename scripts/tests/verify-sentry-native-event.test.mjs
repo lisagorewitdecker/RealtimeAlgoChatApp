@@ -276,6 +276,42 @@ test("accepts a redacted saved evidence file", async () => {
   assert.equal(evidence.eventId, "0123456789abcdef0123456789abcdef");
 });
 
+test("rejects malformed saved evidence with a fixed parser reason", async () => {
+  const tempDir = await mkdtemp(path.join(tmpdir(), "malformed-sentry-evidence-"));
+  const evidencePath = path.join(tempDir, "sentry-source-map-evidence.json");
+  const triggerPath = path.join(tempDir, "sentry-trigger.txt");
+  const parserMarker = "sentry-evidence-parser-marker-private";
+
+  await writeFile(
+    evidencePath,
+    `{"status":"PASS","marker":"${parserMarker}",`,
+  );
+  await writeFile(
+    triggerPath,
+    [
+      "platform=ios",
+      "candidate_build_id=build-ios",
+      "marker=run-1234-ios",
+    ].join("\n"),
+  );
+
+  assert.throws(
+    () =>
+      verifyNativeSentryEvidence({
+        evidencePath,
+        triggerPath,
+        expectedPlatform: expected.platform,
+        expectedBuildId: expected.candidateBuildId,
+      }),
+    (error) => {
+      assert.equal(error.message, "evidence is not valid JSON");
+      assert.doesNotMatch(error.message, new RegExp(parserMarker));
+      assert.doesNotMatch(error.message, /Unexpected token|position/i);
+      return true;
+    },
+  );
+});
+
 test("rejects duplicate trigger metadata fields", async () => {
   const tempDir = await mkdtemp(path.join(tmpdir(), "sentry-trigger-"));
   const evidencePath = path.join(tempDir, "sentry-source-map-evidence.json");
