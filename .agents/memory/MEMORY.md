@@ -54,7 +54,7 @@
 - [Mobile preview rename detection](ios-preview-rename-detection.md) — force Git rename detection and keep moved timestamped records paired with their sidecars.
 - [Room key hydration](room-key-hydration.md) — key-load promises must always settle; storage read failures become retryable load failures, never a hang or key replacement.
 - [Job summary untrusted text](job-summary-untrusted-text.md) — render PR-body text and contract findings in backtick-safe code spans in GitHub job summaries; never as raw Markdown.
-- [Task merges land on the checked-out branch](branch-divergence-from-task-merges.md) — the platform rebases then squashes; consolidate in a worktree, then `merge -s ours` the stale branch.
+- [Task merges land on the checked-out branch](branch-divergence-from-task-merges.md) — the platform rebases then squashes; a pre-merge auto-commit can double whole files (restore from its parent).
 - [Preload worker transport chain](preload-worker-transport-chain.md) — a logger import in the `--import` preload spawned pino workers without bound; keep side effects behind `isMainThread`.
 - [Pinned packageExtensions after upgrades](pinned-package-extensions-after-upgrades.md) — exact-version extension keys silently stop applying after upgrades and broke the Chat App publish build.
 - [Release summary secret contract](release-summary-secret-contract.md) — secret masking is per-job and exact-match only; every workflow summary writer needs an inventoried sentinel contract.

@@ -37,16 +37,20 @@ function NativeTabLayout() {
  * Each platform draws the surface differently:
  *
  * - iOS keeps the bar clear and draws a native blur behind the tab items, so
- *   the chat list shows through it as it scrolls.
+ *   the chat list shows through it as it scrolls. With high contrast on it
+ *   draws the palette's denser `tabBarBackground` panel instead: the blur is
+ *   the busiest of the three surfaces, and the high-contrast palette exists
+ *   to take visual noise away from low-vision users, so they get the same
+ *   panel web draws (still faintly see-through, unlike Reduce transparency).
  * - Android paints the bar itself with the opaque palette background and
- *   draws no background element at all.
+ *   draws no background element at all, in every palette.
  * - Web keeps the bar clear on a fixed 84pt height and draws the palette's
  *   translucent `tabBarBackground` panel behind a hairline border.
  *
  * Reduce transparency (the in-app toggle, which follows iOS's system setting
  * until the user changes it) replaces each surface with the opaque palette
- * background and removes the blur or panel. The bar remains absolutely
- * positioned so the reserved height does not change.
+ * background and removes the blur or panel, whatever the palette. The bar
+ * remains absolutely positioned so the reserved height does not change.
  *
  * expo-blur's Android blur (`blurMethod="dimezisBlurView"`) was evaluated and
  * left out:
@@ -66,12 +70,19 @@ function NativeTabLayout() {
  */
 function ClassicTabLayout() {
   const colors = useColors();
-  const { reduceTransparency } = useAccessibilityOptional();
+  const { highContrast, reduceTransparency } = useAccessibilityOptional();
   const colorScheme = useColorScheme();
   const isDark = colorScheme === "dark";
   const isIOS = Platform.OS === "ios";
   const isWeb = Platform.OS === "web";
   const isAndroid = Platform.OS === "android";
+  // Android's surface is the bar itself, and Reduce transparency makes every
+  // platform's bar opaque. Otherwise iOS and web keep the bar clear so the
+  // screen shows through the background element drawn behind the tab items.
+  const opaqueBar = reduceTransparency || isAndroid;
+  // iOS draws the native blur unless high contrast is on, when the palette's
+  // denser panel (the one web draws) takes its place.
+  const drawsBlur = isIOS && !highContrast;
 
   return (
     <Tabs
@@ -81,20 +92,16 @@ function ClassicTabLayout() {
         headerShown: false,
         tabBarStyle: {
           position: "absolute",
-          // Android's surface is the bar itself. iOS and web keep the bar
-          // clear so the screen shows through their background surface.
-          // Reduce transparency makes every platform opaque.
-          backgroundColor:
-            reduceTransparency || isAndroid ? colors.background : "transparent",
+          backgroundColor: opaqueBar ? colors.background : "transparent",
           borderTopWidth: isIOS ? 1 : StyleSheet.hairlineWidth,
           borderTopColor: colors.border,
           elevation: 0,
           ...(isWeb ? { height: 84 } : {}),
         },
-        tabBarBackground: reduceTransparency || isAndroid
+        tabBarBackground: opaqueBar
           ? undefined
           : () =>
-              isIOS ? (
+              drawsBlur ? (
                 <BlurView
                   intensity={100}
                   tint={isDark ? "dark" : "light"}

@@ -1,12 +1,16 @@
 // The classic tab bar has three platform branches (iOS blur, opaque Android
-// web panel on a fixed-height bar). Two kinds of test pin them:
+// bar, web panel on a fixed-height bar) and two accessibility variants: high
+// contrast swaps the iOS blur for the palette's denser panel (web's panel
+// simply follows the palette; Android stays opaque), and Reduce transparency
+// makes every platform opaque. Two kinds of test pin them:
 //
 // - "under the current Jest project's platform" leaves react-native's
 //   Platform module alone and keys its expectations with
 //   test-utils/platform.ts. The suite is listed in jest.config.js's
 //   androidLayoutSuites, so the Android project proves that react-native's
 //   real Android build takes the Android branch (an opaque bar, no blur, no
-//   panel, no fixed height) and the iOS project proves the iOS one.
+//   panel, no fixed height) and the iOS project proves the iOS ones (blur by
+//   default, panel with high contrast).
 // - "classic tab bar surface" sets Platform.OS explicitly so all three
 //   branches, including web (which has no Jest project), are compared against
 //   each other in the same run.
@@ -145,14 +149,16 @@ function surfaceStyle(view: Rendered) {
   );
 }
 
+type Palette = (typeof colors)["light" | "dark" | "highContrast"];
+
 // Android paints the bar itself with the opaque palette background and draws
 // neither the blur nor the tinted panel behind the tab items. A bar whose
 // background was dropped or made translucent would show the chat list through
 // it; a stray panel or blur would draw a second surface over the solid one.
-function expectAndroidOpaqueBar(view: Rendered) {
+function expectAndroidOpaqueBar(view: Rendered, palette: Palette = colors.dark) {
   const bar = tabBarStyle(view);
-  expect(bar.backgroundColor).toBe(colors.dark.background);
-  expect(parseColor(colors.dark.background).alpha).toBe(1);
+  expect(bar.backgroundColor).toBe(palette.background);
+  expect(parseColor(palette.background).alpha).toBe(1);
   expect(view.queryByTestId("tab-bar-blur")).toBeNull();
   expect(view.queryByTestId("tab-bar-surface")).toBeNull();
 }
@@ -168,7 +174,22 @@ function expectIOSBlur(view: Rendered) {
   expect(view.queryByTestId("tab-bar-surface")).toBeNull();
 }
 
+// The palette's translucent panel fills the clear bar behind the tab items,
+// no blur: web's everyday surface, and what iOS draws in place of the blur
+// while high contrast is on.
+function expectPanel(view: Rendered, palette: Palette) {
+  expect(tabBarStyle(view).backgroundColor).toBe("transparent");
+  const surface = surfaceStyle(view);
+  expect(surface.backgroundColor).toBe(palette.tabBarBackground);
+  expect(surface).toMatchObject(StyleSheet.flatten(StyleSheet.absoluteFill));
+  expect(view.queryByTestId("tab-bar-blur")).toBeNull();
+}
+
 describe("under the current Jest project's platform", () => {
+  afterEach(() => {
+    mockHighContrast = false;
+  });
+
   it("draws the surface of the platform react-native resolved to", () => {
     const view = render(<TabLayout />);
 
@@ -179,6 +200,26 @@ describe("under the current Jest project's platform", () => {
     expect(bar.elevation).toBe(0);
 
     onTestPlatform({ ios: expectIOSBlur, android: expectAndroidOpaqueBar })(view);
+  });
+
+  it("swaps the iOS blur for the high-contrast panel and keeps Android opaque", () => {
+    // The high-contrast palette exists to take visual noise away from
+    // low-vision users, and the blur is the busiest of the surfaces, so iOS
+    // draws the palette's denser panel instead (web draws the same one).
+    // Android's opaque bar simply takes the palette.
+    mockHighContrast = true;
+    const view = render(<TabLayout />);
+
+    const bar = tabBarStyle(view);
+    expect(bar.position).toBe("absolute");
+    expect(bar.borderTopWidth).toBe(onTestPlatform({ ios: 1, android: StyleSheet.hairlineWidth }));
+    expect(bar.borderTopColor).toBe(colors.highContrast.border);
+    expect(bar.height).toBeUndefined();
+
+    onTestPlatform<(view: Rendered) => void>({
+      ios: (rendered) => expectPanel(rendered, colors.highContrast),
+      android: (rendered) => expectAndroidOpaqueBar(rendered, colors.highContrast),
+    })(view);
   });
 
   it("leaves the bar's height and bottom inset to the navigator", () => {
@@ -259,8 +300,36 @@ describe("classic tab bar surface", () => {
     mockHighContrast = true;
     const view = render(<TabLayout />);
 
-    expect(surfaceStyle(view).backgroundColor).toBe(colors.highContrast.tabBarBackground);
+    expectPanel(view, colors.highContrast);
     expect(tabBarStyle(view).borderTopColor).toBe(colors.highContrast.border);
+  });
+
+  it("replaces the iOS blur with the same high-contrast panel web draws", () => {
+    Platform.OS = "ios";
+    mockHighContrast = true;
+    const view = render(<TabLayout />);
+
+    expectPanel(view, colors.highContrast);
+
+    // Same bar otherwise: still overlaid and bordered like the blurred one,
+    // still sized by the navigator, so the reserved height does not move.
+    const bar = tabBarStyle(view);
+    expect(bar.position).toBe("absolute");
+    expect(bar.borderTopWidth).toBe(1);
+    expect(bar.borderTopColor).toBe(colors.highContrast.border);
+    expect(bar.height).toBeUndefined();
+  });
+
+  it("brings the iOS blur back when high contrast is turned off again", () => {
+    Platform.OS = "ios";
+    mockHighContrast = true;
+    const view = render(<TabLayout />);
+    expectPanel(view, colors.highContrast);
+
+    mockHighContrast = false;
+    view.rerender(<TabLayout />);
+
+    expectIOSBlur(view);
   });
 });
 
@@ -338,6 +407,22 @@ describe("classic tab bar with Reduce transparency", () => {
     expect(view.queryByTestId("tab-bar-surface")).toBeNull();
   });
 
+  it("makes iOS opaque instead of drawing the high-contrast panel when both options are on", () => {
+    // High contrast alone leaves iOS faintly see-through (the denser panel);
+    // Reduce transparency is the stronger request and wins.
+    Platform.OS = "ios";
+    mockHighContrast = true;
+    const view = render(<TabLayout />);
+
+    const bar = tabBarStyle(view);
+    expect(bar.backgroundColor).toBe(colors.highContrast.background);
+    expect(parseColor(colors.highContrast.background).alpha).toBe(1);
+    expect(bar.borderTopColor).toBe(colors.highContrast.border);
+    expect(bar.borderTopWidth).toBe(1);
+    expect(view.queryByTestId("tab-bar-surface")).toBeNull();
+    expect(view.queryByTestId("tab-bar-blur")).toBeNull();
+  });
+
   it("returns to the translucent web surface when the option is turned off again", () => {
     Platform.OS = "web";
     const view = render(<TabLayout />);
@@ -367,7 +452,9 @@ describe("Android tab bar surface tokens", () => {
   });
 });
 
-describe("web tab bar surface tokens", () => {
+// The translucent panel token: web's surface in every palette, and the iOS
+// surface in the high-contrast palette.
+describe("tab bar panel tokens", () => {
   const palettes = ["light", "dark", "highContrast"] as const;
   const white: Rgb = [255, 255, 255];
 
@@ -378,6 +465,16 @@ describe("web tab bar surface tokens", () => {
     expect(surface.rgb).toEqual(parseColor(palette.background).rgb);
     expect(surface.alpha).toBeGreaterThan(0);
     expect(surface.alpha).toBeLessThan(1);
+  });
+
+  it("is denser in high contrast than in the default palettes", () => {
+    // iOS trades its blur for this panel in high contrast to give low-vision
+    // users a calmer surface behind the tab controls; a high-contrast token
+    // no denser than the everyday one would make that trade pointless.
+    const highContrastAlpha = parseColor(colors.highContrast.tabBarBackground).alpha;
+    for (const name of ["light", "dark"] as const) {
+      expect(highContrastAlpha).toBeGreaterThan(parseColor(colors[name].tabBarBackground).alpha);
+    }
   });
 
   it.each(palettes)(

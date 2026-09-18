@@ -29,7 +29,8 @@ const colors = {
     // it the way it does through the iOS blur (Android paints the bar with
     // the opaque `background` instead). The alpha keeps the tab tints
     // (`primary`, `mutedForeground`) at 4.5:1 or better even over white
-    // content; `__tests__/TabLayout.test.tsx` checks it.
+    // content; `__tests__/TabLayout.test.tsx` checks it. iOS only draws this
+    // panel in the high-contrast palette below.
     tabBarBackground: "rgba(14, 17, 24, 0.85)",
   },
   dark: {
@@ -85,9 +86,12 @@ const colors = {
     bubbleOtherText: "#FFFFFF",
     systemMsg: "#BBBBBB",
     online: "#00EE88",
-    // Web's panel, denser than the default palette on purpose: still
+    // The panel web draws and iOS swaps in for its native blur while high
+    // contrast is on. Denser than the default palettes on purpose: still
     // see-through, but low-vision users get less visual noise behind the tab
-    // controls (the same idea as the system "Reduce Transparency" settings).
+    // controls (the same idea as the system "Reduce Transparency" setting,
+    // which the app's Reduce transparency toggle follows to a fully opaque
+    // bar). `__tests__/TabLayout.test.tsx` checks it stays denser.
     tabBarBackground: "rgba(0, 0, 0, 0.9)",
   },
   radius: 12,
