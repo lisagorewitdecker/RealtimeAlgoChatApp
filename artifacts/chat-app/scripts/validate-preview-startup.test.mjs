@@ -645,17 +645,27 @@ test("public manifest probe reports a signed-in dev server without echoing the a
   }
 });
 
-async function withLocalManifestServer(manifest, run) {
+async function withLocalManifestServer(manifest, run, options = {}) {
   const observedPlatforms = [];
+  const observedRequests = [];
   const server = createServer((request, response) => {
     observedPlatforms.push(request.headers["expo-platform"]);
-    response.setHeader("content-type", "application/json");
+    observedRequests.push({
+      path: request.url,
+      platform: request.headers["expo-platform"],
+    });
     if (request.url === "/") {
-      response.end(JSON.stringify(manifest));
+      response.statusCode = options.manifestStatus ?? 200;
+      response.setHeader("content-type", "application/json");
+      response.end(
+        options.manifestBody ??
+          (manifest === undefined ? "" : JSON.stringify(manifest)),
+      );
       return;
     }
+    response.statusCode = options.bundleStatus ?? 200;
     response.setHeader("content-type", "application/javascript");
-    response.end("console.log('ios');");
+    response.end(options.bundleBody ?? "console.log('ios');");
   });
 
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -663,7 +673,7 @@ async function withLocalManifestServer(manifest, run) {
   assert.notEqual(typeof address, "string");
 
   try {
-    return await run(address.port, observedPlatforms);
+    return await run(address.port, observedPlatforms, observedRequests);
   } finally {
     await new Promise((resolve, reject) =>
       server.close((error) => (error ? reject(error) : resolve())),
@@ -671,20 +681,114 @@ async function withLocalManifestServer(manifest, run) {
   }
 }
 
-test("local iOS handoff probe requests both manifest and bundle with the iOS header", async () => {
+test("local iOS handoff probe requests the manifest launch asset path", async () => {
   await withLocalManifestServer(
     {
       launchAsset: {
         url: "https://preview.example.test/_expo/static/js/ios-bundle",
       },
     },
-    async (port, observedPlatforms) => {
+    async (port, observedPlatforms, observedRequests) => {
       const result = await requestLocalHandoffProbe(port, 1_000, "ios");
       assert.match(result.manifest, /^manifest HTTP 200/);
       assert.match(result.bundle, /^bundle HTTP 200/);
       assert.deepEqual(observedPlatforms, ["ios", "ios"]);
+      assert.deepEqual(
+        observedRequests.map(({ path }) => path),
+        ["/", "/_expo/static/js/ios-bundle"],
+      );
       assert.equal(result.signedInDeveloper, false);
     },
+  );
+});
+
+test("local handoff probe keeps missing launch assets in the Expo Go handoff failure", async () => {
+  await withLocalManifestServer({}, async (port, _observedPlatforms, observedRequests) => {
+    await assert.rejects(
+      requestLocalHandoffProbe(port, 50, "ios"),
+      (error) => {
+        assert.match(
+          error.message,
+          /Local Expo Go manifest\/bundle probe failed:/,
+        );
+        assert.match(error.message, /manifest HTTP 200/);
+        assert.match(error.message, /bundle request did not complete/);
+        assert.match(error.message, /manifest did not provide a launch asset URL/);
+        assert.match(
+          error.message,
+          /Restart or repair the managed Chat App\/Expo workflow/,
+        );
+        assert.doesNotMatch(error.message, /Expo preview startup error:/);
+        return true;
+      },
+    );
+    assert.ok(observedRequests.length > 0);
+    assert.ok(observedRequests.every(({ path }) => path === "/"));
+  });
+});
+
+test("local handoff probe keeps invalid manifest JSON in the Expo Go handoff failure", async () => {
+  await withLocalManifestServer(
+    undefined,
+    async (port, _observedPlatforms, observedRequests) => {
+      await assert.rejects(
+        requestLocalHandoffProbe(port, 50, "ios"),
+        (error) => {
+          assert.match(
+            error.message,
+            /Local Expo Go manifest\/bundle probe failed:/,
+          );
+          assert.match(error.message, /manifest HTTP 200/);
+          assert.match(error.message, /manifest returned invalid JSON/);
+          assert.match(error.message, /bundle request did not complete/);
+          assert.match(
+            error.message,
+            /Restart or repair the managed Chat App\/Expo workflow/,
+          );
+          assert.doesNotMatch(error.message, /Expo preview startup error:/);
+          return true;
+        },
+      );
+      assert.ok(observedRequests.length > 0);
+      assert.ok(observedRequests.every(({ path }) => path === "/"));
+    },
+    { manifestBody: '{"launchAsset":' },
+  );
+});
+
+test("local handoff probe keeps a non-2xx bundle response in the Expo Go handoff failure", async () => {
+  await withLocalManifestServer(
+    {
+      launchAsset: {
+        url: "https://preview.example.test/_expo/static/js/ios-bundle",
+      },
+    },
+    async (port, _observedPlatforms, observedRequests) => {
+      await assert.rejects(
+        requestLocalHandoffProbe(port, 50, "ios"),
+        (error) => {
+          assert.match(
+            error.message,
+            /Local Expo Go manifest\/bundle probe failed:/,
+          );
+          assert.match(error.message, /manifest HTTP 200/);
+          assert.match(error.message, /bundle HTTP 503/);
+          assert.match(
+            error.message,
+            /Restart or repair the managed Chat App\/Expo workflow/,
+          );
+          assert.doesNotMatch(error.message, /Expo preview startup error:/);
+          return true;
+        },
+      );
+      const paths = observedRequests.map(({ path }) => path);
+      assert.ok(paths.length >= 2);
+      for (let index = 0; index < paths.length; index += 2) {
+        assert.equal(paths[index], "/");
+        assert.equal(paths[index + 1], "/_expo/static/js/ios-bundle");
+      }
+    },
+    { bundleStatus: 503, bundleBody: "bundle unavailable" },
   );
 });
 
