@@ -2240,7 +2240,7 @@ test("Android preview evidence keeps its pull-request validation and privacy con
     const recordDefinitions = Array.isArray(recordText)
       ? recordText
       : [{ timestamp: "20260915T120000Z", text: recordText }];
-    const baseTimestamp = "20260915T120000Z";
+    const defaultBaseTimestamp = "20260915T120000Z";
     const recordPaths = recordDefinitions.map(({ timestamp }) =>
       path.join(
         fixtureRoot,
@@ -2253,17 +2253,19 @@ test("Android preview evidence keeps its pull-request validation and privacy con
         `artifacts/chat-app/test-results/encrypted-room-recovery/android/${timestamp}/android-preview-preflight.json`,
       ),
     );
-    const baseRecordPaths = recordDefinitions.map(({ timestamp }) =>
-      path.join(
-        fixtureRoot,
-        `artifacts/chat-app/test-results/encrypted-room-recovery/android/${renameRecord ? baseTimestamp : timestamp}/validation-record.md`,
-      ),
+    const baseRecordPaths = recordDefinitions.map(
+      ({ timestamp, baseTimestamp = defaultBaseTimestamp }) =>
+        path.join(
+          fixtureRoot,
+          `artifacts/chat-app/test-results/encrypted-room-recovery/android/${renameRecord ? baseTimestamp : timestamp}/validation-record.md`,
+        ),
     );
-    const basePreflightPaths = recordDefinitions.map(({ timestamp }) =>
-      path.join(
-        fixtureRoot,
-        `artifacts/chat-app/test-results/encrypted-room-recovery/android/${renameRecord ? baseTimestamp : timestamp}/android-preview-preflight.json`,
-      ),
+    const basePreflightPaths = recordDefinitions.map(
+      ({ timestamp, baseTimestamp = defaultBaseTimestamp }) =>
+        path.join(
+          fixtureRoot,
+          `artifacts/chat-app/test-results/encrypted-room-recovery/android/${renameRecord ? baseTimestamp : timestamp}/android-preview-preflight.json`,
+        ),
     );
     const recordModes = recordDefinitions.map((definition) => {
       if (definition.mode !== undefined) {
@@ -2433,6 +2435,9 @@ test("Android preview evidence keeps its pull-request validation and privacy con
       recordPath: path.relative(fixtureRoot, recordPath),
       recordPaths: recordPaths.map((record) => path.relative(fixtureRoot, record)),
       baseRecordPath: path.relative(fixtureRoot, baseRecordPaths[0]),
+      baseRecordPaths: baseRecordPaths.map((record) =>
+        path.relative(fixtureRoot, record),
+      ),
       preflightPath: path.relative(fixtureRoot, preflightPath),
       preflightPaths: preflightPaths.map((preflight) =>
         path.relative(fixtureRoot, preflight),
@@ -2519,6 +2524,93 @@ test("Android preview evidence keeps its pull-request validation and privacy con
     /PRIVATE_RENAMED_ANDROID_EVIDENCE|Workspace curl returned HTTP 200|No physical phone was available/,
     "a renamed Android summary must not expose evidence text",
   );
+
+  const multipleRenamed = runAndroidPreviewJob(
+    "multiple-renamed",
+    [
+      {
+        baseTimestamp: "20260915T120000Z",
+        timestamp: "20260915T121500Z",
+        baseText: blockedRecord,
+        text: blockedRecord.replace(
+          "public manifest HTTP 200 (128 bytes)",
+          "public manifest HTTP 200 (256 bytes)",
+        ),
+        preflight: changedBlockedPreflight,
+      },
+      {
+        baseTimestamp: "20260915T120500Z",
+        timestamp: "20260915T122000Z",
+        baseText: blockedRecord,
+        text: blockedRecord,
+        preflight: blockedPreflight,
+      },
+      {
+        baseTimestamp: "20260915T121000Z",
+        timestamp: "20260915T122500Z",
+        baseText: blockedRecord,
+        text: blockedRecord,
+        preflight: blockedPreflight,
+      },
+    ],
+    { renameRecord: true },
+  );
+  assert.equal(
+    multipleRenamed.result.status,
+    0,
+    "multiple renamed Android preview pairs must keep the job successful",
+  );
+  assert.match(
+    multipleRenamed.summary,
+    /- Changed records checked: \*\*3\*\*/,
+    "the summary must count each renamed Android destination exactly once",
+  );
+  assert.deepEqual(
+    multipleRenamed.checkerArgs,
+    multipleRenamed.recordPaths.map((recordPath, index) => [
+      recordPath,
+      multipleRenamed.preflightPaths[index],
+    ]),
+    "the checker must receive each renamed record with its matching sidecar exactly once",
+  );
+  for (const [index, recordPath] of multipleRenamed.recordPaths.entries()) {
+    const escapedPath = recordPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const recordLinkPattern = new RegExp(
+      `\\[${escapedPath}\\]\\(https://github\\.example/example/chat-app/blob/[^)]+/${escapedPath}\\)`,
+      "g",
+    );
+    const recordSectionPattern = new RegExp(
+      `### \\[${escapedPath}\\]\\(https://github\\.example/example/chat-app/blob/[^)]+/${escapedPath}\\)[\\s\\S]*?(?=\\n### |$)`,
+      "g",
+    );
+    assert.equal(
+      multipleRenamed.summary.match(recordLinkPattern)?.length ?? 0,
+      1,
+      `each renamed Android destination must have one stable link: ${recordPath}`,
+    );
+    assert.equal(
+      multipleRenamed.summary.match(recordSectionPattern)?.length ?? 0,
+      1,
+      `each renamed Android destination must have one validation section: ${recordPath}`,
+    );
+    assert.match(
+      multipleRenamed.summary,
+      new RegExp(
+        `### \\[${escapedPath}\\]\\(https://github\\.example/example/chat-app/blob/[^)]+/${escapedPath}\\)[\\s\\S]*?- Validation: \\*\\*PASS\\*\\*`,
+      ),
+      `each renamed Android destination must report its validation result: ${recordPath}`,
+    );
+    assert.doesNotMatch(
+      multipleRenamed.summary,
+      new RegExp(
+        multipleRenamed.baseRecordPaths[index].replace(
+          /[.*+?^${}()|[\]\\]/g,
+          "\\$&",
+        ),
+      ),
+      `the renamed Android summary must not retain the old path for ${recordPath}`,
+    );
+  }
 
   const incompletePass = runAndroidPreviewJob(
     "incomplete-pass",
