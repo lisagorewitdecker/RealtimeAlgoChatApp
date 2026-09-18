@@ -183,6 +183,13 @@ const scriptContracts = {
     // The preflight uploads no evidence, so identifiers may only feed tools.
     evidenceDirectoryVariable: null,
   },
+  "scripts/check-android-release-runner-health.sh": {
+    diagnosticFunction: "record_failure",
+    diagnosticVariableAllowlist: ["required_label_text"],
+    summaryFunction: "write_report",
+    evidenceDirectoryVariable: null,
+    requiresPrivateValues: false,
+  },
   "scripts/check-native-large-text-evidence.sh": {
     diagnosticFunction: "record_summary_issue",
     diagnosticVariableAllowlist: ["platform"],

@@ -8,6 +8,11 @@ on:
         required: true
         default: false
         type: boolean
+      android_runner_health_only:
+        description: Check the Android release runner without starting release jobs
+        required: true
+        default: false
+        type: boolean
       ios_review_candidate_build_id:
         description: Approved iOS candidate build ID (must match the tested build)
         required: false
@@ -38,7 +43,14 @@ on:
         description: Optional Node range fixture for validating the release guard
         required: false
         type: string
+      android_runner_health_only:
+        description: Check the Android release runner without starting release jobs
+        required: false
+        default: false
+        type: boolean
     secrets:
+      GITHUB_WORKFLOW_PULL_TOKEN_FINAL:
+        required: true
       EAS_TOKEN:
         required: false
       SENTRY_AUTH_TOKEN:
@@ -96,7 +108,7 @@ env:
 jobs:
   mobile-release-node-range:
     name: Validate mobile release Node range
-    if: ${{ github.event_name != 'pull_request' }}
+    if: ${{ github.event_name != 'pull_request' && inputs.android_runner_health_only != true }}
     runs-on: ubuntu-latest
     steps:
       - name: Check out release candidate
@@ -126,6 +138,7 @@ jobs:
               '
             )"
           fi
+
           if [[ -z "$node_range" ]]; then
             node_range="missing or non-string value"
           fi
@@ -166,9 +179,29 @@ jobs:
           fi
           echo "Mobile release Node range is valid: $(sanitize_workflow_text "$NODE_RANGE")"
 
+  android-release-runner-health:
+    name: Android release runner health
+    if: ${{ always() && github.event_name != 'pull_request' && (inputs.android_runner_health_only == true || (needs.mobile-release-node-range.result == 'success' && needs.mobile-release-credentials.result == 'success')) }}
+    needs:
+      - mobile-release-node-range
+      - mobile-release-credentials
+    permissions:
+      actions: read
+      contents: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out release candidate
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Check Android release runner labels and status
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_WORKFLOW_PULL_TOKEN_FINAL }}
+        run: bash scripts/check-android-release-runner-health.sh
+
   mobile-release-credentials:
     name: Validate mobile release credentials
-    if: ${{ github.event_name != 'pull_request' }}
+    if: ${{ github.event_name != 'pull_request' && inputs.android_runner_health_only != true }}
     needs:
       - mobile-release-node-range
     runs-on: ubuntu-latest
@@ -177,6 +210,7 @@ jobs:
     steps:
       - name: Report every missing required release credential
         env:
+          GITHUB_WORKFLOW_PULL_TOKEN_FINAL: ${{ secrets.GITHUB_WORKFLOW_PULL_TOKEN_FINAL }}
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
           NATIVE_SMOKE_IOS_APP_ID: ${{ secrets.NATIVE_SMOKE_IOS_APP_ID }}
           NATIVE_SMOKE_ANDROID_APP_ID: ${{ secrets.NATIVE_SMOKE_ANDROID_APP_ID }}
@@ -194,6 +228,7 @@ jobs:
         run: |
           set -euo pipefail
           required_credentials=(
+            GITHUB_WORKFLOW_PULL_TOKEN_FINAL
             SENTRY_AUTH_TOKEN
             NATIVE_SMOKE_IOS_APP_ID
             NATIVE_SMOKE_ANDROID_APP_ID
@@ -585,10 +620,11 @@ jobs:
 
   native-evidence-summary-regression:
     name: Native evidence summary regression
-    if: ${{ github.event_name != 'pull_request' }}
+    if: ${{ github.event_name != 'pull_request' && inputs.android_runner_health_only != true }}
     needs:
       - mobile-release-node-range
       - mobile-release-credentials
+      - android-release-runner-health
     permissions:
       actions: write
       contents: read
@@ -1096,10 +1132,11 @@ jobs:
 
   native-evidence-tamper-regression:
     name: Native evidence tamper regression
-    if: ${{ github.event_name != 'pull_request' }}
+    if: ${{ github.event_name != 'pull_request' && inputs.android_runner_health_only != true }}
     needs:
       - mobile-release-node-range
       - mobile-release-credentials
+      - android-release-runner-health
     permissions:
       actions: write
       contents: read
@@ -1210,13 +1247,14 @@ jobs:
 
   native-ios:
     name: Native large-text smoke (iOS)
-    if: ${{ github.event_name != 'pull_request' }}
+    if: ${{ github.event_name != 'pull_request' && inputs.android_runner_health_only != true }}
     permissions:
       actions: write
       contents: read
     needs:
       - mobile-release-node-range
       - mobile-release-credentials
+      - android-release-runner-health
     outputs:
       native_evidence_artifact_url: ${{ steps.upload-ios-native-smoke.outputs.artifact-url }}
       native_evidence_digest_manifest: ${{ steps.ios-native-evidence-digest.outputs.native_evidence_digest_manifest }}
@@ -1505,10 +1543,11 @@ jobs:
 
   android-prerequisite-preflight:
     name: Android release runner preflight
-    if: ${{ github.event_name != 'pull_request' }}
+    if: ${{ github.event_name != 'pull_request' && inputs.android_runner_health_only != true }}
     needs:
       - mobile-release-node-range
       - mobile-release-credentials
+      - android-release-runner-health
     runs-on:
       - self-hosted
       - linux
@@ -1532,7 +1571,7 @@ jobs:
 
   native-android:
     name: Native large-text smoke (Android)
-    if: ${{ github.event_name != 'pull_request' }}
+    if: ${{ github.event_name != 'pull_request' && inputs.android_runner_health_only != true }}
     permissions:
       actions: write
       contents: read
@@ -1542,6 +1581,7 @@ jobs:
     needs:
       - mobile-release-node-range
       - mobile-release-credentials
+      - android-release-runner-health
       - android-prerequisite-preflight
     runs-on:
       - self-hosted
@@ -1745,13 +1785,14 @@ jobs:
 
   idle-profile-registration:
     name: Idle profile registration
-    if: ${{ github.event_name != 'pull_request' }}
+    if: ${{ github.event_name != 'pull_request' && inputs.android_runner_health_only != true }}
     permissions:
       actions: write
       contents: read
     needs:
       - mobile-release-node-range
       - mobile-release-credentials
+      - android-release-runner-health
     runs-on: ubuntu-latest
     timeout-minutes: 20
     environment:
@@ -1922,7 +1963,7 @@ jobs:
 
   mobile-release-gate:
     name: Mobile release gate
-    if: ${{ github.event_name != 'pull_request' && needs.mobile-release-node-range.result == 'success' && needs.mobile-release-credentials.result == 'success' && needs.native-ios.result == 'success' && needs.native-android.result == 'success' && needs.idle-profile-registration.result == 'success' && needs.native-evidence-summary-regression.result == 'success' && needs.native-evidence-tamper-regression.result == 'success' }}
+    if: ${{ github.event_name != 'pull_request' && inputs.android_runner_health_only != true && needs.mobile-release-node-range.result == 'success' && needs.mobile-release-credentials.result == 'success' && needs.native-ios.result == 'success' && needs.native-android.result == 'success' && needs.idle-profile-registration.result == 'success' && needs.native-evidence-summary-regression.result == 'success' && needs.native-evidence-tamper-regression.result == 'success' }}
     outputs:
       ios_native_evidence_artifact_url: ${{ needs.native-ios.outputs.native_evidence_artifact_url }}
       android_native_evidence_artifact_url: ${{ needs.native-android.outputs.native_evidence_artifact_url }}
@@ -1931,6 +1972,7 @@ jobs:
     needs:
       - mobile-release-node-range
       - mobile-release-credentials
+      - android-release-runner-health
       - native-ios
       - native-android
       - idle-profile-registration
@@ -2072,6 +2114,7 @@ jobs:
     if: >-
       ${{
         github.event_name != 'pull_request' &&
+        inputs.android_runner_health_only != true &&
         needs.mobile-release-gate.result == 'success' &&
         github.event_name == 'workflow_dispatch' &&
         inputs.publish == true

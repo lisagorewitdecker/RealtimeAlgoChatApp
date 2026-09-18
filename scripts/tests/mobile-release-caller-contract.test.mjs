@@ -50,6 +50,7 @@ const releaseCredentialSecrets = [
   "NATIVE_SMOKE_PASSWORD",
   "SENTRY_AUTH_TOKEN",
 ];
+const runnerHealthSecret = "GITHUB_WORKFLOW_PULL_TOKEN_FINAL";
 const pinnedCheckoutAction =
   "actions/checkout@11d5960a326750d5838078e36cf38b85af677262";
 const pinnedSetupNodeAction =
@@ -375,7 +376,7 @@ test("release credentials remain in the reusable workflow secrets contract", () 
   ).sort();
   assert.deepEqual(
     actualSecrets,
-    releaseCredentialSecrets,
+    [...releaseCredentialSecrets, runnerHealthSecret].sort(),
     "credential, account, Sentry, Clerk, URL, and database values must remain workflow_call secrets",
   );
 
@@ -387,6 +388,35 @@ test("release credentials remain in the reusable workflow secrets contract", () 
       `${secret} must let the aggregate credential preflight report the full missing set`,
     );
   }
+  assert.equal(
+    workflow.on.workflow_call.secrets[runnerHealthSecret].required,
+    true,
+    `${runnerHealthSecret} must be present before the runner inventory can be queried`,
+  );
+});
+
+test("Android runner health uses the dedicated administration-read token", () => {
+  const healthJob = workflow.jobs?.["android-release-runner-health"];
+  const healthStep = healthJob?.steps?.find(
+    (step) => step.name === "Check Android release runner labels and status",
+  );
+  assert.equal(
+    healthStep?.env?.GH_TOKEN,
+    `\${{ secrets.${runnerHealthSecret} }}`,
+    "runner health must use the dedicated repository runner-read token",
+  );
+  assert.notEqual(
+    healthStep?.env?.GH_TOKEN,
+    "${{ github.token }}",
+    "github.token cannot read repository runner administration",
+  );
+  assert.match(
+    callerDocumentation,
+    new RegExp(
+      `${runnerHealthSecret}[\\s\\S]*\\*\\*Administration: read\\*\\* permission`,
+    ),
+    "the operator procedure must document the token permission and purpose",
+  );
 });
 
 test("caller setup documentation lists every reusable workflow secret with its required setting", () => {
