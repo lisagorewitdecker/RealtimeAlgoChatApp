@@ -755,6 +755,52 @@ test("publish job runs the evidence privacy and submission-boundary regression b
     "pnpm run test:native-large-text-evidence",
     "mobile-publish must use the focused native evidence privacy regression command",
   );
+  assert.equal(
+    publishSteps[privacyIndex].id,
+    "native-evidence-privacy",
+    "the native evidence privacy regression must keep a stable step ID",
+  );
+  const privacySummaryIndex = publishSteps.findIndex(
+    (step) => step.name === "Summarize native evidence privacy regression",
+  );
+  assert.ok(
+    privacySummaryIndex > privacyIndex,
+    "the native evidence privacy summary must run after the privacy regression",
+  );
+  const privacySummaryStep = publishSteps[privacySummaryIndex];
+  assert.equal(
+    privacySummaryStep.if,
+    "${{ always() }}",
+    "the native evidence privacy summary must run after a failed privacy regression",
+  );
+  assert.deepEqual(
+    privacySummaryStep.env,
+    {
+      PRIVACY_RESULT:
+        "${{ steps.native-evidence-privacy.outcome }}",
+    },
+    "the native evidence privacy summary must use the privacy step outcome",
+  );
+  assert.match(
+    privacySummaryStep.run,
+    /Status: \*\*PASS\*\*/,
+    "the native evidence privacy summary must distinguish a passing check",
+  );
+  assert.match(
+    privacySummaryStep.run,
+    /Status: \*\*BLOCKED\*\*/,
+    "the native evidence privacy summary must distinguish a blocked check",
+  );
+  assert.match(
+    privacySummaryStep.run,
+    /Run native large-text evidence privacy and submission-boundary regression" step log/,
+    "the blocked privacy summary must point reviewers to the failed checker step log",
+  );
+  assert.doesNotMatch(
+    privacySummaryStep.run,
+    /test-results\/native-large-text|candidate-build-id|runner-metadata|pass-fail-record|sentry-source-map|^\s*cat\s/,
+    "the native evidence privacy summary must not embed fixture output",
+  );
   assert.ok(
     approvalValidationIndex >= 0,
     "mobile-publish must validate candidate approvals",
