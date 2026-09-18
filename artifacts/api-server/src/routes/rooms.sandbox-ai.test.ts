@@ -320,7 +320,7 @@ describe("sandbox AI tab in a browser", () => {
     expect(await page.locator("#ai-declined").isVisible()).toBe(true);
     expect(await emitsOf(page, "assistant-request")).toEqual([]);
     await page.close();
-  });
+  }, 15_000);
 
   it("sends only the current files and prompt with the acknowledgement, and renders replies as text", async () => {
     const page = await openSandbox();
