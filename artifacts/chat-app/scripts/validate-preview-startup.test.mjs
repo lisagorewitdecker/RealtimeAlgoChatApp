@@ -1169,13 +1169,36 @@ globalThis.fetch = async (url, options = {}) => {
         record.boundaries.serverNativeRequestEvidence.status,
         "NOT_ASSESSED",
       );
+      assert.equal(
+        record.boundaries.publicManifestReachability.evidence,
+        "Public manifest probe failed — no successful probe result was recorded",
+      );
+      assert.equal(
+        record.boundaries.localHandoffProbe.evidence,
+        "Local manifest/bundle probe not run — no successful probe result was recorded",
+      );
+      assert.equal(
+        record.boundaries.expoGoLaunch.evidence,
+        "Requires a physical Android phone running stock Expo Go.",
+      );
+      assert.equal(
+        record.boundaries.serverNativeRequestEvidence.evidence,
+        "Requires filtered Metro or API evidence from that physical Expo Go session.",
+      );
       assert.match(output, /public_manifest_reachability=FAIL/);
+      assert.match(output, /local_handoff_probe=NOT_RUN/);
+      assert.match(output, /expo_go_launch=NOT_ASSESSED/);
+      assert.match(output, /server_native_request_evidence=NOT_ASSESSED/);
       assert.match(
         output,
         /Restart or repair the managed Chat App\/Expo workflow/,
       );
       assert.doesNotMatch(
         output,
+        /public-preview\.test|private-path|private-secret|token=/i,
+      );
+      assert.doesNotMatch(
+        JSON.stringify(record),
         /public-preview\.test|private-path|private-secret|token=/i,
       );
     } finally {
