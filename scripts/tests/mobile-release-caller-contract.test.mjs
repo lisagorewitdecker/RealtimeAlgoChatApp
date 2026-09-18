@@ -213,8 +213,7 @@ function documentedCallerSecrets() {
 
 function assertMobileReleaseNodeVersions(releaseWorkflow, nodeRange) {
   const configuredJobs = [];
-  const malformedVersions = [];
-  const mismatches = [];
+  const diagnostics = [];
   for (const [jobId, job] of Object.entries(releaseWorkflow.jobs ?? {})) {
     if (jobId === "mobile-release-node-range") {
       continue;
@@ -239,12 +238,14 @@ function assertMobileReleaseNodeVersions(releaseWorkflow, nodeRange) {
     "mobile-release.yml must configure Node with actions/setup-node",
   );
   for (const { jobId, configuredVersion } of configuredJobs) {
-    assert.ok(
-      configuredVersion !== undefined,
-      `mobile-release job "${jobId}" must configure node-version; package.json engines.node range is ${JSON.stringify(
-        nodeRange,
-      )}`,
-    );
+    if (configuredVersion === undefined) {
+      diagnostics.push(
+        `mobile-release job "${jobId}" must configure node-version; package.json engines.node range is ${JSON.stringify(
+          nodeRange,
+        )}`,
+      );
+      continue;
+    }
     let satisfiesRange;
     try {
       satisfiesRange = nodeVersionSatisfiesRange(
@@ -258,19 +259,18 @@ function assertMobileReleaseNodeVersions(releaseWorkflow, nodeRange) {
           "must be a concrete Node major/minor/patch version",
         )
       ) {
-        malformedVersions.push(error.message);
+        diagnostics.push(error.message);
         continue;
       }
       throw error;
     }
     if (!satisfiesRange) {
-      mismatches.push(
+      diagnostics.push(
         `mobile-release job "${jobId}" configures Node ${JSON.stringify(configuredVersion)}, outside package.json engines.node range ${JSON.stringify(nodeRange)}`,
       );
     }
   }
-  assert.equal(malformedVersions.length, 0, malformedVersions.join("\n"));
-  assert.equal(mismatches.length, 0, mismatches.join("\n"));
+  assert.equal(diagnostics.length, 0, diagnostics.join("\n"));
 }
 
 test("documented caller passes every required build ID through with", () => {
@@ -603,6 +603,94 @@ test("missing mobile release Node versions identify the affected job and require
           `package.json engines.node range is ${JSON.stringify(nodeRange)}`,
         ),
         "the failure must identify the supported package.json Node range",
+      );
+      return true;
+    },
+  );
+});
+
+test("combined mobile release Node diagnostics report every affected job and correction", () => {
+  const fixture = structuredClone(workflow);
+  const nodeRange = rootPackage.engines.node;
+  const missingJobId = "native-ios";
+  const malformedJobId = "native-android";
+  const malformedVersion = "lts";
+  const outOfRangeJobId = "idle-profile-registration";
+  const outOfRangeVersion = "23";
+
+  const missingSetupNodeStep = fixture.jobs[missingJobId].steps.find((step) =>
+    String(step.uses ?? "").startsWith("actions/setup-node@"),
+  );
+  assert.ok(
+    missingSetupNodeStep,
+    `${missingJobId} fixture must configure Node with actions/setup-node`,
+  );
+  delete missingSetupNodeStep.with["node-version"];
+
+  const malformedSetupNodeStep = fixture.jobs[malformedJobId].steps.find(
+    (step) => String(step.uses ?? "").startsWith("actions/setup-node@"),
+  );
+  assert.ok(
+    malformedSetupNodeStep,
+    `${malformedJobId} fixture must configure Node with actions/setup-node`,
+  );
+  malformedSetupNodeStep.with["node-version"] = malformedVersion;
+
+  const outOfRangeSetupNodeStep = fixture.jobs[outOfRangeJobId].steps.find(
+    (step) => String(step.uses ?? "").startsWith("actions/setup-node@"),
+  );
+  assert.ok(
+    outOfRangeSetupNodeStep,
+    `${outOfRangeJobId} fixture must configure Node with actions/setup-node`,
+  );
+  outOfRangeSetupNodeStep.with["node-version"] = outOfRangeVersion;
+
+  assert.throws(
+    () => assertMobileReleaseNodeVersions(fixture, nodeRange),
+    (error) => {
+      assert.ok(
+        error.message.includes(`mobile-release job "${missingJobId}"`),
+        "the combined failure must identify the job missing node-version",
+      );
+      assert.ok(
+        error.message.includes("must configure node-version"),
+        "the combined failure must explain that node-version is required",
+      );
+      assert.ok(
+        error.message.includes(
+          `package.json engines.node range is ${JSON.stringify(nodeRange)}`,
+        ),
+        "the combined failure must identify the supported package.json Node range",
+      );
+
+      assert.ok(
+        error.message.includes(`mobile-release job "${malformedJobId}"`),
+        "the combined failure must identify the malformed-version job",
+      );
+      assert.ok(
+        error.message.includes(JSON.stringify(malformedVersion)),
+        "the combined failure must identify the malformed Node version",
+      );
+      assert.ok(
+        error.message.includes(
+          "must be a concrete Node major/minor/patch version",
+        ),
+        "the combined failure must explain the required concrete Node version format",
+      );
+
+      assert.ok(
+        error.message.includes(`mobile-release job "${outOfRangeJobId}"`),
+        "the combined failure must identify the out-of-range job",
+      );
+      assert.ok(
+        error.message.includes(`Node ${JSON.stringify(outOfRangeVersion)}`),
+        "the combined failure must identify the out-of-range Node version",
+      );
+      assert.ok(
+        error.message.includes(
+          `outside package.json engines.node range ${JSON.stringify(nodeRange)}`,
+        ),
+        "the combined failure must explain the required supported Node range",
       );
       return true;
     },
