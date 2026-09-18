@@ -65,7 +65,9 @@ if (requestLogEnabled) {
         res.once("finish", () => {
           const evidence = formatRequestEvidence(req, res, startedAt);
           console.log(evidence);
-          appendRequestEvidence?.(evidence);
+          if (appendRequestEvidence) {
+            appendRequestEvidence(evidence);
+          }
         });
         return wrapped(req, res, next);
       };

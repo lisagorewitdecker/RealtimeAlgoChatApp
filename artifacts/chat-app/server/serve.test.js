@@ -1,3 +1,4 @@
+/* jshint esversion: 8 */
 const {
   createStaticServer,
   loadStaticFiles,

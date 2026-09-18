@@ -47,6 +47,15 @@ jobs:
           API_CODEGEN_DRIFT_REPORT_PATH: ${{ runner.temp }}/api-codegen-drift-report.txt
         run: pnpm validate:api-codegen
 
+      - name: Upload generated-client drift artifact
+        if: ${{ always() && github.event_name == 'pull_request' && steps.verify-generated.outcome == 'failure' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: generated-client-drift-report
+          path: ${{ runner.temp }}/api-codegen-drift-report.txt
+          if-no-files-found: ignore
+          retention-days: 1
+
       # Reviewers must be able to read the drift evidence from the Checks tab,
       # so it is published as a check-run summary rather than only as this
       # job's step summary, which GitHub shows only to signed-in viewers.

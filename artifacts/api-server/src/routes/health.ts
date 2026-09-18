@@ -87,7 +87,11 @@ export function classifyReadinessError(
   return "unknown";
 }
 
-router.get("/healthz", healthRateLimit, async (_req, res) => {
+router.get("/livez", livenessRateLimit, (_req, res) => {
+  res.json(HealthCheckResponse.parse({ status: "ok" }));
+});
+
+router.get("/healthz", readinessRateLimit, async (_req, res) => {
   const startedAt = Date.now();
 
   try {
@@ -106,9 +110,3 @@ router.get("/healthz", healthRateLimit, async (_req, res) => {
 });
 
 export default router;
-
-const readinessRateLimit = createIpRateLimit({
-  scope: "health-readiness",
-  windowMs: 60_000,
-  maxRequests: 60,
-});

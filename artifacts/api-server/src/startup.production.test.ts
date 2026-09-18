@@ -246,9 +246,17 @@ describe("built production server startup", () => {
 
         const readinessResponse = await readinessResponsePromise;
         expect(readinessResponse.status).toBe(503);
-        expect(await readinessResponse.json()).toEqual({
+        const readinessBody = (await readinessResponse.json()) as {
+          status: string;
+          reason: string;
+          elapsedMs: number;
+        };
+        expect(readinessBody).toMatchObject({
           status: "unavailable",
+          reason: "timeout",
         });
+        expect(readinessBody.elapsedMs).toEqual(expect.any(Number));
+        expect(readinessBody.elapsedMs).toBeGreaterThanOrEqual(0);
       } finally {
         await stopStalledDatabase(stalledDatabase);
       }

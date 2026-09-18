@@ -1,4 +1,4 @@
-# RealtimeAlgoChatApp Studio
+# RealtimeAlgoChatApo
 
 RealtimeAlgoChatApp Studio is a real-time collaboration platform for developers, built around three modes in a single room: **Build** (collaborative code sandbox with an optional AI assistant), **Call** (voice/video), and **Ship** (chat and room coordination).
 
@@ -71,3 +71,5 @@ Secrets (Clerk keys, admin allowlist, session secret, Anthropic access) are mana
 - Server-resolved Clerk identity always overrides any client-supplied identity claims.
 - Room access is granted only via signed server-issued capabilities, not client-asserted room membership.
 - See `replit.md` for project-specific conventions and decisions as they're recorded.
+
+[![Mobile release accessibility gate](https://github.com/lisagorewitdecker/RealtimeAlgoChatApp/actions/workflows/mobile-release.yml/badge.svg?branch=main)](https://github.com/lisagorewitdecker/RealtimeAlgoChatApp/actions/workflows/mobile-release.yml)

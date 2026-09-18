@@ -26,6 +26,12 @@ const workflow = YAML.parse(
     "utf8",
   ),
 );
+const driftPublishWorkflow = YAML.parse(
+  readFileSync(
+    path.join(workspaceRoot, ".github/workflows/api-codegen-drift-check.yml"),
+    "utf8",
+  ),
+);
 const rootPackage = JSON.parse(
   readFileSync(path.join(workspaceRoot, "package.json"), "utf8"),
 );
@@ -38,6 +44,10 @@ const generatedCheckerSource = readFileSync(
 );
 // The checker and the check-run publisher render the reviewer-visible evidence
 // through this shared module, so the contract is followed one import hop.
+const generatedDriftReportSource = readFileSync(
+  path.join(workspaceRoot, "lib/api-spec/scripts/generated-drift-report.mjs"),
+  "utf8",
+);
 const driftSummarySource = readFileSync(
   path.join(workspaceRoot, "lib/api-spec/scripts/drift-summary.mjs"),
   "utf8",
@@ -389,6 +399,16 @@ test("generated-client drift evidence remains visible in the CI job log", () => 
     /"Generated API drift detected after regeneration:"[\s\S]*`Run \\`\$\{regenerationCommand\}\\` and commit the generated output\.`/,
     "the bounded report fallback must retain the failure signal and regeneration command when detailed rendering is unavailable",
   );
+  assert.match(
+    generatedDriftReportSource,
+    /Generated API drift detected after regeneration:/,
+    "the job log must retain the primary generated-client drift failure signal",
+  );
+  assert.match(
+    generatedDriftReportSource,
+    /Run `pnpm --filter @workspace\/api-spec run codegen` and commit the generated output\./,
+    "the job log must retain the generated-client regeneration command when summary publishing is unavailable",
+  );
 });
 
 test("generated-client drift evidence is complete in the reviewer-visible summary", () => {
@@ -480,6 +500,67 @@ test("generated-client drift evidence is published where reviewers need no log a
     driftPublisherSource,
     /\/repos\/\$\{repository\}\/check-runs/,
     "the evidence must be published as a check run so it is readable without job-log access",
+  );
+});
+
+test("generated-client drift artifacts are captured for the trusted follow-up publisher", () => {
+  const uploadDriftArtifactStep = steps.find(
+    (step) => step.name === "Upload generated-client drift artifact",
+  );
+  assert.ok(
+    uploadDriftArtifactStep,
+    "the API codegen workflow must upload drift evidence for the trusted follow-up publisher",
+  );
+  assert.equal(
+    uploadDriftArtifactStep.uses,
+    "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02",
+    "the upload step must use the maintained upload-artifact action",
+  );
+  const condition = String(uploadDriftArtifactStep.if ?? "")
+    .replace(/\$\{\{|\}\}/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  assert.match(condition, /\bgithub\.event_name\s*==\s*'pull_request'/);
+  assert.match(condition, /\bsteps\.verify-generated\.outcome\s*==\s*'failure'/);
+  assert.equal(uploadDriftArtifactStep.with?.["if-no-files-found"], "ignore");
+});
+
+test("generated-client drift publication runs in the trusted workflow", () => {
+  assert.deepEqual(
+    driftPublishWorkflow.on?.workflow_run?.workflows,
+    ["API generated clients"],
+  );
+  assert.deepEqual(driftPublishWorkflow.on?.workflow_run?.types, ["completed"]);
+  assert.equal(driftPublishWorkflow.permissions?.actions, "read");
+  assert.equal(driftPublishWorkflow.permissions?.checks, "write");
+  assert.equal(driftPublishWorkflow.permissions?.contents, "read");
+
+  const publishJob = driftPublishWorkflow.jobs?.["publish-generated-client-drift"];
+  assert.ok(publishJob, "expected the trusted drift-publication job to exist");
+  const publishSteps = publishJob.steps ?? [];
+  const checkoutStep = publishSteps.find(
+    (step) => step.name === "Check out trusted repository code",
+  );
+  const downloadStep = publishSteps.find(
+    (step) => step.name === "Download generated-client drift artifact",
+  );
+  const publishStep = publishSteps.find(
+    (step) => step.name === "Publish generated-client drift evidence",
+  );
+
+  assert.equal(checkoutStep?.uses, "actions/checkout@v5");
+  assert.equal(
+    downloadStep?.uses,
+    "actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093",
+  );
+  assert.equal(downloadStep?.with?.["run-id"], "${{ github.event.workflow_run.id }}");
+  assert.equal(
+    publishStep?.run,
+    "node lib/api-spec/scripts/publish-drift-check.mjs",
+  );
+  assert.equal(
+    publishStep?.env?.API_CODEGEN_DRIFT_HEAD_SHA,
+    "${{ github.event.workflow_run.head_sha }}",
   );
 });
 
