@@ -120,6 +120,12 @@ Then provision the Android SDK and small portrait AVD, using a checksum obtained
 from the pinned Android command-line-tools release. Replace the checksum
 placeholder with the published value before running this block:
 
+The checked-in pin contract at
+`scripts/android-runner-pins.sh` is the source of truth for the GitHub Actions
+runner archive version, runner SHA-256 digest, and Android build-tools version.
+Keep the literal values in the procedure below synchronized with that file in
+one reviewed change.
+
 ```sh
 sudo -u "$RUNNER_USER" -H bash -lc '
   cd "$HOME/RealtimeAlgoChatApp"

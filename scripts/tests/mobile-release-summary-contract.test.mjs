@@ -79,6 +79,17 @@ const playwrightConfig = readFileSync(
 );
 const bashPath = locateExecutable("bash");
 const gitPath = locateExecutable("git");
+const androidRunnerPins = readFileSync(
+  path.join(workspaceRoot, "scripts/android-runner-pins.sh"),
+  "utf8",
+);
+const androidBuildToolsVersion = androidRunnerPins.match(
+  /^ANDROID_BUILD_TOOLS_VERSION="([^"]+)"$/m,
+)?.[1];
+assert.ok(
+  androidBuildToolsVersion,
+  "the Android runner pin contract must define ANDROID_BUILD_TOOLS_VERSION",
+);
 
 const iosGateScript = "artifacts/chat-app/e2e/native-large-text/run.sh";
 const androidPreflightScript = "scripts/check-android-release-prerequisites.sh";
@@ -3982,6 +3993,15 @@ function makeAndroidCommandDirectory(name, { appInstalled }) {
 function runAndroidPreflight(name, expectedStatus, { appInstalled }) {
   const sdkRoot = path.join(testRoot, `${name}-android-sdk`);
   mkdirSync(sdkRoot);
+  const commandDirectory = makeAndroidCommandDirectory(name, { appInstalled });
+  const pinnedAapt2 = path.join(
+    sdkRoot,
+    "build-tools",
+    androidBuildToolsVersion,
+    "aapt2",
+  );
+  mkdirSync(path.dirname(pinnedAapt2), { recursive: true });
+  symlinkSync(path.join(commandDirectory, "aapt2"), pinnedAapt2);
   const summaryPath = path.join(testRoot, `${name}-preflight-summary.md`);
   const result = spawnSync(
     bashPath,
@@ -3990,7 +4010,7 @@ function runAndroidPreflight(name, expectedStatus, { appInstalled }) {
       cwd: workspaceRoot,
       encoding: "utf8",
       env: {
-        PATH: makeAndroidCommandDirectory(name, { appInstalled }),
+        PATH: commandDirectory,
         HOME: homeDirectory,
         ANDROID_SDK_ROOT: sdkRoot,
         GITHUB_STEP_SUMMARY: summaryPath,
