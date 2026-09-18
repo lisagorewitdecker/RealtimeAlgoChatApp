@@ -13,6 +13,7 @@
     "prepare": "node lib/api-spec/scripts/install-repository-git-hooks.mjs",
     "hooks:dispatcher:install": "node lib/api-spec/scripts/install-repository-git-hooks.mjs --install-dispatcher",
     "hooks:dispatcher:status": "node lib/api-spec/scripts/install-repository-git-hooks.mjs --dispatcher-status",
+    "hooks:dispatcher:status:json": "node lib/api-spec/scripts/install-repository-git-hooks.mjs --dispatcher-status --json",
     "hooks:dispatcher:uninstall": "node lib/api-spec/scripts/install-repository-git-hooks.mjs --uninstall-dispatcher",
     "validate:staged-codegen-backups": "node lib/api-spec/scripts/check-staged-codegen-backups.mjs",
     "validate:api-codegen": "pnpm --filter @workspace/api-spec run check-generated",
