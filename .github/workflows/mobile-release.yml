@@ -806,11 +806,7 @@ jobs:
       - mobile-release-node-range
     outputs:
       native_evidence_artifact_url: ${{ steps.upload-ios-native-smoke.outputs.artifact-url }}
-    runs-on:
-      - self-hosted
-      - macos
-      - ios
-      - smallest-simulator
+    runs-on: macos-latest
     timeout-minutes: 90
     environment:
       name: mobile-release
@@ -863,6 +859,15 @@ jobs:
               exit 2
             fi
           done
+
+      - name: Prepare GitHub-hosted iOS runner
+        id: ios-hosted-runner
+        env:
+          EAS_TOKEN: ${{ secrets.EAS_TOKEN }}
+          NATIVE_SMOKE_IOS_APP_ID: ${{ secrets.NATIVE_SMOKE_IOS_APP_ID }}
+          NATIVE_SMOKE_IOS_BUILD_ID: ${{ env.NATIVE_SMOKE_IOS_BUILD_ID }}
+          EAS_CLI_VERSION: ${{ env.EAS_CLI_VERSION }}
+        run: bash scripts/prepare-ios-hosted-runner.sh
 
       - name: Verify iOS simulator tooling
         id: ios-xcrun
@@ -966,6 +971,7 @@ jobs:
           WORKSPACE_RESULT: ${{ steps.install-dependencies.outcome }}
           APP_BRANDING_RESULT: ${{ steps.app-branding.outcome }}
           IOS_RELEASE_CONFIGURATION_RESULT: ${{ steps.ios-release-configuration.outcome }}
+          IOS_HOSTED_RUNNER_RESULT: ${{ steps.ios-hosted-runner.outcome }}
           IOS_XCRUN_RESULT: ${{ steps.ios-xcrun.outcome }}
           IOS_SIMULATOR_RESULT: ${{ steps.ios-simulator.outcome }}
           IOS_NATIVE_BRANDING_RESULT: ${{ steps.ios-native-branding.outcome }}
@@ -994,6 +1000,7 @@ jobs:
           add_check "Workspace dependencies" "$WORKSPACE_RESULT"
           add_check "App branding source" "$APP_BRANDING_RESULT"
           add_check "Release configuration" "$IOS_RELEASE_CONFIGURATION_RESULT"
+          add_check "GitHub-hosted iOS runner" "$IOS_HOSTED_RUNNER_RESULT"
           add_check "Xcode simulator tooling" "$IOS_XCRUN_RESULT"
           add_check "Booted iPhone SE (3rd generation)" "$IOS_SIMULATOR_RESULT"
           add_check "Installed native candidate" "$IOS_NATIVE_BRANDING_RESULT"
@@ -1053,17 +1060,31 @@ jobs:
     if: ${{ github.event_name != 'pull_request' }}
     needs:
       - mobile-release-node-range
-    runs-on:
-      - self-hosted
-      - linux
-      - android
-      - smallest-simulator
+    runs-on: ubuntu-latest
     timeout-minutes: 20
     environment:
       name: mobile-release
     steps:
       - name: Check out release candidate
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ env.RELEASE_NODE_VERSION }}
+
+      - name: Prepare GitHub-hosted Android runner
+        env:
+          EAS_TOKEN: ${{ secrets.EAS_TOKEN }}
+          NATIVE_SMOKE_ANDROID_APP_ID: ${{ secrets.NATIVE_SMOKE_ANDROID_APP_ID }}
+          NATIVE_SMOKE_ANDROID_BUILD_ID: ${{ env.NATIVE_SMOKE_ANDROID_BUILD_ID }}
+          EAS_CLI_VERSION: ${{ env.EAS_CLI_VERSION }}
+        run: bash scripts/prepare-android-hosted-runner.sh
 
       - name: Check Android release prerequisites
         env:
@@ -1085,11 +1106,7 @@ jobs:
     needs:
       - mobile-release-node-range
       - android-prerequisite-preflight
-    runs-on:
-      - self-hosted
-      - linux
-      - android
-      - smallest-simulator
+    runs-on: ubuntu-latest
     timeout-minutes: 90
     environment:
       name: mobile-release
@@ -1098,6 +1115,24 @@ jobs:
     steps:
       - name: Check out release candidate
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ env.RELEASE_NODE_VERSION }}
+
+      - name: Prepare GitHub-hosted Android runner
+        env:
+          EAS_TOKEN: ${{ secrets.EAS_TOKEN }}
+          NATIVE_SMOKE_ANDROID_APP_ID: ${{ secrets.NATIVE_SMOKE_ANDROID_APP_ID }}
+          NATIVE_SMOKE_ANDROID_BUILD_ID: ${{ env.NATIVE_SMOKE_ANDROID_BUILD_ID }}
+          EAS_CLI_VERSION: ${{ env.EAS_CLI_VERSION }}
+        run: bash scripts/prepare-android-hosted-runner.sh
 
       - name: Clear prior Android evidence from this runner
         run: rm -rf test-results/native-large-text/android
