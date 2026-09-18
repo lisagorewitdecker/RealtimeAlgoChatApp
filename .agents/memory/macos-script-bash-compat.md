@@ -1,10 +1,16 @@
 ---
 name: macOS shell scripts must run on bash 3.2
-description: Constraint for any script the owner runs on a Mac (runner provisioning, device checks); the Linux test harness cannot catch bash 4+ constructs.
+description: Constraint for any script the owner runs on a Mac (runner provisioning, device checks), plus the recipe for testing under a real bash 3.2.57 built on Linux.
 ---
 
 Scripts executed on macOS run under Apple's stock `/bin/bash` 3.2 when invoked as `bash script.sh`, so they must avoid bash 4+ features: associative arrays, `mapfile`/`readarray`, `${var,,}`/`${var^^}`, `printf '%(...)T'`, `[[ -v `, negative array indices, `|&`, and GNU-only flags such as `sed -i` without a suffix.
 
 **Why:** The repeatable checks for these scripts run only on Linux (bash 5), so a bash 4 construct passes every workspace test and then fails on the owner's Mac, where nobody can debug it from here.
 
-**How to apply:** Before finishing a macOS-facing script, grep it for the constructs above (a regex over `declare -A|mapfile|readarray|,,|\^\^|%\(|\[\[ -v|\[-1\]`) and prefer `$(<file)`, parallel indexed arrays, `case` matching, and `[[ =~ ]]` with `[[:space:]]` classes. Also verify the checksum/label/version constants against the docs and workflow through the Linux dry-run test rather than by hand.
+**How to apply:** Grep first (`declare -A|mapfile|readarray|,,|\^\^|%\(|\[\[ -v|\[-1\]`), then run the real thing: a genuine bash 3.2.57 builds on this Linux workspace in a few minutes and the iOS runner harness accepts `PROVISION_TEST_BASH=/path/to/bash` to run the script and every stub under it. `bash -n` under 3.2 catches parse-level constructs; the harness cases catch runtime ones.
+
+Build recipe (do not commit the binary; `/tmp` is fine):
+
+1. `F="-O1 -std=gnu89 -Wno-implicit-function-declaration -Wno-implicit-int -Wno-incompatible-pointer-types -Wno-int-conversion -Wno-error -Wno-format-security"`; `curl -fsSL -o bash-3.2.57.tar.gz https://ftp.gnu.org/gnu/bash/bash-3.2.57.tar.gz`, extract, then `CFLAGS="$F" ./configure --prefix=/tmp/bash32/install`. The flags must reach configure too: GCC 14 rejects implicit declarations, so a plain configure records `bash_cv_have_strsignal=no` and the build later dies in `siglist.o` (`siglist.h:37: expected identifier or '(' before 'char'`). Check `grep HAVE_STRSIGNAL config.h` shows `#define HAVE_STRSIGNAL 1` before making.
+2. The shipped `y.tab.c` is stale relative to the patched `parse.y` (compile error `too few arguments to function 'expand_prompt_string'`), and there is no `yacc` on the PATH: delete `y.tab.c`/`y.tab.h` and build inside `nix-shell -p bison` with `YACC='bison -y'`.
+3. The same flags go to both the target and the build-tools compiles: `make -j4 YACC='bison -y' CFLAGS="$F" CFLAGS_FOR_BUILD="$F" && make install`; without `CFLAGS_FOR_BUILD`, `support/bashversion.c` fails, and without `-Wno-format-security`, `print_cmd.c` fails. About two minutes end to end; `/tmp` is wiped when the task environment resets, so expect to rebuild.

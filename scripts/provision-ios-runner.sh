@@ -246,9 +246,11 @@ REGISTRATION_PLANNED=0
 
 XCODE_FIX="install Xcode from the App Store, then run: sudo xcode-select --switch /Applications/Xcode.app/Contents/Developer && sudo xcodebuild -license accept && xcodebuild -runFirstLaunch"
 
+# simctl's text listing may pad lines with trailing whitespace, so the runtime
+# and device patterns end with [[:space:]]* rather than anchoring to the value.
 latest_ios_runtime() {
   xcrun simctl list runtimes available 2>/dev/null |
-    sed -n 's/^iOS .* - \(com\.apple\.CoreSimulator\.SimRuntime\.iOS-[0-9][0-9-]*\)$/\1/p' |
+    sed -n 's/^iOS .* - \(com\.apple\.CoreSimulator\.SimRuntime\.iOS-[0-9][0-9-]*\)[[:space:]]*$/\1/p' |
     tail -n 1
 }
 
@@ -539,10 +541,11 @@ check_playwright() {
 # Simulator
 # ---------------------------------------------------------------------------
 
-# find_simulator_udid <state pattern>: mirrors the workflow's own match.
+# find_simulator_udid <state pattern>: mirrors the workflow's own match
+# (including its tolerance for trailing whitespace after the state).
 find_simulator_udid() {
   xcrun simctl list devices available 2>/dev/null |
-    sed -n 's/^[[:space:]]*iPhone SE (3rd generation) (\([0-9A-F-]\{8,\}\)) ('"$1"')$/\1/p' |
+    sed -n 's/^[[:space:]]*iPhone SE (3rd generation) (\([0-9A-F-]\{8,\}\)) ('"$1"')[[:space:]]*$/\1/p' |
     tail -n 1
 }
 
@@ -584,11 +587,28 @@ simulator_agent_plist() {
 EOF
 }
 
+# write_simulator_agent <plist content>: replaces the agent and loads it.
+# launchctl bootout finishes asynchronously, so an immediate bootstrap can
+# still see the old registration ("Bootstrap failed: 5: Input/output error");
+# the load is retried briefly before it is reported as a failure.
+SIMULATOR_AGENT_LOAD_ATTEMPTS="${IOS_RUNNER_AGENT_LOAD_ATTEMPTS:-5}"
+
 write_simulator_agent() {
   mkdir -p "$HOME/Library/LaunchAgents" "$HOME/Library/Logs" || return 1
   printf '%s\n' "$1" >"$SIMULATOR_AGENT_PLIST" || return 1
-  launchctl bootout "gui/$(id -u)/${SIMULATOR_AGENT_LABEL}" >/dev/null 2>&1 || true
-  launchctl bootstrap "gui/$(id -u)" "$SIMULATOR_AGENT_PLIST"
+  local domain="gui/$(id -u)" attempt=1 output=""
+  launchctl bootout "${domain}/${SIMULATOR_AGENT_LABEL}" >/dev/null 2>&1 || true
+  while :; do
+    if output="$(launchctl bootstrap "$domain" "$SIMULATOR_AGENT_PLIST" 2>&1)"; then
+      return 0
+    fi
+    if ((attempt >= SIMULATOR_AGENT_LOAD_ATTEMPTS)); then
+      [[ -z "$output" ]] || printf '%s\n' "$output" >&2
+      return 1
+    fi
+    attempt=$((attempt + 1))
+    sleep 1
+  done
 }
 
 ensure_simulator_agent() {
@@ -624,7 +644,7 @@ check_simulator() {
     return 0
   fi
 
-  local udid
+  local udid create_error="" create_stderr
   udid="$(find_simulator_udid Booted)"
   if [[ -z "$udid" ]]; then
     udid="$(find_simulator_udid '[A-Za-z ]*')"
@@ -634,7 +654,15 @@ check_simulator() {
           log "[dry-run] create '${SIMULATOR_NAME}': xcrun simctl create \"${SIMULATOR_NAME}\" ${SIMULATOR_DEVICE_TYPE} ${SIMULATOR_RUNTIME}"
         else
           log "Creating '${SIMULATOR_NAME}' on ${SIMULATOR_RUNTIME}..."
-          udid="$(xcrun simctl create "$SIMULATOR_NAME" "$SIMULATOR_DEVICE_TYPE" "$SIMULATOR_RUNTIME" 2>/dev/null || true)"
+          # simctl's reason for refusing (for example a device type that the
+          # installed Xcode no longer offers) belongs in the report row.
+          create_stderr="$(mktemp)"
+          udid="$(xcrun simctl create "$SIMULATOR_NAME" "$SIMULATOR_DEVICE_TYPE" "$SIMULATOR_RUNTIME" 2>"$create_stderr" || true)"
+          if [[ -z "$udid" ]]; then
+            create_error="$(tr '\n' ' ' <"$create_stderr" | sed 's/[[:space:]]*$//')"
+            log "simctl create failed${create_error:+: ${create_error}}"
+          fi
+          rm -f "$create_stderr"
         fi
       fi
     fi
@@ -654,6 +682,8 @@ check_simulator() {
       record "Booted ${SIMULATOR_NAME}" MISSING "will be booted (${udid})" core
     elif ((DRY_RUN)); then
       record "Booted ${SIMULATOR_NAME}" MISSING "will be created on ${SIMULATOR_RUNTIME:-an iOS runtime} and booted" core
+    elif [[ -n "$create_error" ]]; then
+      record "Booted ${SIMULATOR_NAME}" MISSING "xcrun simctl create ${SIMULATOR_DEVICE_TYPE} on ${SIMULATOR_RUNTIME} failed: ${create_error}" core
     else
       record "Booted ${SIMULATOR_NAME}" MISSING "no booted '${SIMULATOR_NAME}'; check 'xcrun simctl list devices available' and the runtime row above" core
     fi
@@ -1104,13 +1134,18 @@ install_service() {
   fi
   local status
   status="$(svc_status)"
+  # svc.sh status prints "not installed", "Stopped", or "Started:" followed by
+  # the launchctl entry. A stopped agent reads the new .path and .env when it
+  # starts, and svc.sh stop exits when launchctl unload fails (as it can for
+  # an agent that is not loaded), so only a started agent is restarted after
+  # an environment change.
   if [[ "$status" == *"not installed"* ]]; then
     run_action "install the runner launch agent: ./svc.sh install" svc install || true
     run_action "start the runner launch agent: ./svc.sh start" svc start || true
-  elif ((ENVIRONMENT_CHANGED)); then
-    run_action "restart the runner so the new .path and .env apply: ./svc.sh stop && ./svc.sh start" svc_restart || true
   elif [[ "$status" == *"Stopped"* ]]; then
     run_action "start the runner launch agent: ./svc.sh start" svc start || true
+  elif ((ENVIRONMENT_CHANGED)); then
+    run_action "restart the runner so the new .path and .env apply: ./svc.sh stop && ./svc.sh start" svc_restart || true
   fi
   status="$(svc_status)"
   local plist="" line

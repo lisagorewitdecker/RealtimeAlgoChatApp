@@ -436,7 +436,13 @@ are read from the workflow on `main`, not from a local checkout.
 
 `pnpm --filter @workspace/scripts run test:ios-runner` exercises the script's
 dry-run path on Linux and fails when its labels, pinned runner release, pnpm
-version, or readiness report drift from the workflow and this document.
+version, or readiness report drift from the workflow and this document. It
+also drives the macOS-only branches through stubs (`uname` reporting Darwin,
+`xcrun simctl` listings padded with trailing whitespace, `launchctl`
+bootstrap failing once after bootout, `svc.sh` in every service state). macOS
+ships bash 3.2, so run the suite with `PROVISION_TEST_BASH=/path/to/bash-3.2`
+pointing at a locally built bash 3.2.57 before changing the script; the
+default run uses the workspace bash.
 
 Store the candidate build IDs as repository-level GitHub Actions
 **variables**:

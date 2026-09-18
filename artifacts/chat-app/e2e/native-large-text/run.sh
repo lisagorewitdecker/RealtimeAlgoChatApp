@@ -185,20 +185,20 @@ if [[ "$PLATFORM" == "ios" ]]; then
     IOS_XCRUN_STATUS="READY"
     BOOTED_DEVICES="$(xcrun simctl list devices booted)"
     IOS_DEVICE_UDID="$(
-      sed -n "s/^[[:space:]]*${SMALLEST_IOS_DEVICE//\//\\/} (\([0-9A-F-]\{8,\}\)) (Booted)$/\1/p" <<<"$BOOTED_DEVICES" |
+      sed -n "s/^[[:space:]]*${SMALLEST_IOS_DEVICE//\//\\/} (\([0-9A-F-]\{8,\}\)) (Booted)[[:space:]]*$/\1/p" <<<"$BOOTED_DEVICES" |
         head -n 1
     )"
     if [[ -n "$IOS_DEVICE_UDID" ]]; then
       BOOTED_DEVICE="$SMALLEST_IOS_DEVICE"
     else
       BOOTED_DEVICE="$(
-        sed -n 's/^[[:space:]]*\(.*\) ([0-9A-F-]\{8,\}) (Booted)$/\1/p' <<<"$BOOTED_DEVICES" |
+        sed -n 's/^[[:space:]]*\(.*\) ([0-9A-F-]\{8,\}) (Booted)[[:space:]]*$/\1/p' <<<"$BOOTED_DEVICES" |
           head -n 1
       )"
     fi
     if [[ -z "$IOS_DEVICE_UDID" && "$RUN_MODE" == "diagnostic-only" ]]; then
       IOS_DEVICE_UDID="$(
-        sed -n 's/^[[:space:]]*.* (\([0-9A-F-]\{8,\}\)) (Booted)$/\1/p' <<<"$BOOTED_DEVICES" |
+        sed -n 's/^[[:space:]]*.* (\([0-9A-F-]\{8,\}\)) (Booted)[[:space:]]*$/\1/p' <<<"$BOOTED_DEVICES" |
           head -n 1
       )"
     fi

@@ -14,7 +14,11 @@ PROVISION="$WORKSPACE_ROOT/scripts/provision-ios-runner.sh"
 WORKFLOW="$WORKSPACE_ROOT/.github/workflows/mobile-release.yml"
 DOCS="$WORKSPACE_ROOT/artifacts/chat-app/docs/native-large-text-device-check.md"
 API_SERVER_MANIFEST="$WORKSPACE_ROOT/artifacts/api-server/package.json"
-BASH_BIN="$(command -v bash)"
+# PROVISION_TEST_BASH runs the script and its stubs under another bash build
+# (for example a locally built 3.2.57, the version macOS ships) so bash 3.2
+# regressions surface on Linux before the owner's Mac sees them.
+BASH_BIN="${PROVISION_TEST_BASH:-$(command -v bash)}"
+[[ -x "$BASH_BIN" ]] || { printf 'PROVISION_TEST_BASH is not an executable bash: %s\n' "$BASH_BIN" >&2; exit 1; }
 ENV_BIN="$(command -v env)"
 GREP_BIN="$(command -v grep)"
 
@@ -97,7 +101,7 @@ esac
 make_utilities() {
   local directory="$1" command
   mkdir -p "$directory"
-  for command in uname sed head tail tr date cat mkdir mktemp rm id sort grep find sha256sum; do
+  for command in uname sed head tail tr date cat mkdir mktemp rm id sort grep find sha256sum sleep; do
     ln -s "$(command -v "$command")" "$directory/$command"
   done
 }
@@ -367,10 +371,16 @@ run_sourced() {
   printf '%s\n' "$output"
 }
 
-# make_svc_stub <runner root>: svc.sh records every call in SVC_LOG and keeps
-# a small state so status answers like the real script (not installed,
-# Stopped, Started: plus the plist path).
+# make_svc_stub <runner root> [state]: svc.sh records every call in SVC_LOG
+# and keeps a small state so status answers like the real script (not
+# installed, Stopped, Started: plus the plist path). Like the real script,
+# stop fails (launchctl unload) unless the agent is started. The optional
+# state (installed or started) seeds an existing installation.
 make_svc_stub() {
+  rm -f "$1/.svc-state"
+  if [[ -n "${2:-}" ]]; then
+    printf '%s\n' "$2" >"$1/.svc-state"
+  fi
   cat >"$1/svc.sh" <<EOF
 #!${BASH_BIN}
 printf '%s\\n' "\$*" >>"\$SVC_LOG"
@@ -378,7 +388,14 @@ state="\${0%/*}/.svc-state"
 case "\$1" in
   install) printf 'installed\\n' >"\$state" ;;
   start) printf 'started\\n' >"\$state" ;;
-  stop) printf 'installed\\n' >"\$state" ;;
+  stop)
+    if [[ -f "\$state" && "\$(<"\$state")" == started ]]; then
+      printf 'installed\\n' >"\$state"
+    else
+      printf 'Failed: failed to unload\\n' >&2
+      exit 1
+    fi
+    ;;
   status)
     if [[ ! -f "\$state" ]]; then
       printf 'not installed\\n'
@@ -555,6 +572,46 @@ assert_contains "$(cat "$test_root/svc-verified.log")" "start"
 assert_contains "$(cat "$verified_service_root/.path")" "$test_root/home-service/.maestro/bin"
 assert_contains "$(cat "$verified_service_root/.env")" "HOME=$test_root/home-service"
 
+# A second run with a current .path/.env leaves the started agent alone.
+run_sourced service-left-running-when-environment-current 0 "$utilities" "$test_root/home-service" \
+  RUNNER_ROOT="$verified_service_root" SVC_LOG="$test_root/svc-current.log" \
+  -- "$service_snippet" >/dev/null
+[[ "$(cat "$test_root/svc-current.log")" == "status
+status" ]] || fail "svc.sh must only be queried when the environment is current and the agent is started; got: $(cat "$test_root/svc-current.log")"
+
+# An installed but stopped agent only needs start after .path/.env change:
+# svc.sh stop would fail (launchctl unload of an unloaded agent) and skip start.
+stopped_service_root="$test_root/runner-stopped-service"
+make_registered_runner_root "$stopped_service_root" "ios-release-mac" "$repository_url"
+make_registration_record "$stopped_service_root" 7 "$expected_labels"
+make_svc_stub "$stopped_service_root" installed
+stopped_service_output="$(
+  run_sourced service-started-when-stopped-after-environment-change 0 "$utilities" "$test_root/home-service" \
+    RUNNER_ROOT="$stopped_service_root" SVC_LOG="$test_root/svc-stopped.log" \
+    -- "$service_snippet"
+)"
+assert_contains "$stopped_service_output" "[READY] Runner service environment: wrote ${stopped_service_root}/.path and .env"
+assert_contains "$stopped_service_output" "[READY] Runner launch agent: ${test_root}/home-service/Library/LaunchAgents/actions.runner.test.plist (started)"
+[[ "$(cat "$test_root/svc-stopped.log")" == "status
+start
+status" ]] || fail "a stopped agent must be started (never stopped or reinstalled) after an environment change; got: $(cat "$test_root/svc-stopped.log")"
+
+# A started agent is restarted so the new .path/.env apply.
+started_service_root="$test_root/runner-started-service"
+make_registered_runner_root "$started_service_root" "ios-release-mac" "$repository_url"
+make_registration_record "$started_service_root" 7 "$expected_labels"
+make_svc_stub "$started_service_root" started
+started_service_output="$(
+  run_sourced service-restarted-when-started-after-environment-change 0 "$utilities" "$test_root/home-service" \
+    RUNNER_ROOT="$started_service_root" SVC_LOG="$test_root/svc-started.log" \
+    -- "$service_snippet"
+)"
+assert_contains "$started_service_output" "[READY] Runner launch agent: ${test_root}/home-service/Library/LaunchAgents/actions.runner.test.plist (started)"
+[[ "$(cat "$test_root/svc-started.log")" == "status
+stop
+start
+status" ]] || fail "a started agent must be stopped and started after an environment change; got: $(cat "$test_root/svc-started.log")"
+
 # ---------------------------------------------------------------------------
 # The simulator login agent must boot the device itself, then wait for it;
 # boot_simulator does the same and tolerates an already-booted device.
@@ -582,6 +639,101 @@ assert_contains "$simulator_output" "<string>/usr/bin/xcrun simctl boot ${simula
 assert_contains "$simulator_output" "<key>RunAtLoad</key>"
 [[ "$(cat "$test_root/xcrun.log")" == "simctl boot ${simulator_udid}
 simctl bootstatus ${simulator_udid} -b" ]] || fail "boot_simulator must run simctl boot and then bootstatus -b even when the device is already booted; got: $(cat "$test_root/xcrun.log")"
+
+# ---------------------------------------------------------------------------
+# Simulated macOS: simctl's text listing pads lines with trailing whitespace,
+# a shut-down device must be booted, and launchctl bootstrap can fail right
+# after bootout (the load is retried). uname reports Darwin through PATH.
+# ---------------------------------------------------------------------------
+
+macos_stubs="$test_root/macos-stubs"
+mkdir -p "$macos_stubs"
+printf '#!%s\nif [[ "$1" == -m ]]; then printf "arm64\\n"; else printf "Darwin\\n"; fi\n' "$BASH_BIN" >"$macos_stubs/uname"
+printf '#!%s\nprintf "15.6\\n"\n' "$BASH_BIN" >"$macos_stubs/sw_vers"
+printf '#!%s\nprintf "/Applications/Xcode.app/Contents/Developer\\n"\n' "$BASH_BIN" >"$macos_stubs/xcode-select"
+cat >"$macos_stubs/xcrun" <<EOF
+#!${BASH_BIN}
+printf '%s\\n' "\$*" >>"\$XCRUN_LOG"
+state="Shutdown"
+if [[ -f "\$XCRUN_BOOTED" ]]; then
+  state="Booted"
+fi
+case "\$*" in
+  "simctl list devices") ;;
+  "simctl list runtimes available")
+    printf '== Runtimes ==\\n'
+    printf 'iOS 26.0 (26.0 - 23A339) - com.apple.CoreSimulator.SimRuntime.iOS-26-0 \\n'
+    printf 'watchOS 26.0 (26.0 - 23R356) - com.apple.CoreSimulator.SimRuntime.watchOS-26-0 \\n'
+    ;;
+  "simctl list devices available")
+    printf '== Devices ==\\n-- iOS 26.0 --\\n'
+    printf '    iPhone 17 (11111111-2222-3333-4444-555555555555) (Shutdown) \\n'
+    if [[ -z "\${XCRUN_NO_SE:-}" ]]; then
+      printf '    iPhone SE (3rd generation) (%s) (%s) \\n' "\$SIM_UDID" "\$state"
+    fi
+    ;;
+  "simctl create "*)
+    printf 'Invalid device type: com.apple.CoreSimulator.SimDeviceType.iPhone-SE-3rd-generation\\n' >&2
+    exit 161
+    ;;
+  "simctl boot "*) : >"\$XCRUN_BOOTED" ;;
+  "simctl bootstatus "*) ;;
+  *) printf 'unexpected xcrun call: %s\\n' "\$*" >&2; exit 64 ;;
+esac
+EOF
+cat >"$macos_stubs/launchctl" <<EOF
+#!${BASH_BIN}
+printf '%s\\n' "\$*" >>"\$LAUNCHCTL_LOG"
+case "\$1" in
+  bootout) printf 'Boot-out failed: 3: No such process\\n' >&2; exit 3 ;;
+  bootstrap)
+    if (( \$(grep -c '^bootstrap ' "\$LAUNCHCTL_LOG") < 2 )); then
+      printf 'Bootstrap failed: 5: Input/output error\\n' >&2
+      exit 5
+    fi
+    ;;
+esac
+EOF
+chmod +x "$macos_stubs"/*
+macos_home="$test_root/home-macos"
+macos_output="$(
+  run_sourced simulated-macos-boots-padded-simctl-listing 0 "$macos_stubs:$utilities" "$macos_home" \
+    XCRUN_LOG="$test_root/xcrun-macos.log" XCRUN_BOOTED="$test_root/xcrun-macos.booted" \
+    LAUNCHCTL_LOG="$test_root/launchctl-macos.log" SIM_UDID="$simulator_udid" \
+    IOS_RUNNER_AGENT_LOAD_ATTEMPTS=3 \
+    -- 'DRY_RUN=0; ((IS_MACOS)) || { echo "uname stub must make the script treat the host as macOS" >&2; exit 1; }; check_xcode; check_simulator'
+)"
+assert_contains "$macos_output" "[READY] Xcode with simctl: /Applications/Xcode.app/Contents/Developer"
+assert_contains "$macos_output" "[READY] iOS simulator runtime: com.apple.CoreSimulator.SimRuntime.iOS-26-0"
+assert_contains "$macos_output" "[READY] Booted iPhone SE (3rd generation): ${simulator_udid}"
+assert_contains "$macos_output" "[READY] Simulator boot launch agent: ${macos_home}/Library/LaunchAgents/actions.runner."
+assert_not_contains "$(cat "$test_root/xcrun-macos.log")" "simctl create"
+assert_contains "$(cat "$test_root/xcrun-macos.log")" "simctl boot ${simulator_udid}"
+assert_contains "$(cat "$test_root/xcrun-macos.log")" "simctl bootstatus ${simulator_udid} -b"
+macos_agent_plist="$(printf '%s\n' "$macos_home"/Library/LaunchAgents/*.ios-release-simulator.plist)"
+[[ -f "$macos_agent_plist" ]] || fail "the simulator launch agent plist must be written under HOME on macOS"
+assert_contains "$(cat "$macos_agent_plist")" "simctl bootstatus ${simulator_udid} -b"
+# When the device type cannot be created, the report row carries simctl's
+# reason instead of a bare MISSING, and no launch agent is written.
+macos_create_home="$test_root/home-macos-create"
+macos_create_output="$(
+  run_sourced simulated-macos-reports-simctl-create-failure 0 "$macos_stubs:$utilities" "$macos_create_home" \
+    XCRUN_LOG="$test_root/xcrun-macos-create.log" XCRUN_BOOTED="$test_root/xcrun-macos-create.booted" \
+    XCRUN_NO_SE=1 LAUNCHCTL_LOG="$test_root/launchctl-macos-create.log" SIM_UDID="$simulator_udid" \
+    -- 'DRY_RUN=0; check_xcode; check_simulator'
+)"
+assert_contains "$macos_create_output" "[MISSING] Booted iPhone SE (3rd generation): xcrun simctl create com.apple.CoreSimulator.SimDeviceType.iPhone-SE-3rd-generation on com.apple.CoreSimulator.SimRuntime.iOS-26-0 failed: Invalid device type: com.apple.CoreSimulator.SimDeviceType.iPhone-SE-3rd-generation"
+assert_contains "$macos_create_output" "[MISSING] Simulator boot launch agent: written after the simulator is booted"
+assert_contains "$(cat "$test_root/xcrun-macos-create.log")" "simctl create iPhone SE (3rd generation) com.apple.CoreSimulator.SimDeviceType.iPhone-SE-3rd-generation com.apple.CoreSimulator.SimRuntime.iOS-26-0"
+assert_not_contains "$(cat "$test_root/xcrun-macos-create.log")" "simctl boot"
+[[ ! -e "$test_root/launchctl-macos-create.log" ]] || fail "launchctl must not run when the simulator could not be created: $(cat "$test_root/launchctl-macos-create.log")"
+[[ ! -d "$macos_create_home/Library/LaunchAgents" ]] || fail "no launch agent may be written when the simulator could not be created"
+
+macos_agent_label="${macos_agent_plist##*/}"
+macos_agent_label="${macos_agent_label%.plist}"
+[[ "$(cat "$test_root/launchctl-macos.log")" == "bootout gui/$(id -u)/${macos_agent_label}
+bootstrap gui/$(id -u) ${macos_agent_plist}
+bootstrap gui/$(id -u) ${macos_agent_plist}" ]] || fail "launchctl must bootout the old agent, then retry bootstrap after the first failure; got: $(cat "$test_root/launchctl-macos.log")"
 
 # ---------------------------------------------------------------------------
 # Runner archive: a digest mismatch must stop before extraction. curl and tar

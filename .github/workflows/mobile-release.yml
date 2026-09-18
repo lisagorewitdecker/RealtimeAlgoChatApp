@@ -1069,7 +1069,7 @@ jobs:
           set -euo pipefail
           booted_devices="$(xcrun simctl list devices booted)"
           device_udid="$(
-            sed -n 's/^[[:space:]]*iPhone SE (3rd generation) (\([0-9A-F-]\{8,\}\)) (Booted)$/\1/p' <<<"$booted_devices" |
+            sed -n 's/^[[:space:]]*iPhone SE (3rd generation) (\([0-9A-F-]\{8,\}\)) (Booted)[[:space:]]*$/\1/p' <<<"$booted_devices" |
               head -n 1
           )"
           if [[ -z "$device_udid" ]]; then
