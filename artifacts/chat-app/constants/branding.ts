@@ -1,4 +1,4 @@
-export const PRODUCT_NAME = "RealtimeAlgoChatApp Studio";
+export const PRODUCT_NAME = "RealtimeAlgoChatApp";
 
 // Compact brand label for tight UI surfaces such as the Chats header. The full
 // PRODUCT_NAME stays the source of truth for app.json and permission copy.

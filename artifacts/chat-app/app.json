@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "RealtimeAlgoChatApp Studio",
+    "name": "RealtimeAlgoChatApp",
     "slug": "chat-app",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -10,8 +10,8 @@
     "ios": {
       "supportsTablet": false,
       "infoPlist": {
-        "NSCameraUsageDescription": "RealtimeAlgoChatApp Studio uses your camera for video calls.",
-        "NSMicrophoneUsageDescription": "RealtimeAlgoChatApp Studio uses your microphone for voice and video calls."
+        "NSCameraUsageDescription": "RealtimeAlgoChatApp uses your camera for video calls.",
+        "NSMicrophoneUsageDescription": "RealtimeAlgoChatApp uses your microphone for voice and video calls."
       }
     },
     "android": {
