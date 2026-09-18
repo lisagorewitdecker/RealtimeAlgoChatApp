@@ -19,8 +19,9 @@ import { createIpRateLimit } from "../middlewares/rateLimit";
 const router = Router();
 const MODERATION_HISTORY_WINDOW_MS = 60 * 1_000;
 const MODERATION_DELETE_MESSAGE_LIMITER = createIpRateLimit({
+  scope: "moderation-delete-message",
   windowMs: 60 * 1_000,
-  max: 30,
+  maxRequests: 30,
 });
 const MODERATION_HISTORY_PER_USER_WINDOW = 30;
 const MODERATION_HISTORY_PER_IP_WINDOW = 120;
