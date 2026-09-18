@@ -2549,8 +2549,8 @@ test("Android preview evidence keeps its pull-request validation and privacy con
       timestamp: "20260915T120000Z",
       baseText: blockedRecord,
       text: blockedRecord.replace(
-        "The local probe was not run.",
-        "The local probe was not run for this record.",
+        "public manifest HTTP 200 (128 bytes)",
+        "public manifest HTTP 200 (256 bytes)",
       ),
       preflight: changedBlockedPreflight,
     },
