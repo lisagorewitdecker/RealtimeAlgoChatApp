@@ -229,7 +229,7 @@ test("keeps every client marker while redacting console and file evidence", asyn
   }
 });
 
-test("keeps the newest evidence in a bounded rolling window", () => {
+test("keeps the newest evidence in a bounded rolling window", async () => {
   assert.equal(MAX_REQUEST_EVIDENCE_LINES, 1_000);
   const retainedContents = [];
   const appendEvidence = createEvidenceAppender(
@@ -243,7 +243,7 @@ test("keeps the newest evidence in a bounded rolling window", () => {
 
   for (const line of ["request 1", "request 2", "request 3", "request 4"]) {
     consoleLines.push(line);
-    appendEvidence(line);
+    await appendEvidence(line);
   }
 
   assert.deepEqual(consoleLines, [
@@ -260,13 +260,70 @@ test("keeps the newest evidence in a bounded rolling window", () => {
     "[dev-request] Evidence file truncated after 2 request lines; console output continues.\n" +
       "request 3\nrequest 4\n",
   ]);
-  assert.equal(appendEvidence("request 5"), true);
+  assert.equal(await appendEvidence("request 5"), true);
   assert.equal(
     retainedContents.at(-1),
     "[dev-request] Evidence file truncated after 2 request lines; console output continues.\n" +
       "request 4\nrequest 5\n",
   );
   assert.equal(retainedContents.at(-1).trimEnd().split("\n").length, 3);
+});
+
+test("serializes asynchronous evidence writes in request order", async () => {
+  const writes = [];
+  const writeStarted = [];
+  const releaseWrite = [];
+  const appendEvidence = createEvidenceAppender(
+    (contents) => {
+      writes.push(contents);
+      const started = new Promise((resolve) => {
+        writeStarted.push(resolve);
+      });
+      const released = new Promise((resolve) => {
+        releaseWrite.push(resolve);
+      });
+      return started.then(() => released);
+    },
+    4,
+  );
+
+  const firstWrite = appendEvidence("request 1");
+  const secondWrite = appendEvidence("request 2");
+  await Promise.resolve();
+  writeStarted[0]();
+  await Promise.resolve();
+
+  assert.deepEqual(writes, ["request 1\n"]);
+  releaseWrite[0]();
+  await firstWrite;
+  await Promise.resolve();
+  assert.deepEqual(writes, ["request 1\n", "request 1\nrequest 2\n"]);
+
+  writeStarted[1]();
+  releaseWrite[1]();
+  assert.equal(await secondWrite, true);
+});
+
+test("disables persistence after a write failure while later appends resolve", async () => {
+  const writes = [];
+  const failures = [];
+  const appendEvidence = createEvidenceAppender(
+    () => {
+      writes.push(true);
+      return Promise.reject(
+        Object.assign(new Error("disk full"), { code: "ENOSPC" }),
+      );
+    },
+    3,
+    (error) => failures.push(error),
+  );
+
+  assert.equal(await appendEvidence("request 1"), false);
+  assert.equal(await appendEvidence("request 2"), false);
+  assert.equal(await appendEvidence("request 3"), false);
+  assert.equal(writes.length, 1);
+  assert.equal(failures.length, 1);
+  assert.equal(failures[0].code, "ENOSPC");
 });
 
 test("Metro middleware keeps console diagnostics unbounded and retains newest evidence", async () => {
