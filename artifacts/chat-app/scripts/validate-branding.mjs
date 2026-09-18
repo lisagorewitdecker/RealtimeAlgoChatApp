@@ -2,7 +2,11 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import { findDuplicateJsonObjectKeys } from "../../../scripts/find-duplicate-json-object-keys.mjs";
+import {
+  findDuplicateJsonObjectKeys,
+  isJsonEvidenceLimitError,
+} from "../../../scripts/find-duplicate-json-object-keys.mjs";
+import { readBoundedTextFileSync } from "../../../scripts/read-bounded-text.mjs";
 
 const workspaceRoot = path.resolve(
   fileURLToPath(new URL("../../..", import.meta.url)),
@@ -98,7 +102,18 @@ function requireNativeValue(metadata, key, platform) {
  * file remains available for detailed inspection.
  */
 export function parseNativeMetadata({ platform, source }) {
-  if (findDuplicateJsonObjectKeys(source).length > 0) {
+  let duplicateFields;
+  try {
+    duplicateFields = findDuplicateJsonObjectKeys(source);
+  } catch (error) {
+    if (isJsonEvidenceLimitError(error)) {
+      throw new Error(
+        `Native ${platformLabel(platform)} metadata exceeds the release evidence size or nesting limit; inspect the uploaded native metadata file rather than the source app.json.`,
+      );
+    }
+    throw error;
+  }
+  if (duplicateFields.length > 0) {
     throw new Error(
       `Native ${platformLabel(platform)} metadata contains duplicate fields; inspect the uploaded native metadata file rather than the source app.json.`,
     );
@@ -127,8 +142,13 @@ export function parseNativeMetadata({ platform, source }) {
 function readNativeMetadata({ platform, metadataPath }) {
   let source;
   try {
-    source = readFileSync(metadataPath, "utf8");
+    source = readBoundedTextFileSync(metadataPath);
   } catch (error) {
+    if (isJsonEvidenceLimitError(error)) {
+      throw new Error(
+        `Native ${platformLabel(platform)} metadata exceeds the release evidence size limit; inspect the uploaded native metadata file rather than the source app.json.`,
+      );
+    }
     const code =
       typeof error?.code === "string" ? ` (${error.code})` : "";
     throw new Error(

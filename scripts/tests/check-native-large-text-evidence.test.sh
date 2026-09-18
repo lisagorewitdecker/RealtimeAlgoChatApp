@@ -491,6 +491,23 @@ fi
 assert_contains "$wrong_function_output" "[android] Invalid Sentry source-map evidence"
 assert_contains "$wrong_function_output" "readable source-mapped frame is missing"
 
+oversized_root="$TEST_ROOT/oversized-evidence"
+write_valid_run "$oversized_root" ios
+write_valid_run "$oversized_root" android
+oversized_sentinel="oversized-private-evidence-sentinel"
+{
+  printf '{"private":"%s","padding":"' "$oversized_sentinel"
+  head -c 262144 /dev/zero | tr '\0' 'x'
+  printf '"}\n'
+} > "$oversized_root/android/20260909T120000Z/sentry-source-map-evidence.json"
+if oversized_output="$(bash "$CHECKER" "$oversized_root" 2>&1)"; then
+  echo "oversized Sentry evidence case unexpectedly passed" >&2
+  exit 1
+fi
+assert_contains "$oversized_output" "[android] Invalid Sentry source-map evidence"
+assert_contains "$oversized_output" "evidence exceeds the release evidence size limit"
+assert_not_contains "$oversized_output" "$oversized_sentinel"
+
 valid_root="$TEST_ROOT/valid"
 write_valid_run "$valid_root" ios
 write_valid_run "$valid_root" android

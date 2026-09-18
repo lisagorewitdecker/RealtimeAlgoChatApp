@@ -632,7 +632,8 @@ validate_platform() {
         "$sentry_trigger_path" \
         "$platform" \
         "$candidate_build_id" \
-        "$ROOT_DIR/scripts/find-duplicate-json-object-keys.mjs" <<'NODE'
+        "$ROOT_DIR/scripts/find-duplicate-json-object-keys.mjs" \
+        "$ROOT_DIR/scripts/read-bounded-text.mjs" 2>&1 <<'NODE'
 import { readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 
@@ -644,15 +645,38 @@ const [
   platform,
   candidateBuildId,
   duplicateKeysModulePath,
+  boundedTextModulePath,
 ] = process.argv;
 const { findDuplicateJsonObjectKeys } = await import(
   pathToFileURL(duplicateKeysModulePath).href
 );
-const rawEvidence = readFileSync(evidencePath, "utf8");
+const { readBoundedTextFileSync } = await import(
+  pathToFileURL(boundedTextModulePath).href
+);
+let rawEvidence;
+try {
+  rawEvidence = readBoundedTextFileSync(evidencePath);
+} catch (error) {
+  if (error?.code === "JSON_EVIDENCE_TOO_LARGE") {
+    throw new Error("evidence exceeds the release evidence size limit");
+  }
+  throw error;
+}
 if (/(?:auth(?:orization)?[_-]?token|sentry_auth_token|bearer\s+[A-Za-z0-9._-]+)/i.test(rawEvidence)) {
   throw new Error("evidence contains credential-like content");
 }
-const duplicateFields = findDuplicateJsonObjectKeys(rawEvidence);
+let duplicateFields;
+try {
+  duplicateFields = findDuplicateJsonObjectKeys(rawEvidence);
+} catch (error) {
+  if (error?.code === "JSON_EVIDENCE_TOO_LARGE") {
+    throw new Error("evidence exceeds the release evidence size limit");
+  }
+  if (error?.code === "JSON_EVIDENCE_TOO_DEEP") {
+    throw new Error("evidence exceeds the release evidence nesting limit");
+  }
+  throw error;
+}
 if (duplicateFields.length > 0) {
   throw new Error("duplicate JSON field(s)");
 }

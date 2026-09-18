@@ -46,6 +46,8 @@ test("hosted summary regression checks only the reviewed ref", () => {
   assert.deepEqual(workflow.on.pull_request.paths, [
     ".github/workflows/native-evidence-summary-regression.yml",
     "scripts/check-native-large-text-evidence.sh",
+    "scripts/find-duplicate-json-object-keys.mjs",
+    "scripts/read-bounded-text.mjs",
     "scripts/run-untrusted-checker.sh",
     "scripts/tests/native-evidence-summary-regression-fixture.sh",
   ]);
@@ -66,7 +68,7 @@ test("hosted summary regression checks only the reviewed ref", () => {
   );
   const [, job] = jobs[0];
   assert.equal(job["runs-on"], "ubuntu-latest");
-  assert.equal(job.steps.length, 2);
+  assert.equal(job.steps.length, 3);
   assert.equal(job.steps[0].uses, "actions/checkout@v4");
   assert.equal(
     job.steps[0].with.ref,
@@ -131,15 +133,55 @@ test("hosted summary regression checks only the reviewed ref", () => {
     /summary_path.*(?:REVIEWED_REF|resolved_commit_sha)|(?:REVIEWED_REF|resolved_commit_sha).*summary_path/,
   );
   assert.doesNotMatch(workflowText, /\$\{\{\s*secrets\./);
+
+  const oversizedStep = job.steps[2];
+  assert.equal(
+    oversizedStep.name,
+    "Verify oversized native evidence stays blocked and redacted",
+  );
+  assert.match(
+    oversizedStep.run,
+    /head -c 262144 \/dev\/zero \| tr '\\0' 'x'/,
+  );
+  assert.match(
+    oversizedStep.run,
+    /evidence exceeds the release evidence size limit/,
+  );
+  // The hostile marker must reach the fixture only after runtime decoding:
+  // GitHub Actions echoes the rendered run script into the hosted job log, so
+  // a literal occurrence would leak the payload the regression checks for.
+  const encodedPrivateMarker = "b3ZlcnNpemVkLWhvc3RlZC1wcml2YXRlLXNlbnRpbmVs";
+  const privateMarker = Buffer.from(encodedPrivateMarker, "base64").toString(
+    "utf8",
+  );
+  assert.ok(
+    !workflowText.includes(privateMarker),
+    "the raw hostile marker must not appear anywhere in the workflow source",
+  );
+  assert.ok(
+    oversizedStep.run.includes(encodedPrivateMarker),
+    "the oversized step must carry the hostile marker in encoded form",
+  );
+  assert.match(
+    oversizedStep.run,
+    /private_marker="\$\(printf '%s' '[A-Za-z0-9+/=]+' \| base64 -d\)"/,
+  );
+  assert.match(oversizedStep.run, /require_not_contains "\$output" "\$private_marker"/);
+  assert.match(oversizedStep.run, /require_not_contains "\$summary" "\$private_marker"/);
+  assert.match(
+    oversizedStep.run,
+    /oversized native evidence scenario unexpectedly passed/,
+  );
+  assert.match(
+    oversizedStep.run,
+    /Oversized evidence payload leaked into hosted output/,
+  );
 });
 
 test("hosted summary regression cannot publish or start native jobs", () => {
   assert.doesNotMatch(workflowText, /self-hosted/);
   assert.doesNotMatch(workflowText, /\bpublish\b/i);
-  assert.doesNotMatch(
-    workflowText,
-    /EAS_TOKEN|candidate_build_id|NATIVE_SMOKE/,
-  );
+  assert.doesNotMatch(workflowText, /EAS_TOKEN|NATIVE_SMOKE/);
   assert.doesNotMatch(workflowText, /runs-on:\s*.*(?:macos|self-hosted)/i);
 });
 

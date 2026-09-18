@@ -1742,6 +1742,31 @@ test("rejects duplicate top-level, boundary, and status fields before schema val
   }
 });
 
+test("rejects oversized handoff evidence with a fixed diagnostic", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "oversized-preview-handoff-"));
+  const outputPath = join(directory, "android-preview-preflight.json");
+  const privateIdentifier = "oversized-preview-private-id";
+  writeFileSync(
+    outputPath,
+    `{"private":"${privateIdentifier}","padding":"${"x".repeat(262_144)}"}`,
+  );
+  try {
+    await assert.rejects(
+      () => readAndValidateHandoffPreflight(outputPath),
+      (error) => {
+        assert.equal(
+          error.message,
+          "Preview handoff preflight JSON exceeds the release evidence size limit.",
+        );
+        assert.doesNotMatch(error.message, new RegExp(privateIdentifier));
+        return true;
+      },
+    );
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("record output reports unwritable parent paths", async () => {
   const record = createHandoffPreflightRecord();
 

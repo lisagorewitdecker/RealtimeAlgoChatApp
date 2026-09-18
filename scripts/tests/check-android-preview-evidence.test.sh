@@ -255,6 +255,8 @@ mkdir -p "$discovery_root/scripts" \
 cp "$CHECKER" "$discovery_root/scripts/"
 cp "$ROOT_DIR/scripts/find-duplicate-json-object-keys.mjs" \
   "$discovery_root/scripts/"
+cp "$ROOT_DIR/scripts/read-bounded-text.mjs" \
+  "$discovery_root/scripts/"
 cp "$ROOT_DIR/artifacts/chat-app/scripts/validate-preview-startup.mjs" \
   "$ROOT_DIR/artifacts/chat-app/scripts/preview-startup-shared.mjs" \
   "$discovery_root/artifacts/chat-app/scripts/"

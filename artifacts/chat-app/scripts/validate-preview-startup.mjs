@@ -4,7 +4,11 @@ import { writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { spawn } from "node:child_process";
 import { setTimeout as delay } from "node:timers/promises";
-import { findDuplicateJsonObjectKeys } from "../../../scripts/find-duplicate-json-object-keys.mjs";
+import {
+  findDuplicateJsonObjectKeys,
+  isJsonEvidenceLimitError,
+} from "../../../scripts/find-duplicate-json-object-keys.mjs";
+import { readBoundedTextFile } from "../../../scripts/read-bounded-text.mjs";
 import {
   MAX_PREVIEW_TIMEOUT_MS,
   READY_MARKERS,
@@ -421,13 +425,27 @@ export function validateHandoffPreflightRecord(record) {
 export async function readAndValidateHandoffPreflight(outputPath) {
   let source;
   try {
-    source = await readFile(resolve(outputPath), "utf8");
-  } catch {
+    source = await readBoundedTextFile(resolve(outputPath));
+  } catch (error) {
+    if (isJsonEvidenceLimitError(error)) {
+      throw new Error(
+        "Preview handoff preflight JSON exceeds the release evidence size limit.",
+      );
+    }
     throw new Error("Preview handoff preflight JSON could not be read.");
   }
 
-  if (findDuplicateJsonObjectKeys(source).length > 0) {
-    throw new Error("Preview handoff preflight JSON contains duplicate fields.");
+  try {
+    if (findDuplicateJsonObjectKeys(source).length > 0) {
+      throw new Error("Preview handoff preflight JSON contains duplicate fields.");
+    }
+  } catch (error) {
+    if (isJsonEvidenceLimitError(error)) {
+      throw new Error(
+        "Preview handoff preflight JSON exceeds the release evidence size or nesting limit.",
+      );
+    }
+    throw error;
   }
 
   let record;

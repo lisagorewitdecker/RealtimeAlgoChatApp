@@ -12,6 +12,10 @@ import {
   validateNativeArtifactMetadata,
   formatNativeBrandingSummary,
 } from "./validate-branding.mjs";
+import {
+  MAX_JSON_EVIDENCE_BYTES,
+  MAX_JSON_EVIDENCE_DEPTH,
+} from "../../../scripts/find-duplicate-json-object-keys.mjs";
 
 const brandingPath = new URL("../constants/branding.ts", import.meta.url);
 const appMetadataPath = new URL("../app.json", import.meta.url);
@@ -318,6 +322,30 @@ test("rejects duplicate nested native metadata fields with a fixed reason", () =
       assert.doesNotMatch(error.message, /position|token/i);
       return true;
     },
+  );
+});
+
+test("rejects oversized native metadata without exposing its contents", () => {
+  const privateIdentifier = "oversized-native-metadata-private-id";
+  assert.throws(
+    () =>
+      parseNativeMetadata({
+        platform: "ios",
+        source: `{"private":"${privateIdentifier}","padding":"${"x".repeat(MAX_JSON_EVIDENCE_BYTES)}"}`,
+      }),
+    (error) => {
+      assert.match(error.message, /exceeds the release evidence size or nesting limit/);
+      assert.doesNotMatch(error.message, new RegExp(privateIdentifier));
+      return true;
+    },
+  );
+});
+
+test("rejects deeply nested native metadata before JSON parsing", () => {
+  const source = `${"[".repeat(MAX_JSON_EVIDENCE_DEPTH + 1)}0${"]".repeat(MAX_JSON_EVIDENCE_DEPTH + 1)}`;
+  assert.throws(
+    () => parseNativeMetadata({ platform: "android", source }),
+    /exceeds the release evidence size or nesting limit/,
   );
 });
 

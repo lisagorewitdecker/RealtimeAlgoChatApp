@@ -39,20 +39,18 @@
 - [Expo Sentry wizard fallback](expo-sentry-wizard.md) — non-TTY wizard runs can exit after the banner without changes; verify diffs and honor Expo's SDK-compatible package range.
 - [Generated-client check backup safety](generated-check-backup-safety.md) — keep the backup when restoration is incomplete; simulate disk failures via read-only paths (skipped as root).
 - [Native gate diagnostic runs](native-gate-diagnostic-runs.md) — any device override marks the whole run diagnostic-only; CI refuses it loudly; evidence requires run_mode=release-gate.
+- [Volatile tracked test results](volatile-tracked-test-results.md) — Playwright test-results/ and run markers are volatile; never re-track them, restore any committed marker before completing.
 - [Native evidence review record](native-evidence-review-record.md) — a missing human review is reported, not fatal (the CI gate runs before anyone can review); rejected or mismatched records fail.
 - [Native evidence diagnostic privacy](native-evidence-diagnostic-privacy.md) — release failures name fields and artifact paths without echoing parsed fixture values or parser snippets.
 - [Candidate-bound release evidence](candidate-bound-release-evidence.md) — checks for prebuilt mobile candidates must verify evidence inside each binary, not current release-time secrets.
-- [Expo Go native modules & preview 502s](expo-go-native-modules.md) — gate native SDK init outside Expo Go; orphan `expo start` blocks the port prompt; iOS Go 57 needs a signed-in dev server (`mkdir -p ~/.expo` first).
-- [iPhone simulator startup crash evidence](expo-go-native-modules.md) — `devices.json` stays empty for Expo Go 57 iOS; use the request log + `DEBUG=Metro:InspectorProxy`; bundle 200 then close 1006 = crash.
-- [Expo Go secure-store keys](expo-go-native-modules.md) — expo-secure-store rejects `:` in key names on phones only; encode keys and keep the Jest mock enforcing the real pattern.
+- [Expo Go native modules & preview 502s](expo-go-native-modules.md) — gate native SDK init outside Expo Go; an orphan `expo start` blocks the port prompt; iOS Go 57 needs a signed-in dev server.
 - [Physical-device evidence tasks](physical-device-evidence.md) — no phones are reachable here; probe once, file a BLOCKED record per the docs procedure, then ask the user for device access.
-- [Release-run preconditions live on GitHub](physical-device-evidence.md) — audit environments/secrets/vars/runners/runs by name via the GitHub connection before planning a release run.
-- [Stale node_modules after merge](physical-device-evidence.md) — Jest "Cannot find module '@babel/generator'" means node_modules lags the lockfile; reinstall frozen and offline.
 - [Preview device debugging](preview-device-debugging.md) — in-container probes bypass the public edge; use the opt-in Metro request log and check the live manifest date first.
 - [Preview timeout test configuration](preview-timeout-test-configuration.md) — pass plain decimal timeout env values; Number() rejects numeric separators and silently falls back to the default.
 - [Mobile preview rename detection](ios-preview-rename-detection.md) — force Git rename detection and keep moved timestamped records paired with their sidecars.
 - [Room key hydration](room-key-hydration.md) — key-load promises must always settle; storage read failures become retryable load failures, never a hang or key replacement.
 - [Job summary untrusted text](job-summary-untrusted-text.md) — render PR-body text and contract findings in backtick-safe code spans in GitHub job summaries; never as raw Markdown.
+- [Task merges land on the checked-out branch](branch-divergence-from-task-merges.md) — pre-merge auto-commits append whole file copies; keep the newest copy and reunify lineages with a no-ff merge.
 - [Preload worker transport chain](preload-worker-transport-chain.md) — a logger import in the `--import` preload spawned pino workers without bound; keep side effects behind `isMainThread`.
 - [Pinned packageExtensions after upgrades](pinned-package-extensions-after-upgrades.md) — exact-version extension keys silently stop applying after upgrades and broke the Chat App publish build.
 - [Release summary secret contract](release-summary-secret-contract.md) — secret masking is per-job and exact-match only; every workflow summary writer needs an inventoried sentinel contract.
@@ -68,7 +66,8 @@
 - [Account-access lookup deadline](account-access-retry-budget.md) — one hard deadline for waits and in-flight Clerk requests, under Socket.IO’s 45 s connect timeout; pass capped hints to clients.
 - [Relocatable Pino bundles](relocatable-pino-bundles.md) — esbuild-plugin-pino can bake the build machine’s absolute output path into workers; rewrite and validate bundle-relative paths.
 - [Browser E2E phase budgets](e2e-phase-budgets.md) — bound and label external setup, navigation, assertions, and teardown separately so stalls identify their real phase.
-- [Chat App source-rule checks](chat-app-source-rule-checks.md) — conventions hidden by mocked dependencies need fast AST-based source rules; follow local imports one hop and reject what cannot be resolved.
+- [Chat App script tests need explicit wiring](chat-app-script-tests.md) — Jest ignores `scripts/` and `.mjs`; chain node:test files into `test` and clear the runner context variable, not blank it.
+- [Chat App source-rule checks](chat-app-source-rule-checks.md) — conventions hidden by mocked dependencies need AST source rules; follow local imports one hop, reject what cannot be resolved.
 - [Web E2EE key persistence](web-key-persistence.md) — web keys stay in localStorage by owner decision (accepted scan risk); jest-expo has no localStorage, so stub it in tests.
 - [.replit merge regressions](replit-config-merge-regressions.md) — task merges can drop validation workflows and the post-merge timeout; an untracked `.replit` stub in a task env gets committed.
 - [Worktree-local state vs shared Git config](shared-git-config-worktree-records.md) — worktrees share local git config; shared single-valued records let siblings impersonate each other.
@@ -81,7 +80,6 @@
 - [Publish failure messages can be stale](publish-failure-card-staleness.md) — repeated "build failed" messages may reference one old build; confirm a newer build exists before re-diagnosing.
 - [expo-router vendored react-navigation](expo-router-vendored-navigation.md) — read tab-bar height from `expo-router/js-tabs`; never add `@react-navigation/*`; vendored views run in Jest.
 - [expo-blur Android blur prerequisites](expo-blur-android.md) — Android blur needs a `BlurTargetView` ref or it silently becomes a ~0.69-alpha tint; Android ships an opaque bar by owner decision.
-- [NativeTabs opaque appearance](native-tabs-opaque-appearance.md) — iOS 26 glass bar goes solid only with backgroundColor + blurEffect none + disableTransparentOnScrollEdge together; not device-confirmed.
 - [Clerk Expo iOS builds](clerk-expo-ios-build.md) — keep the `@clerk/expo` plugin in app.json: it lifts iOS to 17.0 so the ClerkExpo pod links; otherwise pod install dies on a nil SPM target.
 - [GitHub edited-event evidence](github-edited-event-evidence.md) — REST timelines may omit PR body edits; retain the edit timestamp, unchanged head SHA, and subsequent run creation time.
 - [jest-expo platform projects](jest-expo-platform-projects.md) — the default preset also matches `*.test.android.tsx`; list testMatch per project and guard the Android project's `Platform.OS`.
@@ -92,11 +90,15 @@
 - [Self-hosted runner provisioning](self-hosted-runner-provisioning.md) — digest short-circuits, token via ACTIONS_RUNNER_INPUT_TOKEN, verify .runner before svc.sh; macOS svc.sh/simctl facts inside.
 - [Hosted redaction probes](hosted-redaction-probes.md) — Actions echoes env and run scripts; assemble hostile values from encoded literals before capturing checker streams.
 - [GitHub release browser evidence](github-release-browser-evidence.md) — missing release-environment targets make idle-profile evidence skip before Playwright runs.
-- [Reviewer-visible CI evidence](reviewer-visible-ci-evidence.md) — step summaries are sign-in-only and API-invisible; publish failure evidence as a bounded check-run summary and verify it unauthenticated.
-- [API codegen fixture test hides nested failures](api-codegen-fixture-test-diagnosis.md) — a missing drift message usually means an earlier api-spec suite failed; rebuild the fixture by hand to see which.
-- [Volatile tracked test results](volatile-tracked-test-results.md) — Playwright test-results/ and run markers are volatile; never re-track them, restore any committed marker before completing.
-- [Task merges land on the checked-out branch](branch-divergence-from-task-merges.md) — pre-merge auto-commits append whole files (keep the newest copy); reunify lineages with a no-ff merge, never stale `origin/*` refs.
-- [Validation after a mid-task rebase](branch-divergence-from-task-merges.md) — nothing runs post-merge setup for a task env: reinstall frozen, push the schema, restart servers, rescan for appended files.
+- [Reviewer-visible CI evidence](reviewer-visible-ci-evidence.md) — step summaries are sign-in-only; publish failure evidence as a bounded check-run summary and verify it unauthenticated.
+- [API codegen fixture test hides nested failures](api-codegen-fixture-test-diagnosis.md) — a missing drift message usually means an earlier api-spec suite failed; rebuild the fixture by hand.
+- [Expo inspector observability](expo-inspector-observability.md) — inspector connect/close appear only on stderr under the Metro inspector debug flag; tie launch evidence to that session's bundle 200.
+- [Stale composite TypeScript output](stale-composite-dist-typecheck.md) — untracked lib `dist/` declarations outlive rebases; rebuild with `tsc -b` before believing a contradictory typecheck error.
+- [Pre-rebase guard blocks task merges](pre-rebase-guard-blocks-task-merges.md) — a local hook refusing big replays makes task merges fail as opaque UNKNOWN with no conflicts; exempt main-repl/main.
+- [iPhone simulator startup crash evidence](expo-go-native-modules.md) — device lists stay empty for Expo Go 57 iOS; read the request log; a bundle 200 followed by close 1006 means a crash.
+- [Expo Go secure-store keys](expo-go-native-modules.md) — expo-secure-store rejects `:` in key names on phones only; encode keys and keep the Jest mock enforcing the real pattern.
+- [Release-run preconditions live on GitHub](physical-device-evidence.md) — audit environments/secrets/vars/runners/runs by name via the GitHub connection before planning a release run.
+- [Stale node_modules after merge](physical-device-evidence.md) — Jest "Cannot find module '@babel/generator'" means node_modules lags the lockfile; reinstall frozen and offline.
+- [NativeTabs opaque appearance](native-tabs-opaque-appearance.md) — the iOS 26 glass bar goes solid only with background color, no blur effect, and no transparent scroll edge together.
+- [Validation after a mid-task rebase](branch-divergence-from-task-merges.md) — nothing runs post-merge setup in a task env: reinstall, push the schema, restart servers, rescan for appended files.
 - [Generated-check fault controls](generated-check-fault-controls.md) — test-only faults and fixture paths need explicit subprocess opt-ins; harnesses strip inherited env and prove inertness.
-- [Chat App script tests need explicit wiring](chat-app-script-tests.md) — Jest ignores `scripts/` and `.mjs`; chain node:test files into `test`; `NODE_TEST_CONTEXT=` empty still skips runs, use `env -u`.
-- [Expo inspector observability](expo-inspector-observability.md) — inspector connect/close exist only on stderr via DEBUG=Metro:InspectorProxy; launch evidence must follow the session's own bundle 200.
