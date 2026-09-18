@@ -86,7 +86,23 @@ validate_handoff_boundaries() {
 
 validate_preflight_json() {
   local preflight_path="$1"
-  local status_output actual_status expected_status boundary
+  local status_output actual_status expected_status expected_evidence actual_evidence boundary
+
+  boundary_evidence() {
+    local boundary="$1"
+    awk -F'|' -v expected="$boundary" '
+      {
+        label = $2
+        gsub(/^[[:space:]]+|[[:space:]]+$/, "", label)
+      }
+      label == expected {
+        value = $4
+        gsub(/^[[:space:]]+|[[:space:]]+$/, "", value)
+        print value
+        exit
+      }
+    ' "$RECORD_PATH"
+  }
 
   if [[ -z "$preflight_path" ]]; then
     return
@@ -129,6 +145,15 @@ validate_preflight_json() {
   if [[ "$actual_status" != "$expected_status" ]]; then
     failure "The preflight JSON public manifest boundary does not match the Markdown record."
   fi
+  expected_evidence="$(
+    printf '%s\n' "$status_output" |
+      sed -n 's/^publicManifestReachabilityEvidence=//p' |
+      head -n 1
+  )"
+  actual_evidence="$(boundary_evidence "Public manifest reachability")"
+  if [[ "$expected_evidence" != "$actual_evidence" ]]; then
+    failure "The preflight JSON public manifest evidence does not match the Markdown record."
+  fi
 
   expected_status="$(boundary_status "Local handoff probe (manifest and bundle)")"
   actual_status="$(
@@ -137,6 +162,15 @@ validate_preflight_json() {
   )"
   if [[ "$actual_status" != "$expected_status" ]]; then
     failure "The preflight JSON local handoff boundary does not match the Markdown record."
+  fi
+  expected_evidence="$(
+    printf '%s\n' "$status_output" |
+      sed -n 's/^localHandoffProbeEvidence=//p' |
+      head -n 1
+  )"
+  actual_evidence="$(boundary_evidence "Local handoff probe (manifest and bundle)")"
+  if [[ "$expected_evidence" != "$actual_evidence" ]]; then
+    failure "The preflight JSON local handoff evidence does not match the Markdown record."
   fi
 }
 

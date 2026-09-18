@@ -1213,9 +1213,14 @@ async function main() {
     }
     const record = await readAndValidateHandoffPreflight(outputPath);
     for (const boundary of HANDOFF_BOUNDARIES) {
-      console.log(
-        `${boundary}=${record.boundaries[boundary].status}`,
-      );
+      const boundaryRecord = record.boundaries[boundary];
+      console.log(`${boundary}=${boundaryRecord.status}`);
+      if (
+        boundary === "publicManifestReachability" ||
+        boundary === "localHandoffProbe"
+      ) {
+        console.log(`${boundary}Evidence=${boundaryRecord.evidence}`);
+      }
     }
     return;
   }

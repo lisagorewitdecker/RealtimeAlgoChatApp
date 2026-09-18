@@ -2207,8 +2207,8 @@ test("Android preview evidence keeps its pull-request validation and privacy con
 
 | Boundary | Status | Evidence |
 | --- | --- | --- |
-| Public manifest reachability | PASS | Workspace curl returned HTTP 200. |
-| Local handoff probe (manifest and bundle) | NOT_RUN | The local probe was not run. |
+| Public manifest reachability | PASS | public manifest HTTP 200 (128 bytes) |
+| Local handoff probe (manifest and bundle) | NOT_RUN | Local manifest/bundle probe not run — no successful probe result was recorded |
 | Expo Go launch on physical Android | **BLOCKED** | No physical phone was available. |
 | Server-side native request evidence | **BLOCKED** | No native Android request was available. |
 `;

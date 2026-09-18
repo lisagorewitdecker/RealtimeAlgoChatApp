@@ -69,8 +69,8 @@ write_record "$blocked_record" <<'EOF'
 
 | Boundary | Status | Evidence |
 | --- | --- | --- |
-| Public manifest reachability | PASS | Workspace curl returned HTTP 200. |
-| Local handoff probe (manifest and bundle) | NOT_RUN | The local probe was not run. |
+| Public manifest reachability | PASS | public manifest HTTP 200 (128 bytes) |
+| Local handoff probe (manifest and bundle) | NOT_RUN | Local manifest/bundle probe not run — no successful probe result was recorded |
 | Expo Go launch on physical Android | **BLOCKED** | No physical phone was available. |
 | Server-side native request evidence | **BLOCKED** | No native Android request was available. |
 EOF
@@ -415,8 +415,48 @@ write_record "$pass_record" <<'EOF'
 | Redacted screenshot or exact phone error captured | PASS | Redacted screenshot: screenshots/preview-launch.png |
 | Screenshot redaction review | PASS | Redaction review: PASS — account identifiers, message content, tokens, and host details are absent. |
 EOF
-pass_output="$(bash "$CHECKER" "$pass_record" 2>&1)"
+pass_preflight="$(dirname "$pass_record")/android-preview-preflight.json"
+write_preflight "$pass_preflight" <<'EOF'
+{
+  "schema": "android-preview-handoff-preflight/v1",
+  "platform": "android",
+  "boundaries": {
+    "publicManifestReachability": {
+      "status": "PASS",
+      "evidence": "public manifest HTTP 200 (128 bytes)"
+    },
+    "localHandoffProbe": {
+      "status": "PASS",
+      "evidence": "manifest HTTP 200 (64 bytes); bundle HTTP 200 (4096 bytes)"
+    },
+    "expoGoLaunch": {
+      "status": "NOT_ASSESSED",
+      "evidence": "Requires a physical Android phone running stock Expo Go."
+    },
+    "serverNativeRequestEvidence": {
+      "status": "NOT_ASSESSED",
+      "evidence": "Requires filtered Metro or API evidence from that physical Expo Go session."
+    }
+  }
+}
+EOF
+sed -i \
+  -e 's#Workspace curl returned HTTP 200\.\|Public manifest returned HTTP 200\.\|public manifest HTTP 200 (128 bytes)#public manifest HTTP 200 (128 bytes)#' \
+  -e 's#Manifest and bundle returned HTTP 200\.\|The local probe was not run\.\|Local manifest/bundle probe not run — no successful probe result was recorded#manifest HTTP 200 (64 bytes); bundle HTTP 200 (4096 bytes)#' \
+  "$pass_record"
+pass_output="$(bash "$CHECKER" "$pass_record" "$pass_preflight" 2>&1)"
 assert_contains "$pass_output" "validation passed"
+
+tampered_pass_preflight="$TEST_ROOT/pass-tampered-sidecar/android-preview-preflight.json"
+mkdir -p "$(dirname "$tampered_pass_preflight")"
+sed 's/public manifest HTTP 200 (128 bytes)/public manifest HTTP 200 (999 bytes)/' \
+  "$pass_preflight" >"$tampered_pass_preflight"
+if tampered_output="$(bash "$CHECKER" "$pass_record" "$tampered_pass_preflight" 2>&1)"; then
+  printf 'PASS record with unrelated sidecar byte count unexpectedly passed.\n' >&2
+  exit 1
+fi
+assert_contains "$tampered_output" \
+  "preflight JSON public manifest evidence does not match the Markdown record"
 
 phone_error_record="$TEST_ROOT/phone-error/validation-record.md"
 mkdir -p "$(dirname "$phone_error_record")"
