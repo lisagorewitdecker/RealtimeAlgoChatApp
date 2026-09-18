@@ -110,6 +110,7 @@ device=iPhone SE (3rd generation)
 device_udid=00000000-0000-0000-0000-000000000000
 recorded_at_utc=2026-09-09T12:00:00Z
 EOF
+    printf '# iOS native readiness\n\n- Status: **READY**\n' > "$run_dir/ios-readiness.md"
   else
     cat > "$run_dir/runner-metadata.txt" <<EOF
 platform=android
@@ -126,6 +127,7 @@ density_dpi=160
 user_rotation=0
 recorded_at_utc=2026-09-09T12:00:00Z
 EOF
+    printf 'applicationLabel=Chat\npermissions=android.permission.INTERNET\n' > "$run_dir/android-badging.txt"
   fi
   cat > "$run_dir/pass-fail-record.txt" <<EOF
 platform=$platform
@@ -168,6 +170,20 @@ EOF
   for index in 1 2; do
     printf 'call-%s\n' "$index" > "$run_dir/call-surface/call-$index.png"
   done
+}
+
+trusted_digest_manifest_for_run() {
+  local run_dir="$1"
+  (
+    cd "$run_dir"
+    find . -type f ! -name review-record.txt -print |
+      LC_ALL=C sort |
+      while IFS= read -r relative_path; do
+        printf '%s  %s\n' \
+          "$(sha256sum "$relative_path" | awk '{ print $1 }')" \
+          "${relative_path#./}"
+      done
+  )
 }
 
 metadata_keys_of() {
@@ -477,6 +493,8 @@ notes<<END_NOTES
 END_NOTES
 EOF
 done
+valid_ios_digest_manifest="$(trusted_digest_manifest_for_run "$valid_root/ios/20260909T120000Z")"
+valid_android_digest_manifest="$(trusted_digest_manifest_for_run "$valid_root/android/20260909T120000Z")"
 valid_output="$(bash "$CHECKER" "$valid_root" 2>&1)"
 assert_contains "$valid_output" "passed for iOS and Android"
 assert_contains "$valid_output" "[ios] Review record missing: $valid_root/ios/20260909T120000Z/review-record.txt does not exist"
@@ -485,7 +503,12 @@ assert_contains "$valid_output" "Review pending for: ios android"
 assert_contains "$valid_output" "complete review-record.template.txt and rename it to review-record.txt"
 assert_not_contains "$valid_output" "Review record: APPROVED"
 
-if strict_missing_output="$(NATIVE_EVIDENCE_REQUIRE_APPROVAL=1 bash "$CHECKER" "$valid_root" 2>&1)"; then
+if strict_missing_output="$(
+  NATIVE_EVIDENCE_REQUIRE_APPROVAL=1 \
+  NATIVE_IOS_EVIDENCE_DIGEST_MANIFEST="$valid_ios_digest_manifest" \
+  NATIVE_ANDROID_EVIDENCE_DIGEST_MANIFEST="$valid_android_digest_manifest" \
+  bash "$CHECKER" "$valid_root" 2>&1
+)"; then
   echo "strict missing-review case unexpectedly passed" >&2
   exit 1
 fi
@@ -497,6 +520,8 @@ assert_contains "$strict_missing_output" "completeness check FAILED with 2 issue
 reviewed_root="$TEST_ROOT/reviewed"
 write_valid_run "$reviewed_root" ios
 write_valid_run "$reviewed_root" android
+reviewed_ios_digest_manifest="$(trusted_digest_manifest_for_run "$reviewed_root/ios/20260909T120000Z")"
+reviewed_android_digest_manifest="$(trusted_digest_manifest_for_run "$reviewed_root/android/20260909T120000Z")"
 write_review_record "$reviewed_root" ios APPROVED
 write_review_record "$reviewed_root" android APPROVED "2026-09-09T14:45:00Z" build-android "Grace Reviewer"
 reviewed_output="$(bash "$CHECKER" "$reviewed_root" 2>&1)"
@@ -509,7 +534,10 @@ assert_not_contains "$reviewed_output" "Review record missing"
 assert_not_contains "$reviewed_output" "Review pending"
 
 strict_reviewed_output="$(
-  NATIVE_EVIDENCE_REQUIRE_APPROVAL=1 bash "$CHECKER" "$reviewed_root" 2>&1
+  NATIVE_EVIDENCE_REQUIRE_APPROVAL=1 \
+  NATIVE_IOS_EVIDENCE_DIGEST_MANIFEST="$reviewed_ios_digest_manifest" \
+  NATIVE_ANDROID_EVIDENCE_DIGEST_MANIFEST="$reviewed_android_digest_manifest" \
+  bash "$CHECKER" "$reviewed_root" 2>&1
 )"
 assert_contains "$strict_reviewed_output" "Strict review mode enabled"
 assert_contains "$strict_reviewed_output" "[ios] Review record: APPROVED"
@@ -540,6 +568,8 @@ assert_not_contains "$crlf_approved_output" "unterminated notes block"
 candidate_scoped_root="$TEST_ROOT/candidate-scoped-rerun"
 write_valid_run "$candidate_scoped_root" ios
 write_valid_run "$candidate_scoped_root" android
+candidate_scoped_ios_digest_manifest="$(trusted_digest_manifest_for_run "$candidate_scoped_root/ios/20260909T120000Z")"
+candidate_scoped_android_digest_manifest="$(trusted_digest_manifest_for_run "$candidate_scoped_root/android/20260909T120000Z")"
 write_review_record "$candidate_scoped_root" ios APPROVED "2026-09-09T13:00:00Z"
 write_review_record "$candidate_scoped_root" android APPROVED "2026-09-09T13:00:00Z"
 printf 'approval_scope=candidate\n' >> "$candidate_scoped_root/ios/20260909T120000Z/review-record.txt"
@@ -547,7 +577,10 @@ printf 'approval_scope=candidate\n' >> "$candidate_scoped_root/android/20260909T
 mv "$candidate_scoped_root/ios/20260909T120000Z" "$candidate_scoped_root/ios/20260910T120000Z"
 mv "$candidate_scoped_root/android/20260909T120000Z" "$candidate_scoped_root/android/20260910T120000Z"
 candidate_scoped_output="$(
-  NATIVE_EVIDENCE_REQUIRE_APPROVAL=1 bash "$CHECKER" "$candidate_scoped_root" 2>&1
+  NATIVE_EVIDENCE_REQUIRE_APPROVAL=1 \
+  NATIVE_IOS_EVIDENCE_DIGEST_MANIFEST="$candidate_scoped_ios_digest_manifest" \
+  NATIVE_ANDROID_EVIDENCE_DIGEST_MANIFEST="$candidate_scoped_android_digest_manifest" \
+  bash "$CHECKER" "$candidate_scoped_root" 2>&1
 )"
 assert_contains "$candidate_scoped_output" "[ios] Review record: APPROVED"
 assert_contains "$candidate_scoped_output" "[android] Review record: APPROVED"
@@ -1234,6 +1267,8 @@ for tampered_platform in ios android; do
     "$private_candidate_id" \
     "$private_reviewer"
 
+  ios_digest_manifest="$(trusted_digest_manifest_for_run "$tampered_root/ios/20260909T120000Z")"
+  android_digest_manifest="$(trusted_digest_manifest_for_run "$tampered_root/android/20260909T120000Z")"
   tampered_run_dir="$tampered_root/$tampered_platform/20260909T120000Z"
   cat > "$tampered_run_dir/pass-fail-record.txt" <<EOF
 platform=$tampered_platform
@@ -1252,6 +1287,8 @@ EOF
   if validation_output="$(
     GITHUB_STEP_SUMMARY="$tampered_summary_path" \
       NATIVE_EVIDENCE_REQUIRE_APPROVAL=1 \
+      NATIVE_IOS_EVIDENCE_DIGEST_MANIFEST="$ios_digest_manifest" \
+      NATIVE_ANDROID_EVIDENCE_DIGEST_MANIFEST="$android_digest_manifest" \
       bash "$CHECKER" "$tampered_root" 2>&1
   )"; then
     fake_store_submission
@@ -1274,6 +1311,94 @@ EOF
   assert_not_contains "$validation_output" "$private_reviewer"
   assert_not_contains "$(cat "$tampered_summary_path")" "$private_candidate_id"
   assert_not_contains "$(cat "$tampered_summary_path")" "$private_reviewer"
+done
+
+# Screenshot files and Sentry evidence are downloaded separately from the
+# pass/fail record. Mutating either input after approval must still block the
+# publish boundary even when the mutation remains non-empty and structurally
+# valid, without copying private evidence, candidate, or reviewer values into
+# diagnostics or the step summary.
+for artifact_mutation in ios-screenshot android-sentry; do
+  if [[ "$artifact_mutation" == "ios-screenshot" ]]; then
+    tampered_platform=ios
+  else
+    tampered_platform=android
+  fi
+
+  tampered_root="$TEST_ROOT/tampered-$artifact_mutation"
+  tampered_summary_path="$TEST_ROOT/tampered-$artifact_mutation-summary.md"
+  submission_marker="$tampered_root/submission-command-ran"
+  blocked_result="$tampered_root/store-submission-result.txt"
+  private_candidate_id="candidate-$artifact_mutation-private-sentinel"
+  private_reviewer="reviewer-$artifact_mutation-private-sentinel"
+  private_evidence="evidence-$artifact_mutation-private-sentinel"
+
+  write_valid_run "$tampered_root" ios "$private_candidate_id"
+  write_valid_run "$tampered_root" android "$private_candidate_id"
+  write_review_record \
+    "$tampered_root" \
+    ios \
+    APPROVED \
+    "2026-09-09T13:00:00Z" \
+    "$private_candidate_id" \
+    "$private_reviewer"
+  write_review_record \
+    "$tampered_root" \
+    android \
+    APPROVED \
+    "2026-09-09T13:00:00Z" \
+    "$private_candidate_id" \
+    "$private_reviewer"
+
+  ios_digest_manifest="$(trusted_digest_manifest_for_run "$tampered_root/ios/20260909T120000Z")"
+  android_digest_manifest="$(trusted_digest_manifest_for_run "$tampered_root/android/20260909T120000Z")"
+  tampered_run_dir="$tampered_root/$tampered_platform/20260909T120000Z"
+  if [[ "$artifact_mutation" == "ios-screenshot" ]]; then
+    printf '%s\n' "$private_evidence" \
+      > "$tampered_run_dir/screenshots/screen-11.png"
+  else
+    sed -i \
+      "s/\"release\": \"chat-app@1.0.0+abc123\"/\"release\": \"$private_evidence\"/" \
+      "$tampered_run_dir/sentry-source-map-evidence.json"
+  fi
+
+  fake_store_submission() {
+    printf 'submitted\n' > "$submission_marker"
+  }
+
+  if validation_output="$(
+    GITHUB_STEP_SUMMARY="$tampered_summary_path" \
+      NATIVE_EVIDENCE_REQUIRE_APPROVAL=1 \
+      NATIVE_IOS_EVIDENCE_DIGEST_MANIFEST="$ios_digest_manifest" \
+      NATIVE_ANDROID_EVIDENCE_DIGEST_MANIFEST="$android_digest_manifest" \
+      bash "$CHECKER" "$tampered_root" 2>&1
+  )"; then
+    fake_store_submission
+    echo "tampered $artifact_mutation evidence unexpectedly passed strict validation" >&2
+    exit 1
+  else
+    printf 'status=BLOCKED\nreason=native-evidence-validation-failed\n' > "$blocked_result"
+  fi
+
+  if [[ -e "$submission_marker" ]]; then
+    echo "tampered $artifact_mutation evidence reached the store submission command" >&2
+    exit 1
+  fi
+  assert_contains "$validation_output" "[$tampered_platform]"
+  if [[ "$artifact_mutation" == "ios-screenshot" ]]; then
+    assert_contains "$validation_output" "does not match the trusted digest manifest"
+  else
+    assert_contains "$validation_output" "does not match the trusted digest manifest"
+  fi
+  assert_contains "$(cat "$blocked_result")" "status=BLOCKED"
+  assert_contains "$(cat "$blocked_result")" "reason=native-evidence-validation-failed"
+  assert_contains "$(cat "$tampered_summary_path")" "- Status: **FAIL**"
+  assert_not_contains "$validation_output" "$private_candidate_id"
+  assert_not_contains "$validation_output" "$private_reviewer"
+  assert_not_contains "$validation_output" "$private_evidence"
+  assert_not_contains "$(cat "$tampered_summary_path")" "$private_candidate_id"
+  assert_not_contains "$(cat "$tampered_summary_path")" "$private_reviewer"
+  assert_not_contains "$(cat "$tampered_summary_path")" "$private_evidence"
 done
 
 cleanup_test_fixtures

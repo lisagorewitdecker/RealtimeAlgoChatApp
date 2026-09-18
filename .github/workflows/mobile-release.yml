@@ -870,6 +870,7 @@ jobs:
       - mobile-release-node-range
     outputs:
       native_evidence_artifact_url: ${{ steps.upload-ios-native-smoke.outputs.artifact-url }}
+      native_evidence_digest_manifest: ${{ steps.ios-native-evidence-digest.outputs.native_evidence_digest_manifest }}
     runs-on:
       - self-hosted
       - macos
@@ -1094,6 +1095,29 @@ jobs:
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Create trusted iOS native evidence digest manifest
+        id: ios-native-evidence-digest
+        run: |
+          set -euo pipefail
+          manifest="$(
+            cd "$NATIVE_SMOKE_RESULTS_DIR"
+            find . -type f ! -name review-record.txt -print |
+              LC_ALL=C sort |
+              while IFS= read -r relative_path; do
+                if command -v sha256sum >/dev/null 2>&1; then
+                  digest="$(sha256sum "$relative_path" | awk '{ print $1 }')"
+                else
+                  digest="$(shasum -a 256 "$relative_path" | awk '{ print $1 }')"
+                fi
+                printf '%s  %s\n' "$digest" "${relative_path#./}"
+              done
+          )"
+          {
+            echo 'native_evidence_digest_manifest<<NATIVE_EVIDENCE_DIGEST_MANIFEST'
+            printf '%s\n' "$manifest"
+            echo NATIVE_EVIDENCE_DIGEST_MANIFEST
+          } >> "$GITHUB_OUTPUT"
+
       - name: Upload iOS native smoke artifacts
         if: always()
         id: upload-ios-native-smoke
@@ -1146,6 +1170,7 @@ jobs:
       contents: read
     outputs:
       native_evidence_artifact_url: ${{ steps.upload-android-native-smoke.outputs.artifact-url }}
+      native_evidence_digest_manifest: ${{ steps.android-native-evidence-digest.outputs.native_evidence_digest_manifest }}
     needs:
       - mobile-release-node-range
       - android-prerequisite-preflight
@@ -1304,6 +1329,29 @@ jobs:
           SENTRY_PROBE_MARKER: native-${{ github.run_id }}-${{ github.run_attempt }}-android
           SENTRY_EVIDENCE_PATH: ${{ env.NATIVE_SMOKE_RESULTS_DIR }}/sentry-source-map-evidence.json
         run: node scripts/verify-sentry-native-event.mjs
+
+      - name: Create trusted Android native evidence digest manifest
+        id: android-native-evidence-digest
+        run: |
+          set -euo pipefail
+          manifest="$(
+            cd "$NATIVE_SMOKE_RESULTS_DIR"
+            find . -type f ! -name review-record.txt -print |
+              LC_ALL=C sort |
+              while IFS= read -r relative_path; do
+                if command -v sha256sum >/dev/null 2>&1; then
+                  digest="$(sha256sum "$relative_path" | awk '{ print $1 }')"
+                else
+                  digest="$(shasum -a 256 "$relative_path" | awk '{ print $1 }')"
+                fi
+                printf '%s  %s\n' "$digest" "${relative_path#./}"
+              done
+          )"
+          {
+            echo 'native_evidence_digest_manifest<<NATIVE_EVIDENCE_DIGEST_MANIFEST'
+            printf '%s\n' "$manifest"
+            echo NATIVE_EVIDENCE_DIGEST_MANIFEST
+          } >> "$GITHUB_OUTPUT"
 
       - name: Upload Android native smoke artifacts
         if: always()
@@ -1503,6 +1551,8 @@ jobs:
     outputs:
       ios_native_evidence_artifact_url: ${{ needs.native-ios.outputs.native_evidence_artifact_url }}
       android_native_evidence_artifact_url: ${{ needs.native-android.outputs.native_evidence_artifact_url }}
+      ios_native_evidence_digest_manifest: ${{ needs.native-ios.outputs.native_evidence_digest_manifest }}
+      android_native_evidence_digest_manifest: ${{ needs.native-android.outputs.native_evidence_digest_manifest }}
     needs:
       - mobile-release-node-range
       - native-ios
@@ -1566,6 +1616,8 @@ jobs:
           REVIEWED_REF: ${{ github.ref }}
           NATIVE_IOS_EVIDENCE_ARTIFACT_URL: ${{ needs.native-ios.outputs.native_evidence_artifact_url }}
           NATIVE_ANDROID_EVIDENCE_ARTIFACT_URL: ${{ needs.native-android.outputs.native_evidence_artifact_url }}
+          NATIVE_IOS_EVIDENCE_DIGEST_MANIFEST: ${{ needs.native-ios.outputs.native_evidence_digest_manifest }}
+          NATIVE_ANDROID_EVIDENCE_DIGEST_MANIFEST: ${{ needs.native-android.outputs.native_evidence_digest_manifest }}
           NATIVE_IOS_EVIDENCE_DOWNLOAD_RESULT: ${{ steps.download-ios-native-smoke.outcome == 'success' && 'success' || steps.retry-ios-native-smoke.outcome }}
           NATIVE_ANDROID_EVIDENCE_DOWNLOAD_RESULT: ${{ steps.download-android-native-smoke.outcome == 'success' && 'success' || steps.retry-android-native-smoke.outcome }}
         shell: bash
@@ -1821,6 +1873,8 @@ jobs:
           NATIVE_EVIDENCE_REQUIRE_APPROVAL: "1"
           NATIVE_IOS_EVIDENCE_ARTIFACT_URL: ${{ needs.mobile-release-gate.outputs.ios_native_evidence_artifact_url }}
           NATIVE_ANDROID_EVIDENCE_ARTIFACT_URL: ${{ needs.mobile-release-gate.outputs.android_native_evidence_artifact_url }}
+          NATIVE_IOS_EVIDENCE_DIGEST_MANIFEST: ${{ needs.mobile-release-gate.outputs.ios_native_evidence_digest_manifest }}
+          NATIVE_ANDROID_EVIDENCE_DIGEST_MANIFEST: ${{ needs.mobile-release-gate.outputs.android_native_evidence_digest_manifest }}
           NATIVE_IOS_EVIDENCE_DOWNLOAD_RESULT: ${{ steps.download-publish-ios-native-smoke.outcome == 'success' && 'success' || steps.retry-publish-ios-native-smoke.outcome }}
           NATIVE_ANDROID_EVIDENCE_DOWNLOAD_RESULT: ${{ steps.download-publish-android-native-smoke.outcome == 'success' && 'success' || steps.retry-publish-android-native-smoke.outcome }}
         shell: bash

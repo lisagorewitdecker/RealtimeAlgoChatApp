@@ -19,6 +19,8 @@ NODE_BINARY="${NATIVE_EVIDENCE_NODE_BINARY:-node}"
 UTC_TIMESTAMP_PATTERN='^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$'
 TEMPLATE_PLACEHOLDER_PATTERN='^<.*>$'
 NATIVE_EVIDENCE_REPORT_NAME="native-branding-check.md"
+SHA256_PATTERN='^[0-9a-f]{64}$'
+TRUSTED_EVIDENCE_PATH_PATTERN='^(candidate-build-id\.txt|runner-metadata\.txt|pass-fail-record\.txt|review-record\.template\.txt|native-info\.json|native-branding-check\.md|ios-readiness\.md|android-badging\.txt|maestro-results\.xml|sentry-maestro-results\.xml|sentry-trigger\.txt|sentry-source-map-evidence\.json|screenshots/[A-Za-z0-9._-]+\.png|call-surface/[A-Za-z0-9._-]+\.png)$'
 
 # The recovery wording is also consumed by the release workflow's contract
 # checks. Keep reviewer-facing guidance identical across both boundaries.
@@ -99,6 +101,100 @@ record_download_status() {
 
   SUMMARY_DOWNLOAD_STATUS["$platform"]="FAIL"
   issue "$platform" "The ${label} native evidence artifact download did not complete. The downloaded ${label} evidence is unavailable; rerun the release gate after the artifact is available."
+}
+
+trusted_digest_manifest() {
+  if [[ "$1" == "ios" ]]; then
+    printf '%s' "${NATIVE_IOS_EVIDENCE_DIGEST_MANIFEST:-}"
+  else
+    printf '%s' "${NATIVE_ANDROID_EVIDENCE_DIGEST_MANIFEST:-}"
+  fi
+}
+
+file_sha256() {
+  local path="$1"
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$path" | awk '{ print $1 }'
+  elif command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$path" | awk '{ print $1 }'
+  else
+    return 1
+  fi
+}
+
+validate_trusted_digest_manifest() {
+  local platform="$1"
+  local run_dir="$2"
+  local manifest
+  local line
+  local digest
+  local relative_path
+  local actual_path
+  local actual_digest
+  local manifest_error=0
+  local manifest_entry_count=0
+  local actual_file_count=0
+  local -a manifest_paths=()
+  declare -A manifest_digests=()
+  declare -A actual_files=()
+
+  # The native jobs calculate this manifest before upload and expose it as a
+  # job output. It is intentionally not stored beside the downloaded files:
+  # changing the artifact must not let a publisher change the expected hashes.
+  manifest="$(trusted_digest_manifest "$platform")"
+  if [[ -z "$manifest" ]]; then
+    issue "$platform" "Strict evidence validation is missing the trusted digest manifest for the downloaded native evidence. Regenerate the release evidence from the native job before submission."
+    return
+  fi
+
+  while IFS= read -r line; do
+    [[ -n "$line" ]] || continue
+    if [[ "$line" =~ ^([0-9a-f]{64})[[:space:]][[:space:]](.+)$ ]]; then
+      digest="${BASH_REMATCH[1]}"
+      relative_path="${BASH_REMATCH[2]}"
+    else
+      manifest_error=1
+      continue
+    fi
+    if [[ ! "$relative_path" =~ $TRUSTED_EVIDENCE_PATH_PATTERN ]] ||
+      [[ -v "manifest_digests[$relative_path]" ]]; then
+      manifest_error=1
+      continue
+    fi
+    manifest_paths+=("$relative_path")
+    manifest_digests["$relative_path"]="$digest"
+    manifest_entry_count=$((manifest_entry_count + 1))
+  done <<< "$manifest"
+
+  while IFS= read -r -d '' actual_path; do
+    relative_path="${actual_path#"$run_dir"/}"
+    [[ "$relative_path" == "review-record.txt" ]] && continue
+    if [[ ! "$relative_path" =~ $TRUSTED_EVIDENCE_PATH_PATTERN ]]; then
+      manifest_error=1
+      continue
+    fi
+    actual_files["$relative_path"]=1
+    actual_file_count=$((actual_file_count + 1))
+    if [[ -z "${manifest_digests[$relative_path]+set}" ]]; then
+      manifest_error=1
+      continue
+    fi
+    actual_digest="$(file_sha256 "$actual_path" || true)"
+    if [[ ! "$actual_digest" =~ $SHA256_PATTERN ]] ||
+      [[ "$actual_digest" != "${manifest_digests[$relative_path]}" ]]; then
+      manifest_error=1
+    fi
+  done < <(find "$run_dir" -type f -print0 | sort -z)
+
+  for relative_path in "${manifest_paths[@]}"; do
+    if [[ -z "${actual_files[$relative_path]+set}" ]]; then
+      manifest_error=1
+    fi
+  done
+
+  if ((manifest_error)) || ((manifest_entry_count != actual_file_count)); then
+    issue "$platform" "A downloaded native evidence file does not match the trusted digest manifest for ${run_dir}. Redownload the evidence from the release gate; do not edit or merge evidence files before submission."
+  fi
 }
 
 issue() {
@@ -431,6 +527,9 @@ validate_platform() {
   check_required_file "$platform" "$run_dir" "sentry-maestro-results.xml" "controlled Sentry probe JUnit result"
   check_required_file "$platform" "$run_dir" "sentry-trigger.txt" "controlled Sentry probe metadata"
   check_required_file "$platform" "$run_dir" "sentry-source-map-evidence.json" "Sentry source-map evidence"
+  if [[ "$REQUIRE_APPROVAL" == "1" ]]; then
+    validate_trusted_digest_manifest "$platform" "$run_dir"
+  fi
 
   local candidate_build_id_path="$run_dir/candidate-build-id.txt"
   local candidate_build_id_is_valid=0
