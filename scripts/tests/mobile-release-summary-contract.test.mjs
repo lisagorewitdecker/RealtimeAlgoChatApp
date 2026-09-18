@@ -807,6 +807,118 @@ test("idle-profile registration check blocks release and reports its result", ()
   );
 });
 
+test("native release jobs are gated by centralized mobile release configuration", () => {
+  const configJob = workflow.jobs["mobile-release-configuration"];
+  assert.ok(
+    configJob,
+    "release workflow must define the centralized mobile release configuration job",
+  );
+  assert.equal(
+    configJob.environment?.name,
+    "mobile-release",
+    "centralized release configuration must read from the protected mobile-release environment",
+  );
+  assert.equal(
+    configJob.outputs?.ios_configured,
+    "${{ steps.release-config.outputs.ios_configured }}",
+    "centralized release configuration must expose the iOS readiness flag",
+  );
+  assert.equal(
+    configJob.outputs?.android_configured,
+    "${{ steps.release-config.outputs.android_configured }}",
+    "centralized release configuration must expose the Android readiness flag",
+  );
+
+  const configStep = configJob.steps.find(
+    (step) => step.name === "Determine mobile release configuration",
+  );
+  assert.ok(
+    configStep,
+    "centralized release configuration must compute the native readiness flags",
+  );
+  assert.equal(configStep.id, "release-config");
+  assert.equal(configStep.env.EAS_TOKEN, "${{ secrets.EAS_TOKEN }}");
+  assert.equal(
+    configStep.env.NATIVE_SMOKE_IOS_BUILD_ID,
+    "${{ env.NATIVE_SMOKE_IOS_BUILD_ID }}",
+  );
+  assert.equal(
+    configStep.env.NATIVE_SMOKE_ANDROID_BUILD_ID,
+    "${{ env.NATIVE_SMOKE_ANDROID_BUILD_ID }}",
+  );
+  assert.match(configStep.run, /echo "ios_configured=\$ios_configured" >> "\$GITHUB_OUTPUT"/);
+  assert.match(
+    configStep.run,
+    /echo "android_configured=\$android_configured" >> "\$GITHUB_OUTPUT"/,
+  );
+  assert.doesNotMatch(
+    configStep.run,
+    /echo[^\n]*(?:EAS_TOKEN|NATIVE_SMOKE_EMAIL|NATIVE_SMOKE_PASSWORD|SENTRY_AUTH_TOKEN)/,
+    "centralized release configuration must not print secret-backed values",
+  );
+
+  const nativeIosJob = workflow.jobs["native-ios"];
+  assert.ok(
+    nativeIosJob.needs.includes("mobile-release-configuration"),
+    "native-ios must wait for centralized release configuration",
+  );
+  assert.equal(
+    nativeIosJob.if,
+    "${{ github.event_name != 'pull_request' && needs.mobile-release-configuration.outputs.ios_configured == 'true' }}",
+    "native-ios must only run when the centralized iOS release configuration is ready",
+  );
+
+  const androidPreflightJob = workflow.jobs["android-prerequisite-preflight"];
+  assert.ok(
+    androidPreflightJob.needs.includes("mobile-release-configuration"),
+    "Android runner preflight must wait for centralized release configuration",
+  );
+  assert.equal(
+    androidPreflightJob.if,
+    "${{ github.event_name != 'pull_request' && needs.mobile-release-configuration.outputs.android_configured == 'true' }}",
+    "Android runner preflight must only run when the centralized Android release configuration is ready",
+  );
+
+  const gateJob = workflow.jobs["mobile-release-gate"];
+  assert.ok(
+    gateJob.needs.includes("mobile-release-configuration"),
+    "the final release gate must retain the centralized configuration job in its prerequisites",
+  );
+  const blockingStep = gateJob.steps.find(
+    (step) => step.name === "Block release unless both native checks pass",
+  );
+  assert.equal(
+    blockingStep?.env?.RELEASE_CONFIGURATION_RESULT,
+    "${{ needs.mobile-release-configuration.result }}",
+    "the final release gate must report the centralized configuration result",
+  );
+  assert.equal(
+    blockingStep?.env?.IOS_CONFIGURATION_READY,
+    "${{ needs.mobile-release-configuration.outputs.ios_configured }}",
+    "the final release gate must receive the centralized iOS readiness flag",
+  );
+  assert.equal(
+    blockingStep?.env?.ANDROID_CONFIGURATION_READY,
+    "${{ needs.mobile-release-configuration.outputs.android_configured }}",
+    "the final release gate must receive the centralized Android readiness flag",
+  );
+  assert.match(
+    blockingStep?.run ?? "",
+    /iOS release configuration: \*\*READY\*\*[\s\S]*iOS release configuration: \*\*BLOCKED\*\*/,
+    "the final release gate must summarize both ready and blocked iOS configuration states",
+  );
+  assert.match(
+    blockingStep?.run ?? "",
+    /Android release configuration: \*\*READY\*\*[\s\S]*Android release configuration: \*\*BLOCKED\*\*/,
+    "the final release gate must summarize both ready and blocked Android configuration states",
+  );
+  assert.match(
+    blockingStep?.run ?? "",
+    /provide the native smoke build IDs and protected release secrets before rerunning the workflow/,
+    "the final release gate must explain how to unblock missing native release configuration",
+  );
+});
+
 test("failed native evidence checks remain reviewable before blocking release", () => {
   const gate = workflow.jobs["mobile-release-gate"];
   const iosDownload = gate.steps.find(
