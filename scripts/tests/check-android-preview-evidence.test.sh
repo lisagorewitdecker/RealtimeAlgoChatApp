@@ -40,6 +40,14 @@ assert_not_contains() {
   fi
 }
 
+assert_file_not_exists() {
+  local path="$1"
+  if [[ -e "$path" ]]; then
+    printf 'Expected %s not to exist.\n' "$path" >&2
+    exit 1
+  fi
+}
+
 write_record() {
   local path="$1"
   cat >"$path"
@@ -117,6 +125,37 @@ if invalid_json_output="$(bash "$CHECKER" "$json_contract_record" 2>&1)"; then
 fi
 assert_contains "$invalid_json_output" "does not satisfy the redacted schema"
 assert_not_contains "$invalid_json_output" "GARBAGE"
+
+missing_validator_root="$TEST_ROOT/missing-validator"
+missing_validator_checker="$missing_validator_root/scripts/check-android-preview-evidence.sh"
+missing_validator_record="$missing_validator_root/validation-record.md"
+missing_validator_preflight="$missing_validator_root/android-preview-preflight.json"
+missing_validator_node_marker="$missing_validator_root/node-invoked"
+missing_validator_bin="$missing_validator_root/bin"
+missing_validator_sentinel="android-preview-missing-validator-evidence-sentinel"
+mkdir -p "$(dirname "$missing_validator_checker")" "$missing_validator_bin"
+cp "$CHECKER" "$missing_validator_checker"
+sed "s/No physical Android device was available/No physical Android device was available; $missing_validator_sentinel/g" \
+  "$blocked_record" >"$missing_validator_record"
+cp "$blocked_preflight" "$missing_validator_preflight"
+cat >"$missing_validator_bin/node" <<EOF
+#!/usr/bin/env bash
+printf '%s\n' invoked >"$missing_validator_node_marker"
+exit 0
+EOF
+chmod +x "$missing_validator_bin/node"
+if missing_validator_output="$(
+  PATH="$missing_validator_bin:$PATH" \
+    bash "$missing_validator_checker" "$missing_validator_record" "$missing_validator_preflight" 2>&1
+)"; then
+  printf 'Android evidence validation unexpectedly passed without its delegated validator.\n' >&2
+  exit 1
+fi
+assert_contains "$missing_validator_output" \
+  "The Android preview evidence check is missing its delegated validator dependency boundary: artifacts/chat-app/scripts/validate-preview-startup.mjs is not present in the checked-out commit. Restore that validator before changing the evidence record."
+assert_not_contains "$missing_validator_output" "$missing_validator_sentinel"
+assert_not_contains "$missing_validator_output" "No physical Android device was available"
+assert_file_not_exists "$missing_validator_node_marker"
 
 truncated_json_sentinel="android-preview-truncated-preflight-sentinel"
 cat >"$json_contract_path" <<EOF

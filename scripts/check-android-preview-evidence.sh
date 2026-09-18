@@ -7,6 +7,8 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+VALIDATOR_PATH="$ROOT_DIR/artifacts/chat-app/scripts/validate-preview-startup.mjs"
+VALIDATOR_FAILURE_REASON="The Android preview evidence check is missing its delegated validator dependency boundary: artifacts/chat-app/scripts/validate-preview-startup.mjs is not present in the checked-out commit. Restore that validator before changing the evidence record."
 if [[ "${1:-}" == "--" ]]; then
   shift
 fi
@@ -114,8 +116,13 @@ validate_preflight_json() {
     return
   fi
 
+  if [[ ! -f "$VALIDATOR_PATH" ]]; then
+    failure "$VALIDATOR_FAILURE_REASON"
+    return
+  fi
+
   if ! status_output="$(
-    node "$ROOT_DIR/artifacts/chat-app/scripts/validate-preview-startup.mjs" \
+    node "$VALIDATOR_PATH" \
       --validate-record "$preflight_path" 2>/dev/null
   )"; then
     failure "The Android preview preflight JSON artifact does not satisfy the redacted schema."
