@@ -28,6 +28,29 @@ function request(userAgent, platform = "android", url = "/index.bundle") {
   };
 }
 
+const sensitiveEvidenceMarkers = [
+  "preview-user",
+  "preview-password",
+  "private.example.com",
+  "secret-query-token",
+  "private@example.com",
+  "private-message",
+  "Expo/57.0.0 (Android); account=private@example.com",
+  "Mozilla/5.0 (private-browser)",
+  "curl/8.14.1 (private-curl)",
+  "UnknownPreview/1.0 (private-unknown)",
+];
+
+function assertContainsNoSensitiveEvidence(contents) {
+  for (const marker of sensitiveEvidenceMarkers) {
+    assert.doesNotMatch(
+      contents,
+      new RegExp(marker.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
+      `private marker leaked into evidence: ${marker}`,
+    );
+  }
+}
+
 test("keeps synthetic preview validation separate from physical Expo Go", () => {
   assert.equal(
     classifyClient(request("Expo/57.0.0 (preview-validation)")),
@@ -39,6 +62,7 @@ test("keeps synthetic preview validation separate from physical Expo Go", () => 
 test("distinguishes browser and curl probes", () => {
   assert.equal(classifyClient(request("Mozilla/5.0")), "browser");
   assert.equal(classifyClient(request("curl/8.14.1")), "curl");
+  assert.equal(classifyClient(request("UnknownPreview/1.0")), "other");
 });
 
 test("redacts request details while retaining the native marker", () => {
@@ -57,10 +81,7 @@ test("redacts request details while retaining the native marker", () => {
     evidence,
     /platform=android client=Expo Go user-agent=\[redacted\] resource=bundle/,
   );
-  assert.doesNotMatch(
-    evidence,
-    /private\.example\.com|secret-message|private@example\.com|Expo\/57\.0\.0/,
-  );
+  assertContainsNoSensitiveEvidence(evidence);
 });
 
 test("resolves relative evidence paths from the Chat App package root", () => {
@@ -75,6 +96,137 @@ test("resolves relative evidence paths from the Chat App package root", () => {
       "test-results/encrypted-room-recovery/android/run/logs/metro.txt",
     ),
   );
+});
+
+test("keeps every client marker while redacting console and file evidence", async () => {
+  const temporaryDirectory = await fs.mkdtemp(
+    path.join(os.tmpdir(), "chat-app-metro-privacy-"),
+  );
+  const evidencePath = path.join(temporaryDirectory, "request-evidence.log");
+
+  try {
+    const { stdout } = await execFileAsync(
+      process.execPath,
+      [
+        "-e",
+        `
+          const fs = require("node:fs");
+          const { EventEmitter } = require("node:events");
+
+          const diagnostics = [];
+          const warnings = [];
+          console.log = (...args) => diagnostics.push(args.join(" "));
+          console.warn = (...args) => warnings.push(args.join(" "));
+
+          const config = require("./metro.config.js");
+          const metroMiddleware = (req, res, next) => {
+            res.statusCode = 200;
+            res.emit("finish");
+            next?.();
+          };
+          const wrappedMiddleware = config.server.enhanceMiddleware(
+            metroMiddleware,
+            {},
+          );
+          const requests = [
+            {
+              url:
+                "https://preview-user:preview-password@private.example.com/" +
+                "index.bundle?token=secret-query-token&message=private-message",
+              userAgent:
+                "Expo/57.0.0 (Android); account=private@example.com",
+            },
+            {
+              url:
+                "https://private.example.com/manifest.json?" +
+                "account=private@example.com",
+              userAgent: "Mozilla/5.0 (private-browser)",
+              extraHeaders: { "sec-fetch-mode": "cors" },
+            },
+            {
+              url:
+                "https://private.example.com/assets/logo.png?" +
+                "message=private-message",
+              userAgent: "curl/8.14.1 (private-curl)",
+            },
+            {
+              url:
+                "https://private.example.com/room/private-message?" +
+                "token=secret-query-token",
+              userAgent: "UnknownPreview/1.0 (private-unknown)",
+            },
+          ];
+
+          for (const { url, userAgent, extraHeaders } of requests) {
+            const req = {
+              method: "GET",
+              url,
+              headers: {
+                "expo-platform": "android",
+                "user-agent": userAgent,
+                ...extraHeaders,
+              },
+            };
+            const res = new EventEmitter();
+            res.statusCode = 200;
+            wrappedMiddleware(req, res, () => {});
+          }
+
+          process.stdout.write(
+            JSON.stringify({
+              diagnostics,
+              warnings,
+              fileContents: fs.readFileSync(
+                process.env.EXPO_DEV_REQUEST_EVIDENCE_FILE,
+                "utf8",
+              ),
+            }),
+          );
+        `,
+      ],
+      {
+        cwd: packageRoot,
+        env: {
+          ...process.env,
+          EXPO_DEV_REQUEST_EVIDENCE_FILE: evidencePath,
+          EXPO_DEV_REQUEST_LOG: "",
+        },
+        maxBuffer: 2 * 1024 * 1024,
+      },
+    );
+    const result = JSON.parse(stdout);
+    const retainedContent = await fs.readFile(evidencePath, "utf8");
+    const consoleContent = result.diagnostics.join("\n");
+
+    assert.deepEqual(
+      result.diagnostics.map((line) => {
+        const match = line.match(/client=(Expo Go|browser|curl|other)/);
+        return match?.[1];
+      }),
+      ["Expo Go", "browser", "curl", "other"],
+    );
+    assert.deepEqual(
+      result.diagnostics.map((line) => {
+        const match = line.match(/resource=([^ ]+)$/);
+        return match?.[1];
+      }),
+      ["bundle", "manifest", "asset", "other"],
+    );
+    assert.equal(result.warnings.length, 0);
+    assertContainsNoSensitiveEvidence(consoleContent);
+    assertContainsNoSensitiveEvidence(result.fileContents);
+    assertContainsNoSensitiveEvidence(retainedContent);
+    assert.match(
+      consoleContent,
+      /user-agent=\[redacted\].*resource=bundle/,
+    );
+    assert.match(
+      retainedContent,
+      /user-agent=\[redacted\].*resource=other/,
+    );
+  } finally {
+    await fs.rm(temporaryDirectory, { recursive: true, force: true });
+  }
 });
 
 test("keeps the newest evidence in a bounded rolling window", () => {
