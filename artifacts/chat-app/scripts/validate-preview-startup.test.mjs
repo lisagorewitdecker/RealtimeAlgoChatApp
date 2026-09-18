@@ -1426,6 +1426,150 @@ globalThis.fetch = async (url, options = {}) => {
 );
 
 test(
+  "CLI saves a redacted failed iOS local boundary when the local bundle probe times out",
+  { timeout: 5_000 },
+  () => {
+    const directory = mkdtempSync(
+      join(tmpdir(), "ios-preview-handoff-local-timeout-cli-"),
+    );
+    const outputPath = join(directory, "ios-preview-preflight.json");
+    const stdoutPath = join(directory, "validator.stdout.log");
+    const stderrPath = join(directory, "validator.stderr.log");
+    const preloadPath = join(directory, "stall-local-bundle-fetch.mjs");
+    writeFileSync(
+      preloadPath,
+      `const originalFetch = globalThis.fetch;
+globalThis.fetch = async (url, options = {}) => {
+  const requestUrl = new URL(String(url));
+  if (requestUrl.origin === "https://public-preview.test") {
+    return new Response(
+      JSON.stringify({
+        launchAsset: {
+          url: "https://public-preview.test/_expo/static/js/bundle",
+        },
+      }),
+      { status: 200 },
+    );
+  }
+  if (
+    requestUrl.hostname === "127.0.0.1" &&
+    requestUrl.pathname === "/_expo/static/js/bundle"
+  ) {
+    await new Promise((resolve, reject) => {
+      const signal = options.signal;
+      if (!signal) {
+        reject(new Error("test fetch requires an abort signal"));
+        return;
+      }
+      if (signal.aborted) {
+        reject(new Error("request aborted by deadline"));
+        return;
+      }
+      signal.addEventListener(
+        "abort",
+        () => reject(new Error("request aborted by deadline")),
+        { once: true },
+      );
+    });
+  }
+  return originalFetch(url, options);
+};
+`,
+      "utf8",
+    );
+
+    try {
+      const stdout = openSync(stdoutPath, "w");
+      const stderr = openSync(stderrPath, "w");
+      let result;
+      try {
+        result = spawnSync(
+          process.execPath,
+          [
+            validatorPath,
+            "--platform",
+            "ios",
+            "--record-output",
+            outputPath,
+          ],
+          {
+            env: {
+              ...process.env,
+              NODE_OPTIONS: [
+                process.env.NODE_OPTIONS,
+                `--import ${preloadPath}`,
+              ]
+                .filter(Boolean)
+                .join(" "),
+              PREVIEW_PUBLIC_URL:
+                "https://public-preview.test/private-path?token=private-secret",
+              PREVIEW_PUBLIC_TIMEOUT_MS: "200",
+              PREVIEW_HANDOFF_TIMEOUT_MS: "100",
+              PREVIEW_STARTUP_TIMEOUT_MS: "2000",
+              PREVIEW_STARTUP_EXPECTED_EXPO_PLATFORM: "ios",
+              PREVIEW_STARTUP_TEST_FIXTURE: "handoff-server",
+            },
+            stdio: ["ignore", stdout, stderr],
+          },
+        );
+      } finally {
+        closeSync(stdout);
+        closeSync(stderr);
+      }
+      const output =
+        readFileSync(stdoutPath, "utf8") + readFileSync(stderrPath, "utf8");
+
+      assert.notEqual(result.status, 0, output);
+      const record = JSON.parse(readFileSync(outputPath, "utf8"));
+      assert.doesNotThrow(() => validateHandoffPreflightRecord(record));
+      assert.equal(record.schema, "ios-preview-handoff-preflight/v1");
+      assert.equal(record.platform, "ios");
+      assert.equal(
+        record.boundaries.publicManifestReachability.status,
+        "PASS",
+      );
+      assert.equal(record.boundaries.localHandoffProbe.status, "FAIL");
+      assert.equal(record.boundaries.expoGoLaunch.status, "NOT_ASSESSED");
+      assert.equal(
+        record.boundaries.serverNativeRequestEvidence.status,
+        "NOT_ASSESSED",
+      );
+      assert.equal(
+        record.boundaries.expoGoLaunch.evidence,
+        "Requires a physical iPhone running stock Expo Go.",
+      );
+      assert.equal(
+        record.boundaries.serverNativeRequestEvidence.evidence,
+        "Requires filtered Metro or API evidence from that physical Expo Go session.",
+      );
+      assert.equal(
+        record.boundaries.localHandoffProbe.evidence,
+        "Local manifest/bundle probe failed — no successful probe result was recorded",
+      );
+      assert.match(output, /iOS preview handoff preflight/);
+      assert.match(output, /public_manifest_reachability=PASS/);
+      assert.match(output, /local_handoff_probe=FAIL/);
+      assert.match(output, /expo_go_launch=NOT_ASSESSED/);
+      assert.match(output, /server_native_request_evidence=NOT_ASSESSED/);
+      assert.match(
+        output,
+        /Restart or repair the managed Chat App\/Expo workflow/,
+      );
+      assert.doesNotMatch(
+        output,
+        /127\.0\.0\.1|public-preview\.test|private-path|private-secret|token=|_expo\/static\/js\/bundle/i,
+      );
+      assert.doesNotMatch(
+        JSON.stringify(record),
+        /127\.0\.0\.1|public-preview\.test|private-path|private-secret|token=|_expo\/static\/js\/bundle/i,
+      );
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
   "aborts a stalled local manifest request at its deadline with recovery guidance",
   { timeout: 1_000 },
   async () => {
