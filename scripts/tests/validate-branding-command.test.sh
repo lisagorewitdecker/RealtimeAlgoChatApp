@@ -45,10 +45,10 @@ pnpm --filter @workspace/chat-app run validate:branding
 
 cat > "$TEST_ROOT/ios-native-info.json" <<'JSON'
 {
-  "CFBundleDisplayName": "RealtimeAlgoChatApp Studio",
-  "CFBundleName": "RealtimeAlgoChatApp Studio",
-  "NSCameraUsageDescription": "RealtimeAlgoChatApp Studio uses your camera for video calls.",
-  "NSMicrophoneUsageDescription": "RealtimeAlgoChatApp Studio uses your microphone for voice and video calls."
+  "CFBundleDisplayName": "RealtimeAlgoChatApp",
+  "CFBundleName": "RealtimeAlgoChatApp",
+  "NSCameraUsageDescription": "RealtimeAlgoChatApp uses your camera for video calls.",
+  "NSMicrophoneUsageDescription": "RealtimeAlgoChatApp uses your microphone for voice and video calls."
 }
 JSON
 
@@ -122,9 +122,9 @@ expect_incomplete_metadata_failure() {
 
 cat > "$TEST_ROOT/ios-missing-label.json" <<'JSON'
 {
-  "CFBundleName": "RealtimeAlgoChatApp Studio",
-  "NSCameraUsageDescription": "RealtimeAlgoChatApp Studio uses your camera for video calls.",
-  "NSMicrophoneUsageDescription": "RealtimeAlgoChatApp Studio uses your microphone for voice and video calls."
+  "CFBundleName": "RealtimeAlgoChatApp",
+  "NSCameraUsageDescription": "RealtimeAlgoChatApp uses your camera for video calls.",
+  "NSMicrophoneUsageDescription": "RealtimeAlgoChatApp uses your microphone for voice and video calls."
 }
 JSON
 expect_incomplete_metadata_failure ios-missing-label ios \
@@ -134,9 +134,9 @@ assert_contains "$TEST_ROOT/ios-missing-label-results/native-branding-summary.md
 
 cat > "$TEST_ROOT/ios-missing-permission.json" <<'JSON'
 {
-  "CFBundleDisplayName": "RealtimeAlgoChatApp Studio",
-  "CFBundleName": "RealtimeAlgoChatApp Studio",
-  "NSMicrophoneUsageDescription": "RealtimeAlgoChatApp Studio uses your microphone for voice and video calls."
+  "CFBundleDisplayName": "RealtimeAlgoChatApp",
+  "CFBundleName": "RealtimeAlgoChatApp",
+  "NSMicrophoneUsageDescription": "RealtimeAlgoChatApp uses your microphone for voice and video calls."
 }
 JSON
 expect_incomplete_metadata_failure ios-missing-permission ios \
@@ -162,7 +162,7 @@ done
 
 cat > "$TEST_ROOT/android-missing-declarations.json" <<'JSON'
 {
-  "applicationLabel": "RealtimeAlgoChatApp Studio"
+  "applicationLabel": "RealtimeAlgoChatApp"
 }
 JSON
 expect_incomplete_metadata_failure android-missing-declarations android \

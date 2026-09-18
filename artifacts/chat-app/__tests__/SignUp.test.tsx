@@ -114,10 +114,10 @@ describe("email account signup", () => {
     });
   });
 
-  it("uses the approved RealtimeAlgoChatApp Studio brand in the signup invitation", () => {
+  it("uses the approved RealtimeAlgoChatApp brand in the signup invitation", () => {
     const { getByText, queryByText } = render(<SignUpScreen />);
 
-    expect(getByText("Join RealtimeAlgoChatApp Studio to chat, call, and build together.")).toBeTruthy();
+    expect(getByText("Join RealtimeAlgoChatApp to chat, call, and build together.")).toBeTruthy();
     expect(queryByText("Join DevAlgoChat Studio to chat, call, and build together.")).toBeNull();
     expect(queryByText("Join DevStudio to chat, call, and build together.")).toBeNull();
   });

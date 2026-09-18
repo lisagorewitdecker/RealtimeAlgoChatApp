@@ -95,8 +95,8 @@ describe("static file path resolution", () => {
       const html = response.body;
 
       expect(response.status).toBe(200);
-      expect(html).toContain("<title>RealtimeAlgoChatApp Studio</title>");
-      expect(html).toContain("<h1>RealtimeAlgoChatApp Studio</h1>");
+      expect(html).toContain("<title>RealtimeAlgoChatApp</title>");
+      expect(html).toContain("<h1>RealtimeAlgoChatApp</h1>");
       expect(html).not.toMatch(/DevAlgoChat|DevStudio|ChatSphere/);
     } finally {
       await new Promise((resolve) => server.close(resolve));
@@ -125,9 +125,9 @@ describe("static file path resolution", () => {
       expect(structuredData).toEqual({
         "@context": "https://schema.org",
         "@type": "WebPage",
-        name: "RealtimeAlgoChatApp Studio mobile preview",
+        name: "RealtimeAlgoChatApp mobile preview",
         description:
-          "Get RealtimeAlgoChatApp Studio on your phone: real-time code collaboration, calls, and chat for developers.",
+          "Get RealtimeAlgoChatApp on your phone: real-time code collaboration, calls, and chat for developers.",
         url: `https://127.0.0.1:${address.port}/`,
       });
       expect(structuredData).not.toHaveProperty("downloadUrl");

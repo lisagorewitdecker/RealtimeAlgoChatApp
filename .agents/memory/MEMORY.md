@@ -98,3 +98,4 @@
 - [Expo Go native modules & preview 502s](expo-go-native-modules.md) — gate native SDK init outside Expo Go; orphan `expo start` blocks the port prompt; Go home screen = dropped launch.
 - [Task merges land on the checked-out branch](branch-divergence-from-task-merges.md) — reunify development/production with a no-ff merge then fast-forward; never use stale `origin/*` refs.
 - [Generated-check fault controls](generated-check-fault-controls.md) — test-only faults and fixture paths require explicit subprocess opt-ins; harnesses strip inherited env and prove inertness.
+- [API codegen fixture test hides nested failures](api-codegen-fixture-test-diagnosis.md) — a missing drift message usually means an earlier api-spec suite failed; rebuild the fixture by hand to see which.

@@ -29,6 +29,12 @@ expectations that differ by platform use the shared `onTestPlatform` helper so
 neither project reports skipped tests. The Android pass adds roughly 10% to a
 warm run and noticeably more on a cold babel cache.
 
+Run one suite under one project as
+`jest --runInBand --selectProjects iOS -- __tests__/X.test.tsx`. Without the
+`--`, `--selectProjects` swallows the path as another project name and Jest
+runs the whole project in parallel, where the heavier screen suites hit
+spurious 5 s test timeouts.
+
 There is deliberately no web project. A component's web branch is covered
 inside the same suite by assigning `Platform.OS = "web"` for that test and
 restoring the project's platform afterwards; capture the project's platform

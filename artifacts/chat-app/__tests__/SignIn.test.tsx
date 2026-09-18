@@ -205,7 +205,7 @@ describe("default sign in", () => {
 
   it("uses an accessible workspace heading and lower-case greeting", () => {
     const { getByTestId, getByText } = render(<SignInScreen />);
-    const title = getByText("Sign in to your RealtimeAlgoChatApp Studio Workspace");
+    const title = getByText("Sign in to your RealtimeAlgoChatApp Workspace");
     const greeting = getByText("welcome back");
 
     expect(title.props.accessibilityRole).toBe("header");
@@ -214,7 +214,7 @@ describe("default sign in", () => {
     expect(greeting.props.accessibilityRole).toBe("header");
     expect(greeting.props.role).toBe("heading");
     expect(greeting.props["aria-level"]).toBe(2);
-    expect(getByText("Sign in to your RealtimeAlgoChatApp Studio workspace.")).toBeTruthy();
+    expect(getByText("Sign in to your RealtimeAlgoChatApp workspace.")).toBeTruthy();
     expect(title.props.style.fontSize).toBeCloseTo(39.2);
 
     const scroll = getByTestId("sign-in-scroll");
@@ -266,7 +266,7 @@ describe("default sign in", () => {
     fireEvent.press(getByLabelText("Verify reset code"));
 
     await waitFor(() => {
-      expect(getByText("Choose a new password for your RealtimeAlgoChatApp Studio account.")).toBeTruthy();
+      expect(getByText("Choose a new password for your RealtimeAlgoChatApp account.")).toBeTruthy();
     });
   });
 });

@@ -423,7 +423,7 @@ describe("profile moderation controls", () => {
       ),
     );
     expect((await findByTestId("moderation-feedback")).props.children).toBe(
-      "Account Grace Hopper (user-target) is banned and can no longer access RealtimeAlgoChatApp Studio.",
+      "Account Grace Hopper (user-target) is banned and can no longer access RealtimeAlgoChatApp.",
     );
   });
 

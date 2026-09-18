@@ -141,6 +141,13 @@ describe("home screen tab bar reservation", () => {
     return StyleSheet.flatten(style).paddingBottom;
   }
 
+  function footerPaddingBottom(view: {
+    getByTestId: (testID: string) => { props: Record<string, unknown> };
+  }) {
+    const style = view.getByTestId("chats-footer").props.style as StyleProp<ViewStyle>;
+    return StyleSheet.flatten(style).paddingBottom;
+  }
+
   it("reserves the measured tab bar height below the last room", async () => {
     // The classic tab navigator publishes its measured bar height (bottom
     // inset included) through this context; the bar overlays the screen and
@@ -207,5 +214,77 @@ describe("home screen tab bar reservation", () => {
     );
 
     expect(listPaddingBottom(view)).toBe(84 + WEB_BREATHING_ROOM);
+  });
+
+  describe("copyright footer", () => {
+    // Spare room between the copyright line and the tab bar, in points. The
+    // footer padded a flat 64pt over the safe-area inset on native (15pt past
+    // the default 49pt + inset bar) and the bar's own 84pt on web before it
+    // measured the bar, so with the default bar its position must come out
+    // unchanged.
+    const NATIVE_FOOTER_ROOM = 15;
+    const WEB_FOOTER_ROOM = 0;
+
+    it("keeps the copyright line above a taller tab bar", async () => {
+      // The footer sits below the list, so a bar taller than the default
+      // (scaled labels, Android three-button navigation) used to cover the
+      // copyright text while the list above it stayed clear.
+      mockInsets.bottom = 34;
+      const view = await renderRooms(
+        <BottomTabBarHeightContext.Provider value={96}>
+          <ChatsScreen />
+        </BottomTabBarHeightContext.Provider>,
+      );
+
+      expect(footerPaddingBottom(view)).toBe(96 + NATIVE_FOOTER_ROOM);
+    });
+
+    it("tracks the tab bar height as the navigator re-measures it", async () => {
+      const view = await renderRooms(
+        <BottomTabBarHeightContext.Provider value={49}>
+          <ChatsScreen />
+        </BottomTabBarHeightContext.Provider>,
+      );
+
+      expect(footerPaddingBottom(view)).toBe(49 + NATIVE_FOOTER_ROOM);
+
+      view.rerender(
+        <BottomTabBarHeightContext.Provider value={120}>
+          <ChatsScreen />
+        </BottomTabBarHeightContext.Provider>,
+      );
+      expect(footerPaddingBottom(view)).toBe(120 + NATIVE_FOOTER_ROOM);
+    });
+
+    it("falls back to the safe-area inset when no tab bar height is published", async () => {
+      // Inside the iOS 26 native tabs the bottom inset already includes the
+      // system tab bar, so only the spare room belongs above it.
+      mockInsets.bottom = 34;
+      const view = await renderRooms(<ChatsScreen />);
+
+      expect(footerPaddingBottom(view)).toBe(34 + NATIVE_FOOTER_ROOM);
+    });
+
+    it("keeps the position it had with the default native bar", async () => {
+      mockInsets.bottom = 34;
+      const view = await renderRooms(
+        <BottomTabBarHeightContext.Provider value={49 + 34}>
+          <ChatsScreen />
+        </BottomTabBarHeightContext.Provider>,
+      );
+
+      expect(footerPaddingBottom(view)).toBe(34 + 64);
+    });
+
+    it("keeps the position it had with the default web bar", async () => {
+      Platform.OS = "web";
+      const view = await renderRooms(
+        <BottomTabBarHeightContext.Provider value={84}>
+          <ChatsScreen />
+        </BottomTabBarHeightContext.Provider>,
+      );
+
+      expect(footerPaddingBottom(view)).toBe(84 + WEB_FOOTER_ROOM);
+    });
   });
 });

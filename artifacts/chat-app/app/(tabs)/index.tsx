@@ -91,6 +91,13 @@ export default function ChatsScreen() {
   // bar keeps the spacing the list had while it reserved a flat 90pt over the
   // safe-area inset: 41pt past the 49pt native bar, 6pt past the 84pt web bar.
   const listBottomInset = useTabBarContentInset(Platform.OS === "web" ? 6 : 41);
+  // The copyright footer below the list follows the same measured height: a
+  // taller bar (scaled labels, Android three-button navigation) would
+  // otherwise hide the text behind the opaque Android and web bar while the
+  // list above it stays clear. Its spare room keeps the position it had while
+  // it reserved a flat 64pt over the safe-area inset on native (15pt past the
+  // 49pt bar) and sat flush with the 84pt bar on web.
+  const footerBottomInset = useTabBarContentInset(Platform.OS === "web" ? 0 : 15);
 
   return (
     <View style={[styles.root, { backgroundColor: colors.background }]}>
@@ -167,12 +174,10 @@ export default function ChatsScreen() {
         />
       )}
       <View
+        testID="chats-footer"
         style={[
           styles.footer,
-          {
-            borderTopColor: colors.border,
-            paddingBottom: insets.bottom + (Platform.OS === "web" ? 84 : 64),
-          },
+          { borderTopColor: colors.border, paddingBottom: footerBottomInset },
         ]}
       >
         <Text style={[styles.footerText, { color: colors.mutedForeground }]}>

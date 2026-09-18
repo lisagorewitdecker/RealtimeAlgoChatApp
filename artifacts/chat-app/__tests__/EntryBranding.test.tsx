@@ -132,22 +132,22 @@ describe("entry-screen branding", () => {
     mockIsSignedIn = true;
   });
 
-  it("uses RealtimeAlgoChatApp Studio on the setup screen", async () => {
+  it("uses RealtimeAlgoChatApp on the setup screen", async () => {
     const view = render(<SetupScreen />);
     await act(async () => {});
 
-    expect(view.getByText("RealtimeAlgoChatApp Studio")).toBeTruthy();
+    expect(view.getByText("RealtimeAlgoChatApp")).toBeTruthy();
     expect(view.queryByText("DevAlgoChat Studio")).toBeNull();
     expect(view.queryByText("DevStudio")).toBeNull();
   });
 
-  it("uses RealtimeAlgoChatApp Studio in shared account access messaging", async () => {
+  it("uses RealtimeAlgoChatApp in shared account access messaging", async () => {
     const view = render(<RootLayout />);
     await act(async () => {});
 
     expect(
       view.getByText(
-        "This RealtimeAlgoChatApp Studio account has been banned. You cannot join rooms, calls, or sandboxes.",
+        "This RealtimeAlgoChatApp account has been banned. You cannot join rooms, calls, or sandboxes.",
       ),
     ).toBeTruthy();
     expect(
@@ -157,14 +157,14 @@ describe("entry-screen branding", () => {
     ).toBeNull();
   });
 
-  it("uses RealtimeAlgoChatApp Studio on the unauthenticated access gate", async () => {
+  it("uses RealtimeAlgoChatApp on the unauthenticated access gate", async () => {
     mockIsSignedIn = false;
     const view = render(<RootLayout />);
     await act(async () => {});
 
     expect(
       view.getByText(
-        "Create an account or sign in to open RealtimeAlgoChatApp Studio rooms and sandboxes.",
+        "Create an account or sign in to open RealtimeAlgoChatApp rooms and sandboxes.",
       ),
     ).toBeTruthy();
     expect(view.queryByText(/DevAlgoChat|DevStudio|ChatSphere/)).toBeNull();
