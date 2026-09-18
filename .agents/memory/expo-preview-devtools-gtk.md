@@ -7,4 +7,4 @@ The Expo preview environment must include the complete native runtime set used b
 
 **Why:** Preview diagnostics are harder to interpret when an optional desktop tool reports a missing library even though the mobile Expo Go path is healthy.
 
-**How to apply:** Keep the full runtime package set in the project’s Nix package list when upgrading Expo or React Native, and verify a fresh Expo workflow reaches Metro without any shared-library or DevTools startup error.
+**How to apply:** Keep the full runtime package set in the project’s Nix package list when upgrading Expo or React Native. Before startup, confirm installed Expo CLI/React Native versions still match captured loader evidence; then verify a fresh Expo workflow reaches Metro without any shared-library or DevTools startup error.

@@ -191,6 +191,9 @@ timeoutMs = 180000
 
 [nix]
 channel = "stable-25_05"
+# Expo SDK 57's optional React Native DevTools launcher is a native binary.
+# Keep this desktop runtime set aligned with @expo/cli and react-native upgrades;
+# validate-preview-runtime reports a missing entry before preview startup runs.
 packages = ["glib", "nss", "nspr", "atk", "at-spi2-atk", "dbus", "xorg.libX11", "xorg.libXcomposite", "xorg.libXdamage", "xorg.libXext", "xorg.libXfixes", "xorg.libXrandr", "mesa", "xorg.libxcb", "libxkbcommon", "alsa-lib", "at-spi2-core", "libgbm", "cups", "expat", "libdrm", "pango", "cairo", "fontconfig", "freetype", "systemd", "gtk3", "tesseract", "imagemagick", "actionlint"]
 
 [userenv]
