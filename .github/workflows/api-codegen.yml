@@ -9,6 +9,9 @@ on:
 
 permissions:
   contents: read
+  # Publishing the drift evidence as its own check run keeps it readable from
+  # the pull request's Checks tab, which needs no job-log access.
+  checks: write
 
 jobs:
   check-generated:
@@ -39,7 +42,21 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Verify generated API clients
+        id: verify-generated
+        env:
+          API_CODEGEN_DRIFT_REPORT_PATH: ${{ runner.temp }}/api-codegen-drift-report.txt
         run: pnpm validate:api-codegen
+
+      # Reviewers must be able to read the drift evidence from the Checks tab,
+      # so it is published as a check-run summary rather than only as this
+      # job's step summary, which GitHub shows only to signed-in viewers.
+      - name: Publish generated-client drift evidence
+        if: ${{ always() && steps.verify-generated.outcome == 'failure' }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          API_CODEGEN_DRIFT_REPORT_PATH: ${{ runner.temp }}/api-codegen-drift-report.txt
+          API_CODEGEN_DRIFT_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: node lib/api-spec/scripts/publish-drift-check.mjs
 
       - name: Verify generated API-break guidance
         run: pnpm validate:api-break-guidance

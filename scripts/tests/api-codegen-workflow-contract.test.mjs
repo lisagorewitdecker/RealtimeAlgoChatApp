@@ -36,6 +36,16 @@ const generatedCheckerSource = readFileSync(
   path.join(workspaceRoot, "lib/api-spec/scripts/check-generated.mjs"),
   "utf8",
 );
+// The checker and the check-run publisher render the reviewer-visible evidence
+// through this shared module, so the contract is followed one import hop.
+const driftSummarySource = readFileSync(
+  path.join(workspaceRoot, "lib/api-spec/scripts/drift-summary.mjs"),
+  "utf8",
+);
+const driftPublisherSource = readFileSync(
+  path.join(workspaceRoot, "lib/api-spec/scripts/publish-drift-check.mjs"),
+  "utf8",
+);
 
 const steps = workflow.jobs?.["check-generated"]?.steps ?? [];
 const generatedClientStep = steps.find(
@@ -43,6 +53,9 @@ const generatedClientStep = steps.find(
 );
 const compatibilityStep = steps.find(
   (step) => step.name === "Check API contract compatibility",
+);
+const driftEvidenceStep = steps.find(
+  (step) => step.name === "Publish generated-client drift evidence",
 );
 const generatedClientFixturePath = "lib/api-client-react/src/generated/api.ts";
 const pushTrigger = workflow.on?.push;
@@ -386,19 +399,87 @@ test("generated-client drift evidence is complete in the reviewer-visible summar
   );
   assert.match(
     generatedCheckerSource,
+    /appendFileSync\(summaryPath, buildDriftSummary\(report\)\)/,
+    "the checker must render the summary through the shared drift-summary module",
+  );
+  assert.match(
+    driftSummarySource,
     /const fence = markdownFence\(report\)/,
     "the summary must fence generated content without allowing report text to escape the Markdown block",
   );
   assert.ok(
-    generatedCheckerSource.includes(
+    driftSummarySource.includes(
       "Regenerate with \\`${regenerationCommand}\\` and commit the generated output.",
     ),
     "the summary must include the regeneration command reviewers need",
   );
   assert.match(
-    generatedCheckerSource,
+    driftSummarySource,
     /Generated API drift detected[\s\S]*regenerationCommand[\s\S]*report[\s\S]*fence/,
     "the summary must include the heading, command, bounded report, and closing fence",
+  );
+});
+
+test("generated-client drift evidence is published where reviewers need no log access", () => {
+  assert.equal(
+    workflow.permissions?.checks,
+    "write",
+    "publishing the drift evidence as its own check run requires the checks write permission",
+  );
+  assert.ok(
+    driftEvidenceStep,
+    "expected the API codegen workflow to publish the generated-client drift evidence",
+  );
+  assert.equal(
+    driftEvidenceStep.run,
+    "node lib/api-spec/scripts/publish-drift-check.mjs",
+    "the drift evidence must be published by the maintained publisher script",
+  );
+  assert.match(
+    String(driftEvidenceStep.if),
+    /steps\.verify-generated\.outcome == 'failure'/,
+    "the evidence must be published exactly when the generated-client verification fails",
+  );
+  assert.equal(
+    generatedClientStep?.id,
+    "verify-generated",
+    "the verification step must be identifiable so the publishing step can react to its outcome",
+  );
+
+  const reportPath = generatedClientStep?.env?.API_CODEGEN_DRIFT_REPORT_PATH;
+  assert.ok(
+    reportPath,
+    "the verification step must tell the checker where to write the publishable drift report",
+  );
+  assert.equal(
+    driftEvidenceStep.env?.API_CODEGEN_DRIFT_REPORT_PATH,
+    reportPath,
+    "the publishing step must read the same report the checker wrote; each step has its own step-summary file",
+  );
+  assert.ok(
+    driftEvidenceStep.env?.GITHUB_TOKEN,
+    "the publishing step needs a token to create the check run",
+  );
+  assert.match(
+    String(driftEvidenceStep.env?.API_CODEGEN_DRIFT_HEAD_SHA),
+    /pull_request\.head\.sha/,
+    "the check run must be attached to the pull request head commit reviewers are looking at",
+  );
+
+  assert.match(
+    generatedCheckerSource,
+    /writeDriftReportFile\(driftReport\)/,
+    "the checker must write the same bounded report it prints for publication",
+  );
+  assert.match(
+    driftPublisherSource,
+    /buildDriftSummary\(report, \{ limit: checkRunSummaryLimit \}\)/,
+    "the published summary must use the shared rendering, bounded to GitHub's check-run limit",
+  );
+  assert.match(
+    driftPublisherSource,
+    /\/repos\/\$\{repository\}\/check-runs/,
+    "the evidence must be published as a check run so it is readable without job-log access",
   );
 });
 
