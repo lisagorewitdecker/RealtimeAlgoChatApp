@@ -1701,10 +1701,12 @@ jobs:
 
       - name: Clear partial iOS native smoke artifacts before retry
         if: ${{ always() && steps.download-ios-native-smoke.outcome != 'success' }}
+        continue-on-error: true
+        id: cleanup-ios-native-smoke
         run: rm -rf -- test-results/native-large-text/ios && mkdir -p -- test-results/native-large-text/ios
 
       - name: Retry iOS native smoke artifact download
-        if: ${{ always() && steps.download-ios-native-smoke.outcome != 'success' }}
+        if: ${{ always() && steps.download-ios-native-smoke.outcome != 'success' && steps.cleanup-ios-native-smoke.outcome == 'success' }}
         continue-on-error: true
         id: retry-ios-native-smoke
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
@@ -1723,10 +1725,12 @@ jobs:
 
       - name: Clear partial Android native smoke artifacts before retry
         if: ${{ always() && steps.download-android-native-smoke.outcome != 'success' }}
+        continue-on-error: true
+        id: cleanup-android-native-smoke
         run: rm -rf -- test-results/native-large-text/android && mkdir -p -- test-results/native-large-text/android
 
       - name: Retry Android native smoke artifact download
-        if: ${{ always() && steps.download-android-native-smoke.outcome != 'success' }}
+        if: ${{ always() && steps.download-android-native-smoke.outcome != 'success' && steps.cleanup-android-native-smoke.outcome == 'success' }}
         continue-on-error: true
         id: retry-android-native-smoke
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
@@ -1848,10 +1852,12 @@ jobs:
 
       - name: Clear partial iOS native smoke artifacts before publishing retry
         if: ${{ always() && steps.download-publish-ios-native-smoke.outcome != 'success' }}
+        continue-on-error: true
+        id: cleanup-publish-ios-native-smoke
         run: rm -rf -- test-results/native-large-text/ios && mkdir -p -- test-results/native-large-text/ios
 
       - name: Retry iOS native smoke artifact download for publishing
-        if: ${{ always() && steps.download-publish-ios-native-smoke.outcome != 'success' }}
+        if: ${{ always() && steps.download-publish-ios-native-smoke.outcome != 'success' && steps.cleanup-publish-ios-native-smoke.outcome == 'success' }}
         continue-on-error: true
         id: retry-publish-ios-native-smoke
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
@@ -1870,10 +1876,12 @@ jobs:
 
       - name: Clear partial Android native smoke artifacts before publishing retry
         if: ${{ always() && steps.download-publish-android-native-smoke.outcome != 'success' }}
+        continue-on-error: true
+        id: cleanup-publish-android-native-smoke
         run: rm -rf -- test-results/native-large-text/android && mkdir -p -- test-results/native-large-text/android
 
       - name: Retry Android native smoke artifact download for publishing
-        if: ${{ always() && steps.download-publish-android-native-smoke.outcome != 'success' }}
+        if: ${{ always() && steps.download-publish-android-native-smoke.outcome != 'success' && steps.cleanup-publish-android-native-smoke.outcome == 'success' }}
         continue-on-error: true
         id: retry-publish-android-native-smoke
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4

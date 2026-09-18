@@ -1433,8 +1433,8 @@ test("native evidence downloads retry without exposing evidence contents", () =>
     );
     assert.equal(
       retry?.if,
-      `\${{ always() && steps.${downloadId}.outcome != 'success' }}`,
-      `${jobId}: ${platform} retry must run only after a non-successful initial download`,
+      `\${{ always() && steps.${downloadId}.outcome != 'success' && steps.cleanup-${downloadId.replace("download-", "")}.outcome == 'success' }}`,
+      `${jobId}: ${platform} retry must run only after cleanup succeeds`,
     );
     assert.deepEqual(
       retry?.with,
@@ -4886,6 +4886,63 @@ test("unsafe download metadata cannot alter fixed platform recovery actions", ()
   );
 });
 
+test("cleanup-gated skipped retries preserve fixed blocking summaries", () => {
+  const evidenceRoot = path.join(testRoot, "cleanup-failure-stale-output");
+  const iosRunDir = path.join(evidenceRoot, "ios", "stale-run");
+  mkdirSync(iosRunDir, { recursive: true });
+  writeFileSync(
+    path.join(iosRunDir, brandingReportFile),
+    "private-evidence-marker must not appear in the release summary\n",
+  );
+  const summaryPath = path.join(
+    testRoot,
+    "cleanup-failure-stale-output-summary.md",
+  );
+  const iosArtifactUrl =
+    "https://github.example/example/chat-app/actions/runs/123/artifacts/456";
+  const androidArtifactUrl =
+    "https://github.example/example/chat-app/actions/runs/123/artifacts/789";
+
+  const result = spawnSync(
+    bashPath,
+    [path.join(workspaceRoot, nativeEvidenceCheckerScript), evidenceRoot],
+    {
+      cwd: workspaceRoot,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        GITHUB_STEP_SUMMARY: summaryPath,
+        NATIVE_IOS_EVIDENCE_ARTIFACT_URL: iosArtifactUrl,
+        NATIVE_ANDROID_EVIDENCE_ARTIFACT_URL: androidArtifactUrl,
+        NATIVE_IOS_EVIDENCE_DOWNLOAD_RESULT: "skipped",
+        NATIVE_ANDROID_EVIDENCE_DOWNLOAD_RESULT: "success",
+      },
+    },
+  );
+  assert.notEqual(
+    result.status,
+    0,
+    "a cleanup failure that skips the retry must keep the release blocked",
+  );
+
+  const summary = readFileSync(summaryPath, "utf8");
+  assert.match(
+    summary,
+    /## iOS native large-text evidence[\s\S]*- Status: \*\*FAIL\*\*[\s\S]*- Artifact download: \*\*FAIL\*\*/,
+    "the affected platform must retain a fixed blocking summary",
+  );
+  assert.match(
+    summary,
+    /- Recovery: \*\*Rerun the iOS native large-text job, or make the existing iOS artifact available, then rerun the mobile release gate\.\*\*/,
+    "the affected platform must retain fixed iOS recovery guidance",
+  );
+  assert.doesNotMatch(
+    summary,
+    /private-evidence-marker|github\.example/,
+    "stale evidence text and artifact metadata must not reach the summary",
+  );
+});
+
 test("partial native reruns keep each platform linked to its own artifact", () => {
   const artifactNames = {
     ios: "native-large-text-ios",
@@ -5082,9 +5139,18 @@ test("partial native reruns keep each platform linked to its own artifact", () =
         `${jobId}: ${platform} cleanup must recreate the download directory`,
       );
       assert.equal(
+        cleanupStep["continue-on-error"],
+        true,
+        `${jobId}: ${platform} cleanup failure must still reach evidence validation`,
+      );
+      assert.ok(
+        cleanupStep.id,
+        `${jobId}: ${platform} cleanup must have an outcome that gates retry`,
+      );
+      assert.equal(
         retryStep.if,
-        cleanupStep.if,
-        `${jobId}: ${platform} retry must use the same failure condition as cleanup`,
+        `\${{ always() && steps.${initialStep.id}.outcome != 'success' && steps.${cleanupStep.id}.outcome == 'success' }}`,
+        `${jobId}: ${platform} retry must run only after cleanup succeeds`,
       );
       assert.equal(
         retryStep.with.path,
@@ -5116,6 +5182,29 @@ test("partial native reruns keep each platform linked to its own artifact", () =
       );
       rmSync(partialRoot, { recursive: true, force: true });
     }
+  }
+
+  for (const [jobId, checkerStepName] of [
+    ["mobile-release-gate", "Validate native evidence completeness"],
+    ["mobile-publish", "Require approved iOS and Android evidence"],
+  ]) {
+    const checkerStep = workflow.jobs[jobId].steps.find(
+      (step) => step.name === checkerStepName,
+    );
+    assert.ok(
+      checkerStep,
+      `${jobId}: evidence validation must remain present after cleanup failure`,
+    );
+    assert.match(
+      checkerStep.env.NATIVE_IOS_EVIDENCE_DOWNLOAD_RESULT,
+      /steps\.retry(?:-publish)?-ios-native-smoke\.outcome/,
+      `${jobId}: iOS validation must receive the skipped retry outcome after cleanup failure`,
+    );
+    assert.match(
+      checkerStep.env.NATIVE_ANDROID_EVIDENCE_DOWNLOAD_RESULT,
+      /steps\.retry(?:-publish)?-android-native-smoke\.outcome/,
+      `${jobId}: Android validation must receive the skipped retry outcome after cleanup failure`,
+    );
   }
 
   function runEvidenceSummary(name, artifacts, urls) {
