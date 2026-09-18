@@ -142,3 +142,9 @@ export interface RoomResponse {
 export type UnauthorizedResponse = {
   error: string;
 };
+
+// Intentionally stale generated content for the task 474 reviewer-evidence
+// probe. Regeneration removes this block, which is the drift under test.
+export type Task474StaleProbeMarker = {
+  reviewerEvidenceProbe: string;
+};
