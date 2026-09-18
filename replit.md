@@ -1,4 +1,4 @@
-# RealtimeAlgoChatApp
+# RealtimeAlgoChatApp Studio
 
 RealtimeAlgoChatApp Studio is a real-time collaboration platform for developers with Build, Call, and Ship modes in a single room.
 
