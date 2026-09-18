@@ -33,6 +33,7 @@ jobs:
         shell: bash
         env:
           REVIEWED_REF: ${{ github.event.pull_request.head.sha || inputs.reviewed_ref }}
+          NATIVE_EVIDENCE_HOSTILE_METADATA: "1"
         run: |
           bash scripts/tests/native-evidence-summary-regression-fixture.sh \
             bash scripts/check-native-large-text-evidence.sh

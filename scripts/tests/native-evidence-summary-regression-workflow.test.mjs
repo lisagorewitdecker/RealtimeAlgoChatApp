@@ -78,6 +78,7 @@ test("hosted summary regression checks only the reviewed ref", () => {
   assert.deepEqual(job.steps[1].env, {
     REVIEWED_REF:
       "${{ github.event.pull_request.head.sha || inputs.reviewed_ref }}",
+    NATIVE_EVIDENCE_HOSTILE_METADATA: "1",
   });
   assert.equal(
     verification.trim(),
@@ -91,11 +92,21 @@ test("hosted summary regression checks only the reviewed ref", () => {
     fixtureText,
     /scripts\/run-untrusted-checker\.sh" "\$@" "\$blocked_root"/,
   );
+  assert.match(
+    fixtureText,
+    /base64 --decode[\s\S]*NATIVE_IOS_EVIDENCE_DOWNLOAD_RESULT/,
+    "hostile metadata must be assembled from encoded values at runtime",
+  );
+  assert.match(
+    fixtureText,
+    /checker_stdout="\$\(mktemp\)"[\s\S]*checker_stderr="\$\(mktemp\)"/,
+    "checker stdout and stderr must be captured before they are printed",
+  );
   const revisionMetadataIndex = fixtureText.indexOf(
     'echo "## Reviewed release revision"',
   );
   const checkerIndex = fixtureText.indexOf(
-    'if GITHUB_STEP_SUMMARY="$summary_path" bash',
+    'if env "${checker_env[@]}" bash',
   );
   assert.ok(
     revisionMetadataIndex >= 0 && revisionMetadataIndex < checkerIndex,
@@ -108,7 +119,11 @@ test("hosted summary regression checks only the reviewed ref", () => {
   );
   assert.match(
     fixtureText,
-    /Expected exactly one platform-specific blocking finding/,
+    /Expected the platform-specific missing result finding/,
+  );
+  assert.match(
+    fixtureText,
+    /Release review is blocked until both platform evidence sets contain complete, non-empty reviewed device artifacts\./,
   );
   assert.match(fixtureText, /\$GITHUB_STEP_SUMMARY/);
   assert.doesNotMatch(
