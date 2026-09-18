@@ -659,6 +659,38 @@ write_png_with_text() {
     "$output_path"
 }
 
+write_android_text_fixture() {
+  local output_path="$1"
+  local text="$2"
+  magick \
+    -size 1440x2560 \
+    xc:white \
+    -background white \
+    -fill '#101828' \
+    -font DejaVu-Sans \
+    -pointsize 48 \
+    -gravity NorthWest \
+    -annotate +96+160 "$text" \
+    -resize 75% \
+    -strip \
+    -quality 72 \
+    "$output_path"
+}
+
+write_android_safe_fixture() {
+  local output_path="$1"
+  magick \
+    -size 1440x2560 \
+    xc:white \
+    -background white \
+    -fill white \
+    -gravity NorthWest \
+    -resize 75% \
+    -strip \
+    -quality 72 \
+    "$output_path"
+}
+
 declare -A forbidden_fixtures=(
   [account]='account_email=preview-fixture@example.test'
   [message]='message_body=preview-fixture-message'
@@ -684,6 +716,42 @@ for category in account message token host; do
   fi
   assert_contains "$forbidden_output" "forbidden ${category}"
   assert_not_contains "$forbidden_output" "${forbidden_fixtures[$category]}"
+done
+
+for image_format in jpg webp; do
+  safe_record="$TEST_ROOT/safe-${image_format}/validation-record.md"
+  safe_screenshot="$(dirname "$safe_record")/screenshots/safe.${image_format}"
+  mkdir -p "$(dirname "$safe_screenshot")"
+  write_android_safe_fixture "$safe_screenshot"
+  sed "s#screenshots/preview-launch.png#screenshots/safe.${image_format}#" \
+    "$pass_record" >"$safe_record"
+  safe_output="$(bash "$CHECKER" "$safe_record" 2>&1)"
+  assert_contains "$safe_output" "validation passed"
+  assert_not_contains "$safe_output" "forbidden"
+
+  for category in account message token host; do
+    formatted_forbidden_record="$TEST_ROOT/forbidden-${category}-${image_format}/validation-record.md"
+    formatted_forbidden_screenshot="$(dirname "$formatted_forbidden_record")/screenshots/forbidden-${category}.${image_format}"
+    mkdir -p "$(dirname "$formatted_forbidden_screenshot")"
+    write_android_text_fixture "$formatted_forbidden_screenshot" "${forbidden_fixtures[$category]}"
+    if strings -a "$formatted_forbidden_screenshot" 2>/dev/null |
+      grep -Fq -- "${forbidden_fixtures[$category]}"; then
+      printf 'Forbidden %s %s fixture unexpectedly retained the sensitive text in metadata.\n' \
+        "$category" "$image_format" >&2
+      exit 1
+    fi
+    sed "s#screenshots/preview-launch.png#screenshots/forbidden-${category}.${image_format}#" \
+      "$pass_record" >"$formatted_forbidden_record"
+    if formatted_forbidden_output="$(bash "$CHECKER" "$formatted_forbidden_record" 2>&1)"; then
+      printf 'PASS record with forbidden %s %s screenshot content unexpectedly passed.\n' \
+        "$category" "$image_format" >&2
+      exit 1
+    fi
+    assert_contains "$formatted_forbidden_output" "forbidden ${category}"
+    assert_contains "$formatted_forbidden_output" \
+      "screenshots/forbidden-${category}.${image_format}"
+    assert_not_contains "$formatted_forbidden_output" "${forbidden_fixtures[$category]}"
+  done
 done
 
 for placeholder in "" TODO pending blocked placeholder -; do
