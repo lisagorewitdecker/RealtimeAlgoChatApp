@@ -172,6 +172,51 @@ jobs:
           fi
           echo "Mobile release Node range is valid: $(printf '%q' "$NODE_RANGE")"
 
+  native-release-configuration:
+    name: Determine native release configuration
+    if: ${{ github.event_name != 'pull_request' }}
+    needs:
+      - mobile-release-node-range
+    runs-on: ubuntu-latest
+    environment:
+      name: mobile-release
+    outputs:
+      ios_release_configured: ${{ steps.native-release-config.outputs.ios_release_configured }}
+      android_release_configured: ${{ steps.native-release-config.outputs.android_release_configured }}
+    steps:
+      - name: Determine native release secret configuration
+        id: native-release-config
+        env:
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+          EAS_TOKEN: ${{ secrets.EAS_TOKEN }}
+          NATIVE_SMOKE_IOS_APP_ID: ${{ secrets.NATIVE_SMOKE_IOS_APP_ID }}
+          NATIVE_SMOKE_ANDROID_APP_ID: ${{ secrets.NATIVE_SMOKE_ANDROID_APP_ID }}
+          NATIVE_SMOKE_EMAIL: ${{ secrets.NATIVE_SMOKE_EMAIL }}
+          NATIVE_SMOKE_PASSWORD: ${{ secrets.NATIVE_SMOKE_PASSWORD }}
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          NATIVE_SMOKE_IOS_SENTRY_RELEASE: ${{ secrets.NATIVE_SMOKE_IOS_SENTRY_RELEASE }}
+          NATIVE_SMOKE_IOS_SENTRY_DIST: ${{ secrets.NATIVE_SMOKE_IOS_SENTRY_DIST }}
+          NATIVE_SMOKE_ANDROID_SENTRY_RELEASE: ${{ secrets.NATIVE_SMOKE_ANDROID_SENTRY_RELEASE }}
+          NATIVE_SMOKE_ANDROID_SENTRY_DIST: ${{ secrets.NATIVE_SMOKE_ANDROID_SENTRY_DIST }}
+          NATIVE_SMOKE_IOS_BUILD_ID: ${{ env.NATIVE_SMOKE_IOS_BUILD_ID }}
+          NATIVE_SMOKE_ANDROID_BUILD_ID: ${{ env.NATIVE_SMOKE_ANDROID_BUILD_ID }}
+        run: |
+          set -euo pipefail
+          ios_release_configured=false
+          if [[ -n "${EAS_TOKEN:-}" && -n "${NATIVE_SMOKE_IOS_APP_ID:-}" && -n "${NATIVE_SMOKE_EMAIL:-}" && -n "${NATIVE_SMOKE_PASSWORD:-}" && -n "${SENTRY_AUTH_TOKEN:-}" && -n "${NATIVE_SMOKE_IOS_SENTRY_RELEASE:-}" && -n "${NATIVE_SMOKE_IOS_SENTRY_DIST:-}" && -n "${NATIVE_SMOKE_IOS_BUILD_ID:-}" ]]; then
+            ios_release_configured=true
+          fi
+          echo "ios_release_configured=$ios_release_configured" >> "$GITHUB_OUTPUT"
+          android_release_configured=false
+          if [[ -n "${EAS_TOKEN:-}" && -n "${NATIVE_SMOKE_ANDROID_APP_ID:-}" && -n "${NATIVE_SMOKE_EMAIL:-}" && -n "${NATIVE_SMOKE_PASSWORD:-}" && -n "${SENTRY_AUTH_TOKEN:-}" && -n "${NATIVE_SMOKE_ANDROID_SENTRY_RELEASE:-}" && -n "${NATIVE_SMOKE_ANDROID_SENTRY_DIST:-}" && -n "${NATIVE_SMOKE_ANDROID_BUILD_ID:-}" ]]; then
+            android_release_configured=true
+          fi
+          echo "android_release_configured=$android_release_configured" >> "$GITHUB_OUTPUT"
+          if [[ "${GITHUB_EVENT_NAME:-}" != "workflow_dispatch" && ( "$ios_release_configured" != "true" || "$android_release_configured" != "true" ) ]]; then
+            echo "Native release configuration is required for tag and reusable mobile-release runs." >&2
+            exit 1
+          fi
+
   android-preview-evidence:
     # Keep this display name synchronized with the required check in the repository ruleset.
     name: Android preview evidence
@@ -806,12 +851,13 @@ jobs:
 
   native-ios:
     name: Native large-text smoke (iOS)
-    if: ${{ github.event_name != 'pull_request' }}
+    if: ${{ github.event_name != 'pull_request' && needs.native-release-configuration.outputs.ios_release_configured == 'true' }}
     permissions:
       actions: write
       contents: read
     needs:
       - mobile-release-node-range
+      - native-release-configuration
     outputs:
       native_evidence_artifact_url: ${{ steps.upload-ios-native-smoke.outputs.artifact-url }}
     runs-on: macos-latest
@@ -1065,9 +1111,10 @@ jobs:
 
   android-prerequisite-preflight:
     name: Android release runner preflight
-    if: ${{ github.event_name != 'pull_request' }}
+    if: ${{ github.event_name != 'pull_request' && needs.native-release-configuration.outputs.android_release_configured == 'true' }}
     needs:
       - mobile-release-node-range
+      - native-release-configuration
     runs-on: ubuntu-latest
     timeout-minutes: 20
     environment:
@@ -1105,7 +1152,7 @@ jobs:
 
   native-android:
     name: Native large-text smoke (Android)
-    if: ${{ github.event_name != 'pull_request' }}
+    if: ${{ github.event_name != 'pull_request' && needs.native-release-configuration.outputs.android_release_configured == 'true' }}
     permissions:
       actions: write
       contents: read
@@ -1113,6 +1160,7 @@ jobs:
       native_evidence_artifact_url: ${{ steps.upload-android-native-smoke.outputs.artifact-url }}
     needs:
       - mobile-release-node-range
+      - native-release-configuration
       - android-prerequisite-preflight
     runs-on: ubuntu-latest
     timeout-minutes: 90
