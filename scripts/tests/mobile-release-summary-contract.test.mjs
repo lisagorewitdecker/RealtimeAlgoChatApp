@@ -3186,6 +3186,17 @@ test("iOS preview evidence covers renamed records and blocks malformed changes",
     /elif \[\[ -n "\$validator_failure_reason" \]\][\s\S]*reasons="\$validator_failure_reason"[\s\S]*else[\s\S]*validation_output="\$\(/,
     "a missing delegated iOS validator must produce a fixed reason without invoking the record checker",
   );
+  assert.ok(
+    validationStep.run.includes(
+      `reasons="$(printf '%s\\n' "$validation_output" | sed -n '/^- /p')"`
+    ),
+    "only fixed checker reason lines may enter the iOS summary",
+  );
+  assert.doesNotMatch(
+    validationStep.run,
+    /cat\s+"\$record_path"|validation_output.*GITHUB_STEP_SUMMARY/,
+    "the iOS job must not print iOS record evidence into the summary",
+  );
 
   function runIosPreviewJob(
     name,
@@ -3394,9 +3405,22 @@ test("iOS preview evidence covers renamed records and blocks malformed changes",
   }
 
   const malformed = runIosPreviewJob("malformed", {
-    recordText:
-      "# iOS preview validation record\n\nPRIVATE_IOS_EVIDENCE_MARKER\n",
+    recordText: `# iOS preview validation record
+
+PRIVATE_IOS_EVIDENCE_MARKER
+
+| Raw evidence | IOS_CHANGED_RECORD_RAW_CONTENT_7f2a |
+`,
   });
+  const malformedFailure = [
+    malformed.result.stdout,
+    malformed.result.stderr,
+  ].join("\n");
+  const malformedRecordLink = new RegExp(
+    `\\[${malformed.recordPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\]\\(https://github\\.example/example/chat-app/blob/[^)]+/${malformed.recordPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\)`,
+  );
+  const malformedFixedReason =
+    "Evidence record must declare **Result: PASS**, **Result: BLOCKED**, or **Result: FAIL**.";
   assert.notEqual(
     malformed.result.status,
     0,
@@ -3407,11 +3431,28 @@ test("iOS preview evidence covers renamed records and blocks malformed changes",
     /Validation: \*\*FAIL\*\*[\s\S]*Evidence record must declare/,
     "the failed summary must report a fixed checker reason",
   );
-  assert.doesNotMatch(
+  assert.match(
     malformed.summary,
-    /PRIVATE_IOS_EVIDENCE_MARKER/,
-    "the failed summary must not copy iOS record evidence",
+    malformedRecordLink,
+    "the failed summary must keep a stable link to the changed iOS record",
   );
+  assert.match(
+    malformedFailure,
+    new RegExp(
+      malformedFixedReason.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
+    ),
+    "the surfaced iOS checker failure must report the fixed reason",
+  );
+  for (const [surfaceName, surface] of [
+    ["job summary", malformed.summary],
+    ["surfaced checker failure", malformedFailure],
+  ]) {
+    assert.doesNotMatch(
+      surface,
+      /PRIVATE_IOS_EVIDENCE_MARKER|IOS_CHANGED_RECORD_RAW_CONTENT_7f2a/,
+      `the malformed iOS ${surfaceName} must not expose the marker or raw record content`,
+    );
+  }
 
   const blockedRecord = `# iOS preview validation record
 
