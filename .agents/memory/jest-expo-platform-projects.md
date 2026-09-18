@@ -28,3 +28,13 @@ the Chat App's Jest config (the config throws if a listed file is missing);
 expectations that differ by platform use the shared `onTestPlatform` helper so
 neither project reports skipped tests. The Android pass adds roughly 10% to a
 warm run and noticeably more on a cold babel cache.
+
+There is deliberately no web project. A component's web branch is covered
+inside the same suite by assigning `Platform.OS = "web"` for that test and
+restoring the project's platform afterwards; capture the project's platform
+with `testPlatform()` at module load (it throws for anything but ios/android),
+before any test mutates `Platform.OS`. React Native's own `ScrollView` under
+Jest is the preset's mock class, so `UNSAFE_getByType(ScrollView)` identifies
+the plain-scroll branch; `react-test-renderer` is not installed in the app, so
+type render results as `ReturnType<typeof render>` rather than importing
+`ReactTestInstance`.
