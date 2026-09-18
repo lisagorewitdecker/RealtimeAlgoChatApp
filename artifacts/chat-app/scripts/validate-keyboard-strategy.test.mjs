@@ -56,18 +56,27 @@ export default function Screen() {
 }
 `;
 
-test("the Chat App's app/ and components/ trees follow the keyboard strategy", () => {
-  const { findings, scannedFiles } = scanKeyboardStrategy({ packageRoot });
+test("the Chat App's source trees follow the keyboard strategy", () => {
+  const { findings, scannedFiles, scannedDirectories } = scanKeyboardStrategy({ packageRoot });
 
   assert.deepEqual(findings, [], formatKeyboardStrategyFailure(findings));
+  // The shared-module homes are all present in the real tree, so a helper
+  // moved into any of them is read by the check.
+  assert.deepEqual(SCANNED_DIRECTORIES, ["app", "components", "hooks", "lib", "contexts", "utils"]);
+  assert.deepEqual(scannedDirectories, SCANNED_DIRECTORIES);
   // Guard against an empty or mis-rooted scan passing silently: the known
-  // keyboard call sites and the compat component must have been read.
+  // keyboard call sites, the compat component and one module from each
+  // shared-module home must have been read.
   for (const expected of [
     "artifacts/chat-app/app/room/[roomId].tsx",
     "artifacts/chat-app/app/(tabs)/profile.tsx",
     "artifacts/chat-app/app/(auth)/forgot-password.tsx",
     "artifacts/chat-app/components/AiPanel.tsx",
     `artifacts/chat-app/${COMPAT_COMPONENT_PATH}`,
+    "artifacts/chat-app/hooks/useColors.ts",
+    "artifacts/chat-app/lib/sentry.ts",
+    "artifacts/chat-app/contexts/AppContext.tsx",
+    "artifacts/chat-app/utils/analytics.ts",
   ]) {
     assert.ok(scannedFiles.includes(expected), `expected ${expected} to be scanned`);
   }
@@ -244,6 +253,443 @@ element.scrollIntoView({ behavior: Platform.OS === "web" ? "smooth" : "instant" 
   }
 });
 
+// --- Behavior values and tags that live in another Chat App file -----------
+
+const platformHook = `import { Platform } from "react-native";
+
+export function useKeyboardBehavior() {
+  return Platform.OS === "ios" ? "padding" : "height";
+}
+`;
+
+function scanFixture(files) {
+  return writeFixtureRoot(files).then((root) => ({
+    root,
+    ...scanKeyboardStrategy({ packageRoot: root, workspaceRoot: root }),
+  }));
+}
+
+function cleanup(t, roots) {
+  t.after(() => Promise.all(roots.map((root) => rm(root, { recursive: true, force: true }))));
+}
+
+test("follows a behavior value one import hop into a hook that switches on the platform", async (t) => {
+  const screen = (importLine, expression = "useKeyboardBehavior()") =>
+    `import { KeyboardAvoidingView } from "react-native-keyboard-controller";
+${importLine}
+export default () => <KeyboardAvoidingView behavior={${expression}} />;`;
+  const forms = {
+    aliasImport: {
+      files: {
+        "hooks/useKeyboardBehavior.ts": platformHook,
+        "app/screen.tsx": screen('import { useKeyboardBehavior } from "@/hooks/useKeyboardBehavior";'),
+      },
+      detail:
+        "the behavior prop depends on Platform.OS through `useKeyboardBehavior` (declared on line 3 of hooks/useKeyboardBehavior.ts)",
+    },
+    relativeImport: {
+      files: {
+        "hooks/useKeyboardBehavior.ts": platformHook,
+        "app/screen.tsx": screen('import { useKeyboardBehavior } from "../hooks/useKeyboardBehavior";'),
+      },
+      detail:
+        "the behavior prop depends on Platform.OS through `useKeyboardBehavior` (declared on line 3 of hooks/useKeyboardBehavior.ts)",
+    },
+    renamedImport: {
+      files: {
+        "hooks/useKeyboardBehavior.ts": platformHook,
+        "app/screen.tsx": screen(
+          'import { useKeyboardBehavior as useBehavior } from "@/hooks/useKeyboardBehavior";',
+          "useBehavior()",
+        ),
+      },
+      detail:
+        "the behavior prop depends on Platform.OS through `useBehavior` (declared on line 3 of hooks/useKeyboardBehavior.ts)",
+    },
+    namespaceImport: {
+      files: {
+        "hooks/useKeyboardBehavior.ts": platformHook,
+        "app/screen.tsx": screen(
+          'import * as keyboard from "@/hooks/useKeyboardBehavior";',
+          "keyboard.useKeyboardBehavior()",
+        ),
+      },
+      detail:
+        "the behavior prop depends on Platform.OS through `keyboard.useKeyboardBehavior` (declared on line 3 of hooks/useKeyboardBehavior.ts)",
+    },
+    defaultExport: {
+      files: {
+        "hooks/useKeyboardBehavior.ts": `import { Platform } from "react-native";
+export default function useKeyboardBehavior() {
+  return Platform.select({ ios: "padding", android: "height" });
+}`,
+        "app/screen.tsx": screen('import useKeyboardBehavior from "@/hooks/useKeyboardBehavior";'),
+      },
+      detail:
+        "the behavior prop depends on Platform.select through `useKeyboardBehavior` (declared on line 2 of hooks/useKeyboardBehavior.ts)",
+    },
+    viaLocalVariable: {
+      files: {
+        "hooks/useKeyboardBehavior.ts": platformHook,
+        "app/screen.tsx": `import { KeyboardAvoidingView } from "react-native-keyboard-controller";
+import { useKeyboardBehavior } from "@/hooks/useKeyboardBehavior";
+export default function Screen() {
+  const behavior = useKeyboardBehavior();
+  return <KeyboardAvoidingView behavior={behavior} />;
+}`,
+      },
+      detail:
+        "the behavior prop depends on Platform.OS through `useKeyboardBehavior` (declared on line 3 of hooks/useKeyboardBehavior.ts) through `behavior` (declared on line 4)",
+    },
+    exportedProperty: {
+      files: {
+        "utils/keyboard.ts": `import { Platform } from "react-native";
+export const keyboardProps = { behavior: Platform.OS === "ios" ? "padding" : "height" };`,
+        "app/screen.tsx": screen('import { keyboardProps } from "@/utils/keyboard";', "keyboardProps.behavior"),
+      },
+      detail:
+        "the behavior prop depends on Platform.OS through `keyboardProps.behavior` (declared on line 2 of utils/keyboard.ts)",
+    },
+    contextHelper: {
+      files: {
+        "contexts/KeyboardContext.tsx": `import { Platform } from "react-native";
+const isIOS = Platform.OS === "ios";
+export const pickBehavior = () => (isIOS ? "padding" : "height");`,
+        "app/screen.tsx": screen('import { pickBehavior } from "@/contexts/KeyboardContext";', "pickBehavior()"),
+      },
+      detail:
+        "the behavior prop depends on Platform.OS through `isIOS` (declared on line 2) through `pickBehavior` (declared on line 3 of contexts/KeyboardContext.tsx)",
+    },
+  };
+  const roots = [];
+  for (const [name, { files, detail }] of Object.entries(forms)) {
+    const { root, findings } = await scanFixture(files);
+    roots.push(root);
+    const split = findings.filter((finding) => finding.rule === "platform-split-behavior");
+    const callSite = split.find((finding) => finding.file === "app/screen.tsx");
+    assert.ok(callSite, `${name}: the call site should be reported: ${JSON.stringify(findings)}`);
+    assert.equal(callSite.detail, detail, name);
+    // The hook hides the switch, so the controller component's own rule fires too.
+    assert.ok(
+      findings.some((finding) => finding.rule === "keyboard-avoiding-view-behavior" && finding.file === "app/screen.tsx"),
+      `${name}: the call site should also miss the explicit padding: ${JSON.stringify(findings)}`,
+    );
+    assert.ok(
+      findings.every((finding) => ["platform-split-behavior", "keyboard-avoiding-view-behavior"].includes(finding.rule)),
+      `${name}: ${JSON.stringify(findings)}`,
+    );
+  }
+  cleanup(t, roots);
+
+  // The shared module is scanned in its own right: a `behavior` property that
+  // switches on the platform is a finding there even before it is consumed.
+  const { root, findings } = await scanFixture({
+    "utils/keyboard.ts": forms.exportedProperty.files["utils/keyboard.ts"],
+    "app/screen.tsx": compliantScreen,
+  });
+  cleanup(t, [root]);
+  assert.deepEqual(findings, [
+    {
+      file: "utils/keyboard.ts",
+      rule: "platform-split-behavior",
+      line: 2,
+      detail: "the behavior property depends on Platform.OS",
+    },
+  ]);
+});
+
+test("a fixed value resolved one hop away is not mistaken for a platform split", async (t) => {
+  const { root, findings } = await scanFixture({
+    "lib/keyboard.ts": `import { Platform } from "react-native";
+export const KEYBOARD_BEHAVIOR = "padding";
+export const keyboardProps = { behavior: "padding", keyboardVerticalOffset: Platform.OS === "ios" ? 0 : 24 };
+export const scrollOptions = { behavior: Platform.OS === "web" ? "smooth" : "instant" };`,
+    "components/Shell.tsx": `import { KeyboardAvoidingView } from "react-native-keyboard-controller";
+import { KEYBOARD_BEHAVIOR, keyboardProps, scrollOptions } from "@/lib/keyboard";
+export const A = () => <KeyboardAvoidingView behavior={KEYBOARD_BEHAVIOR} />;
+export const B = () => <KeyboardAvoidingView behavior={keyboardProps.behavior} keyboardVerticalOffset={keyboardProps.keyboardVerticalOffset} />;
+export const scroll = (element) => element.scrollIntoView({ behavior: scrollOptions.behavior });`,
+    "components/Wrapper.tsx": `import { KEYBOARD_BEHAVIOR } from "@/lib/keyboard";
+export const Wrapper = (props) => <Shell behavior={KEYBOARD_BEHAVIOR} {...props} />;`,
+  });
+  cleanup(t, [root]);
+
+  // Neither the platform rule nor the "another file" rule fires, but the
+  // controller component still wants the literal at its own call site.
+  assert.deepEqual(
+    findings.map(({ file, rule, line }) => ({ file, rule, line })),
+    [
+      { file: "components/Shell.tsx", rule: "keyboard-avoiding-view-behavior", line: 3 },
+      { file: "components/Shell.tsx", rule: "keyboard-avoiding-view-behavior", line: 4 },
+    ],
+  );
+});
+
+test("reports a behavior value the check cannot follow instead of accepting it", async (t) => {
+  const bareScreen = (importLine, expression = "useKeyboardBehavior()") =>
+    `${importLine}
+export default () => <KeyboardAvoidingView behavior={${expression}} />;`;
+  const forms = {
+    secondHop: {
+      files: {
+        "lib/keyboard.ts": platformHook.replace("useKeyboardBehavior", "pickBehavior"),
+        "hooks/useKeyboardBehavior.ts": `import { pickBehavior } from "@/lib/keyboard";
+export function useKeyboardBehavior() {
+  return pickBehavior();
+}`,
+        "app/screen.tsx": bareScreen('import { useKeyboardBehavior } from "@/hooks/useKeyboardBehavior";'),
+      },
+      detail:
+        "the behavior prop comes from another file (`useKeyboardBehavior` is declared in hooks/useKeyboardBehavior.ts, which imports `pickBehavior` from \"@/lib/keyboard\"; the check follows one import hop)",
+    },
+    reexportChain: {
+      files: {
+        "hooks/useKeyboardBehavior.ts": platformHook,
+        "hooks/index.ts": 'export { useKeyboardBehavior } from "./useKeyboardBehavior";',
+        "app/screen.tsx": bareScreen('import { useKeyboardBehavior } from "@/hooks";'),
+      },
+      detail:
+        "the behavior prop comes from another file (`useKeyboardBehavior` is imported from \"@/hooks\" (hooks/index.ts), which imports it again from \"./useKeyboardBehavior\"; the check follows one import hop)",
+    },
+    importThenExport: {
+      files: {
+        "hooks/useKeyboardBehavior.ts": platformHook,
+        "hooks/index.ts": `import { useKeyboardBehavior } from "./useKeyboardBehavior";
+export { useKeyboardBehavior };`,
+        "app/screen.tsx": bareScreen('import { useKeyboardBehavior } from "@/hooks";'),
+      },
+      detail:
+        "the behavior prop comes from another file (`useKeyboardBehavior` is imported from \"@/hooks\" (hooks/index.ts), which imports it again from \"./useKeyboardBehavior\"; the check follows one import hop)",
+    },
+    starExport: {
+      files: {
+        "hooks/useKeyboardBehavior.ts": platformHook,
+        "hooks/index.ts": 'export * from "./useKeyboardBehavior";',
+        "app/screen.tsx": bareScreen('import { useKeyboardBehavior } from "@/hooks";'),
+      },
+      detail:
+        "the behavior prop comes from another file (`useKeyboardBehavior` is imported from \"@/hooks\", but hooks/index.ts does not export `useKeyboardBehavior` directly (it may come through export * from \"./useKeyboardBehavior\"))",
+    },
+    missingExport: {
+      files: {
+        "hooks/useKeyboardBehavior.ts": 'export const unrelated = "padding";',
+        "app/screen.tsx": bareScreen('import { useKeyboardBehavior } from "@/hooks/useKeyboardBehavior";'),
+      },
+      detail:
+        "the behavior prop comes from another file (`useKeyboardBehavior` is imported from \"@/hooks/useKeyboardBehavior\", but hooks/useKeyboardBehavior.ts does not export `useKeyboardBehavior`)",
+    },
+    missingModule: {
+      files: {
+        "app/screen.tsx": bareScreen('import { useKeyboardBehavior } from "@/hooks/useKeyboardBehavior";'),
+      },
+      detail:
+        "the behavior prop comes from another file (`useKeyboardBehavior` is imported from \"@/hooks/useKeyboardBehavior\", which does not resolve to a source file)",
+    },
+    wholeNamespace: {
+      files: {
+        "hooks/useKeyboardBehavior.ts": platformHook,
+        "app/screen.tsx": bareScreen('import * as keyboard from "@/hooks/useKeyboardBehavior";', "keyboard"),
+      },
+      detail:
+        "the behavior prop comes from another file (`keyboard` is imported from \"@/hooks/useKeyboardBehavior\", and the whole module namespace of hooks/useKeyboardBehavior.ts is used as the value)",
+    },
+  };
+  const roots = [];
+  for (const [name, { files, detail }] of Object.entries(forms)) {
+    const { root, findings } = await scanFixture(files);
+    roots.push(root);
+    const callSite = findings.filter((finding) => finding.file === "app/screen.tsx");
+    assert.deepEqual(rulesOf(callSite), ["behavior-from-another-file"], `${name}: ${JSON.stringify(findings)}`);
+    assert.equal(callSite[0].line, 2, name);
+    assert.equal(callSite[0].detail, detail, name);
+  }
+  cleanup(t, roots);
+
+  // Without a module loader (single-source scans) nothing can be followed.
+  const unfollowed = scan(
+    "app/screen.tsx",
+    bareScreen('import { useKeyboardBehavior } from "@/hooks/useKeyboardBehavior";'),
+  );
+  assert.deepEqual(rulesOf(unfollowed), ["behavior-from-another-file"]);
+  assert.equal(
+    unfollowed[0].detail,
+    "the behavior prop comes from another file (`useKeyboardBehavior` is imported from \"@/hooks/useKeyboardBehavior\", which was not followed)",
+  );
+
+  // The fix keeps the literal at the call site; package imports are never followed.
+  assert.match(
+    formatKeyboardStrategyFailure(unfollowed),
+    /\[behavior-from-another-file\] the behavior prop comes from another file \(.*\)\. Fix: keep the fixed "padding" value at the call site;/,
+  );
+  assert.deepEqual(
+    scan(
+      "app/screen.tsx",
+      bareScreen('import { useKeyboardBehavior } from "some-keyboard-package";'),
+    ),
+    [],
+  );
+});
+
+test("flags a behavior value taken from platform-specific module files", async (t) => {
+  const { root, findings } = await scanFixture({
+    "lib/keyboardBehavior.ios.ts": 'export const KEYBOARD_BEHAVIOR = "padding";',
+    "lib/keyboardBehavior.android.ts": 'export const KEYBOARD_BEHAVIOR = "height";',
+    "app/screen.tsx": `import { KEYBOARD_BEHAVIOR } from "@/lib/keyboardBehavior";
+export default () => <KeyboardAvoidingView behavior={KEYBOARD_BEHAVIOR} />;`,
+  });
+  const withBase = await scanFixture({
+    "lib/keyboardBehavior.ts": 'export const KEYBOARD_BEHAVIOR = "padding";',
+    "lib/keyboardBehavior.android.ts": 'export const KEYBOARD_BEHAVIOR = "height";',
+    "app/screen.tsx": `import { KEYBOARD_BEHAVIOR } from "@/lib/keyboardBehavior";
+export default () => <KeyboardAvoidingView behavior={KEYBOARD_BEHAVIOR} />;`,
+  });
+  cleanup(t, [root, withBase.root]);
+
+  assert.deepEqual(rulesOf(findings), ["platform-split-behavior"]);
+  assert.equal(
+    findings[0].detail,
+    "the behavior prop depends on the platform-specific module files lib/keyboardBehavior.ios.ts and lib/keyboardBehavior.android.ts through `KEYBOARD_BEHAVIOR`",
+  );
+  assert.deepEqual(rulesOf(withBase.findings), ["platform-split-behavior"]);
+  assert.equal(
+    withBase.findings[0].detail,
+    "the behavior prop depends on the platform-specific module files lib/keyboardBehavior.android.ts through `KEYBOARD_BEHAVIOR`",
+  );
+});
+
+test("flags React Native's KeyboardAvoidingView re-exported under another name from a shared module", async (t) => {
+  const composer = `import { KeyboardShell } from "@/lib/keyboard";
+export const Composer = () => <KeyboardShell behavior="padding" />;`;
+  const reexported = await scanFixture({
+    "lib/keyboard.ts": 'export { KeyboardAvoidingView as KeyboardShell } from "react-native";',
+    "components/Composer.tsx": composer,
+  });
+  const aliased = await scanFixture({
+    "lib/keyboard.ts": `import { KeyboardAvoidingView } from "react-native";
+export const KeyboardShell = KeyboardAvoidingView;`,
+    "components/Composer.tsx": composer,
+  });
+  // A module outside the scanned directories is still followed from the call site.
+  const unscannedModule = await scanFixture({
+    "constants/keyboard.ts": 'export { KeyboardAvoidingView as KeyboardShell } from "react-native";',
+    "components/Composer.tsx": composer.replace("@/lib/keyboard", "@/constants/keyboard"),
+  });
+  cleanup(t, [reexported.root, aliased.root, unscannedModule.root]);
+
+  const callSiteFinding = (module) => ({
+    file: "components/Composer.tsx",
+    rule: "react-native-keyboard-avoiding-view",
+    line: 2,
+    detail: `renders <KeyboardShell>, which is KeyboardAvoidingView from "react-native" re-exported by "${module}"`,
+  });
+  assert.deepEqual(reexported.findings, [
+    callSiteFinding("@/lib/keyboard"),
+    {
+      file: "lib/keyboard.ts",
+      rule: "react-native-keyboard-avoiding-view",
+      line: 1,
+      detail: 're-exports KeyboardAvoidingView from "react-native"',
+    },
+  ]);
+  assert.deepEqual(aliased.findings, [
+    callSiteFinding("@/lib/keyboard"),
+    {
+      file: "lib/keyboard.ts",
+      rule: "react-native-keyboard-avoiding-view",
+      line: 1,
+      detail: 'imports KeyboardAvoidingView from "react-native"',
+    },
+  ]);
+  assert.deepEqual(unscannedModule.findings, [callSiteFinding("@/constants/keyboard")]);
+});
+
+test("holds the controller KeyboardAvoidingView re-exported under another name to the padding rule", async (t) => {
+  const { root, findings } = await scanFixture({
+    "lib/keyboard.ts": 'export { KeyboardAvoidingView as KeyboardShell } from "react-native-keyboard-controller";',
+    "components/Composer.tsx": `import { KeyboardShell } from "@/lib/keyboard";
+export const Fine = () => <KeyboardShell behavior="padding" />;
+export const Wrong = () => <KeyboardShell behavior="height" />;
+export const Missing = () => <KeyboardShell />;`,
+  });
+  cleanup(t, [root]);
+
+  assert.deepEqual(
+    findings.map(({ file, rule, line }) => ({ file, rule, line })),
+    [
+      { file: "components/Composer.tsx", rule: "keyboard-avoiding-view-behavior", line: 3 },
+      { file: "components/Composer.tsx", rule: "keyboard-avoiding-view-behavior", line: 4 },
+    ],
+  );
+});
+
+test("type imports from another file are not treated as a behavior source", async (t) => {
+  const { root, findings } = await scanFixture({
+    "lib/keyboard.ts": 'export type KeyboardBehavior = "padding" | "height";',
+    "app/screen.tsx": `import { KeyboardAvoidingView } from "react-native-keyboard-controller";
+import type { KeyboardBehavior } from "@/lib/keyboard";
+export default () => <KeyboardAvoidingView behavior={"padding" as KeyboardBehavior} />;`,
+    "components/Shell.tsx": `import { KeyboardAvoidingView } from "react-native-keyboard-controller";
+import { KeyboardBehavior } from "@/lib/keyboard";
+const behavior: KeyboardBehavior = "padding";
+export const Shell = () => <KeyboardAvoidingView behavior={behavior satisfies KeyboardBehavior} />;`,
+  });
+  cleanup(t, [root]);
+
+  assert.deepEqual(findings, []);
+});
+
+test("skips absent optional directories but still requires app/ and components/", async (t) => {
+  const minimal = await mkdtemp(path.join(os.tmpdir(), "keyboard-strategy-"));
+  await mkdir(path.join(minimal, "app"));
+  await mkdir(path.join(minimal, "components"));
+  await writeFile(path.join(minimal, "app/screen.tsx"), compliantScreen);
+  const noApp = await mkdtemp(path.join(os.tmpdir(), "keyboard-strategy-"));
+  for (const directory of SCANNED_DIRECTORIES.filter((entry) => entry !== "app")) {
+    await mkdir(path.join(noApp, directory));
+  }
+  await writeFile(path.join(noApp, "components/Fine.tsx"), compliantScreen);
+  const noComponents = await mkdtemp(path.join(os.tmpdir(), "keyboard-strategy-"));
+  await mkdir(path.join(noComponents, "app"));
+  await writeFile(path.join(noComponents, "app/screen.tsx"), compliantScreen);
+  cleanup(t, [minimal, noApp, noComponents]);
+
+  const result = scanKeyboardStrategy({ packageRoot: minimal, workspaceRoot: minimal });
+  assert.deepEqual(result.findings, []);
+  assert.deepEqual(result.scannedDirectories, ["app", "components"]);
+  assert.deepEqual(result.scannedFiles, ["app/screen.tsx"]);
+  assert.throws(
+    () => scanKeyboardStrategy({ packageRoot: noApp, workspaceRoot: noApp }),
+    /expected directory app does not exist/,
+  );
+  assert.throws(
+    () => scanKeyboardStrategy({ packageRoot: noComponents, workspaceRoot: noComponents }),
+    /expected directory components does not exist/,
+  );
+});
+
+test("violations in every shared-module home are reported", async (t) => {
+  const { root, findings } = await scanFixture({
+    "app/screen.tsx": compliantScreen,
+    "hooks/useKeyboard.ts": 'export { KeyboardAvoidingView } from "react-native";',
+    "lib/keyboard.ts": `import { Platform } from "react-native";
+export const keyboardProps = { behavior: Platform.select({ ios: "padding", default: "height" }) };`,
+    "contexts/KeyboardContext.tsx": `import { KeyboardAvoidingView } from "react-native-keyboard-controller";
+export const Provider = ({ children }) => <KeyboardAvoidingView>{children}</KeyboardAvoidingView>;`,
+    "utils/forms.ts": 'import { KeyboardAwareScrollView } from "react-native-keyboard-controller";',
+  });
+  cleanup(t, [root]);
+
+  assert.deepEqual(
+    findings.map(({ file, rule }) => `${file} ${rule}`),
+    [
+      "hooks/useKeyboard.ts react-native-keyboard-avoiding-view",
+      "lib/keyboard.ts platform-split-behavior",
+      "contexts/KeyboardContext.tsx keyboard-avoiding-view-behavior",
+      "utils/forms.ts direct-keyboard-aware-scroll-view",
+    ],
+  );
+});
+
 test("flags KeyboardAwareScrollView used directly outside the compat component", () => {
   const forms = {
     named: 'import { KeyboardAwareScrollView } from "react-native-keyboard-controller";',
@@ -397,5 +843,18 @@ export default () => <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "pa
   const { stdout } = await execFileAsync(process.execPath, [scriptPath, "--root", clean], {
     cwd: packageRoot,
   });
-  assert.match(stdout, /Keyboard strategy check passed: 1 source files under app\/ and components\//);
+  assert.match(
+    stdout,
+    /Keyboard strategy check passed: 1 source file under app\/, components\/, hooks\/, lib\/, contexts\/ and utils\/ follows/,
+  );
+
+  // Optional directories that do not exist are left out of the report.
+  const minimal = await mkdtemp(path.join(os.tmpdir(), "keyboard-strategy-"));
+  await mkdir(path.join(minimal, "app"));
+  await mkdir(path.join(minimal, "components"));
+  await writeFile(path.join(minimal, "app/screen.tsx"), compliantScreen);
+  await writeFile(path.join(minimal, "components/Fine.tsx"), compliantScreen);
+  t.after(() => rm(minimal, { recursive: true, force: true }));
+  const minimalRun = await execFileAsync(process.execPath, [scriptPath, "--root", minimal], { cwd: packageRoot });
+  assert.match(minimalRun.stdout, /Keyboard strategy check passed: 2 source files under app\/ and components\/ follow the/);
 });
