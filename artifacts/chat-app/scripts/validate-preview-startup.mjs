@@ -347,7 +347,7 @@ function sanitizeRecordedStartupOutput(value) {
     return `${redactedPrefix}\\${libraryName}${suffix}`;
   };
   const sanitizeWindowsProjectPath = (path) => {
-    const pathSegments = path.split("\\");
+    const pathSegments = path.split("\\").filter(Boolean);
     const preservedSegments = pathSegments.slice(-2).join("\\");
     const redactedPrefix = path.startsWith("\\\\")
       ? "\\\\[redacted]"
