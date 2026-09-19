@@ -143,4 +143,4 @@ export type UnauthorizedResponse = {
   error: string;
 };
 
-// api-codegen stale-client event probe: api-codegen-stale-client-probe-20260919023037-2925-2026-09-19T02:30:37.373Z-opened
+// api-codegen stale-client event probe: api-codegen-stale-client-probe-20260919023037-2925-2026-09-19T02:30:37.373Z-synchronize
