@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -57,6 +63,41 @@ function runValidator(env) {
   try {
     const summary = existsSync(summaryPath)
       ? readFileSync(summaryPath, "utf8")
+      : "";
+    return {
+      ...result,
+      summary,
+    };
+  } finally {
+    rmSync(temporaryDirectory, { recursive: true, force: true });
+  }
+}
+
+function runWorkflowVerificationStep() {
+  const temporaryDirectory = mkdtempSync(
+    path.join(os.tmpdir(), "preview-startup-summary-step-"),
+  );
+  const scriptPath = path.join(temporaryDirectory, "verify-hosted-summary.sh");
+  const githubStepSummaryPath = path.join(temporaryDirectory, "summary.md");
+  writeFileSync(scriptPath, workflow.jobs["verify-hosted-summary"].steps[1].run);
+
+  const result = spawnSync(
+    "bash",
+    ["-euo", "pipefail", scriptPath],
+    {
+      cwd: workspaceRoot,
+      env: {
+        ...process.env,
+        GITHUB_STEP_SUMMARY: githubStepSummaryPath,
+        REVIEWED_REF: "preview-startup-summary-regression-test-ref",
+      },
+      encoding: "utf8",
+    },
+  );
+
+  try {
+    const summary = existsSync(githubStepSummaryPath)
+      ? readFileSync(githubStepSummaryPath, "utf8")
       : "";
     return {
       ...result,
@@ -172,5 +213,21 @@ test("hosted preview startup workflow invalid-setting summary matches validator 
   assert.equal(
     result.summary,
     extractWorkflowHereDoc("expected_setting_summary_path"),
+  );
+});
+
+test("hosted preview startup workflow step succeeds end-to-end", () => {
+  const result = runWorkflowVerificationStep();
+
+  assert.equal(result.status, 0, `${result.stdout}${result.stderr}`);
+  assert.match(result.summary, /## Reviewed preview startup revision/);
+  assert.match(result.summary, /## Preview startup summary regression/);
+  assert.match(
+    result.summary,
+    /Healthy captured startup: \*\*PASS\*\* \(success output retained; no failure section\)/,
+  );
+  assert.match(
+    result.summary,
+    /Malformed preview setting: \*\*PASS\*\* \(configuration diagnosis retained; private material excluded\)/,
   );
 });
