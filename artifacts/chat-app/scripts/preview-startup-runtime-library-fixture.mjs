@@ -1,5 +1,6 @@
 import { appendFileSync } from "node:fs";
 import { createServer } from "node:http";
+import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 // BEGIN GENERATED PREVIEW LOADER EVIDENCE
@@ -105,7 +106,7 @@ export const fixtureOutput = Object.freeze({
 });
 // END GENERATED PREVIEW LOADER OUTPUT
 
-if (fileURLToPath(import.meta.url) === process.argv[1]) {
+if (fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
   const fixtureName =
     process.env.PREVIEW_STARTUP_TEST_FIXTURE ?? "missing-runtime-library";
   if (

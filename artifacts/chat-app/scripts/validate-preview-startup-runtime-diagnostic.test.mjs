@@ -282,7 +282,8 @@ test("real-platform capture records macOS and Windows loader output safely", () 
       output:
         "Error: The code execution cannot proceed because " +
         "C:\\Users\\reviewer\\AppData\\Local\\Expo\\libgtk-3-0.dll " +
-        "was not found. password=TOP_SECRET_VALUE\n",
+        "was not found. password=TOP_SECRET_VALUE\n" +
+        "Starting project at D:\\a\\RealtimeAlgoChatApp\\artifacts\\chat-app\n",
       libraryIdentifier: "libgtk-3-0.dll",
     },
   ];
@@ -304,6 +305,7 @@ test("real-platform capture records macOS and Windows loader output safely", () 
       assert.equal(live.status, 1, fixtureCase.name);
       const recordedOutput = readFileSync(recordPath, "utf8");
       assert.doesNotMatch(recordedOutput, /\/Users\/reviewer|C:\\Users\\reviewer/);
+      assert.doesNotMatch(recordedOutput, /D:\\a\\RealtimeAlgoChatApp/);
       assert.doesNotMatch(recordedOutput, /TOP_SECRET_VALUE/);
       assert.match(recordedOutput, new RegExp(fixtureCase.libraryIdentifier));
 
@@ -329,6 +331,33 @@ test("real-platform capture records macOS and Windows loader output safely", () 
         fixtureCase.name,
       );
     }
+  } finally {
+    rmSync(temporaryDirectory, { recursive: true, force: true });
+  }
+});
+
+test("real launcher validation does not require a public preview URL", () => {
+  const temporaryDirectory = mkdtempSync(
+    join(tmpdir(), "chat-preview-real-launcher-only-"),
+  );
+  const recordPath = join(temporaryDirectory, "launcher.log");
+
+  try {
+    const result = runNodeScript(
+      [validatorPath, "--record-log", recordPath],
+      {
+        PREVIEW_STARTUP_REAL_LAUNCHER: "1",
+        PREVIEW_STARTUP_TEST_FIXTURE: "handoff-server",
+        PREVIEW_STARTUP_TIMEOUT_MS: "2000",
+      },
+    );
+
+    assert.equal(result.status, 0, result.output);
+    assert.match(
+      result.output,
+      /Expo preview launcher reached Metro running status/,
+    );
+    assert.match(readFileSync(recordPath, "utf8"), /Starting Metro Bundler/);
   } finally {
     rmSync(temporaryDirectory, { recursive: true, force: true });
   }
@@ -374,6 +403,7 @@ test(
         const live = runNodeScript(
           [validatorPath, "--record-log", recordPath],
           {
+            PREVIEW_STARTUP_REAL_LAUNCHER: "1",
             PREVIEW_STARTUP_TEST_FIXTURE: "missing-runtime-library-windows",
             PREVIEW_STARTUP_TEST_OUTPUT: fixtureCase.output,
           },
