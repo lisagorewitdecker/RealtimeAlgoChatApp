@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -9,11 +10,15 @@ import { promisify } from "node:util";
 import {
   COMPAT_COMPONENT_PATH,
   KEYBOARD_STRATEGY_RULES,
+  ROOT_LAYOUT_PATH,
+  ROUTER_NAVIGATOR_EXPORTS,
   SCANNED_DIRECTORIES,
   assertKeyboardStrategy,
+  createModuleLoader,
   formatKeyboardStrategyFailure,
   scanKeyboardStrategy,
   scanKeyboardStrategySource,
+  scanRootLayoutKeyboardProvider,
 } from "./validate-keyboard-strategy.mjs";
 
 const execFileAsync = promisify(execFile);
@@ -28,13 +33,30 @@ function rulesOf(findings) {
   return findings.map((finding) => finding.rule);
 }
 
-/** Writes a throwaway package root with the given `{ relativePath: source }` files. */
+/** A root layout that satisfies the whole-tree rule: the navigator sits inside KeyboardProvider. */
+const compliantRootLayout = `import { Stack } from "expo-router";
+import { KeyboardProvider } from "react-native-keyboard-controller";
+
+export default function RootLayout() {
+  return (
+    <KeyboardProvider>
+      <Stack screenOptions={{ headerShown: false }} />
+    </KeyboardProvider>
+  );
+}
+`;
+
+/**
+ * Writes a throwaway package root with the given `{ relativePath: source }`
+ * files. A compliant root layout is included unless `files` supplies one, so
+ * fixtures for the per-file rules are not tripped by the whole-tree rule.
+ */
 async function writeFixtureRoot(files) {
   const root = await mkdtemp(path.join(os.tmpdir(), "keyboard-strategy-"));
   for (const directory of SCANNED_DIRECTORIES) {
     await mkdir(path.join(root, directory), { recursive: true });
   }
-  for (const [relativePath, source] of Object.entries(files)) {
+  for (const [relativePath, source] of Object.entries({ [ROOT_LAYOUT_PATH]: compliantRootLayout, ...files })) {
     const absolutePath = path.join(root, relativePath);
     await mkdir(path.dirname(absolutePath), { recursive: true });
     await writeFile(absolutePath, source);
@@ -57,9 +79,11 @@ export default function Screen() {
 `;
 
 test("the Chat App's source trees follow the keyboard strategy", () => {
-  const { findings, scannedFiles, scannedDirectories } = scanKeyboardStrategy({ packageRoot });
+  const { findings, scannedFiles, scannedDirectories, rootLayoutFile } = scanKeyboardStrategy({ packageRoot });
 
   assert.deepEqual(findings, [], formatKeyboardStrategyFailure(findings));
+  // The whole-tree rule read the real root layout, not a fallback path.
+  assert.equal(rootLayoutFile, `artifacts/chat-app/${ROOT_LAYOUT_PATH}`);
   // The shared-module homes are all present in the real tree, so a helper
   // moved into any of them is read by the check.
   assert.deepEqual(SCANNED_DIRECTORIES, ["app", "components", "hooks", "lib", "contexts", "utils"]);
@@ -642,6 +666,7 @@ test("skips absent optional directories but still requires app/ and components/"
   const minimal = await mkdtemp(path.join(os.tmpdir(), "keyboard-strategy-"));
   await mkdir(path.join(minimal, "app"));
   await mkdir(path.join(minimal, "components"));
+  await writeFile(path.join(minimal, ROOT_LAYOUT_PATH), compliantRootLayout);
   await writeFile(path.join(minimal, "app/screen.tsx"), compliantScreen);
   const noApp = await mkdtemp(path.join(os.tmpdir(), "keyboard-strategy-"));
   for (const directory of SCANNED_DIRECTORIES.filter((entry) => entry !== "app")) {
@@ -656,7 +681,8 @@ test("skips absent optional directories but still requires app/ and components/"
   const result = scanKeyboardStrategy({ packageRoot: minimal, workspaceRoot: minimal });
   assert.deepEqual(result.findings, []);
   assert.deepEqual(result.scannedDirectories, ["app", "components"]);
-  assert.deepEqual(result.scannedFiles, ["app/screen.tsx"]);
+  assert.deepEqual(result.scannedFiles, [ROOT_LAYOUT_PATH, "app/screen.tsx"]);
+  assert.equal(result.rootLayoutFile, ROOT_LAYOUT_PATH);
   assert.throws(
     () => scanKeyboardStrategy({ packageRoot: noApp, workspaceRoot: noApp }),
     /expected directory app does not exist/,
@@ -821,6 +847,557 @@ test("refuses to pass when a scanned directory is missing or empty", async (t) =
   );
 });
 
+// --- Whole-tree rule: the root layout wraps the navigator in KeyboardProvider
+
+/** Runs the root-layout rule on one synthetic root layout with no other files to follow. */
+function scanRootLayout(source, file = ROOT_LAYOUT_PATH) {
+  return scanRootLayoutKeyboardProvider({ file, source });
+}
+
+/** The 1-based line of the first occurrence of `needle` in `source`. */
+function lineOf(source, needle) {
+  const index = source.indexOf(needle);
+  assert.notEqual(index, -1, `expected the fixture to contain ${needle}`);
+  return source.slice(0, index).split("\n").length;
+}
+
+const rootRule = "root-keyboard-provider";
+const noProviderImport = `${ROOT_LAYOUT_PATH} does not import KeyboardProvider from "react-native-keyboard-controller"`;
+const noNavigatorFinding = {
+  file: ROOT_LAYOUT_PATH,
+  rule: rootRule,
+  line: null,
+  detail:
+    'renders no navigator the check can see (<Stack>, <Slot>, <Tabs>, <NativeTabs>, <Drawer> or <Navigator> from "expo-router", ' +
+    "followed from the default export through same-file components and one import hop)",
+};
+
+
+test("the root layout rule is part of the strategy and its fix names the provider, the navigators and the limits", () => {
+  assert.ok(Object.hasOwn(KEYBOARD_STRATEGY_RULES, rootRule));
+  assert.deepEqual(ROUTER_NAVIGATOR_EXPORTS, ["Stack", "Slot", "Tabs", "NativeTabs", "Drawer", "Navigator"]);
+  const { fix } = KEYBOARD_STRATEGY_RULES[rootRule];
+  assert.match(fix, /keep <KeyboardProvider> from "react-native-keyboard-controller" in app\/_layout\.tsx/);
+  for (const navigator of ROUTER_NAVIGATOR_EXPORTS) assert.ok(fix.includes(`<${navigator}>`), navigator);
+  assert.match(fix, /every Jest suite mocks the provider as a pass-through/);
+  assert.match(fix, /one import hop/);
+  assert.match(fix, /not passed through a children prop/);
+});
+
+test("the real root layout fails the root provider rule as soon as KeyboardProvider is removed", () => {
+  const layoutPath = path.join(packageRoot, ROOT_LAYOUT_PATH);
+  const source = readFileSync(layoutPath, "utf8");
+  const file = `artifacts/chat-app/${ROOT_LAYOUT_PATH}`;
+  const importLine = 'import { KeyboardProvider } from "react-native-keyboard-controller";\n';
+  const wrapped = /<KeyboardProvider>\s*(<RootLayoutNav \/>)\s*<\/KeyboardProvider>/;
+  // Guard the derivation: the fixture below must really be "the current
+  // layout minus the provider", so a restructured layout has to update this.
+  assert.ok(source.includes(importLine), "the root layout imports KeyboardProvider");
+  assert.match(source, wrapped, "the root layout wraps RootLayoutNav in KeyboardProvider");
+  const removed = source.replace(importLine, "").replace(wrapped, "$1");
+  assert.ok(!removed.includes("KeyboardProvider"));
+  // The real loader follows AppFooter, ScaledText, the contexts, … exactly as
+  // the check does against the tree.
+  const resolveModule = createModuleLoader({ packageRoot }).resolverFor(layoutPath);
+
+  assert.deepEqual(scanRootLayoutKeyboardProvider({ file, source, resolveModule }), []);
+
+  const findings = scanRootLayoutKeyboardProvider({ file, source: removed, resolveModule });
+  assert.deepEqual(findings, [
+    {
+      file,
+      rule: rootRule,
+      line: lineOf(removed, "<Stack screenOptions"),
+      detail:
+        'renders <Stack> from "expo-router" outside KeyboardProvider from "react-native-keyboard-controller" ' +
+        `(reached through RootLayout › RootLayoutNav › RootLayoutContent; ${file} does not import KeyboardProvider ` +
+        'from "react-native-keyboard-controller")',
+    },
+  ]);
+  const message = formatKeyboardStrategyFailure(findings);
+  assert.match(message, /^Keyboard strategy violation in the Chat App \(.*; see the "Keyboard handling on native has one strategy" note in replit\.md\):/);
+  assert.match(message, /\n  - artifacts\/chat-app\/app\/_layout\.tsx:\d+ \[root-keyboard-provider\] renders <Stack> .* Fix: keep <KeyboardProvider>/);
+});
+
+test("the root provider rule says how the provider went missing", () => {
+  const imported = `import { Stack } from "expo-router";
+import { KeyboardProvider } from "react-native-keyboard-controller";
+export default function RootLayout() {
+  return <Stack />;
+}`;
+  const selfClosing = `import { Stack } from "expo-router";
+import { KeyboardProvider } from "react-native-keyboard-controller";
+export default function RootLayout() {
+  return (
+    <>
+      <KeyboardProvider />
+      <Stack />
+    </>
+  );
+}`;
+  const beside = `import { Stack } from "expo-router";
+import { View } from "react-native";
+import { KeyboardProvider } from "react-native-keyboard-controller";
+function Footer() { return <View />; }
+export default function RootLayout() {
+  return (
+    <View>
+      <Stack />
+      <KeyboardProvider>
+        <Footer />
+      </KeyboardProvider>
+    </View>
+  );
+}`;
+  const below = `import { Stack } from "expo-router";
+import { KeyboardProvider } from "react-native-keyboard-controller";
+export default function RootLayout() {
+  return (
+    <Stack>
+      <KeyboardProvider>
+        <Stack.Screen name="(tabs)" />
+      </KeyboardProvider>
+    </Stack>
+  );
+}`;
+  const otherPackage = `import { Stack } from "expo-router";
+import { KeyboardProvider } from "react-native-keyboard-avoiding-provider";
+export default function RootLayout() {
+  return (
+    <KeyboardProvider>
+      <Stack />
+    </KeyboardProvider>
+  );
+}`;
+  const conditional = `import { Stack } from "expo-router";
+import { Platform } from "react-native";
+import { KeyboardProvider } from "react-native-keyboard-controller";
+export default function RootLayout() {
+  if (Platform.OS === "web") return <Stack />;
+  return (
+    <KeyboardProvider>
+      <Stack />
+    </KeyboardProvider>
+  );
+}`;
+  const expectations = [
+    [imported, 4, "reached through RootLayout; KeyboardProvider is imported but not rendered on the way there"],
+    [selfClosing, 7, "reached through RootLayout; the self-closing <KeyboardProvider /> on line 6 renders nothing inside it"],
+    [beside, 8, "reached through RootLayout; the <KeyboardProvider> on line 9 does not contain it"],
+    [below, 5, "reached through RootLayout; the <KeyboardProvider> on line 6 does not contain it"],
+    [otherPackage, 6, `reached through RootLayout; ${noProviderImport}`],
+    [conditional, 5, "reached through RootLayout; the <KeyboardProvider> on line 7 does not contain it"],
+  ];
+  for (const [source, line, status] of expectations) {
+    assert.deepEqual(
+      scanRootLayout(source),
+      [
+        {
+          file: ROOT_LAYOUT_PATH,
+          rule: rootRule,
+          line,
+          detail: `renders <Stack> from "expo-router" outside KeyboardProvider from "react-native-keyboard-controller" (${status})`,
+        },
+      ],
+      source,
+    );
+  }
+});
+
+test("a root layout the rule cannot follow is a finding, not a pass", () => {
+  const rootFinding = (detail) => [{ file: ROOT_LAYOUT_PATH, rule: rootRule, line: null, detail }];
+
+  assert.deepEqual(
+    scanRootLayoutKeyboardProvider({ file: ROOT_LAYOUT_PATH, source: null }),
+    rootFinding("does not exist, so nothing renders KeyboardProvider around the navigator"),
+  );
+  assert.deepEqual(
+    scanRootLayout(`import { Stack } from "expo-router";
+import { KeyboardProvider } from "react-native-keyboard-controller";
+export function RootLayout() {
+  return <KeyboardProvider><Stack /></KeyboardProvider>;
+}`),
+    rootFinding(
+      "has no default export, so the tree it renders cannot be followed from the default export through same-file components and one import hop",
+    ),
+  );
+  assert.deepEqual(
+    scanRootLayout('export { default } from "@/components/RootLayout";'),
+    rootFinding(
+      're-exports its default export from "@/components/RootLayout", which the check does not follow; define the root layout component in this file',
+    ),
+  );
+  assert.deepEqual(
+    scanRootLayout(`import { View } from "react-native";
+import { KeyboardProvider } from "react-native-keyboard-controller";
+export default function RootLayout() {
+  return <KeyboardProvider><View /></KeyboardProvider>;
+}`),
+    [noNavigatorFinding],
+  );
+  // The failure message has no line to print for a file-level finding.
+  const message = formatKeyboardStrategyFailure(rootFinding("has no default export"));
+  assert.match(message, /\n  - app\/_layout\.tsx \[root-keyboard-provider\] has no default export\. Fix: /);
+});
+
+test("the root provider rule reads only what the layout renders, so dead code cannot satisfy it", () => {
+  const deadWrapped = {
+    unusedVariable: `import { Stack } from "expo-router";
+import { KeyboardProvider } from "react-native-keyboard-controller";
+export default function RootLayout() {
+  const unused = <KeyboardProvider><Stack /></KeyboardProvider>;
+  return null;
+}`,
+    effectCallback: `import { Stack } from "expo-router";
+import { useEffect } from "react";
+import { View } from "react-native";
+import { KeyboardProvider } from "react-native-keyboard-controller";
+export default function RootLayout() {
+  useEffect(() => {
+    const tree = <KeyboardProvider><Stack /></KeyboardProvider>;
+    void tree;
+  }, []);
+  return <View />;
+}`,
+    jsxProp: `import { Stack } from "expo-router";
+import { View } from "react-native";
+import { KeyboardProvider } from "react-native-keyboard-controller";
+export default function RootLayout() {
+  return <View header={<KeyboardProvider><Stack /></KeyboardProvider>} />;
+}`,
+    unusedComponent: `import { Stack } from "expo-router";
+import { View } from "react-native";
+import { KeyboardProvider } from "react-native-keyboard-controller";
+function Unused() {
+  return <KeyboardProvider><Stack /></KeyboardProvider>;
+}
+export default function RootLayout() {
+  return <View />;
+}`,
+    renderPropChild: `import { Stack } from "expo-router";
+import { KeyboardProvider } from "react-native-keyboard-controller";
+export default function RootLayout() {
+  return <KeyboardProvider>{() => <Stack />}</KeyboardProvider>;
+}`,
+    nestedFunctionReturn: `import { Stack } from "expo-router";
+import { View } from "react-native";
+import { KeyboardProvider } from "react-native-keyboard-controller";
+export default function RootLayout() {
+  const helper = () => {
+    return <KeyboardProvider><Stack /></KeyboardProvider>;
+  };
+  void helper;
+  return <View />;
+}`,
+  };
+  for (const [name, source] of Object.entries(deadWrapped)) {
+    assert.deepEqual(scanRootLayout(source), [noNavigatorFinding], name);
+  }
+});
+
+test("the root provider rule ignores unwrapped navigators the layout never renders", () => {
+  const deadUnwrapped = {
+    callbacksAndVariables: `import { Stack } from "expo-router";
+import { useCallback, useEffect } from "react";
+import { KeyboardProvider } from "react-native-keyboard-controller";
+export default function RootLayout() {
+  const unused = <Stack />;
+  const onPress = useCallback(() => <Stack />, []);
+  useEffect(() => {
+    const dead = <Stack />;
+    void dead;
+    void onPress;
+  }, [onPress]);
+  return <KeyboardProvider><Stack /></KeyboardProvider>;
+}`,
+    jsxProp: `import { Stack } from "expo-router";
+import { KeyboardProvider } from "react-native-keyboard-controller";
+export default function RootLayout() {
+  return <KeyboardProvider fallback={<Stack />}><Stack /></KeyboardProvider>;
+}`,
+    unusedComponent: `import { Stack } from "expo-router";
+import { KeyboardProvider } from "react-native-keyboard-controller";
+function Unused() {
+  return <Stack />;
+}
+export default function RootLayout() {
+  return <KeyboardProvider><Stack /></KeyboardProvider>;
+}`,
+    lifecycleMethod: `import { Stack } from "expo-router";
+import React from "react";
+import { KeyboardProvider } from "react-native-keyboard-controller";
+export default class RootLayout extends React.Component {
+  componentDidMount() {
+    const dead = <Stack />;
+    void dead;
+  }
+  render() {
+    return <KeyboardProvider><Stack /></KeyboardProvider>;
+  }
+}`,
+  };
+  for (const [name, source] of Object.entries(deadUnwrapped)) {
+    assert.deepEqual(scanRootLayout(source), [], name);
+  }
+});
+
+test("the root provider rule accepts every way the current layout may spell the provider and the navigator", () => {
+  const layouts = {
+    aliasedImport: `import { Slot } from "expo-router";
+import { KeyboardProvider as KP } from "react-native-keyboard-controller";
+export default () => <KP><Slot /></KP>;`,
+    namespaceImport: `import { Tabs } from "expo-router";
+import * as KC from "react-native-keyboard-controller";
+export default function RootLayout() {
+  return <KC.KeyboardProvider><Tabs screenOptions={{ headerShown: false }} /></KC.KeyboardProvider>;
+}`,
+    sameFileAlias: `import * as Router from "expo-router";
+import * as KC from "react-native-keyboard-controller";
+const Provider = KC.KeyboardProvider;
+export default function RootLayout() {
+  return <Provider><Router.Stack /></Provider>;
+}`,
+    nativeTabs: `import { NativeTabs } from "expo-router/unstable-native-tabs";
+import { KeyboardProvider } from "react-native-keyboard-controller";
+export default function RootLayout() {
+  return (
+    <KeyboardProvider>
+      <NativeTabs>
+        <NativeTabs.Trigger name="index" />
+      </NativeTabs>
+    </KeyboardProvider>
+  );
+}`,
+    sameFileComponents: `import { Stack } from "expo-router";
+import { View } from "react-native";
+import { KeyboardProvider } from "react-native-keyboard-controller";
+function Content({ ready }) {
+  if (!ready) return <View />;
+  return (
+    <Stack>
+      <Stack.Screen name="(tabs)" />
+    </Stack>
+  );
+}
+const Nav = () => (
+  <View>
+    <Content ready />
+  </View>
+);
+function RootLayout() {
+  return (
+    <View>
+      <KeyboardProvider>
+        <Nav />
+      </KeyboardProvider>
+    </View>
+  );
+}
+export default RootLayout;`,
+    wrappedExport: `import * as Sentry from "@sentry/react-native";
+import { Stack } from "expo-router";
+import { KeyboardProvider } from "react-native-keyboard-controller";
+const enabled = Boolean(process.env["EXPO_PUBLIC_SENTRY_DSN"]);
+function RootLayout() {
+  return <KeyboardProvider><Stack /></KeyboardProvider>;
+}
+export default enabled ? Sentry.wrap(RootLayout) : RootLayout;`,
+    namedDefaultExport: `import { Stack } from "expo-router";
+import { KeyboardProvider } from "react-native-keyboard-controller";
+const RootLayout = () => <KeyboardProvider><Stack /></KeyboardProvider>;
+export { RootLayout as default };`,
+    memoExport: `import { memo } from "react";
+import { Drawer } from "expo-router/drawer";
+import { KeyboardProvider } from "react-native-keyboard-controller";
+export default memo(function RootLayout() {
+  return <KeyboardProvider><Drawer /></KeyboardProvider>;
+});`,
+    renderedVariables: `import { Stack } from "expo-router";
+import { StatusBar } from "expo-status-bar";
+import { useMemo } from "react";
+import { KeyboardProvider } from "react-native-keyboard-controller";
+export default function RootLayout({ ready }) {
+  const statusBar = <StatusBar style="light" />;
+  const navigator = useMemo(() => <Stack />, []);
+  const renderContent = () => (ready ? navigator : null);
+  return (
+    <KeyboardProvider>
+      {statusBar}
+      {renderContent()}
+    </KeyboardProvider>
+  );
+}`,
+    branchingReturns: `import { Stack, Slot } from "expo-router";
+import { KeyboardProvider } from "react-native-keyboard-controller";
+export default function RootLayout({ mode, ready }) {
+  switch (mode) {
+    case "stack":
+      return ready && <KeyboardProvider><Stack /></KeyboardProvider>;
+    default:
+      return ready ? [<KeyboardProvider key="slot"><Slot /></KeyboardProvider>] : null;
+  }
+}`,
+    immediatelyInvoked: `import { Stack } from "expo-router";
+import { KeyboardProvider } from "react-native-keyboard-controller";
+export default () => (function () { return <KeyboardProvider><Stack /></KeyboardProvider>; })();`,
+  };
+  for (const [name, source] of Object.entries(layouts)) {
+    assert.deepEqual(scanRootLayout(source), [], name);
+  }
+});
+
+test("the root provider rule follows one import hop for the navigator, the provider and its re-export", async (t) => {
+  const navigatorOneHop = await scanFixture({
+    "components/RootNavigator.tsx": `import { Stack } from "expo-router";
+export function RootNavigator() {
+  return <Stack screenOptions={{ headerShown: false }} />;
+}`,
+    [ROOT_LAYOUT_PATH]: `import { KeyboardProvider } from "react-native-keyboard-controller";
+import { RootNavigator } from "@/components/RootNavigator";
+export default function RootLayout() {
+  return <KeyboardProvider><RootNavigator /></KeyboardProvider>;
+}`,
+  });
+  const providerOneHop = await scanFixture({
+    "components/AppShell.tsx": `import { Stack } from "expo-router";
+import { KeyboardProvider } from "react-native-keyboard-controller";
+export const AppShell = () => <KeyboardProvider><Stack /></KeyboardProvider>;`,
+    [ROOT_LAYOUT_PATH]: `import { AppShell } from "@/components/AppShell";
+export default function RootLayout() {
+  return <AppShell />;
+}`,
+  });
+  const reexportedProvider = await scanFixture({
+    "lib/keyboard.ts": 'export { KeyboardProvider as AppKeyboardProvider } from "react-native-keyboard-controller";',
+    [ROOT_LAYOUT_PATH]: `import { Stack } from "expo-router";
+import { AppKeyboardProvider } from "@/lib/keyboard";
+export default function RootLayout() {
+  return <AppKeyboardProvider><Stack /></AppKeyboardProvider>;
+}`,
+  });
+  cleanup(t, [navigatorOneHop.root, providerOneHop.root, reexportedProvider.root]);
+
+  assert.deepEqual(navigatorOneHop.findings, []);
+  assert.deepEqual(providerOneHop.findings, []);
+  assert.deepEqual(reexportedProvider.findings, []);
+});
+
+test("the root provider rule rejects what it cannot prove: a second hop, a children wrapper, a child layout, platform variants", async (t) => {
+  const secondHop = await scanFixture({
+    "components/Shell.tsx": `import { Nav } from "./Nav";
+export function Shell() { return <Nav />; }`,
+    "components/Nav.tsx": `import { Stack } from "expo-router";
+export function Nav() { return <Stack />; }`,
+    [ROOT_LAYOUT_PATH]: `import { KeyboardProvider } from "react-native-keyboard-controller";
+import { Shell } from "@/components/Shell";
+export default function RootLayout() {
+  return <KeyboardProvider><Shell /></KeyboardProvider>;
+}`,
+  });
+  const childrenWrapper = await scanFixture({
+    "components/KeyboardRoot.tsx": `import { KeyboardProvider } from "react-native-keyboard-controller";
+export function KeyboardRoot({ children }) {
+  return <KeyboardProvider>{children}</KeyboardProvider>;
+}`,
+    [ROOT_LAYOUT_PATH]: `import { Stack } from "expo-router";
+import { KeyboardRoot } from "@/components/KeyboardRoot";
+export default function RootLayout() {
+  return (
+    <KeyboardRoot>
+      <Stack />
+    </KeyboardRoot>
+  );
+}`,
+  });
+  const movedIntoChildLayout = await scanFixture({
+    "app/(tabs)/_layout.tsx": `import { Tabs } from "expo-router";
+import { KeyboardProvider } from "react-native-keyboard-controller";
+export default function TabLayout() {
+  return <KeyboardProvider><Tabs /></KeyboardProvider>;
+}`,
+    [ROOT_LAYOUT_PATH]: `import { Stack } from "expo-router";
+export default function RootLayout() {
+  return <Stack />;
+}`,
+  });
+  const platformVariants = await scanFixture({
+    "app/_layout.ios.tsx": `import { Stack } from "expo-router";
+export default function RootLayout() {
+  return <Stack />;
+}`,
+  });
+  cleanup(t, [secondHop.root, childrenWrapper.root, movedIntoChildLayout.root, platformVariants.root]);
+
+  assert.deepEqual(secondHop.findings, [noNavigatorFinding]);
+  assert.deepEqual(childrenWrapper.findings, [
+    {
+      file: ROOT_LAYOUT_PATH,
+      rule: rootRule,
+      line: 6,
+      detail:
+        'renders <Stack> from "expo-router" outside KeyboardProvider from "react-native-keyboard-controller" ' +
+        "(reached through RootLayout; the <KeyboardProvider> on line 3 of components/KeyboardRoot.tsx does not contain it)",
+    },
+  ]);
+  assert.deepEqual(movedIntoChildLayout.findings, [
+    {
+      file: ROOT_LAYOUT_PATH,
+      rule: rootRule,
+      line: 3,
+      detail:
+        'renders <Stack> from "expo-router" outside KeyboardProvider from "react-native-keyboard-controller" ' +
+        `(reached through RootLayout; ${noProviderImport})`,
+    },
+  ]);
+  assert.deepEqual(platformVariants.findings, [
+    {
+      file: ROOT_LAYOUT_PATH,
+      rule: rootRule,
+      line: null,
+      detail: "has platform-specific variants (app/_layout.ios.tsx) that the check does not follow; keep a single root layout",
+    },
+  ]);
+});
+
+test("a screen rendering a nested navigator does not satisfy or trip the root provider rule", async (t) => {
+  // Only the root layout is followed: a nested Stack in a child layout and a
+  // KeyboardProvider rendered by a screen are both out of the rule's scope.
+  const { root, findings } = await scanFixture({
+    "app/(tabs)/_layout.tsx": `import { Tabs } from "expo-router";
+export default () => <Tabs />;`,
+    "app/(auth)/_layout.tsx": `import { Stack } from "expo-router";
+import { KeyboardProvider } from "react-native-keyboard-controller";
+export default () => <KeyboardProvider><Stack /></KeyboardProvider>;`,
+  });
+  cleanup(t, [root]);
+
+  assert.deepEqual(findings, []);
+});
+
+test("the command line entry point fails when the root layout loses its provider", async (t) => {
+  const root = await writeFixtureRoot({
+    "app/screen.tsx": compliantScreen,
+    [ROOT_LAYOUT_PATH]: `import { Stack } from "expo-router";
+export default function RootLayout() {
+  return <Stack />;
+}`,
+  });
+  t.after(() => rm(root, { recursive: true, force: true }));
+
+  await assert.rejects(
+    execFileAsync(process.execPath, [scriptPath, "--root", root], { cwd: packageRoot }),
+    (error) => {
+      assert.equal(error.code, 1);
+      assert.match(
+        error.stderr,
+        /app\/_layout\.tsx:3 \[root-keyboard-provider\] renders <Stack> from "expo-router" outside KeyboardProvider/,
+      );
+      assert.match(error.stderr, /see the "Keyboard handling on native has one strategy" note in replit\.md/);
+      return true;
+    },
+  );
+});
+
 test("the command line entry point fails with the violation and passes a clean tree", async (t) => {
   const violating = await writeFixtureRoot({
     "app/screen.tsx": `import { Platform } from "react-native";
@@ -845,16 +1422,17 @@ export default () => <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "pa
   });
   assert.match(
     stdout,
-    /Keyboard strategy check passed: 1 source file under app\/, components\/, hooks\/, lib\/, contexts\/ and utils\/ follows/,
+    /Keyboard strategy check passed: 2 source files under app\/, components\/, hooks\/, lib\/, contexts\/ and utils\/ follow the .*, and app\/_layout\.tsx wraps the navigator in KeyboardProvider\./,
   );
 
   // Optional directories that do not exist are left out of the report.
   const minimal = await mkdtemp(path.join(os.tmpdir(), "keyboard-strategy-"));
   await mkdir(path.join(minimal, "app"));
   await mkdir(path.join(minimal, "components"));
+  await writeFile(path.join(minimal, ROOT_LAYOUT_PATH), compliantRootLayout);
   await writeFile(path.join(minimal, "app/screen.tsx"), compliantScreen);
   await writeFile(path.join(minimal, "components/Fine.tsx"), compliantScreen);
   t.after(() => rm(minimal, { recursive: true, force: true }));
   const minimalRun = await execFileAsync(process.execPath, [scriptPath, "--root", minimal], { cwd: packageRoot });
-  assert.match(minimalRun.stdout, /Keyboard strategy check passed: 2 source files under app\/ and components\/ follow the/);
+  assert.match(minimalRun.stdout, /Keyboard strategy check passed: 3 source files under app\/ and components\/ follow the/);
 });
