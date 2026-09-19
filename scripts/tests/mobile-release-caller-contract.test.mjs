@@ -1229,6 +1229,7 @@ test("iOS preview evidence runs for every pull request", () => {
         "${{ github.event.pull_request.base.sha }}",
       IOS_PREVIEW_HEAD_SHA:
         "${{ github.event.pull_request.head.sha }}",
+      REVIEWED_REF: "${{ github.ref }}",
     },
     "the iOS preview job must compare the pull request base and head",
   );

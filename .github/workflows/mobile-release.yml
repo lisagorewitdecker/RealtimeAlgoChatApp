@@ -163,9 +163,17 @@ jobs:
         env:
           NODE_RANGE: ${{ steps.read-node-range.outputs.node_range }}
           RESOLVE_RESULT: ${{ steps.resolve-node-range.outcome }}
+          REVIEWED_REF: ${{ github.ref }}
         run: |
           set -euo pipefail
           source scripts/workflow-output-safety.sh
+          resolved_commit_sha="$(git rev-parse --verify HEAD)"
+          safe_reviewed_ref="$(sanitize_workflow_text "$REVIEWED_REF")"
+          {
+            echo "## Reviewed release revision"
+            printf -- '- Checked ref: `%s`\n' "$safe_reviewed_ref"
+            printf -- '- Resolved commit SHA: `%s`\n' "$resolved_commit_sha"
+          } >> "$GITHUB_STEP_SUMMARY"
           if [[ "$RESOLVE_RESULT" != "success" ]]; then
             safe_node_range="$(sanitize_workflow_text "$NODE_RANGE")"
             {
@@ -290,9 +298,17 @@ jobs:
         env:
           ANDROID_PREVIEW_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           ANDROID_PREVIEW_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          REVIEWED_REF: ${{ github.ref }}
         run: |
           set -euo pipefail
           source scripts/workflow-output-safety.sh
+          resolved_commit_sha="$(git rev-parse --verify HEAD)"
+          safe_reviewed_ref="$(sanitize_workflow_text "$REVIEWED_REF")"
+          {
+            echo "## Reviewed release revision"
+            printf -- '- Checked ref: `%s`\n' "$safe_reviewed_ref"
+            printf -- '- Resolved commit SHA: `%s`\n' "$resolved_commit_sha"
+          } >> "$GITHUB_STEP_SUMMARY"
 
           summary_header="## Android preview evidence"
           diff_output=""
@@ -477,9 +493,17 @@ jobs:
         env:
           IOS_PREVIEW_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           IOS_PREVIEW_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          REVIEWED_REF: ${{ github.ref }}
         run: |
           set -euo pipefail
           source scripts/workflow-output-safety.sh
+          resolved_commit_sha="$(git rev-parse --verify HEAD)"
+          safe_reviewed_ref="$(sanitize_workflow_text "$REVIEWED_REF")"
+          {
+            echo "## Reviewed release revision"
+            printf -- '- Checked ref: `%s`\n' "$safe_reviewed_ref"
+            printf -- '- Resolved commit SHA: `%s`\n' "$resolved_commit_sha"
+          } >> "$GITHUB_STEP_SUMMARY"
 
           summary_header="## iOS preview evidence"
           diff_output=""
@@ -1459,9 +1483,12 @@ jobs:
           IOS_NATIVE_EVIDENCE_RESULT: ${{ steps.ios-native-evidence.outcome }}
           IOS_SENTRY_TRIGGER_RESULT: ${{ steps.ios-sentry-trigger.outcome }}
           IOS_SENTRY_VERIFICATION_RESULT: ${{ steps.ios-sentry-verification.outcome }}
+          REVIEWED_REF: ${{ github.ref }}
         run: |
           set -euo pipefail
           source scripts/workflow-output-safety.sh
+          resolved_commit_sha="$(git rev-parse --verify HEAD)"
+          safe_reviewed_ref="$(sanitize_workflow_text "$REVIEWED_REF")"
           status="READY"
           blockers=()
           checks=()
@@ -1490,6 +1517,10 @@ jobs:
           add_check "Readable Sentry source maps" "$IOS_SENTRY_VERIFICATION_RESULT"
 
           {
+            echo "## Reviewed release revision"
+            printf -- '- Checked ref: `%s`\n' "$safe_reviewed_ref"
+            printf -- '- Resolved commit SHA: `%s`\n' "$resolved_commit_sha"
+            echo
             echo "## iOS native large-text readiness"
             echo
             echo "- Status: **${status}**"
@@ -1561,7 +1592,19 @@ jobs:
         env:
           NATIVE_BRANDING_ARTIFACT_URL: ${{ steps.upload-ios-native-smoke.outputs.artifact-url }}
           NATIVE_SMOKE_BUILD_ID: ${{ env.NATIVE_SMOKE_IOS_BUILD_ID }}
-        run: scripts/summarize-native-branding.sh ios
+          REVIEWED_REF: ${{ github.ref }}
+        run: |
+          set -euo pipefail
+          source scripts/workflow-output-safety.sh
+          resolved_commit_sha="$(git rev-parse --verify HEAD)"
+          safe_reviewed_ref="$(sanitize_workflow_text "$REVIEWED_REF")"
+          {
+            echo "## Reviewed release revision"
+            printf -- '- Checked ref: `%s`\n' "$safe_reviewed_ref"
+            printf -- '- Resolved commit SHA: `%s`\n' "$resolved_commit_sha"
+            echo
+          } >> "$GITHUB_STEP_SUMMARY"
+          scripts/summarize-native-branding.sh ios
 
   android-prerequisite-preflight:
     name: Android release runner preflight
@@ -1810,7 +1853,19 @@ jobs:
         env:
           NATIVE_BRANDING_ARTIFACT_URL: ${{ steps.upload-android-native-smoke.outputs.artifact-url }}
           NATIVE_SMOKE_BUILD_ID: ${{ env.NATIVE_SMOKE_ANDROID_BUILD_ID }}
-        run: scripts/summarize-native-branding.sh android
+          REVIEWED_REF: ${{ github.ref }}
+        run: |
+          set -euo pipefail
+          source scripts/workflow-output-safety.sh
+          resolved_commit_sha="$(git rev-parse --verify HEAD)"
+          safe_reviewed_ref="$(sanitize_workflow_text "$REVIEWED_REF")"
+          {
+            echo "## Reviewed release revision"
+            printf -- '- Checked ref: `%s`\n' "$safe_reviewed_ref"
+            printf -- '- Resolved commit SHA: `%s`\n' "$resolved_commit_sha"
+            echo
+          } >> "$GITHUB_STEP_SUMMARY"
+          scripts/summarize-native-branding.sh android
 
   idle-profile-registration:
     name: Idle profile registration
@@ -1960,9 +2015,17 @@ jobs:
         env:
           IDLE_PROFILE_PREFLIGHT_FAILURE_REASON: ${{ steps.idle-profile-preflight.outputs.failure_reason }}
           IDLE_PROFILE_RESULT: ${{ steps.idle-profile-check.outcome }}
+          REVIEWED_REF: ${{ github.ref }}
         run: |
           set -euo pipefail
+          source scripts/workflow-output-safety.sh
+          resolved_commit_sha="$(git rev-parse --verify HEAD)"
+          safe_reviewed_ref="$(sanitize_workflow_text "$REVIEWED_REF")"
           {
+            echo "## Reviewed release revision"
+            printf -- '- Checked ref: `%s`\n' "$safe_reviewed_ref"
+            printf -- '- Resolved commit SHA: `%s`\n' "$resolved_commit_sha"
+            echo
             echo "## Idle profile registration"
             echo
             if [[ "$IDLE_PROFILE_RESULT" == "success" ]]; then

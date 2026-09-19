@@ -81,6 +81,25 @@ test("hosted preview startup summary regression checks the reviewed revision", (
   );
   assert.match(verification, /base64 --decode/);
   assert.match(verification, /"\$GITHUB_STEP_SUMMARY"/);
+  const revisionMetadataIndex = verification.indexOf(
+    'echo "## Reviewed preview startup revision"',
+  );
+  const publishedSummaryIndex = verification.indexOf(
+    'echo "## Preview startup summary regression"',
+  );
+  assert.ok(
+    revisionMetadataIndex >= 0 && revisionMetadataIndex < publishedSummaryIndex,
+    "the hosted preview summary must publish revision metadata before its result sections",
+  );
+  assert.match(
+    verification,
+    /resolved_commit_sha="\$\(git rev-parse --verify HEAD\)"[\s\S]*safe_reviewed_ref="\$\(sanitize_workflow_text "\$REVIEWED_REF"\)/,
+  );
+  assert.doesNotMatch(
+    verification,
+    /secrets\.|EAS_TOKEN|CLERK_SECRET_KEY|DATABASE_URL|cat "\$healthy_log"/,
+    "the hosted preview revision summary must not expose secrets or raw logs",
+  );
   assert.doesNotMatch(workflowText, /\$\{\{\s*secrets\./);
   assert.doesNotMatch(workflowText, /EAS_TOKEN|CLERK_SECRET_KEY|DATABASE_URL/);
 });

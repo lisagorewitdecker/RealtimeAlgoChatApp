@@ -1242,6 +1242,7 @@ test("idle-profile summary reports fixed browser target outages without leaking 
           GITHUB_STEP_SUMMARY: summaryPath,
           IDLE_PROFILE_PREFLIGHT_FAILURE_REASON: failureReason,
           IDLE_PROFILE_RESULT: "skipped",
+          REVIEWED_REF: "refs/heads/mobile-v0.0.0",
         },
       });
       const summaryOutput = `${summary.stdout}${summary.stderr}`;
@@ -2231,6 +2232,7 @@ test("Android preview evidence keeps its pull-request validation and privacy con
         "${{ github.event.pull_request.base.sha }}",
       ANDROID_PREVIEW_HEAD_SHA:
         "${{ github.event.pull_request.head.sha }}",
+      REVIEWED_REF: "${{ github.ref }}",
     },
     "the Android preview job must compare the pull request base and head",
   );
@@ -2254,6 +2256,21 @@ test("Android preview evidence keeps its pull-request validation and privacy con
     (step) => step.name === "Validate changed Android preview records",
   );
   assert.ok(validationStep, "the Android preview job must validate changed records");
+  assert.match(
+    validationStep.run,
+    /resolved_commit_sha="\$\(git rev-parse --verify HEAD\)"[\s\S]*echo "## Reviewed release revision"[\s\S]*Checked ref: `%s`[\s\S]*Resolved commit SHA: `%s`/,
+    "the Android preview summary must record the checked revision",
+  );
+  assert.ok(
+    validationStep.run.indexOf('echo "## Reviewed release revision"') <
+      validationStep.run.indexOf('>> "$GITHUB_STEP_SUMMARY"'),
+    "Android revision metadata must precede every preview summary branch",
+  );
+  assert.doesNotMatch(
+    validationStep.run,
+    /secrets\.|E2E_CHAT_URL|E2E_API_URL|CLERK_SECRET_KEY|DATABASE_URL/,
+    "Android preview revision metadata must not expose secrets or private URLs",
+  );
   const ocrStep = androidJob.steps.find(
     (step) => step.name === "Install screenshot OCR runtime",
   );
@@ -2559,6 +2576,7 @@ test("Android preview evidence keeps its pull-request validation and privacy con
         ),
         GITHUB_SERVER_URL: "https://github.example",
         GITHUB_REPOSITORY: "example/chat-app",
+        REVIEWED_REF: "refs/heads/mobile-v0.0.0",
         GITHUB_SHA: headSha,
         GITHUB_STEP_SUMMARY: summaryPath,
         ANDROID_PREVIEW_ARGS_LOG: checkerArgsLogPath,
@@ -3198,6 +3216,26 @@ test("iOS preview evidence covers renamed records and blocks malformed changes",
     (step) => step.name === "Validate changed iOS preview records",
   );
   assert.ok(validationStep, "the iOS preview job must validate changed records");
+  assert.equal(
+    validationStep.env.REVIEWED_REF,
+    "${{ github.ref }}",
+    "the iOS preview summary must use the trusted workflow ref",
+  );
+  assert.match(
+    validationStep.run,
+    /resolved_commit_sha="\$\(git rev-parse --verify HEAD\)"[\s\S]*echo "## Reviewed release revision"[\s\S]*Checked ref: `%s`[\s\S]*Resolved commit SHA: `%s`/,
+    "the iOS preview summary must record the checked revision",
+  );
+  assert.ok(
+    validationStep.run.indexOf('echo "## Reviewed release revision"') <
+      validationStep.run.indexOf('>> "$GITHUB_STEP_SUMMARY"'),
+    "iOS revision metadata must precede every preview summary branch",
+  );
+  assert.doesNotMatch(
+    validationStep.run,
+    /secrets\.|E2E_CHAT_URL|E2E_API_URL|CLERK_SECRET_KEY|DATABASE_URL/,
+    "iOS preview revision metadata must not expose secrets or private URLs",
+  );
   assert.match(
     validationStep.run,
     /No iOS preview validation records or preflight artifacts changed; nothing to validate\./,
@@ -3417,6 +3455,7 @@ test("iOS preview evidence covers renamed records and blocks malformed changes",
         ),
         GITHUB_SERVER_URL: "https://github.example",
         GITHUB_REPOSITORY: "example/chat-app",
+        REVIEWED_REF: "refs/heads/mobile-v0.0.0",
         GITHUB_SHA: headSha,
         GITHUB_STEP_SUMMARY: summaryPath,
       },
@@ -4592,6 +4631,7 @@ function renderSummaryStepEnv(summaryStep, { resultsDir, outcome }) {
     "github.repository": "example/chat-app",
     "github.server_url": "https://github.example",
     "github.sha": "0".repeat(40),
+    "github.ref": "refs/heads/mobile-v0.0.0",
     "github.ref_name": "mobile-v0.0.0",
     "github.event_name": "workflow_dispatch",
     "runner.temp": testRoot,
@@ -4685,7 +4725,11 @@ function runSummaryStep(summaryStep, { name, resultsDir, outcome }) {
     cwd: workspaceRoot,
     encoding: "utf8",
     env: {
-      PATH: makeIosCommandDirectory(`${scratchName}-summary`),
+      PATH: [
+        makeIosCommandDirectory(`${scratchName}-summary`),
+        path.dirname(gitPath),
+        process.env.PATH,
+      ].join(path.delimiter),
       HOME: homeDirectory,
       GITHUB_STEP_SUMMARY: summaryPath,
       // Even if a secret were ever in scope, the summary must not print it.
@@ -4815,7 +4859,8 @@ test("workflow summaries show candidate build IDs without exposing private value
 
 test("native branding summaries keep a durable report snapshot after artifact removal", () => {
   const summaryStep = summarySteps.find(
-    ({ step }) => step.run === "scripts/summarize-native-branding.sh ios",
+    ({ jobId, step }) =>
+      jobId === "native-ios" && step.name === "Summarize iOS native branding",
   );
   assert.ok(summaryStep, "the iOS native branding summary step must exist");
 
@@ -5997,5 +6042,62 @@ test("hosted native evidence summaries record the checked revision before untrus
       /summary_path.*(?:REVIEWED_REF|resolved_commit_sha)|(?:REVIEWED_REF|resolved_commit_sha).*summary_path/,
       `${label} must not derive revision metadata from checker output`,
     );
+  }
+});
+
+test("non-native release summaries record the checked revision without private inputs", () => {
+  const summaryCases = [
+    ["mobile-release-node-range", "Reject invalid Node range before release checks"],
+    ["android-preview-evidence", "Validate changed Android preview records"],
+    ["ios-preview-evidence", "Validate changed iOS preview records"],
+    ["native-ios", "Summarize iOS readiness"],
+    ["native-ios", "Summarize iOS native branding"],
+    ["native-android", "Summarize Android native branding"],
+    ["idle-profile-registration", "Summarize idle-profile registration check"],
+  ];
+
+  for (const [jobId, stepName] of summaryCases) {
+    const job = workflow.jobs[jobId];
+    assert.ok(job, `${jobId} must exist`);
+    const step = job.steps.find((candidate) => candidate.name === stepName);
+    assert.ok(step, `${jobId} must define "${stepName}"`);
+    assert.equal(
+      step.env.REVIEWED_REF,
+      "${{ github.ref }}",
+      `${jobId} ${stepName} must use the trusted workflow ref`,
+    );
+
+    const run = String(step.run);
+    const revisionMetadataIndex = run.indexOf(
+      'echo "## Reviewed release revision"',
+    );
+    assert.ok(
+      revisionMetadataIndex >= 0,
+      `${jobId} ${stepName} must write revision metadata`,
+    );
+    assert.match(
+      run,
+      /resolved_commit_sha="\$\(git rev-parse --verify HEAD\)"/,
+      `${jobId} ${stepName} must resolve the checked commit from the checkout`,
+    );
+    assert.match(run, /Checked ref: `%s`/);
+    assert.match(run, /Resolved commit SHA: `%s`/);
+    assert.doesNotMatch(
+      run,
+      /secrets\.|E2E_CHAT_URL|E2E_API_URL|CLERK_SECRET_KEY|DATABASE_URL|NATIVE_SMOKE_APP_ID|NATIVE_SMOKE_EMAIL|NATIVE_SMOKE_PASSWORD/,
+      `${jobId} ${stepName} must not expose secrets or private release inputs`,
+    );
+
+    const summaryWriteIndex = run.indexOf('>> "$GITHUB_STEP_SUMMARY"');
+    assert.ok(
+      summaryWriteIndex < 0 || revisionMetadataIndex < summaryWriteIndex,
+      `${jobId} ${stepName} must write revision metadata before its summary`,
+    );
+    if (stepName.includes("branding")) {
+      assert.ok(
+        revisionMetadataIndex < run.indexOf("scripts/summarize-native-branding.sh"),
+        `${jobId} ${stepName} must write revision metadata before branding output`,
+      );
+    }
   }
 });
