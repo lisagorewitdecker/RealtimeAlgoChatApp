@@ -5,6 +5,7 @@ import {
   copyFileSync,
   mkdtempSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
   rmSync,
   symlinkSync,
@@ -297,11 +298,21 @@ function createGeneratedClientFixture() {
       copyFileSync(source, destination);
     }
 
-    symlinkSync(
-      path.join(workspaceRoot, "node_modules"),
-      path.join(fixtureRoot, "node_modules"),
-      "dir",
-    );
+    const mirrorNodeModules = (relativePath) => {
+      const source = path.join(workspaceRoot, relativePath, "node_modules");
+      const destination = path.join(fixtureRoot, relativePath, "node_modules");
+      mkdirSync(destination, { recursive: true });
+      for (const entry of readdirSync(source)) {
+        const fixtureEntry = path.join(destination, entry);
+        if (entry.startsWith(".pnpm-task-run-state")) {
+          mkdirSync(fixtureEntry, { recursive: true });
+          continue;
+        }
+        symlinkSync(path.join(source, entry), fixtureEntry);
+      }
+    };
+
+    mirrorNodeModules("");
     for (const packagePath of [
       "lib/api-client-react",
       "lib/api-spec",
@@ -309,11 +320,7 @@ function createGeneratedClientFixture() {
       "lib/db",
       "lib/integrations-anthropic-ai",
     ]) {
-      symlinkSync(
-        path.join(workspaceRoot, packagePath, "node_modules"),
-        path.join(fixtureRoot, packagePath, "node_modules"),
-        "dir",
-      );
+      mirrorNodeModules(packagePath);
     }
 
     return fixtureRoot;

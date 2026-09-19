@@ -1252,6 +1252,8 @@ test("native hosted release jobs skip cleanly when release configuration is abse
     nativeAndroid.needs.includes("native-release-configuration"),
     "native-android must depend on the shared native release configuration job",
   );
+});
+
 test("idle-profile summary reports fixed browser target outages without leaking URLs", () => {
   const idleJob = workflow.jobs["idle-profile-registration"];
   const chatPreflightStep = idleJob.steps.find(
