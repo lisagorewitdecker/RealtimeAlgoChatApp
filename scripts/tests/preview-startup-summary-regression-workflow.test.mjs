@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
@@ -15,6 +17,53 @@ const workflowPath = path.join(
 );
 const workflow = YAML.parse(readFileSync(workflowPath, "utf8"));
 const workflowText = readFileSync(workflowPath, "utf8");
+const validatorPath = path.join(
+  workspaceRoot,
+  "artifacts/chat-app/scripts/validate-preview-startup.mjs",
+);
+
+function extractWorkflowHereDoc(variableName) {
+  const match = workflowText.match(
+    new RegExp(
+      `cat > "\\$${variableName}" <<'EOF'\\n([\\s\\S]*?)\\n\\s*EOF`,
+    ),
+  );
+  assert.ok(match, `workflow is missing the ${variableName} here-doc`);
+  const body = match[1];
+  const indents = body
+    .split("\n")
+    .filter((line) => line.length > 0)
+    .map((line) => line.match(/^ */)?.[0].length ?? 0);
+  const sharedIndent = indents.length > 0 ? Math.min(...indents) : 0;
+  return (
+    body
+      .split("\n")
+      .map((line) => line.slice(sharedIndent))
+      .join("\n") + "\n\n"
+  );
+}
+
+function runValidator(env) {
+  const temporaryDirectory = mkdtempSync(
+    path.join(os.tmpdir(), "preview-startup-summary-workflow-"),
+  );
+  const summaryPath = path.join(temporaryDirectory, "summary.md");
+  const result = spawnSync("node", [validatorPath], {
+    cwd: workspaceRoot,
+    env: { ...process.env, GITHUB_STEP_SUMMARY: summaryPath, ...env },
+    encoding: "utf8",
+  });
+
+  try {
+    const summary = readFileSync(summaryPath, "utf8");
+    return {
+      ...result,
+      summary,
+    };
+  } finally {
+    rmSync(temporaryDirectory, { recursive: true, force: true });
+  }
+}
 
 test("hosted preview startup summary regression checks the reviewed revision", () => {
   assert.deepEqual(Object.keys(workflow.on), [
@@ -89,4 +138,32 @@ test("hosted preview startup summary regression is a read-only Linux check", () 
   assert.doesNotMatch(workflowText, /self-hosted/);
   assert.doesNotMatch(workflowText, /runs-on:\s*.*(?:macos|windows)/i);
   assert.doesNotMatch(workflowText, /\b(publish|deploy|submit)\b/i);
+});
+
+test("hosted preview startup workflow summary matches validator output exactly", () => {
+  const result = runValidator({
+    PREVIEW_STARTUP_TEST_FIXTURE: "missing-runtime-library-long-path",
+  });
+
+  assert.equal(result.status, 1, `${result.stdout}${result.stderr}`);
+  assert.equal(
+    result.summary,
+    extractWorkflowHereDoc("expected_summary_path"),
+  );
+});
+
+test("hosted preview startup workflow invalid-setting summary matches validator output exactly", () => {
+  const result = runValidator({
+    PREVIEW_PUBLIC_URL: "https://[preview-setting-secret",
+    PREVIEW_PUBLIC_TIMEOUT_MS: "25",
+    PREVIEW_STARTUP_TIMEOUT_MS: "2000",
+    PREVIEW_STARTUP_TEST_FIXTURE: "handoff-server",
+    REPLIT_EXPO_DEV_DOMAIN: "fallback-preview.example.test",
+  });
+
+  assert.equal(result.status, 1, `${result.stdout}${result.stderr}`);
+  assert.equal(
+    result.summary,
+    extractWorkflowHereDoc("expected_setting_summary_path"),
+  );
 });
