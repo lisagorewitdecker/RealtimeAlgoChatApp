@@ -11,13 +11,11 @@ set -euo pipefail
 : "${NATIVE_SMOKE_IOS_BUILD_ID:?NATIVE_SMOKE_IOS_BUILD_ID is required.}"
 : "${NATIVE_SMOKE_IOS_APP_ID:?NATIVE_SMOKE_IOS_APP_ID is required.}"
 : "${EAS_TOKEN:?EAS_TOKEN is required.}"
+: "${MAESTRO_INSTALLER_SHA256:?MAESTRO_INSTALLER_SHA256 is required for verified Maestro installation.}"
 
 EAS_CLI_VERSION="${EAS_CLI_VERSION:-23.2.0}"
 IOS_DEVICE_NAME="${IOS_NATIVE_DEVICE_NAME:-iPhone SE (3rd generation)}"
 RUNNER_TEMP="${RUNNER_TEMP:-${TMPDIR:-/tmp}}"
-MAESTRO_VERSION="${MAESTRO_VERSION:-1.39.5}"
-MAESTRO_MACOS_ARM64_SHA256="${MAESTRO_MACOS_ARM64_SHA256:-REPLACE_WITH_OFFICIAL_SHA256_FOR_ARM64_ZIP}"
-MAESTRO_MACOS_X64_SHA256="${MAESTRO_MACOS_X64_SHA256:-REPLACE_WITH_OFFICIAL_SHA256_FOR_X64_ZIP}"
 
 require_command() {
   if ! command -v "$1" >/dev/null 2>&1; then
@@ -26,42 +24,22 @@ require_command() {
   fi
 }
 
-for command in curl find grep head pnpm sed shasum tar unzip xcrun; do
+for command in awk curl find grep head pnpm sed shasum tar unzip xcrun; do
   require_command "$command"
 done
 
 if ! command -v maestro >/dev/null 2>&1; then
-  case "$(uname -m)" in
-    arm64)
-      maestro_arch="arm64"
-      maestro_sha256="$MAESTRO_MACOS_ARM64_SHA256"
-      ;;
-    x86_64)
-      maestro_arch="x86_64"
-      maestro_sha256="$MAESTRO_MACOS_X64_SHA256"
-      ;;
-    *)
-      echo "Unsupported macOS architecture for Maestro install: $(uname -m)" >&2
-      exit 2
-      ;;
-  esac
+  maestro_installer_url="https://get.maestro.mobile.dev"
+  maestro_installer_path="$RUNNER_TEMP/maestro-installer.sh"
+  curl --fail --location --silent --show-error "$maestro_installer_url" -o "$maestro_installer_path"
 
-  maestro_asset="maestro-${MAESTRO_VERSION}-macos-${maestro_arch}.zip"
-  maestro_url="https://github.com/mobile-dev-inc/maestro/releases/download/v${MAESTRO_VERSION}/${maestro_asset}"
-  maestro_download_path="$RUNNER_TEMP/$maestro_asset"
-  maestro_install_dir="$HOME/.maestro/bin"
-
-  if [[ "$maestro_sha256" == REPLACE_WITH_OFFICIAL_SHA256_* ]]; then
-    echo "Maestro checksum is not configured. Set MAESTRO_MACOS_ARM64_SHA256/MAESTRO_MACOS_X64_SHA256 to official release checksums." >&2
+  installer_sha256="$(shasum -a 256 "$maestro_installer_path" | awk '{print $1}')"
+  if [[ "$installer_sha256" != "$MAESTRO_INSTALLER_SHA256" ]]; then
+    echo "Maestro installer checksum mismatch. Expected $MAESTRO_INSTALLER_SHA256, got $installer_sha256." >&2
     exit 2
   fi
 
-  curl --fail --location --silent --show-error --output "$maestro_download_path" "$maestro_url"
-  printf '%s  %s\n' "$maestro_sha256" "$maestro_download_path" | shasum -a 256 -c -
-
-  mkdir -p "$maestro_install_dir"
-  unzip -q "$maestro_download_path" -d "$maestro_install_dir"
-  chmod +x "$maestro_install_dir/maestro" || true
+  env -u EAS_TOKEN bash "$maestro_installer_path"
 fi
 
 if ! command -v maestro >/dev/null 2>&1 && [[ -d "$HOME/.maestro/bin" ]]; then
@@ -72,19 +50,17 @@ if ! command -v maestro >/dev/null 2>&1 && [[ -d "$HOME/.maestro/bin" ]]; then
 fi
 require_command maestro
 
-booted_devices="$(xcrun simctl list devices)"
-device_udid="$({
-  grep -F "$IOS_DEVICE_NAME (" <<<"$booted_devices" || true
-} |
-  sed -n 's/.*(\([0-9A-Fa-f-]\{8,\}\)) (Booted).*/\1/p' |
-  head -n 1
+booted_devices="$(xcrun simctl list devices booted)"
+device_udid="$(
+  { grep -F "$IOS_DEVICE_NAME (" <<<"$booted_devices" || true; } |
+    sed -n 's/.*(\([0-9A-Fa-f-]\{8,\}\)) (Booted).*/\1/p' |
+    head -n 1
 )"
 
 if [[ -z "$device_udid" ]]; then
   available_devices="$(xcrun simctl list devices available)"
-  device_udid="$({
-    grep -F "$IOS_DEVICE_NAME (" <<<"$available_devices" || true
-  } |
+  device_udid="$(
+    { grep -F "$IOS_DEVICE_NAME (" <<<"$available_devices" || true; } |
       sed -n 's/.*(\([0-9A-Fa-f-]\{8,\}\)) (Shutdown).*/\1/p' |
       head -n 1
   )"
@@ -122,6 +98,9 @@ if [[ -z "$app_path" && -f "$artifact_path" ]]; then
     unzip -q "$artifact_path" -d "$extract_root"
   elif tar -tzf "$artifact_path" >/dev/null 2>&1; then
     tar -xzf "$artifact_path" -C "$extract_root"
+  else
+    echo "The downloaded iOS candidate uses an unsupported archive format; expected a .zip or .tar.gz containing an .app bundle." >&2
+    exit 2
   fi
   app_path="$(
     find "$extract_root" -type d -name '*.app' -print -quit

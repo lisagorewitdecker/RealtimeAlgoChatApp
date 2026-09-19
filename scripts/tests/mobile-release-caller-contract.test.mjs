@@ -546,6 +546,7 @@ test("credential preflight reports every missing required caller key together wi
     if (
       jobId === "mobile-release-node-range" ||
       jobId === "mobile-release-credentials" ||
+      jobId === "mobile-release-configuration" ||
       jobId === "android-preview-evidence" ||
       jobId === "ios-preview-evidence" ||
       jobId === "mobile-publish"
@@ -659,13 +660,8 @@ test("invalid Node range guard blocks release jobs before setup or publish work"
   );
   assert.match(
     String(workflow.jobs?.["mobile-release-gate"]?.if),
-    /needs\.native-ios\.result == 'success'/,
-    "the release gate must only start after the iOS native smoke job succeeds",
-  );
-  assert.match(
-    String(workflow.jobs?.["mobile-release-gate"]?.if),
-    /needs\.native-android\.result == 'success'/,
-    "the release gate must only start after the Android native smoke job succeeds",
+    /needs\.mobile-release-configuration\.result == 'success'/,
+    "the release gate must not start before mobile release configuration is evaluated",
   );
   assert.match(
     String(workflow.jobs?.["mobile-release-gate"]?.if),
@@ -676,6 +672,11 @@ test("invalid Node range guard blocks release jobs before setup or publish work"
     String(workflow.jobs?.["mobile-release-gate"]?.if),
     /needs\.native-evidence-summary-regression\.result == 'success'/,
     "the release gate must only start after hosted summary regression succeeds",
+  );
+  assert.doesNotMatch(
+    String(workflow.jobs?.["mobile-release-gate"]?.if),
+    /needs\.native-ios\.result == 'success'|needs\.native-android\.result == 'success'/,
+    "the release gate must still run when native jobs are skipped for missing release configuration",
   );
   assert.doesNotMatch(
     rejectStep?.run,
@@ -961,8 +962,13 @@ test("blocked release diagnostics identify the supported Node range safely", () 
   );
   assert.match(
     blockStep.run,
-    /summary-regression=\$SUMMARY_REGRESSION_RESULT\./,
-    "blocked release output must use the declared summary regression result",
+    /configuration=\$RELEASE_CONFIGURATION_RESULT/,
+    "blocked release output must include the centralized configuration result",
+  );
+  assert.match(
+    blockStep.run,
+    /summary-regression=\$SUMMARY_REGRESSION_RESULT tamper-regression=\$TAMPER_REGRESSION_RESULT\./,
+    "blocked release output must use the declared summary and tamper regression results",
   );
 });
 

@@ -1131,40 +1131,42 @@ test("idle-profile registration check blocks release and reports its result", ()
   );
 });
 
-test("native hosted release jobs skip cleanly when release configuration is absent", () => {
-  const configJob = workflow.jobs["native-release-configuration"];
+test("native release jobs are gated by centralized mobile release configuration", () => {
+  const configJob = workflow.jobs["mobile-release-configuration"];
   assert.ok(
     configJob,
-    "release workflow must define a native release configuration job",
+    "release workflow must define the centralized mobile release configuration job",
   );
   assert.equal(
-    configJob.environment.name,
+    workflow.jobs["native-release-configuration"],
+    undefined,
+    "the hosted release workflow must not retain the superseded native-release-configuration job",
+  );
+  assert.equal(
+    configJob.environment?.name,
     "mobile-release",
-    "native release configuration must read from the protected release environment",
+    "centralized release configuration must read from the protected mobile-release environment",
   );
   assert.equal(
-    configJob.outputs?.ios_release_configured,
-    "${{ steps.native-release-config.outputs.ios_release_configured }}",
+    configJob.outputs?.ios_configured,
+    "${{ steps.release-config.outputs.ios_configured }}",
+    "centralized release configuration must expose the iOS readiness flag",
   );
   assert.equal(
-    configJob.outputs?.android_release_configured,
-    "${{ steps.native-release-config.outputs.android_release_configured }}",
+    configJob.outputs?.android_configured,
+    "${{ steps.release-config.outputs.android_configured }}",
+    "centralized release configuration must expose the Android readiness flag",
   );
 
   const configStep = configJob.steps.find(
-    (step) => step.name === "Determine native release secret configuration",
+    (step) => step.name === "Determine mobile release configuration",
   );
   assert.ok(
     configStep,
-    "native release configuration job must determine whether hosted release secrets are present",
+    "centralized release configuration must compute the native readiness flags",
   );
-  assert.equal(configStep.id, "native-release-config");
+  assert.equal(configStep.id, "release-config");
   assert.equal(configStep.env.EAS_TOKEN, "${{ secrets.EAS_TOKEN }}");
-  assert.equal(
-    configStep.env.GITHUB_EVENT_NAME,
-    "${{ github.event_name }}",
-    "native release configuration must distinguish optional manual dispatches from strict release events",
-  );
   assert.equal(
     configStep.env.NATIVE_SMOKE_IOS_APP_ID,
     "${{ secrets.NATIVE_SMOKE_IOS_APP_ID }}",
@@ -1206,52 +1208,125 @@ test("native hosted release jobs skip cleanly when release configuration is abse
     configStep.env.NATIVE_SMOKE_ANDROID_BUILD_ID,
     "${{ env.NATIVE_SMOKE_ANDROID_BUILD_ID }}",
   );
+  assert.match(configStep.run, /echo "ios_configured=\$ios_configured" >> "\$GITHUB_OUTPUT"/);
   assert.match(
     configStep.run,
-    /echo "ios_release_configured=\$ios_release_configured" >> "\$GITHUB_OUTPUT"/,
+    /echo "android_configured=\$android_configured" >> "\$GITHUB_OUTPUT"/,
+  );
+  assert.doesNotMatch(
+    configStep.run,
+    /echo[^\n]*(?:EAS_TOKEN|NATIVE_SMOKE_EMAIL|NATIVE_SMOKE_PASSWORD|SENTRY_AUTH_TOKEN)/,
+    "centralized release configuration must not print secret-backed values",
+  );
+
+  const nativeIosJob = workflow.jobs["native-ios"];
+  assert.ok(
+    nativeIosJob.needs.includes("mobile-release-configuration"),
+    "native-ios must wait for centralized release configuration",
+  );
+  assert.ok(
+    nativeIosJob.needs.includes("mobile-release-credentials"),
+    "native-ios must wait for the aggregate credential preflight",
+  );
+  assert.equal(
+    nativeIosJob.if,
+    "${{ github.event_name != 'pull_request' && inputs.android_runner_health_only != true && needs.mobile-release-configuration.outputs.ios_configured == 'true' }}",
+    "native-ios must only run when the centralized iOS release configuration is ready",
+  );
+  assert.equal(
+    nativeIosJob.steps.find((step) => step.id === "ios-hosted-runner")?.env
+      ?.MAESTRO_INSTALLER_SHA256,
+    "${{ vars.MAESTRO_INSTALLER_SHA256 }}",
+    "native-ios must pass the pinned Maestro installer checksum into hosted-runner setup",
+  );
+
+  const androidPreflightJob = workflow.jobs["android-prerequisite-preflight"];
+  assert.ok(
+    androidPreflightJob.needs.includes("mobile-release-configuration"),
+    "Android runner preflight must wait for centralized release configuration",
+  );
+  assert.ok(
+    androidPreflightJob.needs.includes("mobile-release-credentials"),
+    "Android runner preflight must wait for the aggregate credential preflight",
+  );
+  assert.equal(
+    androidPreflightJob.if,
+    "${{ github.event_name != 'pull_request' && inputs.android_runner_health_only != true && needs.mobile-release-configuration.outputs.android_configured == 'true' }}",
+    "Android runner preflight must only run when the centralized Android release configuration is ready",
+  );
+
+  const nativeAndroidJob = workflow.jobs["native-android"];
+  assert.ok(
+    nativeAndroidJob.needs.includes("mobile-release-configuration"),
+    "native-android must wait for centralized release configuration",
+  );
+  assert.ok(
+    nativeAndroidJob.needs.includes("mobile-release-credentials"),
+    "native-android must wait for the aggregate credential preflight",
+  );
+  assert.equal(
+    nativeAndroidJob.if,
+    "${{ github.event_name != 'pull_request' && inputs.android_runner_health_only != true && needs.mobile-release-configuration.outputs.android_configured == 'true' }}",
+    "native-android must only run when the centralized Android release configuration is ready",
+  );
+  assert.equal(
+    nativeAndroidJob.steps.find(
+      (step) => step.name === "Prepare GitHub-hosted Android runner",
+    )?.env?.MAESTRO_INSTALLER_SHA256,
+    "${{ vars.MAESTRO_INSTALLER_SHA256 }}",
+    "native-android must pass the pinned Maestro installer checksum into hosted-runner setup",
+  );
+
+  const gateJob = workflow.jobs["mobile-release-gate"];
+  assert.ok(
+    gateJob.needs.includes("mobile-release-configuration"),
+    "the final release gate must retain the centralized configuration job in its prerequisites",
+  );
+  const blockingStep = gateJob.steps.find(
+    (step) => step.name === "Block release unless both native checks pass",
+  );
+  assert.equal(
+    blockingStep?.env?.RELEASE_CONFIGURATION_RESULT,
+    "${{ needs.mobile-release-configuration.result }}",
+    "the final release gate must report the centralized configuration result",
+  );
+  assert.equal(
+    blockingStep?.env?.IOS_CONFIGURATION_READY,
+    "${{ needs.mobile-release-configuration.outputs.ios_configured }}",
+    "the final release gate must receive the centralized iOS readiness flag",
+  );
+  assert.equal(
+    blockingStep?.env?.ANDROID_CONFIGURATION_READY,
+    "${{ needs.mobile-release-configuration.outputs.android_configured }}",
+    "the final release gate must receive the centralized Android readiness flag",
   );
   assert.match(
-    configStep.run,
-    /echo "android_release_configured=\$android_release_configured" >> "\$GITHUB_OUTPUT"/,
+    blockingStep?.run ?? "",
+    /iOS release configuration: \*\*READY\*\*[\s\S]*iOS release configuration: \*\*BLOCKED\*\*/,
+    "the final release gate must summarize both ready and blocked iOS configuration states",
   );
   assert.match(
-    configStep.run,
-    /if \[\[ "\$\{GITHUB_EVENT_NAME:-\}" != "workflow_dispatch" && \( "\$ios_release_configured" != "true" \|\| "\$android_release_configured" != "true" \) \]\]; then/,
-    "strict tag and reusable-call runs must fail when native release configuration is incomplete",
+    blockingStep?.run ?? "",
+    /Android release configuration: \*\*READY\*\*[\s\S]*Android release configuration: \*\*BLOCKED\*\*/,
+    "the final release gate must summarize both ready and blocked Android configuration states",
   );
+  assert.match(
+    blockingStep?.run ?? "",
+    /provide the native smoke build IDs and protected release secrets before rerunning the workflow/,
+    "the final release gate must explain how to unblock missing native release configuration",
+  );
+  assert.match(
+    blockingStep?.run ?? "",
+    /if \[\[ "\$IOS_CONFIGURATION_READY" == "true" && "\$IOS_RESULT" != "success" \]\]; then[\s\S]*ios_gate_failed=true/,
+    "the final release gate must only require iOS success when iOS configuration is ready",
+  );
+  assert.match(
+    blockingStep?.run ?? "",
+    /if \[\[ "\$ANDROID_CONFIGURATION_READY" == "true" && "\$ANDROID_RESULT" != "success" \]\]; then[\s\S]*android_gate_failed=true/,
+    "the final release gate must only require Android success when Android configuration is ready",
+  );
+});
 
-  const androidPreflight = workflow.jobs["android-prerequisite-preflight"];
-  assert.equal(
-    androidPreflight.if,
-    "${{ github.event_name != 'pull_request' && needs.native-release-configuration.outputs.android_release_configured == 'true' }}",
-    "android runner preflight must skip unless Android release configuration is present",
-  );
-  assert.ok(
-    androidPreflight.needs.includes("native-release-configuration"),
-    "android runner preflight must depend on the shared native release configuration job",
-  );
-
-  const nativeIos = workflow.jobs["native-ios"];
-  assert.equal(
-    nativeIos.if,
-    "${{ github.event_name != 'pull_request' && needs.native-release-configuration.outputs.ios_release_configured == 'true' }}",
-    "native-ios must skip unless iOS release configuration is present",
-  );
-  assert.ok(
-    nativeIos.needs.includes("native-release-configuration"),
-    "native-ios must depend on the shared native release configuration job",
-  );
-
-  const nativeAndroid = workflow.jobs["native-android"];
-  assert.equal(
-    nativeAndroid.if,
-    "${{ github.event_name != 'pull_request' && needs.native-release-configuration.outputs.android_release_configured == 'true' }}",
-    "native-android must skip unless Android release configuration is present",
-  );
-  assert.ok(
-    nativeAndroid.needs.includes("native-release-configuration"),
-    "native-android must depend on the shared native release configuration job",
-  );
 test("idle-profile summary reports fixed browser target outages without leaking URLs", () => {
   const idleJob = workflow.jobs["idle-profile-registration"];
   const chatPreflightStep = idleJob.steps.find(
