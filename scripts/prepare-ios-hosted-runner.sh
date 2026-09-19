@@ -53,7 +53,7 @@ require_command maestro
 
 booted_devices="$(xcrun simctl list devices booted)"
 device_udid="$(
-  grep -F "$IOS_DEVICE_NAME (" <<<"$booted_devices" |
+  { grep -F "$IOS_DEVICE_NAME (" <<<"$booted_devices" || true; } |
     sed -n 's/.*(\([0-9A-Fa-f-]\{8,\}\)) (Booted).*/\1/p' |
     head -n 1
 )"
