@@ -341,7 +341,10 @@ test(
   },
   () => {
     const temporaryDirectory = mkdtempSync(
-      join(tmpdir(), "chat-preview-windows-runner-"),
+      join(
+        packageRoot,
+        "chat-preview-windows-runner-",
+      ),
     );
     const longPath =
       `C:\\Program Files\\Expo\\${"React Native DevTools cache\\".repeat(14)}` +
