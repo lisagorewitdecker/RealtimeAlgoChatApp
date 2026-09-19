@@ -145,7 +145,7 @@ if [[ ! -f "$artifact_path" ]]; then
   exit 2
 fi
 
-adb install -r "$artifact_path" >/dev/null
+adb install -r -t "$artifact_path" >/dev/null
 if ! adb shell pm path "$NATIVE_SMOKE_ANDROID_APP_ID" >/dev/null 2>&1; then
   echo "The downloaded Android candidate did not install with the configured application ID." >&2
   exit 2

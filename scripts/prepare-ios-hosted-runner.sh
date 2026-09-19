@@ -24,7 +24,7 @@ require_command() {
   fi
 }
 
-for command in curl find grep head pnpm sed shasum tar unzip xcrun; do
+for command in awk curl find grep head pnpm sed shasum tar unzip xcrun; do
   require_command "$command"
 done
 
