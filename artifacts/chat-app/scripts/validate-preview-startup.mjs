@@ -347,7 +347,7 @@ function sanitizeRecordedStartupOutput(value) {
     return `${redactedPrefix}\\${libraryName}${suffix}`;
   };
   const sanitizeWindowsProjectPath = (path) => {
-    const pathSegments = path.split("\\");
+    const pathSegments = path.split("\\").filter(Boolean);
     const preservedSegments = pathSegments.slice(-2).join("\\");
     const redactedPrefix = path.startsWith("\\\\")
       ? "\\\\[redacted]"
@@ -380,7 +380,7 @@ function sanitizeRecordedStartupOutput(value) {
           },
         )
         .replace(
-          /Starting project at ((?:[A-Za-z]:\\|\\\\[^\\\r\n]+\\[^\\\r\n]+\\)[^\\\s"\r\n]+(?:\\[^\\\s"\r\n]+)*)/g,
+          /Starting project at ((?:[A-Za-z]:\\|\\\\[^\\\r\n]+\\[^\\\r\n]+\\)[^\\"\r\n]+(?:\\[^\\"\r\n]+)*)/g,
           (_, path) => {
             return `Starting project at ${sanitizeWindowsProjectPath(path)}`;
           },
