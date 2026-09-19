@@ -26,6 +26,19 @@ jobs:
           ref: ${{ inputs.reviewed_ref }}
           fetch-depth: 1
           persist-credentials: false
+          # The repository contains documentation fixture paths that Git for
+          # Windows cannot materialize. This check only needs the workspace
+          # packages and launcher validator, so avoid unrelated paths.
+          sparse-checkout: |
+            /package.json
+            /pnpm-lock.yaml
+            /pnpm-workspace.yaml
+            /.npmrc
+            /artifacts/chat-app/
+            /lib/
+            /vendor/
+            /scripts/
+          sparse-checkout-cone-mode: false
 
       - name: Set up pnpm
         uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
@@ -40,6 +53,11 @@ jobs:
 
       - name: Install workspace dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: Run Windows loader diagnosis smoke check
+        if: matrix.os == 'windows-latest'
+        shell: bash
+        run: pnpm --filter @workspace/chat-app run test:preview-loader-windows
 
       - name: Capture and revalidate real Expo launcher output
         shell: bash
