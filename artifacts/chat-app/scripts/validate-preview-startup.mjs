@@ -278,6 +278,11 @@ function formatStartupFailure(output) {
       ? redactKnownStartupFailureSecrets(failure)
       : failure;
     const missingLibrary = loaderFailure
+    const isLoaderFailure = loaderFailure === failure;
+    const safeFailure = isLoaderFailure
+      ? redactKnownStartupFailureSecrets(failure)
+      : failure;
+    const missingLibrary = isLoaderFailure
       ? findMissingLibrary(loaderFailure)
       : null;
     if (isLoaderFailure && !missingLibrary) {
@@ -338,6 +343,7 @@ function sanitizeRecordedStartupOutput(value) {
   const sanitizeWindowsPath = (path) => {
     const libraryName = path.match(
       /[^/\\\s]+?\.(?:dylib|so(?:\.\d+)*|dll)\b/i,
+      /[^/\\\s]+?\.(?:dylib|so(?:\.\d+)?|dll)\b/i,
     )?.[0];
     const redactedPrefix = path.startsWith("\\\\")
       ? "\\\\[redacted]"
@@ -383,11 +389,16 @@ function sanitizeRecordedStartupOutput(value) {
           /Starting project at ((?:[A-Za-z]:\\|\\\\[^\\\r\n]+\\[^\\\r\n]+\\)[^\\"\r\n]+(?:\\[^\\"\r\n]+)*)/g,
           (_, path) => {
             const startupProjectPath = trimKnownStartupArguments(path);
+            const startupProjectPath = path.replace(
+              /\s+--port\b(?:\s+\S+)?(?:\s+\S+)?$/,
+              "",
+            );
             return `Starting project at ${sanitizeWindowsProjectPath(startupProjectPath)}`;
           },
         )
         .replace(
           /[A-Za-z]:\\(?:Users|home)\\[^"\r\n]+|[A-Za-z]:\\[^"\r\n]*?[^/\\\s]+\.(?:dylib|so(?:\.\d+)*|dll)\b[^"\r\n]*|\\\\[^\\\r\n]+\\[^\\\r\n]+\\[^"\r\n]*?[^/\\\s]+\.(?:dylib|so(?:\.\d+)*|dll)\b[^"\r\n]*/g,
+          /[A-Za-z]:\\(?:Users|home)\\[^"\r\n]+|[A-Za-z]:\\[^"\r\n]*?[^/\\\s]+\.(?:dylib|so(?:\.\d+)?|dll)\b[^"\r\n]*|\\\\[^\\\r\n]+\\[^\\\r\n]+\\[^"\r\n]*?[^/\\\s]+\.(?:dylib|so(?:\.\d+)?|dll)\b[^"\r\n]*/g,
           sanitizeWindowsPath,
         )
         .slice(0, MAX_RECORDED_STARTUP_LINE_LENGTH),
