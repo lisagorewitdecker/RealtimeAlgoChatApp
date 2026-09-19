@@ -7,6 +7,8 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+VALIDATOR_PATH="$ROOT_DIR/artifacts/chat-app/scripts/validate-preview-startup.mjs"
+VALIDATOR_FAILURE_REASON="The Android preview evidence check is missing its delegated validator dependency boundary: artifacts/chat-app/scripts/validate-preview-startup.mjs is not present in the checked-out commit. Restore that validator before changing the evidence record."
 if [[ "${1:-}" == "--" ]]; then
   shift
 fi
@@ -18,6 +20,9 @@ if [[ -n "$PREFLIGHT_PATH" ]]; then
   PREFLIGHT_PATH_EXPLICIT=1
 fi
 FAILURES=()
+SCREENSHOT_INSPECTION_PATH=""
+SCREENSHOT_METADATA_INSPECTION_STATUS="NOT_RUN"
+SCREENSHOT_PIXEL_INSPECTION_STATUS="NOT_RUN"
 
 failure() {
   FAILURES+=("$1")
@@ -86,7 +91,23 @@ validate_handoff_boundaries() {
 
 validate_preflight_json() {
   local preflight_path="$1"
-  local status_output actual_status expected_status boundary
+  local status_output actual_status expected_status expected_evidence actual_evidence boundary
+
+  boundary_evidence() {
+    local boundary="$1"
+    awk -F'|' -v expected="$boundary" '
+      {
+        label = $2
+        gsub(/^[[:space:]]+|[[:space:]]+$/, "", label)
+      }
+      label == expected {
+        value = $4
+        gsub(/^[[:space:]]+|[[:space:]]+$/, "", value)
+        print value
+        exit
+      }
+    ' "$RECORD_PATH"
+  }
 
   if [[ -z "$preflight_path" ]]; then
     return
@@ -98,8 +119,13 @@ validate_preflight_json() {
     return
   fi
 
+  if [[ ! -f "$VALIDATOR_PATH" ]]; then
+    failure "$VALIDATOR_FAILURE_REASON"
+    return
+  fi
+
   if ! status_output="$(
-    node "$ROOT_DIR/artifacts/chat-app/scripts/validate-preview-startup.mjs" \
+    node "$VALIDATOR_PATH" \
       --validate-record "$preflight_path" 2>/dev/null
   )"; then
     failure "The Android preview preflight JSON artifact does not satisfy the redacted schema."
@@ -129,6 +155,15 @@ validate_preflight_json() {
   if [[ "$actual_status" != "$expected_status" ]]; then
     failure "The preflight JSON public manifest boundary does not match the Markdown record."
   fi
+  expected_evidence="$(
+    printf '%s\n' "$status_output" |
+      sed -n 's/^publicManifestReachabilityEvidence=//p' |
+      head -n 1
+  )"
+  actual_evidence="$(boundary_evidence "Public manifest reachability")"
+  if [[ "$expected_evidence" != "$actual_evidence" ]]; then
+    failure "The preflight JSON public manifest evidence does not match the Markdown record."
+  fi
 
   expected_status="$(boundary_status "Local handoff probe (manifest and bundle)")"
   actual_status="$(
@@ -137,6 +172,15 @@ validate_preflight_json() {
   )"
   if [[ "$actual_status" != "$expected_status" ]]; then
     failure "The preflight JSON local handoff boundary does not match the Markdown record."
+  fi
+  expected_evidence="$(
+    printf '%s\n' "$status_output" |
+      sed -n 's/^localHandoffProbeEvidence=//p' |
+      head -n 1
+  )"
+  actual_evidence="$(boundary_evidence "Local handoff probe (manifest and bundle)")"
+  if [[ "$expected_evidence" != "$actual_evidence" ]]; then
+    failure "The preflight JSON local handoff evidence does not match the Markdown record."
   fi
 }
 
@@ -248,10 +292,15 @@ screenshot_contains_forbidden_text() {
   local image_path="$1"
   local pattern="$2"
   local ocr_text="$3"
+  local metadata_text
 
-  if strings -a -n 4 "$image_path" 2>/dev/null |
-    LC_ALL=C grep -Eiq -- "$pattern"; then
-    return 0
+  if metadata_text="$(strings -a -n 4 "$image_path" 2>/dev/null)"; then
+    SCREENSHOT_METADATA_INSPECTION_STATUS="COMPLETED"
+    if printf '%s\n' "$metadata_text" | LC_ALL=C grep -Eiq -- "$pattern"; then
+      return 0
+    fi
+  else
+    SCREENSHOT_METADATA_INSPECTION_STATUS="NOT_COMPLETED"
   fi
 
   printf '%s\n' "$ocr_text" |
@@ -263,11 +312,20 @@ validate_screenshot_redaction() {
   local screenshot_path="$2"
   local ocr_text
 
+  if strings -a -n 4 "$screenshot_file" >/dev/null 2>&1; then
+    SCREENSHOT_METADATA_INSPECTION_STATUS="COMPLETED"
+  else
+    SCREENSHOT_METADATA_INSPECTION_STATUS="NOT_COMPLETED"
+  fi
+
   if ! command -v tesseract >/dev/null 2>&1 ||
     ! ocr_text="$(tesseract "$screenshot_file" stdout --psm 11 -l eng 2>/dev/null)"; then
+    SCREENSHOT_PIXEL_INSPECTION_STATUS="NOT_COMPLETED"
     failure "The PASS record's screenshot pixel inspection could not run for ${screenshot_path}."
     return
   fi
+
+  SCREENSHOT_PIXEL_INSPECTION_STATUS="COMPLETED"
 
   if screenshot_contains_forbidden_text "$screenshot_file" \
     '[[:alnum:]][[:alnum:]._%+-]*@[[:alnum:].-]+\.[[:alpha:]]{2,}|(account|user(name)?|member|profile)[[:space:]_-]*(id|email|name)?[[:space:]]*[:=]' \
@@ -394,6 +452,7 @@ validate_pass_record() {
       ! is_supported_image_file "$screenshot_file"; then
       failure "The PASS record's redacted screenshot path must point to an existing non-empty supported image file."
     else
+      SCREENSHOT_INSPECTION_PATH="$screenshot_path"
       if [[ "$(boundary_status "Screenshot redaction review")" != "pass" ]]; then
         failure "PASS records with a screenshot require a separate Screenshot redaction review row marked PASS."
       fi
@@ -478,6 +537,13 @@ else
       failure "Evidence record has an unsupported result; use PASS or BLOCKED."
       ;;
   esac
+fi
+
+if [[ -n "$SCREENSHOT_INSPECTION_PATH" ]]; then
+  printf 'Screenshot inspection status: path=%s; metadata=%s; pixels=%s\n' \
+    "$SCREENSHOT_INSPECTION_PATH" \
+    "$SCREENSHOT_METADATA_INSPECTION_STATUS" \
+    "$SCREENSHOT_PIXEL_INSPECTION_STATUS"
 fi
 
 if ((${#FAILURES[@]})); then

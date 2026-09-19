@@ -252,14 +252,14 @@ describe("key-reset recovery Playwright diagnostics", () => {
     },
     {
       phase: "recover a fresh room-key envelope after reset",
-      action: "page.goto",
+      action: "locator.click",
     },
     {
       phase: "decrypt history and a new message with recovered key",
       action: "locator.fill",
     },
     {
-      phase: "reload room and reuse recovered key",
+      phase: "reload room after resetting the session key",
       action: "page.reload",
     },
     {
@@ -472,11 +472,29 @@ describe("key-reset recovery Playwright diagnostics", () => {
     20_000,
   );
 
-  it(
-    "reports a cleanup-only timeout after recovery diagnostics succeed",
-    () => {
+  it.each([
+    {
+      cleanup: "browser",
+      timeout: "Browser context cleanup timed out after 250ms",
+    },
+    {
+      cleanup: "database",
+      timeout: "Recovery room database cleanup timed out after 250ms",
+    },
+    {
+      cleanup: "clerk-user",
+      timeout:
+        "Clerk user cleanup for diagnostic-user timed out after 250ms",
+    },
+    {
+      cleanup: "pool",
+      timeout: "Recovery database pool shutdown timed out after 250ms",
+    },
+  ])(
+    "reports a cleanup-only $cleanup timeout after recovery diagnostics succeed",
+    ({ cleanup, timeout }) => {
       const outputDirectory = mkdtempSync(
-        join(tmpdir(), "recovery-cleanup-only-diagnostic-"),
+        join(tmpdir(), `recovery-${cleanup}-cleanup-only-diagnostic-`),
       );
       const phase = recoveryPhases[0]!;
       try {
@@ -502,7 +520,7 @@ describe("key-reset recovery Playwright diagnostics", () => {
               E2E_RECOVERY_DIAGNOSTIC_CONTRACT: "1",
               E2E_RECOVERY_DIAGNOSTIC_PHASES: phase.phase,
               E2E_RECOVERY_DIAGNOSTIC_PHASES_SUCCEED: "1",
-              E2E_RECOVERY_DIAGNOSTIC_CLEANUP: "database",
+              E2E_RECOVERY_DIAGNOSTIC_CLEANUP: cleanup,
             },
             timeout: 15_000,
           },
@@ -516,9 +534,7 @@ describe("key-reset recovery Playwright diagnostics", () => {
           `[key-reset-recovery-e2e] diagnostic phase completed: ${phase.phase}`,
         );
         expect(report).toContain("Key-reset recovery E2E cleanup failed");
-        expect(report).toContain(
-          "Recovery room database cleanup timed out after 250ms",
-        );
+        expect(report).toContain(timeout);
         expect(report).not.toContain("Recovery diagnostic phase failed");
         expect(report).not.toContain(
           "Key-reset recovery verification and cleanup both failed",

@@ -6,6 +6,8 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 WORKSPACE_ROOT="$(cd -- "$SCRIPT_DIR/../.." && pwd)"
 GATE_RELATIVE_PATH="artifacts/chat-app/e2e/native-large-text/run.sh"
 GATE="$WORKSPACE_ROOT/$GATE_RELATIVE_PATH"
+WORKFLOW_OUTPUT_SAFETY_RELATIVE_PATH="scripts/workflow-output-safety.sh"
+WORKFLOW_OUTPUT_SAFETY="$WORKSPACE_ROOT/$WORKFLOW_OUTPUT_SAFETY_RELATIVE_PATH"
 SENTRY_GATE="$WORKSPACE_ROOT/artifacts/chat-app/e2e/sentry-source-map/run.sh"
 TEMPLATE_WRITER_RELATIVE_PATH="artifacts/chat-app/e2e/native-large-text/write-review-record-template.sh"
 TEMPLATE_WRITER="$WORKSPACE_ROOT/$TEMPLATE_WRITER_RELATIVE_PATH"
@@ -19,8 +21,22 @@ MKDIR_BIN="$(command -v mkdir)"
 RM_BIN="$(command -v rm)"
 GREP_BIN="$(command -v grep)"
 
-test_root="$("$MKTEMP_BIN" -d)"
-trap '"$RM_BIN" -rf "$test_root"' EXIT
+test_parent="$("$MKTEMP_BIN" -d)"
+test_root="$test_parent/fixtures"
+cleanup_guard="$test_parent/cleanup-must-not-escape-fixtures"
+"$MKDIR_BIN" -p "$test_root"
+printf 'keep\n' >"$cleanup_guard"
+
+cleanup_test_fixtures() {
+  "$RM_BIN" -rf "$test_root"
+  if [[ ! -f "$cleanup_guard" ]]; then
+    echo "iOS native large-text readiness cleanup escaped its fixture directory" >&2
+    return 1
+  fi
+  "$RM_BIN" -rf "$test_parent"
+}
+
+trap cleanup_test_fixtures EXIT
 
 utilities="$test_root/utilities"
 "$MKDIR_BIN" -p "$utilities" "$test_root/home"
@@ -438,7 +454,9 @@ assert_contains \
 # tree instead of the release evidence directory.
 default_tree="$test_root/default-tree"
 "$MKDIR_BIN" -p "$(dirname "$default_tree/$GATE_RELATIVE_PATH")"
+  "$MKDIR_BIN" -p "$(dirname "$default_tree/$WORKFLOW_OUTPUT_SAFETY_RELATIVE_PATH")"
 "$CP_BIN" "$GATE" "$default_tree/$GATE_RELATIVE_PATH"
+  "$CP_BIN" "$WORKFLOW_OUTPUT_SAFETY" "$default_tree/$WORKFLOW_OUTPUT_SAFETY_RELATIVE_PATH"
 "$CP_BIN" "$TEMPLATE_WRITER" "$default_tree/$TEMPLATE_WRITER_RELATIVE_PATH"
 default_diagnostic_path="$(make_command_path default-diagnostic)"
 make_xcrun_stub "$default_diagnostic_path" "$LARGER_DEVICE_BOOTED"
@@ -479,5 +497,8 @@ for summary in "$test_root"/*-summary.md; do
     assert_not_contains "$(<"$summary")" "$sentinel" "credential sentinel"
   done
 done
+
+cleanup_test_fixtures
+trap - EXIT
 
 echo "iOS native large-text readiness regression tests passed."

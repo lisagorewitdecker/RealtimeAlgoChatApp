@@ -5,7 +5,10 @@ on:
     paths:
       - .github/workflows/native-evidence-summary-regression.yml
       - scripts/check-native-large-text-evidence.sh
+      - scripts/find-duplicate-json-object-keys.mjs
+      - scripts/read-bounded-text.mjs
       - scripts/run-untrusted-checker.sh
+      - scripts/tests/native-evidence-summary-regression-fixture.sh
   workflow_dispatch:
     inputs:
       reviewed_ref:
@@ -32,83 +35,92 @@ jobs:
         shell: bash
         env:
           REVIEWED_REF: ${{ github.event.pull_request.head.sha || inputs.reviewed_ref }}
+          NATIVE_EVIDENCE_HOSTILE_METADATA: "1"
+        run: |
+          bash scripts/tests/native-evidence-summary-regression-fixture.sh \
+            bash scripts/check-native-large-text-evidence.sh
+
+      - name: Verify oversized native evidence stays blocked and redacted
+        shell: bash
         run: |
           set -euo pipefail
-          blocked_root="$(mktemp -d)"
+          # The hostile marker is decoded at runtime: GitHub Actions echoes the
+          # rendered run script into the job log, so the raw value must not
+          # appear anywhere in this workflow source.
+          private_marker="$(printf '%s' 'b3ZlcnNpemVkLWhvc3RlZC1wcml2YXRlLXNlbnRpbmVs' | base64 -d)"
+          oversized_root="$(mktemp -d)"
           summary_path="$(mktemp)"
-          trap 'rm -rf "$blocked_root" "$summary_path"' EXIT
-          resolved_commit_sha="$(git rev-parse --verify HEAD)"
+          output_path="$(mktemp)"
+          trap 'rm -rf "$oversized_root" "$summary_path" "$output_path"' EXIT
+
+          run_dir="$oversized_root/android/20260917T120000Z"
+          mkdir -p "$run_dir/screenshots" "$run_dir/call-surface"
+          printf 'build-android\n' > "$run_dir/candidate-build-id.txt"
+          cat > "$run_dir/runner-metadata.txt" <<'EOF'
+          platform=android
+          run_mode=release-gate
+          candidate_build_id=build-android
+          recorded_at_utc=2026-09-17T12:00:00Z
+          EOF
+          cat > "$run_dir/pass-fail-record.txt" <<'EOF'
+          platform=android
+          status=PASS
+          run_mode=release-gate
+          recorded_at_utc=2026-09-17T12:00:00Z
+          EOF
+          printf '%s\n' '- Status: **PASS**' > "$run_dir/native-branding-check.md"
+          printf '%s\n' '<testsuite name="native-large-text"/>' > "$run_dir/maestro-results.xml"
+          printf '%s\n' '<testsuite name="sentry-probe"/>' > "$run_dir/sentry-maestro-results.xml"
+          cat > "$run_dir/sentry-trigger.txt" <<'EOF'
+          platform=android
+          candidate_build_id=build-android
+          marker=run-1234-android
+          EOF
+          for index in $(seq 1 11); do
+            printf 'png-%s\n' "$index" > "$run_dir/screenshots/screen-$index.png"
+          done
+          for index in 1 2; do
+            printf 'call-%s\n' "$index" > "$run_dir/call-surface/call-$index.png"
+          done
 
           {
-            echo "## Reviewed release revision"
-            printf -- '- Checked ref: `%s`\n' "$REVIEWED_REF"
-            printf -- '- Resolved commit SHA: `%s`\n' "$resolved_commit_sha"
-          } >> "$GITHUB_STEP_SUMMARY"
+            printf '{"status":"PASS","eventId":"0123456789abcdef0123456789abcdef","platform":"android","candidateBuildId":"build-android","marker":"run-1234-android","release":"chat-app@1.0.0+abc123","dist":"42","readableFrame":{"filename":"artifacts/chat-app/lib/sentry.ts","function":"createNativeSourceMapProbeError","line":55,"column":10},"private":"'
+            printf '%s' "$private_marker"
+            printf '%s' '","padding":"'
+            head -c 262144 /dev/zero | tr '\0' 'x'
+            printf '"}\n'
+          } > "$run_dir/sentry-source-map-evidence.json"
 
-          if GITHUB_STEP_SUMMARY="$summary_path" bash scripts/run-untrusted-checker.sh bash scripts/check-native-large-text-evidence.sh "$blocked_root"; then
-            echo "The blocked native evidence scenario unexpectedly passed." >&2
+          if GITHUB_STEP_SUMMARY="$summary_path" \
+            bash scripts/run-untrusted-checker.sh \
+            bash scripts/check-native-large-text-evidence.sh "$oversized_root" \
+            > "$output_path" 2>&1; then
+            echo "The oversized native evidence scenario unexpectedly passed." >&2
             exit 1
           fi
 
-          ios_section="$(
-            awk '
-              /^## iOS native large-text evidence$/ { collecting=1 }
-              /^## Android native large-text evidence$/ { collecting=0 }
-              collecting { print }
-            ' "$summary_path"
-          )"
-          android_section="$(
-            awk '
-              /^## Android native large-text evidence$/ { collecting=1 }
-              collecting { print }
-            ' "$summary_path"
-          )"
-
+          output="$(cat "$output_path")"
+          summary="$(cat "$summary_path")"
           require_contains() {
-            local section="$1"
+            local value="$1"
             local expected="$2"
-            if ! grep -Fq -- "$expected" <<< "$section"; then
-              echo "Expected hosted summary to contain: $expected" >&2
+            if ! grep -Fq -- "$expected" <<< "$value"; then
+              echo "Expected oversized evidence diagnostic to contain: $expected" >&2
               exit 1
             fi
           }
-
           require_not_contains() {
-            local section="$1"
+            local value="$1"
             local unexpected="$2"
-            if grep -Fq -- "$unexpected" <<< "$section"; then
-              echo "Hosted summary contained cross-platform detail: $unexpected" >&2
+            if grep -Fq -- "$unexpected" <<< "$value"; then
+              echo "Oversized evidence payload leaked into hosted output." >&2
               exit 1
             fi
           }
 
-          require_only_missing_result_finding() {
-            local section="$1"
-            local expected="$2"
-            local findings
-            findings="$(
-              awk '
-                /^### Blocking evidence findings$/ { collecting=1; next }
-                /^### / { collecting=0 }
-                collecting && /^- `/ { print }
-              ' <<< "$section"
-            )"
-            if [[ "$findings" != "$expected" ]]; then
-              printf 'Expected exactly one platform-specific blocking finding:\n%s\n' "$findings" >&2
-              exit 1
-            fi
-          }
-
-          require_contains "$ios_section" "- Status: **FAIL**"
-          require_contains "$ios_section" "- Validated run directory: **Unavailable**"
-          require_contains "$ios_section" "- Detailed evidence report: **Unavailable**"
-          require_only_missing_result_finding "$ios_section" "- \`Missing result directory: $blocked_root/ios. Run the ios native large-text gate and upload its timestamped result directory.\`"
-          require_not_contains "$ios_section" "$blocked_root/android"
-
-          require_contains "$android_section" "- Status: **FAIL**"
-          require_contains "$android_section" "- Validated run directory: **Unavailable**"
-          require_contains "$android_section" "- Detailed evidence report: **Unavailable**"
-          require_only_missing_result_finding "$android_section" "- \`Missing result directory: $blocked_root/android. Run the android native large-text gate and upload its timestamped result directory.\`"
-          require_not_contains "$android_section" "$blocked_root/ios"
-
+          require_contains "$output" "evidence exceeds the release evidence size limit"
+          require_contains "$summary" "evidence exceeds the release evidence size limit"
+          require_contains "$summary" "- Status: **FAIL**"
+          require_not_contains "$output" "$private_marker"
+          require_not_contains "$summary" "$private_marker"
           cat "$summary_path" >> "$GITHUB_STEP_SUMMARY"

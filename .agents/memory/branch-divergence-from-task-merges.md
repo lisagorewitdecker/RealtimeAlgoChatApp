@@ -1,81 +1,22 @@
 ---
 name: Task merges land on the checked-out branch
-description: Why branches diverge after task merges, how the platform rebases task branches, and how to consolidate a split safely.
+description: Reconciling task merges when branches diverge, and recognizing whole-file duplication inherited from the target branch.
 ---
-Platform task merges are committed onto whichever branch is checked out in the
-workspace at merge time. If the Git pane switches branches between merges (the
-iOS app does this easily), approved work ends up split across branches even
-though every merge succeeded. On 2026-09-13, a Git-pane switch from
-`production` to a task branch and then through `development` to `main` split 32
-approved merges across three workspace branches.
 
-**Why:** A branch switch during the merge session placed otherwise successful
-task merges on different tips. Rejoining the branches required comparing each
-source tip's tree because the platform rebased task branches onto whichever
-branch was checked out and the resulting squash diffs included rebase noise.
+Task merges are committed onto whichever branch is checked out in the workspace at merge time. A task branch can therefore contain a stale snapshot or unrelated tree changes even when the merge itself reports success.
 
-**How the platform merges (observed):** it rebases the task's source branch
-onto the current HEAD (`git rebase` semantics: everything since the merge-base
-is replayed, conflicts auto-resolved) and then records one squash commit named
-after the task. When the merge-base is old or unrelated, the replay duplicates
-test blocks, regresses docs and drags generated Playwright traces along, so the
-squash commit is not a clean per-task diff. When the target lacks a shared
-history it falls back to a single commit holding the task-tip versions of the
-files the task touched.
+**Why:** Replaying a task from an old or unrelated merge-base can duplicate blocks, overwrite newer manifests and workflows, and carry generated artifacts into the target branch. Treating the squash commit as authoritative preserves that drift.
 
-**Task snapshots come back on merge.** A task environment is cloned from the
-workspace checkout at the moment the task starts. If the wrong branch was
-checked out then, the task's history shares no commit with the trunk and its
-merge lands as the task's *whole tip tree*: every file that differs between the
-stale snapshot and the trunk is overwritten (older manifests, tsconfig,
-committed build output, memory notes), which broke the frozen install and the
-publish build even though the task itself touched two files.
+**How to apply:** Compare the task tip and target by tree, not history. Keep only changes attributable to the task, restore unrelated files from the target, and drop generated test output. Consolidate in an external worktree while merges continue, then reunify stale branches with an ours merge so later rebases have a current merge-base. Verify the merge-base before relying on remote refs, and protect chained commands from falling through after a failed `cd`.
 
-**A merge-join is rebase-hostile until it is pushed.** Joining the GitHub
-history with `merge -s ours --allow-unrelated-histories` gives the platform's
-task merges a merge-base again, but `git pull --quiet --no-edit --rebase origin
-<branch>` (which ran automatically within seconds of the join) linearizes the
-join: it tries to replay every workspace commit from the initial commit onto
-the GitHub tip, stops on the first conflict, and leaves a detached HEAD whose
-tree lacks the artifact manifests and workflows. Abort it (`git rebase
---abort`) and keep an untracked `.githooks/pre-rebase` guard (listed in
-`.git/info/exclude`) that refuses rebases replaying more than ~25 commits until
-the join has been pushed; a linear "import" commit instead of a merge would
-break the task merge-bases, so it is not an alternative.
+**Whole-file duplication is the recurring failure mode.** A file's entire content can appear appended to itself, repeatedly (up to eight copies observed), from platform "Git commit prior to merge" auto-commits and from the target branch itself. Package manifests become two JSON documents; shell scripts re-run their whole validation and then exit 2 on "syntax error: unexpected end of file"; ESM files fail with duplicate imports. Unreferenced "(copy)" files carrying raw conflict markers ride along the same way. A rebase onto such a target makes it worse: hunks replay into *both* copies and can erase the boundary between them.
 
-**How to apply:**
-- After any merge from a task that started during a wrong checkout, diff the
-  merge against its parent, keep only the files the task's own agent commits
-  touched (verify their deltas match), and restore everything else from the
-  pre-merge commit. Expect one such cleanup per affected task.
-- Treat the task's *own* commits at the top of its `subrepl-*` branch (after the
-  last replayed lineage commit) as the source of truth, not the squash commit on
-  the wrong branch. Cherry-pick them onto the trunk (`-n`, then commit with the
-  task title) and drop any `artifacts/api-server/test-results/` additions.
-- Do the consolidation in a `git worktree` outside the workspace so HEAD stays
-  put while merges keep landing; switch the workspace only once at the end.
-- After consolidating, `git merge -s ours <stale-branch>` so in-flight task
-  branches based on it get a recent merge-base and rebase cleanly; then
-  `git branch -f` the other branches onto the trunk.
-- Compare trees, not histories, to verify: every difference between the trunk
-  and the stale branch must be explainable (missing task, duplicate block,
-  replay regression, generated output).
-- Reconcile the memory index after any split: topic files without index lines
-  and index lines without files both happen.
-- The GitHub connection status alone does not reveal that `origin` holds an
-  unrelated history; check `git merge-base` before any pull/push from the pane.
-  `origin` now points to the real GitHub repository, not a stale backup mirror;
-  fetch its live refs before relying on cached tracking refs.
-- Guard `cd` in chained shell commands (`cd dir || exit 1`). The container
-  restarts under memory pressure and wipes `/tmp`, so a chained command whose
-  `cd` fails falls through into the workspace checkout.
+**Two concatenation shapes, test both:** copies are sometimes joined mid-line (parent minus its trailing newline, then parent, e.g. `fi#!/usr/bin/env bash`) and sometimes plain (parent repeated verbatim, boundary on its own line). Testing only the mid-line shape reports "not a duplicate" for the plain kind. Compare the byte length against the parent's and check for an integer ratio first, then test n copies of both shapes.
 
-**Git-pane Pull against a diverged GitHub branch:** it stops on conflicts and
-leaves the workspace half-merged (conflict markers in `pnpm-lock.yaml`, files
-deleted on GitHub staged for deletion), and every install or validation then
-fails with "duplicated mapping key". `git merge --abort` first. Then merge the
-GitHub head deliberately: keep the workspace lockfile (a GitHub-regenerated
-lockfile follows GitHub's catalog) and keep `replit.md` (contract-guidance
-tests read it). GitHub's branches share one tree, so merging the superset
-branch and pointing the other local branches at the result makes every push a
-fast-forward.
+**Detection:** duplicated shell source still passes `bash -n` while duplicated JSON does not, so manifests fail loudly and checkers fail silently. A clean `git status` proves nothing — the doubling can already be committed at HEAD. Walk the file's own history and parse each revision to find the last good one, and check every file the suspect commit touched: a later commit may restore some and leave others.
+
+**How to pick the surviving copy:** when copies differ, the first is the newest — it carries the latest commit's additions while later copies predate them. Reconstruct from the first copy, diff it against the last known-clean revision, and confirm the only difference is that commit's intended change. Keep the copy that carries both the target's newer content and the task's own change, rebuilding a glued boundary line by hand. A fixed file can be doubled again by a later commit, so re-check after every rebase.
+
+**When validation fails for a reason unrelated to the change,** validate the files it loads rather than re-reading the diff: `node --check` / `bash -n` per script and a JSON/YAML parse per manifest across the tree names the corrupt file in seconds.
+
+**Completion validation after a mid-task rebase:** marking a task complete rebases onto the current target first, and nothing runs post-merge setup for the task environment afterwards. When every configured check fails at once though the task's own suite passed minutes earlier, do four things before reading individual failures: scan tracked files for appended copies; reinstall from the frozen lockfile (a merged dependency bump leaves `node_modules` behind and the Expo runtime check reports outdated packages); run the post-merge schema push (a merged schema change leaves the dev database behind and the API suite fails with "column ... does not exist"); and restart the API and Expo workflows so browser E2E checks hit current code and can sign in.

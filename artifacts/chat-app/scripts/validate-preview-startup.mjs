@@ -1,9 +1,22 @@
 import { createServer } from "node:net";
 import { appendFile, readFile, writeFile } from "node:fs/promises";
+import { writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { spawn } from "node:child_process";
 import { setTimeout as delay } from "node:timers/promises";
-import { findDuplicateJsonObjectKeys } from "../../../scripts/find-duplicate-json-object-keys.mjs";
+import { fileURLToPath } from "node:url";
+import {
+  findDuplicateJsonObjectKeys,
+  isJsonEvidenceLimitError,
+} from "../../../scripts/find-duplicate-json-object-keys.mjs";
+import { readBoundedTextFile } from "../../../scripts/read-bounded-text.mjs";
+import {
+  MAX_PREVIEW_TIMEOUT_MS,
+  READY_MARKERS,
+  parsePreviewTimeout,
+} from "./preview-startup-shared.mjs";
+
+export { MAX_PREVIEW_TIMEOUT_MS, READY_MARKERS, parsePreviewTimeout };
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 const DEFAULT_HANDOFF_TIMEOUT_MS = 60_000;
@@ -13,7 +26,25 @@ const MAX_STARTUP_DIAGNOSTIC_LENGTH = 512;
 const MAX_STARTUP_FAILURE_LINE_LENGTH = 320;
 const MAX_STARTUP_SUMMARY_LENGTH = 512;
 const MAX_STARTUP_LIBRARY_DETAIL_LENGTH = 192;
+const MAX_RECORDED_STARTUP_OUTPUT_LENGTH = 16_384;
+const MAX_RECORDED_STARTUP_LINE_LENGTH = 1_024;
 const STARTUP_DIAGNOSTIC_PREFIX = "Expo preview startup error: ";
+const HANDOFF_FAILURE_PHASES = Object.freeze([
+  {
+    label: "public manifest",
+    matches: [
+      "Public Expo preview manifest check failed",
+      "Preview handoff preflight failed at the public manifest probe.",
+    ],
+  },
+  {
+    label: "local handoff",
+    matches: [
+      "Local Expo Go manifest/bundle probe failed",
+      "Preview handoff preflight failed at the local manifest/bundle probe.",
+    ],
+  },
+]);
 const HANDOFF_PLATFORM_CONFIG = {
   android: {
     schema: "android-preview-handoff-preflight/v1",
@@ -66,7 +97,10 @@ const HANDOFF_EVIDENCE_PATTERNS = Object.freeze({
       /^Requires filtered Metro or API evidence from that physical Expo Go session\.$/,
   },
 });
-const READY_MARKERS = [/Starting Metro Bundler/i, /› Metro:/i];
+const DEV_SERVER_SIGN_IN_STATUSES = Object.freeze({
+  signedIn: "SIGNED_IN",
+  anonymous: "ANONYMOUS",
+});
 const STARTUP_FAILURES = [
   /error while loading shared libraries:/i,
   /cannot open shared object file/i,
@@ -75,6 +109,12 @@ const STARTUP_FAILURES = [
   /(?:error|failed|unable|cannot).{0,80}(?:react native )?devtools/i,
   /(?:react native )?devtools.{0,80}(?:error|failed|unable|cannot|could not|couldn't)/i,
 ];
+const LOADER_FAILURES = [
+  /error while loading shared libraries:/i,
+  /cannot open shared object file/i,
+  /library not loaded:/i,
+  /cannot proceed because [^\r\n]+ was not found/i,
+];
 const UNRECOGNIZED_LOADER_FAILURES = [
   /(?:react native )?devtools.{0,120}(?:launcher|loader|binary).{0,120}(?:exited|terminated|error|failed|unable|cannot|could not|status)/i,
   /(?:launcher|loader).{0,120}(?:react native )?devtools.{0,120}(?:exited|terminated|error|failed|unable|cannot|could not|status)/i,
@@ -82,7 +122,8 @@ const UNRECOGNIZED_LOADER_FAILURES = [
 export const LOADER_COMPATIBILITY_MAINTENANCE_MESSAGE =
   "Expo preview loader wording changed. Update STARTUP_FAILURES and " +
   "MISSING_LIBRARY_PATTERNS, then refresh the versioned loader samples " +
-  "before relying on this diagnostic.";
+  "with pnpm run refresh:preview-loader-evidence before relying on this " +
+  "diagnostic.";
 const STARTUP_TEST_FIXTURES = new Set([
   "handoff-server",
   "handoff-server-stall-manifest",
@@ -98,21 +139,26 @@ const STARTUP_TEST_FIXTURES = new Set([
   "missing-runtime-library-windows-quoted",
   "missing-runtime-library-dyld-quoted-long-path",
   "missing-runtime-library-windows-quoted-long-path",
+  "missing-runtime-library-malformed-quotes",
+  "missing-runtime-library-malformed-control",
+  "missing-runtime-library-malformed-trailing",
+  "missing-runtime-library-malformed-followed-by-valid",
 ]);
-const MISSING_LIBRARY_PATH = String.raw`[A-Za-z0-9._+~ /\\:-]`;
+const MISSING_LIBRARY_PATH = String.raw`[A-Za-z0-9._+~ /\\:[\]-]`;
 const MISSING_LIBRARY_CAPTURE = String.raw`(?:(["'])([^"'\u0000-\u001f\u007f]+)\1|(${MISSING_LIBRARY_PATH}+?))`;
 const MISSING_LIBRARY_DYLD_CAPTURE = String.raw`(?:(["'])([^"'\u0000-\u001f\u007f]+)\1|(${MISSING_LIBRARY_PATH}+))`;
+const MISSING_LIBRARY_BASENAME = /(?:^|[\\/])[^/\\\s:]+\.(?:dylib|so(?:\.\d+)*|dll)$/i;
 const MISSING_LIBRARY_PATTERNS = [
   new RegExp(
-    String.raw`error while loading shared libraries:\s*${MISSING_LIBRARY_CAPTURE}\s*:\s*cannot open shared object file`,
+    String.raw`error while loading shared libraries:\s*${MISSING_LIBRARY_CAPTURE}\s*:\s*cannot open shared object file(?:\s*:\s*no such file or directory)?\s*$`,
     "i",
   ),
   new RegExp(
-    String.raw`library not loaded:\s*${MISSING_LIBRARY_DYLD_CAPTURE}`,
+    String.raw`library not loaded:\s*${MISSING_LIBRARY_DYLD_CAPTURE}\s*$`,
     "i",
   ),
   new RegExp(
-    String.raw`cannot proceed because\s+${MISSING_LIBRARY_CAPTURE}\s+was not found`,
+    String.raw`cannot proceed because\s+${MISSING_LIBRARY_CAPTURE}\s+was not found(?:\.\s*(?:reinstalling the program may fix this problem\.)?)?\s*$`,
     "i",
   ),
 ];
@@ -123,6 +169,14 @@ function findStartupFailure(output) {
     lines.find((line) =>
       STARTUP_FAILURES.some((pattern) => pattern.test(line)),
     ) ?? null
+  );
+}
+
+function findLoaderFailure(output) {
+  const lines = output.split(/\r?\n/);
+  return (
+    lines.find((line) => LOADER_FAILURES.some((pattern) => pattern.test(line))) ??
+    null
   );
 }
 
@@ -146,12 +200,48 @@ function sanitizeStartupDiagnostic(value, maxLength) {
     .slice(0, maxLength);
 }
 
+function redactStartupAuthorization(value) {
+  return value.replace(
+    /(?<!redacted )\b(?:authorization|proxy-authorization)\s*:?.*$/gi,
+    "[redacted authorization]",
+  );
+}
+
+function redactKnownStartupFailureSecrets(value) {
+  const loaderStart = value.search(
+    /(?:error while loading shared libraries:|library not loaded:|cannot proceed because\b)/i,
+  );
+  if (loaderStart < 0) return value;
+
+  const prefix = value.slice(0, loaderStart);
+  const loaderFailure = value.slice(loaderStart);
+  return `${prefix}${loaderFailure
+    .replace(
+      /\s+(?:password|authorization|proxy-authorization|token)\s*[:=]\s*\S.*$/i,
+      "",
+    )
+    .replace(/\s+\[redacted (?:credential|authorization)\].*$/i, "")}`;
+}
+
+function normalizeLoaderFailureForMatching(value) {
+  return value
+    // eslint-disable-next-line no-control-regex
+    .replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, "")
+    // eslint-disable-next-line no-control-regex
+    .replace(/\u0007\s*$/g, "");
+}
+
 function findMissingLibrary(output) {
   for (const line of output.split(/\r?\n/)) {
+    const normalizedLine = normalizeLoaderFailureForMatching(
+      redactKnownStartupFailureSecrets(line),
+    );
     for (const pattern of MISSING_LIBRARY_PATTERNS) {
-      const match = line.match(pattern);
+      const match = normalizedLine.match(pattern);
       const missingLibrary = (match?.[2] ?? match?.[3])?.trim();
-      if (missingLibrary) return missingLibrary;
+      if (missingLibrary && MISSING_LIBRARY_BASENAME.test(missingLibrary)) {
+        return missingLibrary;
+      }
     }
   }
   return null;
@@ -181,12 +271,24 @@ function compactStartupLibraryPath(path) {
 
 function formatStartupFailure(output) {
   const failure = findStartupFailure(output);
+  const loaderFailure = findLoaderFailure(output);
   if (failure) {
+    const isLoaderFailure = loaderFailure === failure;
+    const safeFailure = isLoaderFailure
+      ? redactKnownStartupFailureSecrets(failure)
+      : failure;
+    const missingLibrary = isLoaderFailure
+      ? findMissingLibrary(loaderFailure)
+      : null;
+    if (isLoaderFailure && !missingLibrary) {
+      return `${STARTUP_DIAGNOSTIC_PREFIX}${LOADER_COMPATIBILITY_MAINTENANCE_MESSAGE}`;
+    }
+
     const fullFailureDetail = sanitizeStartupDiagnostic(
-      failure,
+      safeFailure,
       MAX_STARTUP_FAILURE_LINE_LENGTH,
     );
-    const missingLibrary = findMissingLibrary(output);
+    const redactedFailureDetail = redactStartupAuthorization(fullFailureDetail);
     const libraryDetail =
       missingLibrary &&
       (!fullFailureDetail.includes(missingLibrary) ||
@@ -195,7 +297,7 @@ function formatStartupFailure(output) {
         : "";
 
     const failureLength = Math.min(
-      fullFailureDetail.length,
+      redactedFailureDetail.length,
       Math.max(
         0,
         MAX_STARTUP_DIAGNOSTIC_LENGTH -
@@ -203,7 +305,7 @@ function formatStartupFailure(output) {
           libraryDetail.length,
       ),
     );
-    const failureDetail = fullFailureDetail.slice(0, failureLength);
+    const failureDetail = redactedFailureDetail.slice(0, failureLength);
 
     return `${STARTUP_DIAGNOSTIC_PREFIX}${sanitizeStartupDiagnostic(
       `${failureDetail}${libraryDetail}`,
@@ -214,22 +316,16 @@ function formatStartupFailure(output) {
   const unrecognizedLoaderFailure = findUnrecognizedLoaderFailure(output);
   if (!unrecognizedLoaderFailure) return null;
 
-  return `${STARTUP_DIAGNOSTIC_PREFIX}${sanitizeStartupDiagnostic(
-    `${LOADER_COMPATIBILITY_MAINTENANCE_MESSAGE} Observed: ${sanitizeStartupDiagnostic(
-      unrecognizedLoaderFailure,
-      MAX_STARTUP_FAILURE_LINE_LENGTH,
-    )}`,
-    MAX_STARTUP_DIAGNOSTIC_LENGTH - STARTUP_DIAGNOSTIC_PREFIX.length,
-  )}`;
+  return `${STARTUP_DIAGNOSTIC_PREFIX}${LOADER_COMPATIBILITY_MAINTENANCE_MESSAGE}`;
 }
 
 function sanitizeStartupSummaryDiagnostic(value) {
-  return sanitizeStartupDiagnostic(value, MAX_STARTUP_SUMMARY_LENGTH)
-    .replace(/https?:\/\/\S+/gi, "[redacted URL]")
-    .replace(
-      /\b(?:authorization|proxy-authorization)\s*:?.*$/gi,
-      "[redacted authorization]",
-    )
+  return redactStartupAuthorization(
+    sanitizeStartupDiagnostic(value, MAX_STARTUP_SUMMARY_LENGTH).replace(
+      /https?:\/\/\S+/gi,
+      "[redacted URL]",
+    ),
+  )
     .replace(
       /\b(?:api[_-]?key|credential|password|passwd|secret|token)\s*(?:[=:]\s*|\s+)\S+/gi,
       "[redacted credential]",
@@ -238,8 +334,85 @@ function sanitizeStartupSummaryDiagnostic(value) {
     .slice(0, MAX_STARTUP_SUMMARY_LENGTH);
 }
 
-function formatStartupFailureSummary(error) {
+function sanitizeRecordedStartupOutput(value) {
+  const sanitizeWindowsPath = (path) => {
+    const libraryName = path.match(
+      /[^/\\\s]+?\.(?:dylib|so(?:\.\d+)?|dll)\b/i,
+    )?.[0];
+    const redactedPrefix = path.startsWith("\\\\")
+      ? "\\\\[redacted]"
+      : `${path.slice(0, 3)}[redacted]`;
+    if (!libraryName) return redactedPrefix;
+    const suffix = path.slice(path.indexOf(libraryName) + libraryName.length);
+    return `${redactedPrefix}\\${libraryName}${suffix}`;
+  };
+  const sanitizeWindowsProjectPath = (path) => {
+    const pathSegments = path.split("\\").filter(Boolean);
+    const preservedSegments = pathSegments.slice(-2).join("\\");
+    const redactedPrefix = path.startsWith("\\\\")
+      ? "\\\\[redacted]"
+      : `${path.slice(0, 3)}[redacted]`;
+    if (!preservedSegments) return redactedPrefix;
+    return `${redactedPrefix}\\${preservedSegments}`;
+  };
+  const sanitizedLines = value
+    .split(/\r?\n/)
+    .map((line) =>
+      sanitizeStartupSummaryDiagnostic(line)
+        .replace(/\/(?:Users|home)\/[^\r\n]+/g, (path) => {
+          const prefix = path.startsWith("/Users/") ? "/Users/" : "/home/";
+          const libraryName = path.match(
+            /[^/\\\s]+?\.(?:dylib|so(?:\.\d+)?|dll)\b/i,
+          )?.[0];
+          if (!libraryName) return `${prefix}[redacted]`;
+          const suffix = path.slice(path.indexOf(libraryName) + libraryName.length);
+          return `${prefix}[redacted]/${libraryName}${suffix}`;
+        })
+        .replace(
+          /Starting project at ((?:[A-Za-z]:\\|\\\\[^\\\r\n]+\\[^\\\r\n]+\\)[^\\"\r\n]+(?:\\[^\\"\r\n]+)*)/g,
+          (_, path) => {
+            const startupProjectPath = path.replace(
+              /\s+--port\b(?:\s+\S+)?(?:\s+\S+)?$/,
+              "",
+            );
+            return `Starting project at ${sanitizeWindowsProjectPath(startupProjectPath)}`;
+          },
+        )
+        .replace(
+          /[A-Za-z]:\\(?:Users|home)\\[^"\r\n]+|[A-Za-z]:\\[^"\r\n]*?[^/\\\s]+\.(?:dylib|so(?:\.\d+)?|dll)\b[^"\r\n]*|\\\\[^\\\r\n]+\\[^\\\r\n]+\\[^"\r\n]*?[^/\\\s]+\.(?:dylib|so(?:\.\d+)?|dll)\b[^"\r\n]*/g,
+          sanitizeWindowsPath,
+        )
+        .slice(0, MAX_RECORDED_STARTUP_LINE_LENGTH),
+    )
+    .join("\n");
+
+  return sanitizedLines.slice(0, MAX_RECORDED_STARTUP_OUTPUT_LENGTH);
+}
+
+function recordStartupOutput(recordLog, output) {
+  if (!recordLog) return;
+  writeFileSync(resolve(recordLog), sanitizeRecordedStartupOutput(output), "utf8");
+}
+
+function getHandoffFailurePhase(message) {
+  return (
+    HANDOFF_FAILURE_PHASES.find(({ matches }) =>
+      matches.some((prefix) => message.startsWith(prefix)),
+    )?.label ?? null
+  );
+}
+
+export function formatStartupFailureSummary(error) {
   const message = error instanceof Error ? error.message : String(error);
+  const handoffFailurePhase = getHandoffFailurePhase(message);
+  if (handoffFailurePhase) {
+    return (
+      "### Expo preview startup\n\n" +
+      "**Status:** FAIL\n\n" +
+      `**Failed phase:** ${handoffFailurePhase}\n\n`
+    );
+  }
+
   const startupFailure =
     message.startsWith("Expo preview startup error:") ||
     message.startsWith("Public Expo preview manifest URL ")
@@ -283,6 +456,19 @@ function formatRequestOutcome(stage, response, byteLength) {
 
 function safePreflightFailure(status) {
   return `${status} — no successful probe result was recorded`;
+}
+
+function formatRecordWriteFailure(phase) {
+  const boundary =
+    phase === "public"
+      ? "public manifest probe"
+      : "local manifest/bundle probe";
+  return (
+    `Preview handoff preflight failed at the ${boundary}. ` +
+    "The failed-boundary record could not be saved. " +
+    "Recovery: rerun with --record-output set to a writable JSON file, " +
+    "or omit --record-output."
+  );
 }
 
 function isPlainObject(value) {
@@ -357,13 +543,27 @@ export function validateHandoffPreflightRecord(record) {
 export async function readAndValidateHandoffPreflight(outputPath) {
   let source;
   try {
-    source = await readFile(resolve(outputPath), "utf8");
-  } catch {
+    source = await readBoundedTextFile(resolve(outputPath));
+  } catch (error) {
+    if (isJsonEvidenceLimitError(error)) {
+      throw new Error(
+        "Preview handoff preflight JSON exceeds the release evidence size limit.",
+      );
+    }
     throw new Error("Preview handoff preflight JSON could not be read.");
   }
 
-  if (findDuplicateJsonObjectKeys(source).length > 0) {
-    throw new Error("Preview handoff preflight JSON contains duplicate fields.");
+  try {
+    if (findDuplicateJsonObjectKeys(source).length > 0) {
+      throw new Error("Preview handoff preflight JSON contains duplicate fields.");
+    }
+  } catch (error) {
+    if (isJsonEvidenceLimitError(error)) {
+      throw new Error(
+        "Preview handoff preflight JSON exceeds the release evidence size or nesting limit.",
+      );
+    }
+    throw error;
   }
 
   let record;
@@ -464,6 +664,80 @@ function publicPreviewRecoveryMessage() {
   );
 }
 
+/**
+ * Expo CLI advertises the account its dev server is signed into through
+ * `extra.expoGo.username`; Expo Go 57 on iOS compares that account with its
+ * own before loading the project. An anonymous manifest omits the field.
+ * Only the presence of the field is inspected so no account identifier or
+ * session value ever reaches validation output.
+ */
+export function manifestHasSignedInDeveloper(manifest) {
+  const username = manifest?.extra?.expoGo?.username;
+  return (
+    typeof username === "string" &&
+    username.length > 0 &&
+    username !== "anonymous"
+  );
+}
+
+function hasExpoSessionSecret(environment) {
+  const secret = environment.REPLIT_EXPO_SESSION_SECRET;
+  return typeof secret === "string" && secret.length > 0;
+}
+
+function describeManifestSources(sources) {
+  return sources.length === 2 ? `${sources[0]} and ${sources[1]}` : sources[0];
+}
+
+export function classifyDevServerSignIn(
+  { localSignedIn, publicSignedIn },
+  environment = process.env,
+) {
+  // Anything short of an explicit `true` counts as anonymous so a missing
+  // probe result can never make this gate pass by accident.
+  const anonymousSources = [];
+  if (publicSignedIn !== true) anonymousSources.push("public");
+  if (localSignedIn !== true) anonymousSources.push("local");
+  const secretConfigured = hasExpoSessionSecret(environment);
+
+  if (anonymousSources.length === 0) {
+    return {
+      status: DEV_SERVER_SIGN_IN_STATUSES.signedIn,
+      severity: "pass",
+      evidence:
+        "public and local Expo Go manifests both carry a signed-in Expo account (extra.expoGo.username present)",
+    };
+  }
+
+  const anonymousDescription = describeManifestSources(anonymousSources);
+  if (secretConfigured) {
+    return {
+      status: DEV_SERVER_SIGN_IN_STATUSES.anonymous,
+      severity: "fail",
+      evidence:
+        `REPLIT_EXPO_SESSION_SECRET is set but the ${anonymousDescription} Expo Go ` +
+        "manifest is anonymous (no extra.expoGo.username). iOS Expo Go 57 only " +
+        "loads the app from a dev server signed into the same Expo account, so " +
+        "the dev script's create-launch login step is missing or failed. Check " +
+        'the Chat App workflow log for the "Logged in as" line, then restart ' +
+        "the managed Chat App/Expo workflow.",
+    };
+  }
+
+  return {
+    status: DEV_SERVER_SIGN_IN_STATUSES.anonymous,
+    severity: "warn",
+    evidence:
+      `REPLIT_EXPO_SESSION_SECRET is unset, so the ${anonymousDescription} Expo Go ` +
+      "manifest is anonymous (no extra.expoGo.username). iOS Expo Go 57 cannot " +
+      "load the app until the workspace supplies the managed Expo session.",
+  };
+}
+
+export function formatDevServerSignIn(signIn) {
+  return `dev_server_sign_in=${signIn.status}; evidence=${signIn.evidence}`;
+}
+
 export function getPublicPreviewManifestUrl(environment = process.env) {
   const configuredSetting =
     environment.PREVIEW_PUBLIC_URL != null
@@ -507,6 +781,23 @@ export function getPublicPreviewManifestUrl(environment = process.env) {
   return url;
 }
 
+function usesStartupTestFixture(
+  environment = process.env,
+  { includeOutputOverride = true } = {},
+) {
+  return (
+    STARTUP_TEST_FIXTURES.has(environment.PREVIEW_STARTUP_TEST_FIXTURE) ||
+    (includeOutputOverride && environment.PREVIEW_STARTUP_TEST_OUTPUT != null)
+  );
+}
+
+export function validatePreviewConfiguration(environment = process.env) {
+  if (usesStartupTestFixture(environment)) {
+    return;
+  }
+  getPublicPreviewManifestUrl(environment);
+}
+
 export async function requestPublicPreviewManifest(
   timeoutMs,
   environment = process.env,
@@ -536,6 +827,7 @@ export async function requestPublicPreviewManifest(
       deadline,
       (manifestResponse) => manifestResponse.text(),
       `${timeoutMs}ms configured public preview deadline`,
+      "public manifest",
     ));
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
@@ -557,26 +849,30 @@ export async function requestPublicPreviewManifest(
     );
   }
 
+  let manifest;
   try {
-    const manifest = JSON.parse(body);
-    if (
-      !manifest ||
-      typeof manifest !== "object" ||
-      typeof manifest.launchAsset?.url !== "string" ||
-      manifest.launchAsset.url.length === 0
-    ) {
-      throw new Error("manifest did not provide a launch asset URL");
-    }
-  } catch (error) {
-    const detail =
-      error instanceof Error ? error.message : "manifest returned invalid JSON";
+    manifest = JSON.parse(body);
+  } catch {
     throw new Error(
-      `Public Expo preview manifest check failed: ${outcome}; ${detail}. ` +
+      `Public Expo preview manifest check failed: ${outcome}; manifest returned invalid JSON. ` +
         publicPreviewRecoveryMessage(),
     );
   }
 
-  return { outcome };
+  if (
+    !manifest ||
+    typeof manifest !== "object" ||
+    typeof manifest.launchAsset?.url !== "string" ||
+    manifest.launchAsset.url.length === 0
+  ) {
+    throw new Error(
+      `Public Expo preview manifest check failed: ${outcome}; manifest did not provide a launch asset URL. ` +
+        publicPreviewRecoveryMessage(),
+    );
+  }
+
+  const signedInDeveloper = manifestHasSignedInDeveloper(manifest);
+  return { outcome, signedInDeveloper };
 }
 
 function localBundleUrl(port, launchAssetUrl) {
@@ -596,6 +892,7 @@ async function requestWithDeadline(
   deadline,
   readBody,
   deadlineDescription = "configured request deadline",
+  resourceDescription = "request",
 ) {
   const remainingMs = deadline - Date.now();
   if (remainingMs <= 0) {
@@ -622,20 +919,32 @@ async function requestWithDeadline(
     controller.abort(deadlineAbortError);
   }, remainingMs);
 
+  let headersReceived = false;
   try {
     const response = await Promise.race([
       fetch(url, { ...options, signal: controller.signal }),
       abortPromise,
     ]);
+    headersReceived = true;
     const body = await Promise.race([readBody(response), abortPromise]);
     return { response, body };
   } catch (error) {
-    if (deadlineAbortError) throw deadlineAbortError;
+    if (deadlineAbortError) {
+      if (headersReceived) {
+        throw new Error(
+          `${resourceDescription} response headers received but body did not ` +
+            `complete before ${deadlineDescription}: ${deadlineAbortError.message}`,
+        );
+      }
+      throw deadlineAbortError;
+    }
     throw error;
   } finally {
     clearTimeout(abortTimer);
   }
 }
+
+const LOCAL_HANDOFF_RETRY_PAUSE_MS = 250;
 
 export async function requestLocalHandoffProbe(
   port,
@@ -669,6 +978,7 @@ export async function requestLocalHandoffProbe(
         deadline,
         (response) => response.text(),
         `${timeoutMs}ms configured local handoff deadline`,
+        "manifest",
       );
       const { response: manifestResponse, body: manifestBody } =
         manifestRequest;
@@ -700,6 +1010,7 @@ export async function requestLocalHandoffProbe(
         deadline,
         (response) => response.arrayBuffer(),
         `${timeoutMs}ms configured local handoff deadline`,
+        "bundle",
       );
       const { response: bundleResponse, body: bundleBody } = bundleRequest;
       outcome.bundle = formatRequestOutcome(
@@ -715,6 +1026,7 @@ export async function requestLocalHandoffProbe(
       return {
         ...outcome,
         launchAssetPath: new URL(launchAssetUrl).pathname,
+        signedInDeveloper: manifestHasSignedInDeveloper(manifest),
       };
     } catch (error) {
       lastError = new Error(
@@ -726,8 +1038,22 @@ export async function requestLocalHandoffProbe(
           publicPreviewRecoveryMessage(),
         ].join(" "),
       );
-      if (Date.now() >= deadline) break;
-      await delay(Math.min(250, Math.max(1, deadline - Date.now())));
+      const remainingMs = deadline - Date.now();
+      if (remainingMs <= 0) break;
+      if (remainingMs <= LOCAL_HANDOFF_RETRY_PAUSE_MS) {
+        // The deadline falls inside the next pause. Wait it out instead of
+        // starting an attempt that has no time to complete: a timer can wake
+        // a fraction of a millisecond before Date.now() reaches the deadline,
+        // and such an attempt would replace the last real outcome with
+        // "request aborted by deadline" while leaving a half-finished
+        // manifest request behind.
+        await delay(remainingMs);
+        while (Date.now() < deadline) {
+          await delay(1);
+        }
+        break;
+      }
+      await delay(LOCAL_HANDOFF_RETRY_PAUSE_MS);
     }
   }
 
@@ -773,22 +1099,30 @@ async function findFreePort() {
   });
 }
 
-export function parsePreviewTimeout(name, value, defaultValue) {
-  if (value == null) return defaultValue;
-
-  const timeoutMs = Number(value);
-  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
-    throw new Error(
-      `${name} must be a positive finite number of milliseconds.`,
-    );
-  }
-
-  return timeoutMs;
+export function parsePreviewTimeouts(environment = process.env) {
+  return {
+    timeoutMs: parsePreviewTimeout(
+      "PREVIEW_STARTUP_TIMEOUT_MS",
+      environment.PREVIEW_STARTUP_TIMEOUT_MS,
+      DEFAULT_TIMEOUT_MS,
+    ),
+    handoffTimeoutMs: parsePreviewTimeout(
+      "PREVIEW_HANDOFF_TIMEOUT_MS",
+      environment.PREVIEW_HANDOFF_TIMEOUT_MS,
+      DEFAULT_HANDOFF_TIMEOUT_MS,
+    ),
+    publicPreviewTimeoutMs: parsePreviewTimeout(
+      "PREVIEW_PUBLIC_TIMEOUT_MS",
+      environment.PREVIEW_PUBLIC_TIMEOUT_MS,
+      DEFAULT_PUBLIC_PREVIEW_TIMEOUT_MS,
+    ),
+  };
 }
 
 function parseArgs(argv) {
   const platformIndex = argv.indexOf("--platform");
   const logFileIndex = argv.indexOf("--log-file");
+  const recordLogIndex = argv.indexOf("--record-log");
   const recordOutputIndex = argv.indexOf("--record-output");
   const platform =
     platformIndex === -1 ? "android" : argv[platformIndex + 1];
@@ -809,25 +1143,20 @@ function parseArgs(argv) {
   ) {
     throw new Error("--record-output requires a path to a JSON output file.");
   }
+  const recordLog =
+    recordLogIndex === -1 ? null : argv[recordLogIndex + 1];
+  if (
+    recordLogIndex !== -1 &&
+    (!recordLog || recordLog.startsWith("--"))
+  ) {
+    throw new Error("--record-log requires a path to captured startup output.");
+  }
   return {
     platform,
     logFile: logFileIndex === -1 ? null : argv[logFileIndex + 1],
+    recordLog,
     recordOutput,
-    timeoutMs: parsePreviewTimeout(
-      "PREVIEW_STARTUP_TIMEOUT_MS",
-      process.env.PREVIEW_STARTUP_TIMEOUT_MS,
-      DEFAULT_TIMEOUT_MS,
-    ),
-    handoffTimeoutMs: parsePreviewTimeout(
-      "PREVIEW_HANDOFF_TIMEOUT_MS",
-      process.env.PREVIEW_HANDOFF_TIMEOUT_MS,
-      DEFAULT_HANDOFF_TIMEOUT_MS,
-    ),
-    publicPreviewTimeoutMs: parsePreviewTimeout(
-      "PREVIEW_PUBLIC_TIMEOUT_MS",
-      process.env.PREVIEW_PUBLIC_TIMEOUT_MS,
-      DEFAULT_PUBLIC_PREVIEW_TIMEOUT_MS,
-    ),
+    ...parsePreviewTimeouts(),
   };
 }
 
@@ -847,12 +1176,19 @@ async function validateLivePreview(
   timeoutMs,
   handoffTimeoutMs,
   publicPreviewTimeoutMs,
+  recordLog,
   recordOutput,
 ) {
+  const launcherOnly = process.env.PREVIEW_STARTUP_REAL_LAUNCHER === "1";
+  const useStartupTestFixture = usesStartupTestFixture(process.env);
+  if (!launcherOnly && !useStartupTestFixture) {
+    getPublicPreviewManifestUrl(process.env);
+  }
   const port = await findFreePort();
   const output = [];
+  const pnpmCommand = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
   const startupCommand =
-    STARTUP_TEST_FIXTURES.has(process.env.PREVIEW_STARTUP_TEST_FIXTURE)
+    useStartupTestFixture
       ? {
           command: process.execPath,
           args: [
@@ -862,7 +1198,12 @@ async function validateLivePreview(
             ),
           ],
         }
-      : { command: "pnpm", args: ["run", "dev"] };
+      : process.env.PREVIEW_STARTUP_REAL_LAUNCHER === "1"
+        ? {
+            command: pnpmCommand,
+            args: ["exec", "expo", "start", "--localhost", "--port", String(port)],
+          }
+      : { command: pnpmCommand, args: ["run", "dev"] };
   const child = spawn(startupCommand.command, startupCommand.args, {
     cwd: resolve(import.meta.dirname, ".."),
     env: {
@@ -870,6 +1211,7 @@ async function validateLivePreview(
       PORT: String(port),
     },
     detached: process.platform !== "win32",
+    shell: process.platform === "win32" && startupCommand.command === pnpmCommand,
     stdio: ["ignore", "pipe", "pipe"],
   });
 
@@ -891,13 +1233,33 @@ async function validateLivePreview(
   const stopChild = () => {
     if (stopRequested) return;
     stopRequested = true;
-    const processGroupId = child.pid;
+    const childPid = child.pid;
+    const processGroupId = process.platform === "win32" ? undefined : childPid;
+    const terminateWindowsChild = (signal) => {
+      if (!childPid) {
+        child.kill(signal);
+        return;
+      }
+      const processTreeKiller = spawn(
+        "taskkill.exe",
+        ["/PID", String(childPid), "/T", "/F"],
+        { stdio: "ignore", windowsHide: true },
+      );
+      processTreeKiller.once("error", () => {
+        if (child.exitCode === null) {
+          child.kill(signal);
+        }
+      });
+      processTreeKiller.unref();
+    };
     if (child.exitCode !== null) return;
     child.once("close", () => {
       clearTimeout(closeTimer);
       closeTimer = undefined;
     });
-    if (process.platform === "win32" || !processGroupId) {
+    if (process.platform === "win32") {
+      terminateWindowsChild("SIGTERM");
+    } else if (!processGroupId) {
       child.kill("SIGTERM");
     } else {
       try {
@@ -907,10 +1269,14 @@ async function validateLivePreview(
       }
     }
     closeTimer = setTimeout(() => {
-      if (!processGroupId) return;
       try {
-        if (process.platform === "win32") child.kill("SIGKILL");
-        else process.kill(-processGroupId, "SIGKILL");
+        if (process.platform === "win32") {
+          terminateWindowsChild("SIGKILL");
+        } else if (!processGroupId) {
+          child.kill("SIGKILL");
+        } else {
+          process.kill(-processGroupId, "SIGKILL");
+        }
       } catch (error) {
         if (error.code !== "ESRCH") throw error;
       }
@@ -930,6 +1296,7 @@ async function validateLivePreview(
           if (!completeFailure) return;
           finish(() => {
             stopChild();
+            recordStartupOutput(recordLog, output.join(""));
             rejectResult(new Error(completeFailure));
           });
         }, STARTUP_FAILURE_GRACE_MS);
@@ -948,6 +1315,7 @@ async function validateLivePreview(
     child.once("error", (error) => {
       finish(() => {
         stopChild();
+        recordStartupOutput(recordLog, output.join(""));
         rejectResult(error);
       });
     });
@@ -955,6 +1323,7 @@ async function validateLivePreview(
       if (settled) return;
       finish(() => {
         const combinedOutput = output.join("");
+        recordStartupOutput(recordLog, combinedOutput);
         const startupFailure = formatStartupFailure(combinedOutput);
         if (startupFailure) {
           rejectResult(new Error(startupFailure));
@@ -984,12 +1353,24 @@ async function validateLivePreview(
       if (!READY_MARKERS.some((pattern) => pattern.test(combinedOutput))) {
         finish(() => {
           stopChild();
+          recordStartupOutput(recordLog, combinedOutput);
           rejectResult(
             new Error(
               `Expo preview did not reach Metro running status within ${timeoutMs}ms.\n` +
                 combinedOutput,
             ),
           );
+        });
+        return;
+      }
+      if (launcherOnly) {
+        finish(() => {
+          stopChild();
+          recordStartupOutput(recordLog, combinedOutput);
+          console.log(
+            `Expo preview launcher reached Metro running status on port ${port}.`,
+          );
+          resolveResult();
         });
         return;
       }
@@ -1016,12 +1397,36 @@ async function validateLivePreview(
             localHandoff,
           });
           if (recordOutput) await writeHandoffPreflight(recordOutput, record);
+          // The reachability record above is complete regardless of sign-in
+          // state; the sign-in check is a separate gate for iOS Expo Go 57.
+          const signIn = classifyDevServerSignIn(
+            {
+              localSignedIn: localHandoff.signedInDeveloper,
+              publicSignedIn: publicManifest.signedInDeveloper,
+            },
+            process.env,
+          );
           finish(() => {
             stopChild();
+            recordStartupOutput(recordLog, output.join(""));
             console.log(
               `Expo preview reached Metro running status on port ${port}.`,
             );
             console.log(formatHandoffPreflight(record));
+            if (signIn.severity === "pass") {
+              console.log(formatDevServerSignIn(signIn));
+              resolveResult();
+              return;
+            }
+            console.warn(formatDevServerSignIn(signIn));
+            if (signIn.severity === "fail") {
+              rejectResult(
+                new Error(
+                  `Expo dev server sign-in check failed: ${signIn.evidence}`,
+                ),
+              );
+              return;
+            }
             resolveResult();
           });
         } catch (error) {
@@ -1039,14 +1444,12 @@ async function validateLivePreview(
             try {
               await writeHandoffPreflight(recordOutput, record);
             } catch (recordError) {
-              finalError = new AggregateError(
-                [error, recordError],
-                "Preview handoff preflight failed and its record could not be written.",
-              );
+              finalError = new Error(formatRecordWriteFailure(phase));
             }
           }
           finish(() => {
             stopChild();
+            recordStartupOutput(recordLog, output.join(""));
             rejectResult(finalError);
           });
         }
@@ -1056,6 +1459,16 @@ async function validateLivePreview(
 }
 
 async function main() {
+  if (process.argv.includes("--validate-configuration")) {
+    validatePreviewConfiguration();
+    return;
+  }
+
+  if (process.argv.includes("--validate-timeouts")) {
+    parsePreviewTimeouts();
+    return;
+  }
+
   const validateRecordIndex = process.argv.indexOf("--validate-record");
   if (validateRecordIndex !== -1) {
     const outputPath = process.argv[validateRecordIndex + 1];
@@ -1064,9 +1477,14 @@ async function main() {
     }
     const record = await readAndValidateHandoffPreflight(outputPath);
     for (const boundary of HANDOFF_BOUNDARIES) {
-      console.log(
-        `${boundary}=${record.boundaries[boundary].status}`,
-      );
+      const boundaryRecord = record.boundaries[boundary];
+      console.log(`${boundary}=${boundaryRecord.status}`);
+      if (
+        boundary === "publicManifestReachability" ||
+        boundary === "localHandoffProbe"
+      ) {
+        console.log(`${boundary}Evidence=${boundaryRecord.evidence}`);
+      }
     }
     return;
   }
@@ -1077,6 +1495,7 @@ async function main() {
     timeoutMs,
     handoffTimeoutMs,
     publicPreviewTimeoutMs,
+    recordLog,
     recordOutput,
   } = parseArgs(process.argv.slice(2));
   if (logFile) await validateCapturedLog(logFile);
@@ -1086,11 +1505,12 @@ async function main() {
       timeoutMs,
       handoffTimeoutMs,
       publicPreviewTimeoutMs,
+      recordLog,
       recordOutput,
     );
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
   const cliArgs = process.argv.slice(2);
   main().catch(async (error) => {
     if (isStartupValidationInvocation(cliArgs)) {

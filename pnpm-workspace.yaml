@@ -37,6 +37,9 @@ minimumReleaseAgeExclude:
   - expo-router
   - expo-glass-effect
   - expo
+  - expo-constants
+  - expo-image-picker
+  - expo-location
   - '@expo/ui'
   - '@expo/cli'
   - '@expo/metro-file-map'

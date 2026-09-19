@@ -57,20 +57,22 @@ app.use(
     },
   }),
 );
-// Readiness is public, but only after the startup configuration gate has
-// succeeded. Keep these routes ahead of Clerk so health checks do not depend on
-// per-request authentication parsing.
+// Liveness and readiness are public, but only after the startup configuration
+// gate has succeeded. Keep these routes ahead of Clerk so health checks do not
+// depend on per-request authentication parsing.
 app.get("/", (_req, res) => {
   res.status(200).json({
     status: "ready",
     api: "/api",
     healthCheck: "/api/healthz",
+    livenessCheck: "/api/livez",
   });
 });
 app.get("/api", (_req, res) => {
   res.status(200).json({
     status: "ready",
     healthCheck: "/api/healthz",
+    livenessCheck: "/api/livez",
   });
 });
 app.use("/api", healthRouter);

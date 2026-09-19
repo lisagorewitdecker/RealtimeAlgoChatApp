@@ -40,12 +40,14 @@ type AccountSearchResult = {
 
 type ModerationHistoryEntry = {
   id: number;
-  action: "ban" | "restore";
+  action: "ban" | "restore" | "message_delete";
   actorUserId: string;
   actorUsername: string;
-  targetUserId: string;
-  targetUsername: string;
+  targetUserId: string | null;
+  targetUsername: string | null;
   targetEmail: string | null;
+  roomId: string | null;
+  messageId: string | null;
   createdAt: string;
 };
 
@@ -58,8 +60,8 @@ export default function ProfileScreen() {
   const buildIdentity = getBuildIdentity();
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  // The tab bar overlays this screen (see-through, but whatever scrolls under
-  // it is dimmed and out of reach), so the end of the scroll content must
+  // The tab bar overlays this screen (whatever scrolls under it is covered or
+  // dimmed and out of reach), so the end of the scroll content must
   // clear its full height, not just the inset.
   const bottomContentInset = useTabBarContentInset(24);
   const { username, avatarEmoji, userId, isAdmin, setUsername, setAvatarEmoji } = useApp();
@@ -67,9 +69,11 @@ export default function ProfileScreen() {
     highContrast,
     fontScale,
     reduceMotion,
+    reduceTransparency,
     setHighContrast,
     setFontScale,
     setReduceMotion,
+    setReduceTransparency,
   } = useAccessibility();
   const { getToken } = useAuth();
   const { isConnected, connectionError } = useSocket();
@@ -567,8 +571,8 @@ export default function ProfileScreen() {
             </Text>
           </View>
           <Text style={[styles.accessibilityHint, { color: colors.mutedForeground }]}>
-            Personalize contrast, text size, and motion to make {PRODUCT_NAME} more
-            comfortable to use.
+            Personalize contrast, text size, motion, and transparency to make{" "}
+            {PRODUCT_NAME} more comfortable to use.
           </Text>
 
           <View style={styles.accessibilityOption}>
@@ -708,6 +712,49 @@ export default function ProfileScreen() {
                 ]}
               >
                 {reduceMotion ? "On" : "Off"}
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          <View style={styles.accessibilityOption}>
+            <View style={styles.accessibilityOptionCopy}>
+              <Text style={[styles.accessibilityOptionTitle, { color: colors.foreground }]}>
+                Reduce transparency
+              </Text>
+              <Text style={[styles.accessibilityOptionHint, { color: colors.mutedForeground }]}>
+                Use a solid tab bar instead of a see-through one.
+              </Text>
+            </View>
+            <TouchableOpacity
+              testID="accessibility-reduce-transparency-toggle"
+              style={[
+                styles.accessibilityToggle,
+                {
+                  backgroundColor: reduceTransparency ? colors.primary : colors.background,
+                  borderColor: reduceTransparency ? colors.primary : colors.border,
+                  borderRadius: colors.radius - 2,
+                },
+              ]}
+              onPress={() => {
+                const nextValue = !reduceTransparency;
+                setReduceTransparency(nextValue);
+                trackEvent("accessibility_preference_changed", {
+                  preference: "reduce_transparency",
+                  value: nextValue,
+                });
+              }}
+              activeOpacity={0.8}
+              accessibilityRole="switch"
+              accessibilityLabel={`Reduce transparency: ${reduceTransparency ? "on" : "off"}`}
+              accessibilityState={{ checked: reduceTransparency }}
+            >
+              <Text
+                style={[
+                  styles.accessibilityToggleText,
+                  { color: reduceTransparency ? colors.primaryForeground : colors.foreground },
+                ]}
+              >
+                {reduceTransparency ? "On" : "Off"}
               </Text>
             </TouchableOpacity>
           </View>
@@ -1048,8 +1095,8 @@ export default function ProfileScreen() {
             ) : historyEntries.length === 0 ? (
               <Text style={[styles.moderationHint, { color: colors.mutedForeground }]}>
                 {appliedHistoryFilters.targetUserId || appliedHistoryFilters.actorUserId
-                  ? "No ban or restore actions match these filters."
-                  : "No ban or restore actions yet."}
+                  ? "No moderation actions match these filters."
+                  : "No moderation actions yet."}
               </Text>
             ) : (
               <>
@@ -1070,16 +1117,22 @@ export default function ProfileScreen() {
                         >
                           {entry.actorUsername}
                         </Text>
-                        {entry.action === "ban" ? " banned " : " restored "}
-                        <Text
-                          testID={`moderation-history-entry-${entry.id}-filter-target`}
-                          onPress={() => filterHistoryByTarget(entry.targetUserId)}
-                          accessibilityRole="button"
-                          accessibilityLabel={`Filter moderation history by account ${entry.targetUsername}`}
-                          style={[styles.historyActorLink, { color: colors.primary }]}
-                        >
-                          {entry.targetUsername}
-                        </Text>
+                        {entry.action === "message_delete" ? (
+                          ` deleted message ${entry.messageId ?? "unknown"} from room ${entry.roomId ?? "unknown"}`
+                        ) : (
+                          <>
+                            {entry.action === "ban" ? " banned " : " restored "}
+                            <Text
+                              testID={`moderation-history-entry-${entry.id}-filter-target`}
+                              onPress={() => entry.targetUserId && filterHistoryByTarget(entry.targetUserId)}
+                              accessibilityRole="button"
+                              accessibilityLabel={`Filter moderation history by account ${entry.targetUsername ?? "unknown"}`}
+                              style={[styles.historyActorLink, { color: colors.primary }]}
+                            >
+                              {entry.targetUsername ?? "Unknown account"}
+                            </Text>
+                          </>
+                        )}
                       </Text>
                       <Text style={[styles.historyMeta, { color: colors.mutedForeground }]}>
                         {new Date(entry.createdAt).toLocaleString()}

@@ -14,3 +14,16 @@ The version guard belongs in the normal preview-startup validation entry point, 
 **Why:** A dependency upgrade can otherwise pass the preview validation workflow while leaving its captured loader evidence stale.
 
 **How to apply:** Keep the compatibility check ahead of live preview startup so version or wording drift fails closed before a preview is handed off.
+
+Real macOS and Windows launcher checks should be opt-in hosted-runner runs that
+record through the validator's redacting capture path, then revalidate the
+recorded file with the same parser. The Linux compatibility suite should remain
+deterministic and fixture-based.
+
+**Why:** Non-Linux launchers are not available in the development container,
+while their output can contain user/workspace paths or credentials that must
+not be uploaded as raw logs.
+
+**How to apply:** Use the real-platform workflow after Expo or React Native
+upgrades; compare loader identifiers and failure categories after redaction,
+not private absolute paths.

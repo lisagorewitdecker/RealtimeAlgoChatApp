@@ -95,6 +95,23 @@ copy or another branch that has not been synchronized with `main`.
 - The Android evidence job repeats the final device checks because separate
   self-hosted jobs may be assigned to different runners.
 
+### Checking Android runner health before a release
+
+The workflow includes a GitHub-hosted **Android release runner health** job.
+It uses the read-only Actions API to verify that the repository has at least
+one online runner with all four labels required by the Android jobs:
+`self-hosted`, `linux`, `android`, and `smallest-simulator`. Its job summary
+lists offline runners and the exact labels missing from otherwise eligible
+runners. It does not read or print registration tokens, release credentials,
+or other secret values.
+
+To run only this check, open **Actions → Mobile release accessibility gate →
+Run workflow**, leave **Publish** disabled, and enable
+`android_runner_health_only`. The health job links back to this procedure and
+the other release jobs are skipped. Normal release runs perform the same
+check first; a failed health check prevents the Android self-hosted preflight
+from being scheduled.
+
 For a new Linux x86_64 runner, create the service account before any
 user-scoped SDK, AVD, or Maestro installation. Install the host prerequisites
 as root, but run the bootstrap as `actions` so its `$HOME` is the same home
@@ -119,6 +136,12 @@ fi
 Then provision the Android SDK and small portrait AVD, using a checksum obtained
 from the pinned Android command-line-tools release. Replace the checksum
 placeholder with the published value before running this block:
+
+The checked-in pin contract at
+`scripts/android-runner-pins.sh` is the source of truth for the GitHub Actions
+runner archive version, runner SHA-256 digest, and Android build-tools version.
+Keep the literal values in the procedure below synchronized with that file in
+one reviewed change.
 
 ```sh
 sudo -u "$RUNNER_USER" -H bash -lc '
@@ -282,6 +305,162 @@ Do not run untrusted pull-request code on this public-repository runner; keep
 approval required for outside contributors and rely on the workflow's
 non-pull-request condition for the native release jobs.
 
+### Setting up the macOS runner with one command
+
+The `native-ios` job runs only on a self-hosted Mac with the labels
+`self-hosted`, `macos`, `ios`, and `smallest-simulator`, an iPhone SE
+(3rd generation) simulator booted, pnpm 10.26.1, Java 17 or newer, Maestro,
+Playwright Chromium, and the release candidate installed.
+`scripts/provision-ios-runner.sh` installs or verifies all of that, registers
+the GitHub Actions runner, and installs it as a launch agent. It stays
+compatible with the bash 3.2 that ships with macOS.
+
+Before running it:
+
+1. Install the full Xcode from the App Store (the Command Line Tools alone do
+   not provide `simctl`), open it once, and accept the license. The script
+   downloads the iOS simulator runtime when none is available.
+2. Sign in to the Mac's desktop session and run the script from Terminal in
+   that session, not over SSH. Launch agents are loaded into the logged-in
+   user's session, and the simulator needs a window server.
+3. Clone the repository on the Mac. The script reads the pinned Playwright
+   version from the checkout, so run it from inside the clone.
+
+Preview every action first, then run it for real:
+
+```sh
+cd ~/RealtimeAlgoChatApp
+./scripts/provision-ios-runner.sh --dry-run
+./scripts/provision-ios-runner.sh
+```
+
+The dry run prints each install, download, registration, and service command
+without changing anything; it also works on Linux, where the macOS-only checks
+are reported as `SKIPPED`. The real run:
+
+- installs Homebrew, `node@24`, `openjdk@17`, pnpm 10.26.1 through corepack,
+  Maestro, and Playwright Chromium when they are missing;
+- creates the iPhone SE (3rd generation) simulator when it does not exist,
+  boots it, and writes a second launch agent that boots it again at every
+  login (the agent runs `simctl boot` and then `simctl bootstatus -b`, so
+  it works after a reboot when nothing else has booted the device);
+- downloads the pinned GitHub runner release (the same `RUNNER_VERSION` as the
+  Linux procedure above), verifies its published SHA-256 digest before
+  extracting it into `~/actions-runner`, and registers it unattended as
+  `ios-release-mac` with `--labels self-hosted,macos,ios,smallest-simulator`;
+- writes the runner's `.path` and `.env` files so Maestro, Homebrew, Node,
+  Java, and `JAVA_HOME` are visible to the service, then runs
+  `./svc.sh install && ./svc.sh start`. These service steps run only for a
+  registration the script created or verified, and only while every core
+  prerequisite is `READY`; otherwise they are reported `MISSING` and any
+  existing launch agent is left untouched.
+
+The runner registration token comes from `RUNNER_TOKEN`, from an authenticated
+GitHub CLI session (`gh auth login`), or from a hidden prompt when the script
+runs interactively. The script never accepts the token as a command-line
+argument and never prints it; it hands the token to `config.sh` through the
+runner's `ACTIONS_RUNNER_INPUT_TOKEN` environment input rather than a
+`--token` argument, so it never appears in a process list, and clears both
+variables as soon as registration finishes. Generate the token from
+**Settings → Actions → Runners → New self-hosted runner** (macOS), or with
+`gh api --method POST repos/lisagorewitdecker/RealtimeAlgoChatApp/actions/runners/registration-token`;
+it expires after one hour. Registration is skipped, with an `INCOMPLETE`
+report, while any core prerequisite (Xcode, the simulator runtime, pnpm, Java,
+Maestro, or the booted simulator) is still missing, so GitHub never routes the
+iOS job to a Mac that cannot run it. Re-run the script after fixing the
+reported rows. On a re-run, an existing `~/actions-runner/.runner` counts as
+registered only when it names this repository and the expected runner name
+and its labels are verified: by GitHub when the CLI is authenticated (the
+runner must still exist there with all four labels), otherwise by the record
+the script wrote at registration (`~/actions-runner/.provision-ios-runner`,
+which must describe the same runner). Anything else, including a registration
+made by hand whose labels cannot be checked, is reported `MISSING` together
+with the `./config.sh remove` step that clears the stale registration, and
+the service is neither installed nor started. To register the runner under a
+different name or directory, set `RUNNER_NAME` or `RUNNER_ROOT`;
+`--skip-registration` prepares the host only.
+
+Install the release candidate through the same script once the simulator is
+booted. Point it at the EAS simulator build (a `.tar.gz`) or an unpacked
+`.app` bundle kept outside the repository, and export the bundle identifier
+so later runs can verify the installation without reinstalling:
+
+```sh
+NATIVE_SMOKE_IOS_APP_ID=<bundle identifier> \
+NATIVE_SMOKE_IOS_APP_PATH=/secure/path/candidate-simulator.tar.gz \
+  ./scripts/provision-ios-runner.sh --install-candidate
+```
+
+The candidate row is `READY` only when the app is installed on the booted
+simulator and carries the crash-reporting preflight marker, matching the
+check the workflow performs before the gate runs. The script never prints the
+bundle identifier or any secret value.
+
+Service and PATH caveats for a Mac that must stay online:
+
+- The launch agents run only while the runner user is logged in. Enable
+  automatic login for that user (**System Settings → Users & Groups**), and
+  disable sleep and the screen lock so the simulator keeps a window server.
+- The runner service does not read `~/.zshrc` or `~/.bash_profile`. Anything
+  installed later must be added to `~/actions-runner/.path` (or the script
+  re-run, which rewrites `.path` and `.env` and restarts the service).
+- The runner self-updates past the pinned release after registration; the pin
+  and digest only protect the initial download. Rotate the pin in the script
+  and in this document together.
+- After a reboot the simulator launch agent needs about a minute to finish
+  booting before the runner can pass the simulator check; a run started
+  during that window fails the readiness step and can simply be re-run.
+- Runner registration writes `~/actions-runner/.runner` and
+  `~/actions-runner/.credentials`; keep the runner directory out of any
+  backup or sync that leaves the Mac.
+
+The script ends with a readiness report: a table of prerequisites marked
+`READY`, `MISSING`, or `SKIPPED`, the resulting runner name and labels, and
+the names of the GitHub configuration the iOS job still needs. Its last line is
+`IOS_RELEASE_RUNNER=READY` (exit status 0) or `IOS_RELEASE_RUNNER=INCOMPLETE`
+(exit status 1; a dry run always exits 0). The GitHub configuration it lists
+is:
+
+- environment `mobile-release` secrets `NATIVE_SMOKE_IOS_APP_ID`,
+  `NATIVE_SMOKE_EMAIL`, `NATIVE_SMOKE_PASSWORD`, `SENTRY_AUTH_TOKEN`,
+  `NATIVE_SMOKE_IOS_SENTRY_RELEASE`, and `NATIVE_SMOKE_IOS_SENTRY_DIST`, plus
+  the optional `NATIVE_SMOKE_DISPLAY_NAME`;
+- the repository-level variable `NATIVE_SMOKE_IOS_BUILD_ID` described below.
+
+When the GitHub CLI is installed and authenticated, the script offers to
+confirm that the runner is online and to report which of those names already
+exist (names only, never values); pass `--check-github` to do so without a
+prompt or `--no-github` to skip it. The same confirmation is available
+directly:
+
+```sh
+gh api repos/lisagorewitdecker/RealtimeAlgoChatApp/actions/runners \
+  --jq '.runners[] | select(.name == "ios-release-mac") | {name, status, busy, labels: [.labels[].name]}'
+```
+
+The result must show `"status": "online"` and all four labels.
+
+This is a public repository, so before relying on the self-hosted Mac, set
+**Settings → Actions → General → Approval for running fork pull request
+workflows from contributors** to require approval for all outside
+collaborators. The native release jobs additionally skip pull-request events,
+but the approval setting is what keeps unreviewed fork code off the runner.
+
+Do not start the first real release run until the repository sync task has
+pushed the current `.github/workflows/mobile-release.yml` to `main`: the
+runner labels, the `mobile-release` environment, and the secret names above
+are read from the workflow on `main`, not from a local checkout.
+
+`pnpm --filter @workspace/scripts run test:ios-runner` exercises the script's
+dry-run path on Linux and fails when its labels, pinned runner release, pnpm
+version, or readiness report drift from the workflow and this document. It
+also drives the macOS-only branches through stubs (`uname` reporting Darwin,
+`xcrun simctl` listings padded with trailing whitespace, `launchctl`
+bootstrap failing once after bootout, `svc.sh` in every service state). macOS
+ships bash 3.2, so run the suite with `PROVISION_TEST_BASH=/path/to/bash-3.2`
+pointing at a locally built bash 3.2.57 before changing the script; the
+default run uses the workspace bash.
+
 Store the candidate build IDs as repository-level GitHub Actions
 **variables**:
 
@@ -328,15 +507,31 @@ Do not replace `secrets: inherit` while making this change. The authentication,
 test-account, Sentry, Clerk, and database values listed below still cross the
 reusable-workflow secrets boundary.
 
-Store the following values as **secrets** in the GitHub Actions
-`mobile-release` environment. Authentication values are injected only into the process that
-needs them and are never written to the repository or printed by the workflow.
+The called workflow validates these credentials in one hosted setup preflight.
+When required credentials are absent, the preflight reports every missing key
+together before native runners or release regressions start. It names keys only,
+never values. GitHub's reusable-workflow declarations leave the secrets
+syntactically optional so this aggregate diagnostic can run; the preflight list
+below is the blocking required contract. `NATIVE_SMOKE_DISPLAY_NAME` remains
+optional and is not included in that failure. The publish-only `EAS_TOKEN` also
+stays out of this preflight and remains available only after approval from the
+protected `mobile-store-submission` environment.
+
+Store the runner-read token below as a repository Actions **secret** so manual
+dispatches can use it, and pass it through the reusable-workflow secret contract.
+Store the release credentials in the GitHub Actions `mobile-release` environment.
+Authentication values are injected only into the process that needs them and
+are never written to the repository or printed by the workflow.
 The candidate build IDs are recorded in each smoke result directory so the
 tested candidate can be audited by the publish job:
 
 #### Required reusable-workflow secrets
 
-- `EAS_TOKEN` — EAS authentication token used only by the publish job
+- `GITHUB_WORKFLOW_PULL_TOKEN_FINAL` — a dedicated fine-grained GitHub token
+  scoped to this repository with **Administration: read** permission, used only
+  by the hosted Android runner-health job to read
+  `GET /repos/<owner>/<repo>/actions/runners`; it must not be a registration
+  token or a release credential
 - `SENTRY_AUTH_TOKEN` — a masked Sentry token with release-upload and
   event-read access for organization `lisagorewitdecker-06`, project
   `react-native`; store the same token in the EAS release build environment and
@@ -359,6 +554,11 @@ tested candidate can be audited by the publish job:
 
 - `NATIVE_SMOKE_DISPLAY_NAME` — reusable display name for the smoke account; the
   test flow can register the account without a preconfigured value
+
+#### Publish-only secret
+
+- `EAS_TOKEN` — EAS authentication token used only by the publish job; store it
+  in the protected `mobile-store-submission` environment, not `mobile-release`
 
 Build each candidate with `SENTRY_DSN`, `SENTRY_AUTH_TOKEN`, `SENTRY_RELEASE`,
 and `SENTRY_DIST` in its EAS release environment. EAS supplies `EAS_BUILD_ID`;

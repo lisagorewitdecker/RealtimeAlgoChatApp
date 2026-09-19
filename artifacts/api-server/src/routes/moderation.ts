@@ -6,7 +6,11 @@ import {
   setAccountBan,
 } from "../lib/accountAccess";
 import { normalizeAccountSearchQuery, searchAccounts } from "../lib/accountProfile";
-import { listModerationActions, recordModerationAction } from "../lib/moderationHistory";
+import {
+  listModerationActions,
+  recordMessageDeletion,
+  recordModerationAction,
+} from "../lib/moderationHistory";
 import { requireAuthorizedUser } from "../lib/requireAccountAccess";
 import {
   broadcastMessageDeletion,
@@ -181,6 +185,7 @@ router.delete("/:roomId/messages/:messageId", MODERATION_DELETE_MESSAGE_LIMITER,
       res.status(404).json({ error: "Message not found." });
       return;
     }
+    void recordMessageDeletion(actorId, roomId, deleted.id);
     broadcastMessageDeletion(roomId, deleted.id);
     res.json({ ok: true });
   } catch (error) {

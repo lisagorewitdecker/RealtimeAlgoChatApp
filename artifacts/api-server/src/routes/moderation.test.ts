@@ -13,6 +13,7 @@ const mockKickRoomMember = vi.hoisted(() => vi.fn());
 const mockKickRoomUser = vi.hoisted(() => vi.fn());
 const mockListModerationActions = vi.hoisted(() => vi.fn());
 const mockRecordModerationAction = vi.hoisted(() => vi.fn());
+const mockRecordMessageDeletion = vi.hoisted(() => vi.fn());
 const mockBroadcastMessageDeletion = vi.hoisted(() => vi.fn());
 const mockDbLimit = vi.hoisted(() => vi.fn());
 const mockDbValues = vi.hoisted(() => vi.fn());
@@ -85,6 +86,7 @@ vi.mock("../lib/accountProfile", async () => {
 
 vi.mock("../lib/moderationHistory", () => ({
   listModerationActions: mockListModerationActions,
+  recordMessageDeletion: mockRecordMessageDeletion,
   recordModerationAction: mockRecordModerationAction,
 }));
 
@@ -132,6 +134,7 @@ beforeEach(() => {
   mockDbValues.mockReset().mockResolvedValue(undefined);
   mockListModerationActions.mockReset().mockResolvedValue({ entries: [], nextCursor: null });
   mockRecordModerationAction.mockReset().mockResolvedValue(undefined);
+  mockRecordMessageDeletion.mockReset().mockResolvedValue(undefined);
   mockBroadcastMessageDeletion.mockReset();
   mockDbReturning.mockReset().mockResolvedValue([]);
   mockSearchAccounts.mockReset().mockResolvedValue([
@@ -163,6 +166,11 @@ describe("message deletion", () => {
       "room-123",
       "message-1",
     );
+    expect(mockRecordMessageDeletion).toHaveBeenCalledWith(
+      "owner-ada",
+      "room-123",
+      "message-1",
+    );
     expect(mockDbReturning.mock.invocationCallOrder[0]).toBeLessThan(
       mockBroadcastMessageDeletion.mock.invocationCallOrder[0],
     );
@@ -180,6 +188,7 @@ describe("message deletion", () => {
     expect(response.status).toBe(403);
     expect(mockDbReturning).not.toHaveBeenCalled();
     expect(mockBroadcastMessageDeletion).not.toHaveBeenCalled();
+    expect(mockRecordMessageDeletion).not.toHaveBeenCalled();
   });
 
   it("allows a configured admin to delete a message in another owner's room", async () => {
@@ -193,6 +202,11 @@ describe("message deletion", () => {
 
     expect(response.status).toBe(200);
     expect(mockBroadcastMessageDeletion).toHaveBeenCalledWith(
+      "room-123",
+      "message-1",
+    );
+    expect(mockRecordMessageDeletion).toHaveBeenCalledWith(
+      "admin-ada",
       "room-123",
       "message-1",
     );
@@ -210,6 +224,7 @@ describe("message deletion", () => {
 
     expect(response.status).toBe(404);
     expect(mockBroadcastMessageDeletion).not.toHaveBeenCalled();
+    expect(mockRecordMessageDeletion).not.toHaveBeenCalled();
   });
 });
 

@@ -90,6 +90,8 @@ interface Room {
   messages: Message[];
   sandboxState: EncryptedPayload | null;
   createdAt: number;
+  lastAccessedAt: number;
+  isActive: boolean;
 }
 
 const rooms = new Map<string, Room>();
@@ -158,6 +160,8 @@ type AppServer = Server<
 >;
 
 const KICK_COOLDOWN_MS = 5 * 60 * 1000;
+export const ROOM_INACTIVITY_TIMEOUT_MS = 24 * 60 * 60 * 1000;
+const ROOM_ACTIVITY_WRITE_INTERVAL_MS = 5 * 60 * 1000;
 const SOCKET_PACKET_MAX_BYTES = 512 * 1024;
 const SOCKET_CONNECTIONS_PER_ACCOUNT = 8;
 const SOCKET_CONNECTIONS_PER_IP = 64;
@@ -570,12 +574,94 @@ function getAssistantRequest(value: unknown): AssistantRequest | null {
 }
 
 export function getRooms() {
-  return Array.from(rooms.values()).map((r) => ({
-    id: r.id,
-    name: r.name,
-    userCount: r.users.size,
-    createdAt: r.createdAt,
-  }));
+  const now = Date.now();
+  return Array.from(rooms.values()).flatMap((room) => {
+    if (!room.isActive) return [];
+    if (isRoomInactive(room.lastAccessedAt, now)) {
+      room.isActive = false;
+      void expireRoom(room.id).catch((error: unknown) => {
+        reportSocketHandlerError("expire-inactive-room", error, {
+          roomId: room.id,
+        });
+      });
+      return [];
+    }
+    return [{
+      id: room.id,
+      name: room.name,
+      userCount: room.users.size,
+      createdAt: room.createdAt,
+      lastAccessedAt: room.lastAccessedAt,
+    }];
+  });
+}
+
+function isRoomInactive(lastAccessedAt: number, now = Date.now()): boolean {
+  return now - lastAccessedAt >= ROOM_INACTIVITY_TIMEOUT_MS;
+}
+
+async function recordRoomAccess(
+  room: Room,
+  forcePersist = false,
+): Promise<void> {
+  const now = Date.now();
+  if (
+    !forcePersist &&
+    now - room.lastAccessedAt < ROOM_ACTIVITY_WRITE_INTERVAL_MS
+  ) {
+    return;
+  }
+  room.lastAccessedAt = now;
+  try {
+    await db
+      .update(roomsTable)
+      .set({ lastAccessedAt: new Date(now) })
+      .where(eq(roomsTable.id, room.id));
+  } catch (error) {
+    reportSocketHandlerError("record-room-access", error, {
+      roomId: room.id,
+    });
+  }
+}
+
+async function expireRoom(roomId: string): Promise<void> {
+  await db
+    .update(roomsTable)
+    .set({ isActive: false })
+    .where(eq(roomsTable.id, roomId));
+}
+
+/**
+ * Enforces the inactivity window for a room that is already resident in memory.
+ *
+ * Cold hydration checks the persisted timestamp, but a room that stays in the
+ * map outlives that check. Without this guard a member could act on (or rejoin)
+ * a room after the window elapsed and refresh its timestamp, reviving a room
+ * that should already be closed.
+ */
+function enforceRoomInactivity(room: Room): boolean {
+  if (room.isActive && !isRoomInactive(room.lastAccessedAt)) {
+    return false;
+  }
+  if (room.isActive) {
+    room.isActive = false;
+    void expireRoom(room.id).catch((error: unknown) => {
+      reportSocketHandlerError("expire-room", error, { roomId: room.id });
+    });
+  }
+  return true;
+}
+
+export function setRoomActiveForModeration(
+  roomId: string,
+  isActive: boolean,
+): void {
+  const room = rooms.get(roomId);
+  if (!room) return;
+  room.isActive = isActive;
+  if (isActive) {
+    room.lastAccessedAt = Date.now();
+  }
 }
 
 export function broadcastMessageDeletion(roomId: string, messageId: string): void {
@@ -586,6 +672,23 @@ export function broadcastMessageDeletion(roomId: string, messageId: string): voi
     room.messages = room.messages.filter((message) => message.id !== messageId);
   }
   io.to(roomId).emit("message-deleted", { roomId, messageId });
+}
+
+/**
+ * Ages a resident room so tests can reach the inactivity window without
+ * mocking the clock; a global `Date.now` mock also breaks the Socket.IO
+ * transport used by those tests.
+ */
+export function setRoomLastAccessedAtForTest(
+  roomId: string,
+  lastAccessedAt: number,
+): void {
+  if (process.env["NODE_ENV"] !== "test") {
+    throw new Error("Room activity can only be aged by tests.");
+  }
+  const room = rooms.get(roomId);
+  if (!room) throw new Error(`Room ${roomId} is not resident in memory.`);
+  room.lastAccessedAt = lastAccessedAt;
 }
 
 export function resetSocketRoomStateForTest(): void {
@@ -1060,12 +1163,25 @@ function setupConnectedSocket(
             name: roomsTable.name,
             createdBy: roomsTable.createdBy,
             createdAt: roomsTable.createdAt,
+            lastAccessedAt: roomsTable.lastAccessedAt,
+            isActive: roomsTable.isActive,
           })
           .from(roomsTable)
           .where(eq(roomsTable.id, roomId))
           .limit(1);
         if (!persistedRoom) {
           socket.emit("error", { message: "Room not found." });
+          return;
+        }
+        if (
+          !persistedRoom.isActive ||
+          isRoomInactive(persistedRoom.lastAccessedAt.getTime())
+        ) {
+          if (persistedRoom.isActive) await expireRoom(roomId);
+          socket.emit("error", {
+            code: "ROOM_INACTIVE",
+            message: "This room has been inactive for more than 24 hours.",
+          });
           return;
         }
           let persistedMessages: Awaited<ReturnType<typeof loadEncryptedMessages>> = [];
@@ -1096,6 +1212,8 @@ function setupConnectedSocket(
            })),
            sandboxState: persistedSandbox,
           createdAt: persistedRoom.createdAt.getTime(),
+          lastAccessedAt: persistedRoom.lastAccessedAt.getTime(),
+          isActive: persistedRoom.isActive,
         });
           coldHydrationRoom = rooms.get(roomId) ?? null;
           coldHydrated = true;
@@ -1104,6 +1222,13 @@ function setupConnectedSocket(
       const room = rooms.get(roomId);
       if (!room) {
         throw new Error("Room hydration did not complete.");
+      }
+      if (enforceRoomInactivity(room)) {
+        socket.emit("error", {
+          code: "ROOM_INACTIVE",
+          message: "This room has been inactive for more than 24 hours.",
+        });
+        return;
       }
       const existingUser = room.users.get(authenticatedUser.userId);
       const isNewSocketInRoom = !existingUser?.socketIds.has(socket.id);
@@ -1152,6 +1277,7 @@ function setupConnectedSocket(
       room.users.set(user.userId, user);
       socket.join(roomId);
       socket.data.roomId = roomId;
+      await recordRoomAccess(room, true);
 
       // A deletion can commit after cold hydration reads active rows but before
       // this socket joins the room and can receive its live tombstone. Recheck
@@ -1662,10 +1788,15 @@ function getJoinedRoom(socket: AppSocket, roomId: string): Room | null {
     !room ||
     socket.data.roomId !== roomId ||
     !socket.rooms.has(roomId) ||
-    !room.users.get(userId)?.socketIds.has(socket.id)
+    !room.users.get(userId)?.socketIds.has(socket.id) ||
+    !room.isActive
   ) {
     return null;
   }
+  if (enforceRoomInactivity(room)) {
+    return null;
+  }
+  void recordRoomAccess(room);
   return room;
 }
 

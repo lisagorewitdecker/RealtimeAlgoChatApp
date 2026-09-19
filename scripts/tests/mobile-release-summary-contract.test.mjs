@@ -23,19 +23,23 @@
  *      changing the other platform's fixed report link.
  *   6. A failed platform artifact download keeps the release blocked without
  *      hiding the other platform's report link.
- *   7. Multiple changed Android preview records are validated independently;
- *      one failure does not hide the valid record or expose either record's
- *      evidence text.
- *   8. Malformed, schema-invalid, and duplicate Android preflight artifacts
- *      fail with the fixed redacted-schema message without exposing their
- *      markers or raw artifact content.
- *   9. A missing Android preflight validator produces a fixed dependency
- *      diagnostic without running the checker or exposing evidence content.
+ *   7. Mixed record-only, sidecar-only, and paired Android preview changes are
+ *      validated independently; one failure does not hide valid records or
+ *      expose any record's evidence text.
+ *   8. Malformed, schema-invalid, and duplicate Android and iOS preflight
+ *      artifacts fail with the fixed redacted-schema message without
+ *      exposing their markers or raw artifact content.
+ *   9. A missing Android or iOS preflight validator produces a fixed
+ *      dependency diagnostic without running the checker or exposing evidence
+ *      content.
  *  10. A failed artifact extraction clears partial platform output before its
  *      retry, while a permanently missing artifact still reaches the fixed
  *      platform-specific blocking summary.
  *  11. A controlled hosted artifact outage recovers only after the retry
  *      succeeds, while a failed retry still blocks native evidence.
+ *  12. Native report artifacts use the maximum bounded retention window, and
+ *      an expired artifact download never leaves a dead report link in the
+ *      release summary.
  *
  * The static rules catch code paths no scenario exercises; the behavioral runs
  * inject sentinel values for every secret-backed variable and prove the real
@@ -79,16 +83,58 @@ const playwrightConfig = readFileSync(
 );
 const bashPath = locateExecutable("bash");
 const gitPath = locateExecutable("git");
+const androidRunnerPins = readFileSync(
+  path.join(workspaceRoot, "scripts/android-runner-pins.sh"),
+  "utf8",
+);
+const androidBuildToolsVersion = androidRunnerPins.match(
+  /^ANDROID_BUILD_TOOLS_VERSION="([^"]+)"$/m,
+)?.[1];
+assert.ok(
+  androidBuildToolsVersion,
+  "the Android runner pin contract must define ANDROID_BUILD_TOOLS_VERSION",
+);
 
 const iosGateScript = "artifacts/chat-app/e2e/native-large-text/run.sh";
+const iosPreflightScript = "scripts/check-ios-release-prerequisites.sh";
 const androidPreflightScript = "scripts/check-android-release-prerequisites.sh";
 const nativeEvidenceCheckerScript =
   "scripts/check-native-large-text-evidence.sh";
 const untrustedCheckerWrapperScript = "scripts/run-untrusted-checker.sh";
+const workflowOutputSafetyScript = "scripts/workflow-output-safety.sh";
+const nativeBrandingSummaryScript = "scripts/summarize-native-branding.sh";
+const nativeRecoveryContractScript =
+  "scripts/native-release-recovery-contract.sh";
 const pinnedUploadArtifactAction =
   "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02";
 const pinnedDownloadArtifactAction =
   "actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093";
+
+const recoveryContractResult = spawnSync(
+  bashPath,
+  [
+    "-c",
+    'source "$1"; native_release_recovery_line ios; native_release_recovery_line android',
+    "native-release-recovery-contract",
+    path.join(workspaceRoot, nativeRecoveryContractScript),
+  ],
+  { cwd: workspaceRoot, encoding: "utf8" },
+);
+assert.equal(
+  recoveryContractResult.status,
+  0,
+  "the native recovery contract must load successfully",
+);
+const nativeRecoveryLines = recoveryContractResult.stdout.trimEnd().split("\n");
+assert.deepEqual(
+  nativeRecoveryLines,
+  [
+    "- Recovery: **Rerun the iOS native large-text job, or make the existing iOS artifact available, then rerun the mobile release gate.**",
+    "- Recovery: **Rerun the Android native large-text job, or make the existing Android artifact available, then rerun the mobile release gate.**",
+  ],
+  "the native recovery contract must keep both fixed, safe recovery lines",
+);
+const [iosRecoveryLine, androidRecoveryLine] = nativeRecoveryLines;
 /**
  * Inventory of every script invoked by the release workflow that writes
  * `GITHUB_STEP_SUMMARY`. The discovery test fails when the workflow gains a
@@ -109,6 +155,18 @@ const scriptContracts = {
     // Audited candidate identifiers may be written to evidence files here.
     evidenceDirectoryVariable: "RESULTS_DIR",
   },
+  [iosPreflightScript]: {
+    diagnosticFunction: "record_failure",
+    diagnosticVariableAllowlist: [
+      "command",
+      "name",
+      "java_version",
+      "pnpm_version",
+      "PNPM_VERSION",
+    ],
+    summaryFunction: "write_summary",
+    evidenceDirectoryVariable: null,
+  },
   [androidPreflightScript]: {
     diagnosticFunction: "record_failure",
     diagnosticVariableAllowlist: [
@@ -124,6 +182,13 @@ const scriptContracts = {
     summaryFunction: "write_summary",
     // The preflight uploads no evidence, so identifiers may only feed tools.
     evidenceDirectoryVariable: null,
+  },
+  "scripts/check-android-release-runner-health.sh": {
+    diagnosticFunction: "record_failure",
+    diagnosticVariableAllowlist: ["required_label_text"],
+    summaryFunction: "write_report",
+    evidenceDirectoryVariable: null,
+    requiresPrivateValues: false,
   },
   "scripts/check-native-large-text-evidence.sh": {
     diagnosticFunction: "record_summary_issue",
@@ -143,11 +208,18 @@ const scriptContracts = {
 
 /**
  * Inventory of JSON readers that consume release evidence. The source scan
- * below intentionally discovers JSON.parse calls in release-check scripts
- * rather than trusting this list alone: adding a reader without adding the
- * shared duplicate-key check must fail this contract.
+ * below intentionally discovers JSON.parse calls in release-check scripts and
+ * their local helper modules rather than trusting this list alone: adding a
+ * reader without adding the shared duplicate-key check must fail this
+ * contract.
  */
 const releaseEvidenceReaderContracts = {
+  "artifacts/chat-app/scripts/preview-launch-evidence.mjs": {
+    name: "iOS launch-evidence probe records",
+    argument: "contents",
+    scannerCall: "findDuplicateJsonObjectKeys(contents)",
+    duplicateFailure: /Launch-evidence probe JSON contains duplicate fields \(\$\{fileName\}\)\./,
+  },
   "artifacts/chat-app/scripts/validate-branding.mjs": {
     name: "native branding metadata",
     argument: "source",
@@ -178,6 +250,24 @@ const releaseEvidenceSourceDirectories = [
   path.join(workspaceRoot, "artifacts/chat-app/scripts"),
   path.join(workspaceRoot, "scripts"),
 ];
+const releaseEvidenceExcludedDirectoryNames = new Set([
+  "__tests__",
+  "fixture",
+  "fixtures",
+  "node_modules",
+  "test",
+  "test-fixtures",
+  "tests",
+  "tooling",
+  "tools",
+]);
+const releaseEvidenceExcludedDirectories = new Set([
+  path.join(workspaceRoot, "scripts/src"),
+  path.join(workspaceRoot, "scripts/tests"),
+]);
+const releaseEvidenceScriptPattern = /\.(?:mjs|sh)$/;
+const releaseEvidenceExcludedFilePattern =
+  /\.(?:fixture|test)\.(?:mjs|sh)$/;
 
 const nonEvidenceJsonParseArguments = {
   "artifacts/chat-app/scripts/validate-branding.mjs": new Set([
@@ -317,38 +407,167 @@ function assertNoProblems(problems, heading) {
   );
 }
 
-function discoverReleaseEvidenceJsonParses() {
-  const parsePattern = /\bJSON\.parse\(\s*([A-Za-z_$][\w$]*)\s*\)/g;
-  const discovered = [];
+const localModuleImportPatterns = [
+  /\bimport\s+(?:[\s\S]*?\s+from\s+)?["']([^"']+)["']/g,
+  /\bexport\s+(?:[\s\S]*?\s+from\s+)["']([^"']+)["']/g,
+  /\bimport\s*\(\s*["']([^"']+)["']\s*\)/g,
+];
+const localModuleExtensions = ["", ".mjs", ".js", ".cjs"];
 
-  for (const directory of releaseEvidenceSourceDirectories) {
-    for (const entry of readdirSync(directory, { withFileTypes: true })) {
-      if (
-        !entry.isFile() ||
-        !/\.(?:mjs|sh)$/.test(entry.name) ||
-        entry.name.endsWith(".test.mjs")
-      ) {
-        continue;
-      }
+function resolveLocalModule(filePath, specifier) {
+  if (!specifier.startsWith(".")) {
+    return null;
+  }
 
-      const filePath = path.join(directory, entry.name);
-      const relativePath = path.relative(workspaceRoot, filePath);
-      if (relativePath === "scripts/find-duplicate-json-object-keys.mjs") {
-        continue;
-      }
+  const modulePath = path.resolve(path.dirname(filePath), specifier);
+  const candidates = [
+    ...localModuleExtensions.map((extension) => `${modulePath}${extension}`),
+    ...localModuleExtensions.map((extension) =>
+      path.join(modulePath, `index${extension}`),
+    ),
+  ];
 
-      const ignoredArguments =
-        nonEvidenceJsonParseArguments[relativePath] ?? new Set();
-      const source = readFileSync(filePath, "utf8");
-      for (const [, argument] of source.matchAll(parsePattern)) {
-        if (!ignoredArguments.has(argument)) {
-          discovered.push(`${relativePath}::${argument}`);
+  for (const candidate of candidates) {
+    if (
+      candidate.startsWith(`${workspaceRoot}${path.sep}`) &&
+      !candidate.includes(`${path.sep}node_modules${path.sep}`) &&
+      existsSync(candidate) &&
+      statSync(candidate).isFile()
+    ) {
+      return candidate;
+    }
+  }
+  return null;
+}
+
+function discoverLocalModuleClosure(entryPath) {
+  const discovered = new Set();
+  const queue = [entryPath];
+
+  while (queue.length > 0) {
+    const filePath = queue.shift();
+    if (discovered.has(filePath)) {
+      continue;
+    }
+    discovered.add(filePath);
+
+    if (!/\.(?:mjs|js|cjs)$/.test(filePath)) {
+      continue;
+    }
+
+    const source = readFileSync(filePath, "utf8");
+    for (const pattern of localModuleImportPatterns) {
+      for (const [, specifier] of source.matchAll(pattern)) {
+        const importedPath = resolveLocalModule(filePath, specifier);
+        if (importedPath && !discovered.has(importedPath)) {
+          queue.push(importedPath);
         }
       }
     }
   }
 
-  return discovered.sort();
+  return discovered;
+}
+
+function jsonParseMatches(filePath) {
+  const parsePattern = /\bJSON\.parse\(\s*([A-Za-z_$][\w$]*)\s*\)/g;
+  const relativePath = path.relative(workspaceRoot, filePath);
+  const ignoredArguments =
+    nonEvidenceJsonParseArguments[relativePath] ?? new Set();
+  const source = readFileSync(filePath, "utf8");
+
+  return [...source.matchAll(parsePattern)]
+    .map(([, argument]) => argument)
+    .filter((argument) => !ignoredArguments.has(argument))
+    .map((argument) => ({ filePath, argument }));
+}
+
+function releaseCheckEntryPaths() {
+  const entries = [];
+  function visit(directory) {
+    for (const entry of readdirSync(directory, { withFileTypes: true }).sort(
+      (left, right) => left.name.localeCompare(right.name),
+    )) {
+      const filePath = path.join(directory, entry.name);
+      if (entry.isDirectory()) {
+        if (
+          releaseEvidenceExcludedDirectoryNames.has(entry.name) ||
+          releaseEvidenceExcludedDirectories.has(filePath)
+        ) {
+          continue;
+        }
+        visit(filePath);
+        continue;
+      }
+
+      if (
+        !entry.isFile() ||
+        !releaseEvidenceScriptPattern.test(entry.name) ||
+        releaseEvidenceExcludedFilePattern.test(entry.name)
+      ) {
+        continue;
+      }
+
+      const relativePath = path.relative(workspaceRoot, filePath);
+      if (relativePath === "scripts/find-duplicate-json-object-keys.mjs") {
+        continue;
+      }
+      entries.push(filePath);
+    }
+  }
+
+  for (const directory of releaseEvidenceSourceDirectories) {
+    visit(directory);
+  }
+
+  return entries;
+}
+
+function discoverReleaseEvidenceJsonParses(
+  entryFilePaths = releaseCheckEntryPaths(),
+) {
+  const importedHelpers = new Set();
+  const closures = new Map();
+
+  for (const entryFilePath of entryFilePaths) {
+    const closure = discoverLocalModuleClosure(entryFilePath);
+    closures.set(entryFilePath, closure);
+    for (const importedPath of closure) {
+      if (importedPath !== entryFilePath) {
+        importedHelpers.add(importedPath);
+      }
+    }
+  }
+
+  const discovered = [];
+  for (const [entryFilePath, closure] of closures) {
+    if (importedHelpers.has(entryFilePath)) {
+      continue;
+    }
+
+    const entryPath = path.relative(workspaceRoot, entryFilePath);
+    for (const filePath of closure) {
+      if (
+        path.relative(workspaceRoot, filePath) ===
+        "scripts/find-duplicate-json-object-keys.mjs"
+      ) {
+        continue;
+      }
+      for (const match of jsonParseMatches(filePath)) {
+        discovered.push({
+          entryPath,
+          parserPath: path.relative(workspaceRoot, match.filePath),
+          argument: match.argument,
+        });
+      }
+    }
+  }
+
+  return discovered.sort((left, right) =>
+    `${left.entryPath}::${left.argument}::${left.parserPath}`.localeCompare(
+      `${right.entryPath}::${right.argument}::${right.parserPath}`,
+    ),
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -617,6 +836,51 @@ test("candidate build IDs use non-secret variables or reusable-workflow inputs",
   );
 });
 
+test("iOS preflight clears stale evidence before it can block unconditional uploads", () => {
+  const iosJob = workflow.jobs["native-ios"];
+  assert.ok(iosJob, "release workflow must define the native-ios job");
+  const preflightStep = iosJob.steps.find(
+    (step) => step.name === "Check iOS release prerequisites",
+  );
+  assert.ok(preflightStep, "native-ios must run the iOS prerequisite preflight");
+  const cleanupStep = iosJob.steps.find(
+    (step) => step.name === "Clear prior iOS evidence from this runner",
+  );
+  assert.ok(cleanupStep, "native-ios must clear prior iOS evidence");
+  assert.match(
+    cleanupStep.run,
+    /^rm -rf test-results\/native-large-text\/ios$/,
+    "stale iOS evidence must be cleared by a fixed cleanup command",
+  );
+
+  const preflightIndex = iosJob.steps.indexOf(preflightStep);
+  assert.ok(
+    iosJob.steps.indexOf(cleanupStep) < preflightIndex,
+    "stale iOS evidence must be cleared before the preflight can fail",
+  );
+  for (const stepName of [
+    "Summarize iOS readiness",
+    "Upload iOS native smoke artifacts",
+    "Summarize iOS native branding",
+  ]) {
+    const step = iosJob.steps.find((candidate) => candidate.name === stepName);
+    assert.ok(step, `native-ios must define "${stepName}"`);
+    assert.ok(
+      iosJob.steps.indexOf(step) > preflightIndex,
+      `"${stepName}" must run after the stale-evidence cleanup and preflight`,
+    );
+  }
+
+  const uploadStep = iosJob.steps.find(
+    (step) => step.name === "Upload iOS native smoke artifacts",
+  );
+  assert.equal(
+    uploadStep.if,
+    "always()",
+    "the unconditional upload must be safe after the preflight clears stale evidence",
+  );
+});
+
 test("idle-profile registration check blocks release and reports its result", () => {
   const idleJob = workflow.jobs["idle-profile-registration"];
   assert.ok(idleJob, "release workflow must define the idle-profile job");
@@ -645,41 +909,84 @@ test("idle-profile registration check blocks release and reports its result", ()
     /echo "release_check_configured=true" >> "\$GITHUB_OUTPUT"/,
   );
 
-  const preflightStep = idleJob.steps.find(
-    (step) => step.name === "Verify idle-profile browser targets",
+  const chatPreflightStep = idleJob.steps.find(
+    (step) => step.name === "Verify idle-profile Chat App target",
+  );
+  const apiPreflightStep = idleJob.steps.find(
+    (step) => step.name === "Verify idle-profile API target",
+  );
+  const preflightRecordStep = idleJob.steps.find(
+    (step) => step.name === "Record idle-profile browser target preflight",
   );
   assert.ok(
-    preflightStep,
-    "idle-profile job must preflight its browser targets",
+    chatPreflightStep,
+    "idle-profile job must preflight its Chat App target",
+  );
+  assert.ok(apiPreflightStep, "idle-profile job must preflight its API target");
+  assert.ok(
+    preflightRecordStep,
+    "idle-profile job must record a secret-free preflight reason",
   );
   assert.equal(
-    preflightStep.if,
+    chatPreflightStep.if,
     "${{ steps.idle-profile-config.outputs.browser_targets_configured == 'true' }}",
-    "preflight must run only when browser target configuration is present",
+    "Chat App preflight must run only when browser target configuration is present",
   );
-  assert.equal(preflightStep.env.E2E_CHAT_URL, "${{ secrets.E2E_CHAT_URL }}");
-  assert.equal(preflightStep.env.E2E_API_URL, "${{ secrets.E2E_API_URL }}");
+  assert.equal(
+    apiPreflightStep.if,
+    "${{ steps.idle-profile-config.outputs.browser_targets_configured == 'true' }}",
+    "API preflight must run only when browser target configuration is present",
+  );
+  assert.deepEqual(chatPreflightStep.env, {
+    E2E_CHAT_URL: "${{ secrets.E2E_CHAT_URL }}",
+  });
+  assert.deepEqual(apiPreflightStep.env, {
+    E2E_API_URL: "${{ secrets.E2E_API_URL }}",
+  });
   assert.match(
-    preflightStep.run,
-    /check_target "Chat App" "\$E2E_CHAT_URL"/,
+    chatPreflightStep.run,
+    /--output \/dev\/null[\s\\]*"\$E2E_CHAT_URL"/,
     "preflight must identify and check the configured Chat App target",
   );
   assert.match(
-    preflightStep.run,
-    /check_target "API" "\$\{E2E_API_URL%\/\}\/api\/healthz"/,
+    apiPreflightStep.run,
+    /--output \/dev\/null[\s\\]*"\$\{E2E_API_URL%\/\}\/api\/healthz"/,
     "preflight must check the API public health route",
   );
-  assert.match(preflightStep.run, /--connect-timeout 5/);
-  assert.match(preflightStep.run, /--max-time 10/);
-  assert.match(
-    preflightStep.run,
-    /\$\{label\} target is unavailable or unhealthy\./,
-    "preflight failures must clearly identify the unavailable target",
+  for (const [label, step] of [
+    ["Chat App", chatPreflightStep],
+    ["API", apiPreflightStep],
+  ]) {
+    assert.match(step.run, /--connect-timeout 5/);
+    assert.match(step.run, /--max-time 10/);
+    assert.match(
+      step.run,
+      new RegExp(`${label} target is unavailable or unhealthy\\.`),
+      "preflight failures must clearly identify the unavailable target",
+    );
+    assert.doesNotMatch(
+      step.run,
+      /echo[^\n]*(?:E2E_CHAT_URL|E2E_API_URL)/,
+      "preflight diagnostics must not print configured target URLs",
+    );
+  }
+  assert.equal(
+    preflightRecordStep.if,
+    "${{ always() && steps.idle-profile-config.outputs.browser_targets_configured == 'true' }}",
   );
-  assert.doesNotMatch(
-    preflightStep.run,
-    /echo[^\n]*(?:E2E_CHAT_URL|E2E_API_URL|"\$url")/,
-    "preflight diagnostics must not print configured target URLs",
+  assert.deepEqual(preflightRecordStep.env, {
+    IDLE_PROFILE_CHAT_PREFLIGHT_RESULT:
+      "${{ steps.idle-profile-chat-preflight.outcome }}",
+    IDLE_PROFILE_API_PREFLIGHT_RESULT:
+      "${{ steps.idle-profile-api-preflight.outcome }}",
+  });
+  assert.match(
+    preflightRecordStep.run,
+    /IDLE_PROFILE_CHAT_PREFLIGHT_RESULT" != "success"[\s\S]*failure_reason=chat-app-target-unavailable/,
+  );
+  assert.match(
+    preflightRecordStep.run,
+    /IDLE_PROFILE_API_PREFLIGHT_RESULT" != "success"[\s\S]*failure_reason=api-target-unavailable/,
   );
 
   const runStep = idleJob.steps.find(
@@ -692,7 +999,12 @@ test("idle-profile registration check blocks release and reports its result", ()
     "idle-profile Playwright check must run only when release-check configuration is present",
   );
   assert.ok(
-    idleJob.steps.indexOf(preflightStep) < idleJob.steps.indexOf(runStep),
+    idleJob.steps.indexOf(chatPreflightStep) <
+      idleJob.steps.indexOf(apiPreflightStep) &&
+      idleJob.steps.indexOf(apiPreflightStep) <
+        idleJob.steps.indexOf(preflightRecordStep) &&
+      idleJob.steps.indexOf(preflightRecordStep) <
+        idleJob.steps.indexOf(runStep),
     "both browser targets must be verified before Playwright starts",
   );
   assert.match(
@@ -769,10 +1081,22 @@ test("idle-profile registration check blocks release and reports its result", ()
   );
   assert.ok(summaryStep, "idle-profile job must write a release summary");
   assert.equal(summaryStep.if, "${{ always() }}");
+  assert.equal(
+    summaryStep.env.IDLE_PROFILE_PREFLIGHT_FAILURE_REASON,
+    "${{ steps.idle-profile-preflight.outputs.failure_reason }}",
+  );
   assert.match(summaryStep.run, /## Idle profile registration/);
   assert.match(summaryStep.run, /Status: \*\*PASS\*\*/);
   assert.match(summaryStep.run, /Status: \*\*SKIP\*\*/);
   assert.match(summaryStep.run, /Status: \*\*FAIL\*\*/);
+  assert.match(
+    summaryStep.run,
+    /chat-app-target-unavailable\)[\s\S]*Chat App target is unavailable or unhealthy\./,
+  );
+  assert.match(
+    summaryStep.run,
+    /api-target-unavailable\)[\s\S]*API target is unavailable or unhealthy\./,
+  );
 
   const gate = workflow.jobs["mobile-release-gate"];
   assert.ok(
@@ -928,6 +1252,145 @@ test("native hosted release jobs skip cleanly when release configuration is abse
     nativeAndroid.needs.includes("native-release-configuration"),
     "native-android must depend on the shared native release configuration job",
   );
+test("idle-profile summary reports fixed browser target outages without leaking URLs", () => {
+  const idleJob = workflow.jobs["idle-profile-registration"];
+  const chatPreflightStep = idleJob.steps.find(
+    (step) => step.name === "Verify idle-profile Chat App target",
+  );
+  const apiPreflightStep = idleJob.steps.find(
+    (step) => step.name === "Verify idle-profile API target",
+  );
+  const preflightRecordStep = idleJob.steps.find(
+    (step) => step.name === "Record idle-profile browser target preflight",
+  );
+  const summaryStep = idleJob.steps.find(
+    (step) => step.name === "Summarize idle-profile registration check",
+  );
+  assert.ok(chatPreflightStep);
+  assert.ok(apiPreflightStep);
+  assert.ok(preflightRecordStep);
+  assert.ok(summaryStep);
+
+  const fixtureRoot = mkdtempSync(
+    path.join(tmpdir(), "idle-profile-target-summary-"),
+  );
+  const binDirectory = path.join(fixtureRoot, "bin");
+  mkdirSync(binDirectory);
+  writeFileSync(
+    path.join(binDirectory, "curl"),
+    [
+      "#!/usr/bin/env bash",
+      "set -euo pipefail",
+      "exit 22",
+      "",
+    ].join("\n"),
+    { mode: 0o755 },
+  );
+
+  const chatUrl = "https://PRIVATE_IDLE_CHAT_TARGET.example/preview";
+  const apiUrl = "https://PRIVATE_IDLE_API_TARGET.example";
+  const scenarios = [
+    {
+      name: "Chat App",
+      preflightStep: chatPreflightStep,
+      preflightEnv: { E2E_CHAT_URL: chatUrl },
+      chatOutcome: "failure",
+      apiOutcome: "skipped",
+      reason: "chat-app-target-unavailable",
+      summaryText: "the Chat App target is unavailable or unhealthy.",
+    },
+    {
+      name: "API",
+      preflightStep: apiPreflightStep,
+      preflightEnv: { E2E_API_URL: apiUrl },
+      chatOutcome: "success",
+      apiOutcome: "failure",
+      reason: "api-target-unavailable",
+      summaryText: "the API target is unavailable or unhealthy.",
+    },
+  ];
+
+  try {
+    for (const scenario of scenarios) {
+      const preflight = spawnSync(
+        bashPath,
+        ["-c", scenario.preflightStep.run],
+        {
+          cwd: workspaceRoot,
+          encoding: "utf8",
+          env: {
+            ...process.env,
+            ...scenario.preflightEnv,
+            PATH: `${binDirectory}:${process.env.PATH}`,
+          },
+        },
+      );
+      const preflightOutput = `${preflight.stdout}${preflight.stderr}`;
+      assert.equal(
+        preflight.status,
+        2,
+        `${scenario.name} preflight should fail with the fixed unavailable-target status:\n${preflightOutput}`,
+      );
+      assert.match(
+        preflightOutput,
+        new RegExp(`${scenario.name} target is unavailable or unhealthy\\.`),
+      );
+
+      const outputPath = path.join(fixtureRoot, `${scenario.name}.output`);
+      const recorder = spawnSync(bashPath, ["-c", preflightRecordStep.run], {
+        cwd: workspaceRoot,
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          GITHUB_OUTPUT: outputPath,
+          IDLE_PROFILE_CHAT_PREFLIGHT_RESULT: scenario.chatOutcome,
+          IDLE_PROFILE_API_PREFLIGHT_RESULT: scenario.apiOutcome,
+        },
+      });
+      const recorderOutput = `${recorder.stdout}${recorder.stderr}`;
+      assert.equal(recorder.status, 0, recorderOutput);
+      const failureReason = readFileSync(outputPath, "utf8").match(
+        /^failure_reason=(.+)$/m,
+      )?.[1];
+      assert.equal(failureReason, scenario.reason);
+
+      const summaryPath = path.join(fixtureRoot, `${scenario.name}.summary.md`);
+      const summary = spawnSync(bashPath, ["-c", summaryStep.run], {
+        cwd: workspaceRoot,
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          GITHUB_STEP_SUMMARY: summaryPath,
+          IDLE_PROFILE_PREFLIGHT_FAILURE_REASON: failureReason,
+          IDLE_PROFILE_RESULT: "skipped",
+        },
+      });
+      const summaryOutput = `${summary.stdout}${summary.stderr}`;
+      assert.equal(summary.status, 0, summaryOutput);
+      const summaryText = readFileSync(summaryPath, "utf8");
+      assert.match(summaryText, /- Status: \*\*FAIL\*\*/);
+      assert.ok(
+        summaryText.includes(scenario.summaryText),
+        `${scenario.name} summary should name the failed target:\n${summaryText}`,
+      );
+
+      for (const [surface, contents] of [
+        ["preflight log", preflightOutput],
+        ["preflight recorder log", recorderOutput],
+        ["summary log", summaryOutput],
+        ["job summary", summaryText],
+        ["preflight output", readFileSync(outputPath, "utf8")],
+      ]) {
+        assert.equal(
+          contents.includes(chatUrl) || contents.includes(apiUrl),
+          false,
+          `${scenario.name} ${surface} must not expose secret-backed target URLs`,
+        );
+      }
+    }
+  } finally {
+    rmSync(fixtureRoot, { recursive: true, force: true });
+  }
 });
 
 test("failed native evidence checks remain reviewable before blocking release", () => {
@@ -956,9 +1419,11 @@ test("failed native evidence checks remain reviewable before blocking release", 
     true,
     "native evidence validation must preserve its summary before the blocker runs",
   );
-  assert.equal(
+  assert.match(
     evidenceStep.run,
-    `bash ${untrustedCheckerWrapperScript} bash ${nativeEvidenceCheckerScript}`,
+    new RegExp(
+      `bash ${untrustedCheckerWrapperScript.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} bash ${nativeEvidenceCheckerScript.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`,
+    ),
     "native evidence validation must use the untrusted checker boundary",
   );
   assert.equal(
@@ -1108,8 +1573,8 @@ test("native evidence downloads retry without exposing evidence contents", () =>
     );
     assert.equal(
       retry?.if,
-      `\${{ always() && steps.${downloadId}.outcome != 'success' }}`,
-      `${jobId}: ${platform} retry must run only after a non-successful initial download`,
+      `\${{ always() && steps.${downloadId}.outcome != 'success' && steps.cleanup-${downloadId.replace("download-", "")}.outcome == 'success' }}`,
+      `${jobId}: ${platform} retry must run only after cleanup succeeds`,
     );
     assert.deepEqual(
       retry?.with,
@@ -1135,6 +1600,20 @@ test("native evidence downloads retry without exposing evidence contents", () =>
     evidenceStep?.env?.NATIVE_ANDROID_EVIDENCE_DOWNLOAD_RESULT,
     "${{ steps.download-android-native-smoke.outcome == 'success' && 'success' || steps.retry-android-native-smoke.outcome }}",
     "the Android checker must receive the successful initial or retry outcome",
+  );
+
+  const publishEvidenceStep = workflow.jobs["mobile-publish"].steps.find(
+    (step) => step.name === "Require approved iOS and Android evidence",
+  );
+  assert.equal(
+    publishEvidenceStep?.env?.NATIVE_IOS_EVIDENCE_DOWNLOAD_RESULT,
+    "${{ steps.download-publish-ios-native-smoke.outcome == 'success' && 'success' || steps.retry-publish-ios-native-smoke.outcome }}",
+    "strict publish validation must receive the successful iOS initial or retry outcome",
+  );
+  assert.equal(
+    publishEvidenceStep?.env?.NATIVE_ANDROID_EVIDENCE_DOWNLOAD_RESULT,
+    "${{ steps.download-publish-android-native-smoke.outcome == 'success' && 'success' || steps.retry-publish-android-native-smoke.outcome }}",
+    "strict publish validation must receive the successful Android initial or retry outcome",
   );
 });
 
@@ -1177,6 +1656,11 @@ test("hosted native evidence regression proves a transient download recovers", (
   );
   assert.match(
     recoveryStep.run,
+    /NATIVE_EVIDENCE_REQUIRE_APPROVAL=1[\s\S]*NATIVE_IOS_EVIDENCE_DOWNLOAD_RESULT=success/,
+    "the hosted recovery must exercise strict publish evidence validation after retry",
+  );
+  assert.match(
+    recoveryStep.run,
     /NATIVE_IOS_EVIDENCE_DOWNLOAD_RESULT=failure[\s\S]*check-native-large-text-evidence\.sh "\$recovery_root"/,
     "the hosted regression must prove a failed retry remains blocking",
   );
@@ -1187,6 +1671,16 @@ test("hosted native evidence regression proves a transient download recovers", (
   );
   assert.match(
     recoveryStep.run,
+    /simulate_store_submission "\$recovered_submission_marker"[\s\S]*if \[\[ ! -e "\$recovered_submission_marker" \]\]/,
+    "the hosted recovery must prove a successful strict check reaches the submission boundary",
+  );
+  assert.match(
+    recoveryStep.run,
+    /simulate_store_submission "\$failed_submission_marker"[\s\S]*if \[\[ -e "\$failed_submission_marker" \]\]/,
+    "the hosted recovery must prove a failed retry cannot reach submission",
+  );
+  assert.match(
+    recoveryStep.run,
     /cat "\$pass_summary_path" >> "\$GITHUB_STEP_SUMMARY"/,
     "the hosted regression must publish only the recovered, privacy-safe summary",
   );
@@ -1194,6 +1688,134 @@ test("hosted native evidence regression proves a transient download recovers", (
     recoveryStep.run,
     /cat\s+.*(?:candidate-build-id|runner-metadata|pass-fail-record|sentry-source-map)/,
     "the hosted recovery scenario must not print downloaded evidence contents",
+  );
+});
+
+test("hosted native evidence regression exercises real artifact download continuation", () => {
+  const regressionJob = workflow.jobs["native-evidence-summary-regression"];
+  const uploadStep = regressionJob.steps.find(
+    (step) =>
+      step.name ===
+      "Store controlled Android artifact for missing iOS scenario",
+  );
+  const iosDownloadStep = regressionJob.steps.find(
+    (step) => step.name === "Download controlled missing iOS artifact",
+  );
+  const androidDownloadStep = regressionJob.steps.find(
+    (step) =>
+      step.name ===
+      "Download controlled Android artifact after iOS failure",
+  );
+  const checkerStep = regressionJob.steps.find(
+    (step) => step.name === "Run checker after controlled artifact outage",
+  );
+  const blockerStep = regressionJob.steps.find(
+    (step) =>
+      step.name ===
+      "Confirm controlled outage blocks promotion and preserves both sections",
+  );
+
+  assert.equal(
+    regressionJob.permissions.actions,
+    "write",
+    "the hosted artifact scenario needs scoped Actions write access for its controlled fixture",
+  );
+  assert.equal(
+    uploadStep?.uses,
+    pinnedUploadArtifactAction,
+    "the controlled Android fixture must use the pinned upload action",
+  );
+  assert.equal(
+    iosDownloadStep?.uses,
+    pinnedDownloadArtifactAction,
+    "the missing iOS scenario must use the pinned download action",
+  );
+  assert.equal(
+    androidDownloadStep?.uses,
+    pinnedDownloadArtifactAction,
+    "the Android continuation must use the pinned download action",
+  );
+  assert.equal(
+    iosDownloadStep?.["continue-on-error"],
+    true,
+    "the missing iOS download must not stop the following Android download",
+  );
+  assert.equal(
+    androidDownloadStep?.["continue-on-error"],
+    true,
+    "the controlled Android download must preserve its outcome for the checker",
+  );
+  assert.equal(
+    checkerStep?.env?.NATIVE_IOS_EVIDENCE_DOWNLOAD_RESULT,
+    "${{ steps.download-controlled-ios.outcome }}",
+  );
+  assert.equal(
+    checkerStep?.env?.NATIVE_ANDROID_EVIDENCE_DOWNLOAD_RESULT,
+    "${{ steps.download-controlled-android.outcome }}",
+  );
+  assert.equal(
+    checkerStep?.["continue-on-error"],
+    true,
+    "the checker must publish its blocked summary before the assertion step",
+  );
+  assert.equal(
+    blockerStep?.if,
+    "${{ always() }}",
+    "the assertion must run after the checker blocks the controlled outage",
+  );
+  assert.match(
+    blockerStep?.run ?? "",
+    /Android download did not continue successfully after the iOS failure/,
+  );
+  assert.match(
+    blockerStep?.run ?? "",
+    /Rerun the iOS native large-text job/,
+  );
+  assert.match(
+    blockerStep?.run ?? "",
+    /Rerun the failed native job or make its artifact available/,
+  );
+});
+
+test("native recovery validation uses the shared contract", () => {
+  const regressionJob = workflow.jobs["native-evidence-summary-regression"];
+  const failedDownloadStep = regressionJob.steps.find(
+    (step) => step.name === "Verify failed platform artifact download summary",
+  );
+  const bothFailedDownloadStep = regressionJob.steps.find(
+    (step) =>
+      step.name ===
+      "Verify both platform artifact download failures have recovery guidance",
+  );
+
+  assert.ok(
+    failedDownloadStep,
+    "the workflow must keep its single-platform recovery validation",
+  );
+  assert.ok(
+    bothFailedDownloadStep,
+    "the workflow must keep its both-platform recovery validation",
+  );
+
+  assert.match(
+    failedDownloadStep.run,
+    /source scripts\/native-release-recovery-contract\.sh/,
+    "single-platform recovery validation must source the shared contract",
+  );
+  assert.match(
+    failedDownloadStep.run,
+    /\$NATIVE_IOS_RECOVERY_LINE/,
+    "single-platform recovery validation must use the shared iOS line",
+  );
+  assert.match(
+    bothFailedDownloadStep.run,
+    /source scripts\/native-release-recovery-contract\.sh/,
+    "both-platform recovery validation must source the shared contract",
+  );
+  assert.match(
+    bothFailedDownloadStep.run,
+    /\$NATIVE_IOS_RECOVERY_LINE[\s\S]*\$NATIVE_ANDROID_RECOVERY_LINE/,
+    "both-platform recovery validation must use both shared lines",
   );
 });
 
@@ -1217,9 +1839,11 @@ test("failed native evidence checks remain reviewable before blocking release", 
     true,
     "native evidence validation must preserve its summary before the blocker runs",
   );
-  assert.equal(
+  assert.match(
     evidenceStep.run,
-    `bash ${untrustedCheckerWrapperScript} bash ${nativeEvidenceCheckerScript}`,
+    new RegExp(
+      `bash ${untrustedCheckerWrapperScript.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} bash ${nativeEvidenceCheckerScript.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`,
+    ),
     "native evidence validation must use the untrusted checker boundary",
   );
 
@@ -1387,14 +2011,39 @@ test("publish requires candidate-bound approvals from the current run attempt", 
     "${{ needs.mobile-release-gate.outputs.android_native_evidence_artifact_url }}",
     "publish evidence validation must retain the Android artifact link",
   );
+  const approvalScript = publishSteps[approvalIndex].run;
+  const candidateFileValidationIndex = approvalScript.indexOf(
+    "line_count == 1 && non_empty_count == 1",
+  );
+  const candidateFileReadIndex = approvalScript.indexOf(
+    'tested_build_id="$(head -n 1 "$run_dir/candidate-build-id.txt"',
+  );
   assert.ok(
-    publishSteps[approvalIndex].run.includes(
+    candidateFileValidationIndex >= 0,
+    "publish approval intake must reject multi-line and empty candidate build ID files itself",
+  );
+  assert.ok(
+    candidateFileReadIndex > candidateFileValidationIndex,
+    "publish approval intake must validate the complete candidate build ID file before selecting its first line",
+  );
+  assert.match(
+    approvalScript,
+    /downloaded candidate build ID must contain exactly one non-empty identifier line/,
+    "publish approval intake must explain the candidate file shape without exposing its contents",
+  );
+  assert.doesNotMatch(
+    approvalScript,
+    /(?:echo|printf)[^\n]*(?:tested_build_id|candidate-build-id\.txt)/,
+    "publish approval diagnostics must not print candidate identifier contents or the downloaded file",
+  );
+  assert.ok(
+    approvalScript.includes(
       'if [[ "$approved_build_id" != "$tested_build_id" ]]',
     ),
     "publish approval intake must match approval and evidence candidate IDs",
   );
   assert.ok(
-    publishSteps[approvalIndex].run.includes(
+    approvalScript.includes(
       'if [[ "$submit_build_id" != "$tested_build_id" ]]',
     ),
     "publish approval intake must bind submitted build IDs to validated evidence",
@@ -1416,6 +2065,7 @@ test("publish requires candidate-bound approvals from the current run attempt", 
     "native-ios",
     "native-android",
     "idle-profile-registration",
+    "native-evidence-summary-regression",
   ]) {
     assert.equal(
       workflow.jobs[jobId].permissions.actions,
@@ -1460,6 +2110,9 @@ function summaryEnvExpressionProblem(expression, { jobId, job }) {
   const trimmed = expression.trim();
   if (
     /^steps\.[\w-]+\.(outcome|conclusion)$/.test(trimmed) ||
+    /^steps\.[\w-]+\.(outcome|conclusion)\s*==\s*'[^']*'\s*&&\s*'[^']*'\s*\|\|\s*steps\.[\w-]+\.(outcome|conclusion)$/.test(
+      trimmed,
+    ) ||
     /^needs\.[\w-]+\.result$/.test(trimmed) ||
     /^needs\.[\w-]+\.outputs\.[\w-]+$/.test(trimmed) ||
     trimmed === "job.status" ||
@@ -1580,29 +2233,53 @@ test("every summary-writing script the release workflow invokes has a contract",
   );
 });
 
-test("every release JSON evidence reader rejects duplicate fields with fixed diagnostics", () => {
+function releaseEvidenceReaderInventory(discovered) {
+  return [
+    ...new Set(
+      discovered.map(
+        ({ entryPath, argument }) => `${entryPath}::${argument}`,
+      ),
+    ),
+  ].sort();
+}
+
+function assertReleaseEvidenceReaderInventory(discovered) {
   const inventory = Object.entries(releaseEvidenceReaderContracts)
     .map(([relativePath, contract]) => `${relativePath}::${contract.argument}`)
     .sort();
-  const discovered = discoverReleaseEvidenceJsonParses();
+  const discoveredInventory = releaseEvidenceReaderInventory(discovered);
 
   assert.deepEqual(
-    discovered,
+    discoveredInventory,
     inventory,
     [
       "The release evidence JSON reader inventory must cover every JSON.parse call in release-check scripts.",
-      `  discovered: ${JSON.stringify(discovered)}`,
+      `  discovered: ${JSON.stringify(discoveredInventory)}`,
       `  inventory:  ${JSON.stringify(inventory)}`,
       "Add the reader to the inventory and make it use findDuplicateJsonObjectKeys before JSON.parse.",
     ].join("\n"),
   );
+}
 
-  for (const [relativePath, contract] of Object.entries(
-    releaseEvidenceReaderContracts,
-  )) {
-    const source = scriptSource(relativePath);
-    const scannerIndex = source.indexOf(contract.scannerCall);
-    const parseIndex = source.indexOf(`JSON.parse(${contract.argument})`);
+test("every release JSON evidence reader rejects duplicate fields with fixed diagnostics", () => {
+  const discovered = discoverReleaseEvidenceJsonParses();
+  assertReleaseEvidenceReaderInventory(discovered);
+
+  for (const { entryPath, parserPath, argument } of discovered) {
+    const contract = releaseEvidenceReaderContracts[entryPath];
+    assert.ok(
+      contract,
+      `The release evidence JSON reader ${entryPath} must have an inventory contract.`,
+    );
+    const source = scriptSource(parserPath);
+    const scannerCall = contract.scannerCall.replace(
+      /\([^)]*\)$/,
+      `(${argument})`,
+    );
+    const scannerIndex = source.indexOf(scannerCall);
+    const parseIndex = source.search(
+      new RegExp(`JSON\\.parse\\(\\s*${argument}\\s*\\)`),
+    );
 
     assert.ok(
       scannerIndex >= 0,
@@ -1621,6 +2298,40 @@ test("every release JSON evidence reader rejects duplicate fields with fixed dia
       contract.duplicateFailure,
       `${contract.name} must keep duplicate-field failures fixed and redacted.`,
     );
+  }
+});
+
+test("release evidence discovery catches an un-inventoried nested helper reader", () => {
+  const fixtureDirectory = mkdtempSync(
+    path.join(workspaceRoot, ".mobile-release-summary-contract-"),
+  );
+  const entryPath = path.join(fixtureDirectory, "release-check.mjs");
+  const helperPath = path.join(fixtureDirectory, "nested", "reader.mjs");
+  mkdirSync(path.dirname(helperPath), { recursive: true });
+  writeFileSync(
+    entryPath,
+    'import { readEvidence } from "./nested/reader.mjs";\nreadEvidence();\n',
+  );
+  writeFileSync(
+    helperPath,
+    [
+      "export function readEvidence() {",
+      "  return JSON.parse(evidence);",
+      "}",
+    ].join("\n"),
+  );
+
+  try {
+    const discovered = discoverReleaseEvidenceJsonParses([entryPath]);
+    assert.deepEqual(releaseEvidenceReaderInventory(discovered), [
+      `${path.relative(workspaceRoot, entryPath)}::evidence`,
+    ]);
+    assert.throws(
+      () => assertReleaseEvidenceReaderInventory(discovered),
+      /The release evidence JSON reader inventory must cover every JSON\.parse call in release-check scripts\./,
+    );
+  } finally {
+    rmSync(fixtureDirectory, { recursive: true, force: true });
   }
 });
 
@@ -1687,7 +2398,7 @@ test("Android preview evidence keeps its pull-request validation and privacy con
   );
   assert.match(
     validationStep.run,
-    /git diff[\s\S]*\$\{ANDROID_PREVIEW_BASE_SHA\}\.\.\.\$\{ANDROID_PREVIEW_HEAD_SHA\}[\s\S]*artifacts\/chat-app\/test-results\/encrypted-room-recovery\/android\/\*\*\/validation-record\.md/,
+    /git diff[\s\S]*--find-renames[\s\S]*\$\{ANDROID_PREVIEW_BASE_SHA\}\.\.\.\$\{ANDROID_PREVIEW_HEAD_SHA\}[\s\S]*artifacts\/chat-app\/test-results\/encrypted-room-recovery\/android\/\*\*\/validation-record\.md/,
     "the job must select changed Android validation records from the pull request diff",
   );
   assert.match(
@@ -1717,8 +2428,8 @@ test("Android preview evidence keeps its pull-request validation and privacy con
   );
   assert.match(
     validationStep.run,
-    /record_url="\$\{GITHUB_SERVER_URL\}\/\$\{GITHUB_REPOSITORY\}\/blob\/\$\{GITHUB_SHA\}\/\$\{record_path\}"/,
-    "each changed record must receive a stable GitHub record link",
+    /record_revision="\$GITHUB_SHA"[\s\S]*if \[\[ ! -f "\$record_path" \]\][\s\S]*record_revision="\$ANDROID_PREVIEW_BASE_SHA"[\s\S]*record_url="\$\{GITHUB_SERVER_URL\}\/\$\{GITHUB_REPOSITORY\}\/blob\/\$\{record_revision\}\/\$\{record_path\}"/,
+    "each changed record must receive a GitHub link, using the base revision when the record was deleted",
   );
   assert.ok(
     validationStep.run.includes(
@@ -1748,8 +2459,8 @@ test("Android preview evidence keeps its pull-request validation and privacy con
 
 | Boundary | Status | Evidence |
 | --- | --- | --- |
-| Public manifest reachability | PASS | Workspace curl returned HTTP 200. |
-| Local handoff probe (manifest and bundle) | NOT_RUN | The local probe was not run. |
+| Public manifest reachability | PASS | public manifest HTTP 200 (128 bytes) |
+| Local handoff probe (manifest and bundle) | NOT_RUN | Local manifest/bundle probe not run — no successful probe result was recorded |
 | Expo Go launch on physical Android | **BLOCKED** | No physical phone was available. |
 | Server-side native request evidence | **BLOCKED** | No native Android request was available. |
 `;
@@ -1769,11 +2480,13 @@ test("Android preview evidence keeps its pull-request validation and privacy con
       sidecarOnly = false,
       changedPreflight = blockedPreflight,
       missingValidator = false,
+      renameRecord = false,
     } = options;
     const fixtureRoot = path.join(testRoot, `android-preview-${name}`);
     const recordDefinitions = Array.isArray(recordText)
       ? recordText
       : [{ timestamp: "20260915T120000Z", text: recordText }];
+    const defaultBaseTimestamp = "20260915T120000Z";
     const recordPaths = recordDefinitions.map(({ timestamp }) =>
       path.join(
         fixtureRoot,
@@ -1786,12 +2499,35 @@ test("Android preview evidence keeps its pull-request validation and privacy con
         `artifacts/chat-app/test-results/encrypted-room-recovery/android/${timestamp}/android-preview-preflight.json`,
       ),
     );
+    const baseRecordPaths = recordDefinitions.map(
+      ({ timestamp, baseTimestamp = defaultBaseTimestamp }) =>
+        path.join(
+          fixtureRoot,
+          `artifacts/chat-app/test-results/encrypted-room-recovery/android/${renameRecord ? baseTimestamp : timestamp}/validation-record.md`,
+        ),
+    );
+    const basePreflightPaths = recordDefinitions.map(
+      ({ timestamp, baseTimestamp = defaultBaseTimestamp }) =>
+        path.join(
+          fixtureRoot,
+          `artifacts/chat-app/test-results/encrypted-room-recovery/android/${renameRecord ? baseTimestamp : timestamp}/android-preview-preflight.json`,
+        ),
+    );
+    const recordModes = recordDefinitions.map((definition) => {
+      if (definition.mode !== undefined) {
+        return definition.mode;
+      }
+      if (sidecarOnly) {
+        return "sidecar-only";
+      }
+      return definition.preflight === undefined ? "record-only" : "paired";
+    });
     const recordPath = recordPaths[0];
     const preflightPath = preflightPaths[0];
     const summaryPath = path.join(fixtureRoot, "summary.md");
     const runnerPath = path.join(fixtureRoot, "run-job.sh");
     const binDirectory = path.join(fixtureRoot, "bin");
-    for (const record of recordPaths) {
+    for (const record of [...recordPaths, ...baseRecordPaths]) {
       mkdirSync(path.dirname(record), { recursive: true });
     }
     mkdirSync(binDirectory, { recursive: true });
@@ -1803,18 +2539,21 @@ test("Android preview evidence keeps its pull-request validation and privacy con
       mkdirSync(path.dirname(validatorPath), { recursive: true });
       writeFileSync(validatorPath, "// contract fixture\n");
     }
-    if (sidecarOnly) {
-      writeFileSync(recordPath, recordDefinitions[0].text);
-      writeFileSync(preflightPath, blockedPreflight);
-    } else {
-      for (const [
-        index,
-        { text, baseText, preflight },
-      ] of recordDefinitions.entries()) {
+    for (const [
+      index,
+      { text, baseText, preflight, deleted },
+    ] of recordDefinitions.entries()) {
+      if (deleted) {
+        writeFileSync(baseRecordPaths[index], baseText ?? text);
         if (preflight !== undefined) {
-          writeFileSync(recordPaths[index], baseText ?? text);
-          writeFileSync(preflightPaths[index], blockedPreflight);
+          writeFileSync(basePreflightPaths[index], blockedPreflight);
         }
+      } else if (
+        recordModes[index] === "sidecar-only" ||
+        recordModes[index] === "paired"
+      ) {
+        writeFileSync(baseRecordPaths[index], baseText ?? text);
+        writeFileSync(basePreflightPaths[index], blockedPreflight);
       }
     }
 
@@ -1836,16 +2575,18 @@ test("Android preview evidence keeps its pull-request validation and privacy con
     git([
       "add",
       "README.md",
-      ...(sidecarOnly
-        ? [recordPath, preflightPath]
-        : [
-            ...recordDefinitions.flatMap(({ preflight }, index) =>
-              preflight === undefined ? [] : [recordPaths[index]],
-            ),
-            ...recordDefinitions.flatMap(({ preflight }, index) =>
-              preflight === undefined ? [] : [preflightPaths[index]],
-            ),
-          ]),
+      ...recordDefinitions.flatMap(({ preflight, deleted }, index) => {
+        if (deleted) {
+          return [
+            baseRecordPaths[index],
+            ...(preflight === undefined ? [] : [basePreflightPaths[index]]),
+          ];
+        }
+        return recordModes[index] === "sidecar-only" ||
+          recordModes[index] === "paired"
+          ? [baseRecordPaths[index], basePreflightPaths[index]]
+          : [];
+      }),
       ...(!missingValidator ? [validatorPath] : []),
     ]);
     git(["commit", "--quiet", "-m", "base"]);
@@ -1853,24 +2594,51 @@ test("Android preview evidence keeps its pull-request validation and privacy con
       cwd: fixtureRoot,
       encoding: "utf8",
     }).stdout.trim();
-    if (sidecarOnly) {
-      writeFileSync(preflightPath, changedPreflight);
-      git(["add", preflightPath]);
-    } else {
-      for (const [index, { text, preflight }] of recordDefinitions.entries()) {
-        writeFileSync(recordPaths[index], text);
-        if (preflight !== undefined) {
-          writeFileSync(preflightPaths[index], preflight);
+    const changedPaths = [];
+    if (renameRecord) {
+      for (const [index, recordMode] of recordModes.entries()) {
+        if (recordMode !== "sidecar-only" && recordMode !== "paired") {
+          continue;
         }
+        mkdirSync(path.dirname(recordPaths[index]), { recursive: true });
+        renameSync(baseRecordPaths[index], recordPaths[index]);
+        renameSync(basePreflightPaths[index], preflightPaths[index]);
       }
-      git([
-        "add",
-        ...recordPaths,
-        ...recordDefinitions.flatMap(({ preflight }, index) =>
-          preflight === undefined ? [] : [preflightPaths[index]],
-        ),
-      ]);
     }
+    for (const [
+      index,
+      { text, preflight, deleted },
+    ] of recordDefinitions.entries()) {
+      if (deleted) {
+        rmSync(baseRecordPaths[index]);
+        changedPaths.push(baseRecordPaths[index]);
+        if (preflight !== undefined) {
+          rmSync(basePreflightPaths[index]);
+          changedPaths.push(basePreflightPaths[index]);
+        }
+        continue;
+      }
+      if (
+        recordModes[index] === "record-only" ||
+        recordModes[index] === "paired"
+      ) {
+        writeFileSync(recordPaths[index], text);
+        changedPaths.push(recordPaths[index]);
+      }
+      if (
+        recordModes[index] === "sidecar-only" ||
+        recordModes[index] === "paired"
+      ) {
+        writeFileSync(
+          preflightPaths[index],
+          recordModes[index] === "sidecar-only"
+            ? changedPreflight
+            : preflight,
+        );
+        changedPaths.push(preflightPaths[index]);
+      }
+    }
+    git(renameRecord ? ["add", "-A"] : ["add", ...changedPaths]);
     git(["commit", "--quiet", "-m", "android preview record"]);
     const headSha = spawnSync(gitPath, ["rev-parse", "HEAD"], {
       cwd: fixtureRoot,
@@ -1884,6 +2652,17 @@ test("Android preview evidence keeps its pull-request validation and privacy con
       "pnpm",
       `set -euo pipefail\ntouch ${shellQuote(pnpmCalledPath)}\nchecker_args=()\nfound_separator=0\nfor arg in "$@"; do\n  if [[ "$arg" == "--" ]]; then\n    found_separator=1\n    continue\n  fi\n  if ((found_separator)); then\n    checker_args+=("$arg")\n  fi\ndone\nprintf '%s\\t%s\\n' "\${checker_args[0]}" "\${checker_args[1]:-}" >> "$ANDROID_PREVIEW_ARGS_LOG"\nexec bash "$ANDROID_PREVIEW_CHECKER" "\${checker_args[@]}"`,
     );
+    mkdirSync(path.join(fixtureRoot, "scripts"), { recursive: true });
+    writeFileSync(
+      path.join(fixtureRoot, untrustedCheckerWrapperScript),
+      readFileSync(path.join(workspaceRoot, untrustedCheckerWrapperScript)),
+    );
+    chmodSync(path.join(fixtureRoot, untrustedCheckerWrapperScript), 0o755);
+    writeFileSync(
+      path.join(fixtureRoot, workflowOutputSafetyScript),
+      readFileSync(path.join(workspaceRoot, workflowOutputSafetyScript)),
+    );
+    chmodSync(path.join(fixtureRoot, workflowOutputSafetyScript), 0o755);
     writeFileSync(runnerPath, `#!${bashPath}\n${validationStep.run}\n`);
     chmodSync(runnerPath, 0o755);
 
@@ -1908,8 +2687,14 @@ test("Android preview evidence keeps its pull-request validation and privacy con
     });
     return {
       result,
+      baseSha,
+      headSha,
       recordPath: path.relative(fixtureRoot, recordPath),
       recordPaths: recordPaths.map((record) => path.relative(fixtureRoot, record)),
+      baseRecordPath: path.relative(fixtureRoot, baseRecordPaths[0]),
+      baseRecordPaths: baseRecordPaths.map((record) =>
+        path.relative(fixtureRoot, record),
+      ),
       preflightPath: path.relative(fixtureRoot, preflightPath),
       preflightPaths: preflightPaths.map((preflight) =>
         path.relative(fixtureRoot, preflight),
@@ -1944,6 +2729,145 @@ test("Android preview evidence keeps its pull-request validation and privacy con
     /Workspace curl returned HTTP 200|No physical phone was available/,
     "the successful BLOCKED summary must not copy evidence text",
   );
+
+  const renamed = runAndroidPreviewJob(
+    "renamed",
+    [
+      {
+        timestamp: "20260915T121500Z",
+        baseText: blockedRecord,
+        text: blockedRecord.replace(
+          "No physical phone was available.",
+          "PRIVATE_RENAMED_ANDROID_EVIDENCE no physical phone was available.",
+        ),
+        preflight: blockedPreflight,
+      },
+    ],
+    { renameRecord: true },
+  );
+  assert.equal(
+    renamed.result.status,
+    0,
+    "a valid renamed Android preview record and sidecar must keep the job successful",
+  );
+  assert.match(
+    renamed.summary,
+    /- Changed records checked: \*\*1\*\*/,
+    "a renamed Android preview pair must count as one changed record",
+  );
+  assert.deepEqual(
+    renamed.checkerArgs,
+    [[renamed.recordPath, renamed.preflightPath]],
+    "a renamed Android record must be checked with its renamed sibling sidecar",
+  );
+  const renamedRecordLink = new RegExp(
+    `\\[${renamed.recordPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\]\\(https://github\\.example/example/chat-app/blob/[^)]+/${renamed.recordPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\)`,
+    "g",
+  );
+  assert.equal(
+    renamed.summary.match(renamedRecordLink)?.length ?? 0,
+    1,
+    "a renamed Android record must have one stable destination link",
+  );
+  assert.doesNotMatch(
+    renamed.summary,
+    new RegExp(
+      renamed.baseRecordPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
+    ),
+    "a renamed Android record must not leave its old path in the summary",
+  );
+  assert.doesNotMatch(
+    renamed.summary,
+    /PRIVATE_RENAMED_ANDROID_EVIDENCE|Workspace curl returned HTTP 200|No physical phone was available/,
+    "a renamed Android summary must not expose evidence text",
+  );
+
+  const multipleRenamed = runAndroidPreviewJob(
+    "multiple-renamed",
+    [
+      {
+        baseTimestamp: "20260915T120000Z",
+        timestamp: "20260915T121500Z",
+        baseText: blockedRecord,
+        text: blockedRecord.replace(
+          "public manifest HTTP 200 (128 bytes)",
+          "public manifest HTTP 200 (256 bytes)",
+        ),
+        preflight: changedBlockedPreflight,
+      },
+      {
+        baseTimestamp: "20260915T120500Z",
+        timestamp: "20260915T122000Z",
+        baseText: blockedRecord,
+        text: blockedRecord,
+        preflight: blockedPreflight,
+      },
+      {
+        baseTimestamp: "20260915T121000Z",
+        timestamp: "20260915T122500Z",
+        baseText: blockedRecord,
+        text: blockedRecord,
+        preflight: blockedPreflight,
+      },
+    ],
+    { renameRecord: true },
+  );
+  assert.equal(
+    multipleRenamed.result.status,
+    0,
+    "multiple renamed Android preview pairs must keep the job successful",
+  );
+  assert.match(
+    multipleRenamed.summary,
+    /- Changed records checked: \*\*3\*\*/,
+    "the summary must count each renamed Android destination exactly once",
+  );
+  assert.deepEqual(
+    multipleRenamed.checkerArgs,
+    multipleRenamed.recordPaths.map((recordPath, index) => [
+      recordPath,
+      multipleRenamed.preflightPaths[index],
+    ]),
+    "the checker must receive each renamed record with its matching sidecar exactly once",
+  );
+  for (const [index, recordPath] of multipleRenamed.recordPaths.entries()) {
+    const escapedPath = recordPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const recordLinkPattern = new RegExp(
+      `\\[${escapedPath}\\]\\(https://github\\.example/example/chat-app/blob/[^)]+/${escapedPath}\\)`,
+      "g",
+    );
+    const recordSectionPattern = new RegExp(
+      `### \\[${escapedPath}\\]\\(https://github\\.example/example/chat-app/blob/[^)]+/${escapedPath}\\)[\\s\\S]*?(?=\\n### |$)`,
+      "g",
+    );
+    assert.equal(
+      multipleRenamed.summary.match(recordLinkPattern)?.length ?? 0,
+      1,
+      `each renamed Android destination must have one stable link: ${recordPath}`,
+    );
+    assert.equal(
+      multipleRenamed.summary.match(recordSectionPattern)?.length ?? 0,
+      1,
+      `each renamed Android destination must have one validation section: ${recordPath}`,
+    );
+    assert.match(
+      multipleRenamed.summary,
+      new RegExp(
+        `### \\[${escapedPath}\\]\\(https://github\\.example/example/chat-app/blob/[^)]+/${escapedPath}\\)[\\s\\S]*?- Validation: \\*\\*PASS\\*\\*`,
+      ),
+      `each renamed Android destination must report its validation result: ${recordPath}`,
+    );
+    assert.doesNotMatch(
+      multipleRenamed.summary,
+      new RegExp(
+        multipleRenamed.baseRecordPaths[index].replace(
+          /[.*+?^${}()|[\]\\]/g,
+          "\\$&",
+        ),
+      ),
+      `the renamed Android summary must not retain the old path for ${recordPath}`,
+    );
+  }
 
   const incompletePass = runAndroidPreviewJob(
     "incomplete-pass",
@@ -1982,10 +2906,17 @@ test("Android preview evidence keeps its pull-request validation and privacy con
       timestamp: "20260915T120000Z",
       baseText: blockedRecord,
       text: blockedRecord.replace(
-        "The local probe was not run.",
-        "The local probe was not run for this record.",
+        "public manifest HTTP 200 (128 bytes)",
+        "public manifest HTTP 200 (256 bytes)",
       ),
       preflight: changedBlockedPreflight,
+    },
+    {
+      timestamp: "20260915T121000Z",
+      baseText: blockedRecord,
+      text: blockedRecord,
+      preflight: blockedPreflight,
+      deleted: true,
     },
     {
       timestamp: "20260915T121500Z",
@@ -1999,29 +2930,32 @@ test("Android preview evidence keeps its pull-request validation and privacy con
   assert.notEqual(
     multiRecord.result.status,
     0,
-    "a mismatched Android preview sidecar must fail only its record",
+    "a mismatched or deleted Android preview record must fail only its record",
   );
   assert.match(
     multiRecord.summary,
-    /- Changed records checked: \*\*2\*\*/,
-    "the summary must count both changed Android preview records",
+    /- Changed records checked: \*\*3\*\*/,
+    "the summary must count every changed Android preview record",
   );
   assert.deepEqual(
     multiRecord.checkerArgs,
     [
       [multiRecord.recordPaths[0], multiRecord.preflightPaths[0]],
-      [multiRecord.recordPaths[1], multiRecord.preflightPaths[1]],
+      [multiRecord.recordPaths[2], multiRecord.preflightPaths[2]],
     ],
-    "each changed Android preflight sidecar must be passed to the checker with its sibling record",
+    "each present changed Android preflight sidecar must be passed to the checker even after a deleted record",
   );
   for (const recordPath of multiRecord.recordPaths) {
     const escapedPath = recordPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const recordIndex = multiRecord.recordPaths.indexOf(recordPath);
+    const expectedRevision =
+      recordIndex === 1 ? multiRecord.baseSha : multiRecord.headSha;
     const recordLinkPattern = new RegExp(
-      `\\[${escapedPath}\\]\\(https://github\\.example/example/chat-app/blob/[^)]+/${escapedPath}\\)`,
+      `\\[${escapedPath}\\]\\(https://github\\.example/example/chat-app/blob/${expectedRevision}/${escapedPath}\\)`,
       "g",
     );
     const recordSectionPattern = new RegExp(
-      `### \\[${escapedPath}\\]\\(https://github\\.example/example/chat-app/blob/[^)]+/${escapedPath}\\)[\\s\\S]*?(?=\\n### |$)`,
+      `### \\[${escapedPath}\\]\\(https://github\\.example/example/chat-app/blob/${expectedRevision}/${escapedPath}\\)[\\s\\S]*?(?=\\n### |$)`,
       "g",
     );
     assert.equal(
@@ -2037,7 +2971,7 @@ test("Android preview evidence keeps its pull-request validation and privacy con
     assert.match(
       multiRecord.summary,
       new RegExp(
-        `### \\[${escapedPath}\\]\\(https://github\\.example/example/chat-app/blob/[^)]+/${escapedPath}\\)[\\s\\S]*?- Validation: \\*\\*(?:PASS|FAIL)\\*\\*`,
+        `### \\[${escapedPath}\\]\\(https://github\\.example/example/chat-app/blob/${expectedRevision}/${escapedPath}\\)[\\s\\S]*?- Validation: \\*\\*(?:PASS|FAIL)\\*\\*`,
       ),
       `the multi-record summary must include the validation result for ${recordPath}`,
     );
@@ -2052,21 +2986,150 @@ test("Android preview evidence keeps its pull-request validation and privacy con
   assert.match(
     multiRecord.summary,
     new RegExp(
-      `### \\[${multiRecord.recordPaths[1].replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\][\\s\\S]*- Validation: \\*\\*FAIL\\*\\*[\\s\\S]*Missing-boundary reason[\\s\\S]*preflight JSON public manifest boundary does not match the Markdown record\\.`,
+      `### \\[${multiRecord.recordPaths[2].replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\][\\s\\S]*- Validation: \\*\\*FAIL\\*\\*[\\s\\S]*Missing-boundary reason[\\s\\S]*preflight JSON public manifest boundary does not match the Markdown record\\.`,
     ),
     "the mismatched record must contribute its sanitized checker reason",
+  );
+  assert.match(
+    multiRecord.summary,
+    new RegExp(
+      `### \\[${multiRecord.recordPaths[1].replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\][\\s\\S]*- Validation: \\*\\*FAIL\\*\\*[\\s\\S]*Missing-boundary reason[\\s\\S]*changed Android preview validation record is missing from the checked-out commit\\.`,
+    ),
+    "the deleted record must contribute the fixed missing-record reason",
+  );
+  assert.equal(
+    multiRecord.summary.match(
+      /changed Android preview validation record is missing from the checked-out commit\./g,
+    )?.length ?? 0,
+    1,
+    "deleting a record and its paired sidecar must contribute one fixed missing-record reason",
+  );
+  assert.ok(
+    multiRecord.summary.indexOf(
+      `### [${multiRecord.recordPaths[1]}]`,
+    ) <
+      multiRecord.summary.indexOf(
+        `### [${multiRecord.recordPaths[2]}]`,
+      ),
+    "a record changed after the deletion must remain visible after the missing-record section",
   );
   assert.equal(
     multiRecord.summary.match(
       /- Validation: \*\*FAIL\*\*/g,
     )?.length ?? 0,
-    1,
-    "the summary must preserve the failure status only for the affected record",
+    2,
+    "the summary must preserve the failure status for the invalid and deleted records",
   );
   assert.doesNotMatch(
     multiRecord.summary,
     /PRIVATE_MULTI_RECORD_EVIDENCE|Workspace curl returned HTTP 200|No physical phone was available/,
     "a multi-record summary must not expose evidence text from either record",
+  );
+
+  const changedSidecarOnlyPreflight = `${blockedPreflight}\n`;
+  const mixedModes = runAndroidPreviewJob(
+    "mixed-modes",
+    [
+      {
+        timestamp: "20260915T120000Z",
+        mode: "record-only",
+        text: blockedRecord,
+      },
+      {
+        timestamp: "20260915T121500Z",
+        mode: "sidecar-only",
+        text: blockedRecord,
+      },
+      {
+        timestamp: "20260915T123000Z",
+        mode: "paired",
+        baseText: blockedRecord,
+        text: blockedRecord.replace(
+          "Workspace curl returned HTTP 200.",
+          "PRIVATE_MIXED_MODES_EVIDENCE Workspace curl returned HTTP 200.",
+        ),
+        preflight: mismatchedPreflight,
+      },
+    ],
+    {
+      changedPreflight: changedSidecarOnlyPreflight,
+    },
+  );
+  assert.notEqual(
+    mixedModes.result.status,
+    0,
+    "a failing paired Android preview change must fail the mixed validation job",
+  );
+  assert.match(
+    mixedModes.summary,
+    /- Changed records checked: \*\*3\*\*/,
+    "the mixed summary must count record-only, sidecar-only, and paired changes",
+  );
+  assert.deepEqual(
+    mixedModes.checkerArgs,
+    [
+      [mixedModes.recordPaths[0], ""],
+      [mixedModes.recordPaths[1], mixedModes.preflightPaths[1]],
+      [mixedModes.recordPaths[2], mixedModes.preflightPaths[2]],
+    ],
+    "each mixed Android change must validate with only its own optional sidecar",
+  );
+  for (const recordPath of mixedModes.recordPaths) {
+    const escapedPath = recordPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const recordLinkPattern = new RegExp(
+      `\\[${escapedPath}\\]\\(https://github\\.example/example/chat-app/blob/[^)]+/${escapedPath}\\)`,
+      "g",
+    );
+    const recordSectionPattern = new RegExp(
+      `### \\[${escapedPath}\\]\\(https://github\\.example/example/chat-app/blob/[^)]+/${escapedPath}\\)[\\s\\S]*?(?=\\n### |$)`,
+      "g",
+    );
+    assert.equal(
+      mixedModes.summary.match(recordLinkPattern)?.length ?? 0,
+      1,
+      `the mixed summary must include exactly one stable link for ${recordPath}`,
+    );
+    assert.equal(
+      mixedModes.summary.match(recordSectionPattern)?.length ?? 0,
+      1,
+      `the mixed summary must include exactly one validation section for ${recordPath}`,
+    );
+  }
+  assert.equal(
+    mixedModes.summary.match(/- Validation: \*\*PASS\*\*/g)?.length ?? 0,
+    2,
+    "valid record-only and sidecar-only changes must remain visible after the paired failure",
+  );
+  assert.equal(
+    mixedModes.summary.match(/- Validation: \*\*FAIL\*\*/g)?.length ?? 0,
+    1,
+    "the mixed summary must mark only the failing paired change as failed",
+  );
+  assert.match(
+    mixedModes.summary,
+    new RegExp(
+      `### \\[${mixedModes.recordPaths[0].replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\][\\s\\S]*- Record result: \\*\\*BLOCKED \\(valid\\)\\*\\*`,
+    ),
+    "the record-only change must remain represented as valid",
+  );
+  assert.match(
+    mixedModes.summary,
+    new RegExp(
+      `### \\[${mixedModes.recordPaths[1].replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\][\\s\\S]*- Record result: \\*\\*BLOCKED \\(valid\\)\\*\\*`,
+    ),
+    "the sidecar-only change must remain represented as valid",
+  );
+  assert.match(
+    mixedModes.summary,
+    new RegExp(
+      `### \\[${mixedModes.recordPaths[2].replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\][\\s\\S]*Missing-boundary reason[\\s\\S]*preflight JSON public manifest boundary does not match the Markdown record\\.`,
+    ),
+    "the paired change must contribute its sanitized failure reason",
+  );
+  assert.doesNotMatch(
+    mixedModes.summary,
+    /PRIVATE_MIXED_MODES_EVIDENCE|Workspace curl returned HTTP 200|No physical phone was available/,
+    "the mixed summary must not expose evidence text from any change mode",
   );
 
   const duplicatePreflight = blockedPreflight.replace(
@@ -2263,8 +3326,29 @@ test("iOS preview evidence covers renamed records and blocks malformed changes",
   );
   assert.match(
     validationStep.run,
-    /pnpm run validate:ios-preview-evidence -- "\$\{checker_args\[@\]\}"/,
+    /bash scripts\/run-untrusted-checker\.sh pnpm run validate:ios-preview-evidence -- "\$\{checker_args\[@\]\}"/,
     "changed iOS records must run the focused checker",
+  );
+  assert.match(
+    validationStep.run,
+    /validator_directory="artifacts\/chat-app\/scripts"[\s\S]*validator_file="validate-preview-startup\.mjs"[\s\S]*validator_path="\$\{validator_directory\}\/\$\{validator_file\}"[\s\S]*if \[\[ ! -f "\$validator_path" \]\][\s\S]*validator_failure_reason=/,
+    "the iOS job must check its delegated validator dependency before checking changed records",
+  );
+  assert.match(
+    validationStep.run,
+    /elif \[\[ -n "\$validator_failure_reason" \]\][\s\S]*reasons="\$validator_failure_reason"[\s\S]*else[\s\S]*validation_output="\$\(/,
+    "a missing delegated iOS validator must produce a fixed reason without invoking the record checker",
+  );
+  assert.ok(
+    validationStep.run.includes(
+      `reasons="$(printf '%s\\n' "$validation_output" | sed -n '/^- /p')"`
+    ),
+    "only fixed checker reason lines may enter the iOS summary",
+  );
+  assert.doesNotMatch(
+    validationStep.run,
+    /cat\s+"\$record_path"|validation_output.*GITHUB_STEP_SUMMARY/,
+    "the iOS job must not print iOS record evidence into the summary",
   );
 
   function runIosPreviewJob(
@@ -2277,33 +3361,77 @@ test("iOS preview evidence covers renamed records and blocks malformed changes",
       updateOnlyPreflight = false,
       deleteRecord = false,
       renameRecord = false,
+      missingValidator = false,
     },
   ) {
     const fixtureRoot = path.join(testRoot, `ios-preview-${name}`);
-    const baseRecordPath = path.join(
-      fixtureRoot,
-      "artifacts/chat-app/test-results/encrypted-room-recovery/ios/20260915T120000Z/validation-record.md",
+    const recordDefinitions = Array.isArray(recordText)
+      ? recordText
+      : [
+          {
+            timestamp: renameRecord
+              ? "20260915T121500Z"
+              : "20260915T120000Z",
+            baseTimestamp: "20260915T120000Z",
+            text: recordText,
+            baseText: baseRecordText,
+            preflight: preflightText,
+            basePreflight: basePreflightText,
+            updateOnlyPreflight,
+            deleteRecord,
+          },
+        ];
+    const recordPaths = recordDefinitions.map(({ timestamp }) =>
+      path.join(
+        fixtureRoot,
+        `artifacts/chat-app/test-results/encrypted-room-recovery/ios/${timestamp}/validation-record.md`,
+      ),
     );
-    const recordPath = path.join(
-      fixtureRoot,
-      `artifacts/chat-app/test-results/encrypted-room-recovery/ios/${renameRecord ? "20260915T121500Z" : "20260915T120000Z"}/validation-record.md`,
+    const baseRecordPaths = recordDefinitions.map(
+      ({ timestamp, baseTimestamp = "20260915T120000Z" }) =>
+        path.join(
+          fixtureRoot,
+          `artifacts/chat-app/test-results/encrypted-room-recovery/ios/${renameRecord ? baseTimestamp : timestamp}/validation-record.md`,
+        ),
     );
-    const basePreflightPath = path.join(
-      fixtureRoot,
-      "artifacts/chat-app/test-results/encrypted-room-recovery/ios/20260915T120000Z/ios-preview-preflight.json",
+    const preflightPaths = recordDefinitions.map(({ timestamp }) =>
+      path.join(
+        fixtureRoot,
+        `artifacts/chat-app/test-results/encrypted-room-recovery/ios/${timestamp}/ios-preview-preflight.json`,
+      ),
     );
-    const preflightPath = path.join(
-      fixtureRoot,
-      `artifacts/chat-app/test-results/encrypted-room-recovery/ios/${renameRecord ? "20260915T121500Z" : "20260915T120000Z"}/ios-preview-preflight.json`,
+    const basePreflightPaths = recordDefinitions.map(
+      ({ timestamp, baseTimestamp = "20260915T120000Z" }) =>
+        path.join(
+          fixtureRoot,
+          `artifacts/chat-app/test-results/encrypted-room-recovery/ios/${renameRecord ? baseTimestamp : timestamp}/ios-preview-preflight.json`,
+        ),
     );
+    const recordPath = recordPaths[0];
+    const baseRecordPath = baseRecordPaths[0];
     const summaryPath = path.join(fixtureRoot, "summary.md");
     const runnerPath = path.join(fixtureRoot, "run-job.sh");
     const binDirectory = path.join(fixtureRoot, "bin");
-    mkdirSync(path.dirname(baseRecordPath), { recursive: true });
+    const validatorPath = path.join(
+      fixtureRoot,
+      "artifacts/chat-app/scripts/validate-preview-startup.mjs",
+    );
+    for (const record of [...recordPaths, ...baseRecordPaths]) {
+      mkdirSync(path.dirname(record), { recursive: true });
+    }
     mkdirSync(binDirectory, { recursive: true });
-    writeFileSync(baseRecordPath, baseRecordText);
-    if (basePreflightText !== undefined) {
-      writeFileSync(basePreflightPath, basePreflightText);
+    if (!missingValidator) {
+      mkdirSync(path.dirname(validatorPath), { recursive: true });
+      writeFileSync(validatorPath, "// contract fixture\n");
+    }
+    for (const [
+      index,
+      { text, baseText, basePreflight },
+    ] of recordDefinitions.entries()) {
+      writeFileSync(baseRecordPaths[index], baseText ?? text);
+      if (basePreflight !== undefined) {
+        writeFileSync(basePreflightPaths[index], basePreflight);
+      }
     }
 
     const git = (args) => {
@@ -2321,10 +3449,14 @@ test("iOS preview evidence covers renamed records and blocks malformed changes",
     git(["config", "user.email", "contract-test@example.invalid"]);
     git(["config", "user.name", "Contract Test"]);
     writeFileSync(path.join(fixtureRoot, "README.md"), "base\n");
-    const baseFiles = ["README.md", baseRecordPath];
-    if (basePreflightText !== undefined) {
-      baseFiles.push(basePreflightPath);
-    }
+    const baseFiles = [
+      "README.md",
+      ...baseRecordPaths,
+      ...recordDefinitions.flatMap(({ basePreflight }, index) =>
+        basePreflight === undefined ? [] : [basePreflightPaths[index]],
+      ),
+      ...(!missingValidator ? [validatorPath] : []),
+    ];
     git(["add", ...baseFiles]);
     git(["commit", "--quiet", "-m", "base iOS preview record"]);
     const baseSha = spawnSync(gitPath, ["rev-parse", "HEAD"], {
@@ -2332,26 +3464,37 @@ test("iOS preview evidence covers renamed records and blocks malformed changes",
       encoding: "utf8",
     }).stdout.trim();
 
-    if (deleteRecord) {
-      rmSync(baseRecordPath);
-    } else if (renameRecord) {
-      mkdirSync(path.dirname(recordPath), { recursive: true });
-      renameSync(baseRecordPath, recordPath);
-      if (basePreflightText !== undefined) {
-        renameSync(basePreflightPath, preflightPath);
-      }
-      writeFileSync(recordPath, recordText);
-      if (preflightText !== undefined) {
-        writeFileSync(preflightPath, preflightText);
-      }
-    } else if (updateOnlyPreflight) {
-      if (preflightText !== undefined) {
-        writeFileSync(preflightPath, preflightText);
-      }
-    } else {
-      writeFileSync(recordPath, recordText);
-      if (preflightText !== undefined) {
-        writeFileSync(preflightPath, preflightText);
+    for (const [
+      index,
+      {
+        text,
+        preflight,
+        basePreflight,
+        updateOnlyPreflight: definitionUpdatesOnlyPreflight = false,
+        deleteRecord: definitionDeletesRecord = false,
+      },
+    ] of recordDefinitions.entries()) {
+      if (definitionDeletesRecord) {
+        rmSync(baseRecordPaths[index]);
+      } else if (renameRecord) {
+        mkdirSync(path.dirname(recordPaths[index]), { recursive: true });
+        renameSync(baseRecordPaths[index], recordPaths[index]);
+        if (basePreflight !== undefined) {
+          renameSync(basePreflightPaths[index], preflightPaths[index]);
+        }
+        writeFileSync(recordPaths[index], text);
+        if (preflight !== undefined) {
+          writeFileSync(preflightPaths[index], preflight);
+        }
+      } else if (definitionUpdatesOnlyPreflight) {
+        if (preflight !== undefined) {
+          writeFileSync(preflightPaths[index], preflight);
+        }
+      } else {
+        writeFileSync(recordPaths[index], text);
+        if (preflight !== undefined) {
+          writeFileSync(preflightPaths[index], preflight);
+        }
       }
     }
     git(["add", "-A"]);
@@ -2361,11 +3504,23 @@ test("iOS preview evidence covers renamed records and blocks malformed changes",
       encoding: "utf8",
     }).stdout.trim();
 
+    const checkerInvokedPath = path.join(fixtureRoot, "checker-invoked");
     writeStub(
       binDirectory,
       "pnpm",
-      'set -euo pipefail\nshift 3\nexec bash "$IOS_PREVIEW_CHECKER" "$@"',
+      `set -euo pipefail\ntouch ${shellQuote(checkerInvokedPath)}\nshift 3\nexec bash "$IOS_PREVIEW_CHECKER" "$@"`,
     );
+    mkdirSync(path.join(fixtureRoot, "scripts"), { recursive: true });
+    writeFileSync(
+      path.join(fixtureRoot, untrustedCheckerWrapperScript),
+      readFileSync(path.join(workspaceRoot, untrustedCheckerWrapperScript)),
+    );
+    chmodSync(path.join(fixtureRoot, untrustedCheckerWrapperScript), 0o755);
+    writeFileSync(
+      path.join(fixtureRoot, workflowOutputSafetyScript),
+      readFileSync(path.join(workspaceRoot, workflowOutputSafetyScript)),
+    );
+    chmodSync(path.join(fixtureRoot, workflowOutputSafetyScript), 0o755);
     writeFileSync(runnerPath, `#!${bashPath}\n${validationStep.run}\n`);
     chmodSync(runnerPath, 0o755);
 
@@ -2391,14 +3546,34 @@ test("iOS preview evidence covers renamed records and blocks malformed changes",
       result,
       baseRecordPath: path.relative(fixtureRoot, baseRecordPath),
       recordPath: path.relative(fixtureRoot, recordPath),
+      baseRecordPaths: baseRecordPaths.map((record) =>
+        path.relative(fixtureRoot, record),
+      ),
+      recordPaths: recordPaths.map((record) =>
+        path.relative(fixtureRoot, record),
+      ),
       summary: readFileSync(summaryPath, "utf8"),
+      checkerInvoked: existsSync(checkerInvokedPath),
     };
   }
 
   const malformed = runIosPreviewJob("malformed", {
-    recordText:
-      "# iOS preview validation record\n\nPRIVATE_IOS_EVIDENCE_MARKER\n",
+    recordText: `# iOS preview validation record
+
+PRIVATE_IOS_EVIDENCE_MARKER
+
+| Raw evidence | IOS_CHANGED_RECORD_RAW_CONTENT_7f2a |
+`,
   });
+  const malformedFailure = [
+    malformed.result.stdout,
+    malformed.result.stderr,
+  ].join("\n");
+  const malformedRecordLink = new RegExp(
+    `\\[${malformed.recordPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\]\\(https://github\\.example/example/chat-app/blob/[^)]+/${malformed.recordPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\)`,
+  );
+  const malformedFixedReason =
+    "Evidence record must declare **Result: PASS**, **Result: BLOCKED**, or **Result: FAIL**.";
   assert.notEqual(
     malformed.result.status,
     0,
@@ -2409,11 +3584,28 @@ test("iOS preview evidence covers renamed records and blocks malformed changes",
     /Validation: \*\*FAIL\*\*[\s\S]*Evidence record must declare/,
     "the failed summary must report a fixed checker reason",
   );
-  assert.doesNotMatch(
+  assert.match(
     malformed.summary,
-    /PRIVATE_IOS_EVIDENCE_MARKER/,
-    "the failed summary must not copy iOS record evidence",
+    malformedRecordLink,
+    "the failed summary must keep a stable link to the changed iOS record",
   );
+  assert.match(
+    malformedFailure,
+    new RegExp(
+      malformedFixedReason.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
+    ),
+    "the surfaced iOS checker failure must report the fixed reason",
+  );
+  for (const [surfaceName, surface] of [
+    ["job summary", malformed.summary],
+    ["surfaced checker failure", malformedFailure],
+  ]) {
+    assert.doesNotMatch(
+      surface,
+      /PRIVATE_IOS_EVIDENCE_MARKER|IOS_CHANGED_RECORD_RAW_CONTENT_7f2a/,
+      `the malformed iOS ${surfaceName} must not expose the marker or raw record content`,
+    );
+  }
 
   const blockedRecord = `# iOS preview validation record
 
@@ -2426,6 +3618,48 @@ test("iOS preview evidence covers renamed records and blocks malformed changes",
 | Expo Go launch on physical iPhone | BLOCKED | No physical phone was available. |
 | Server-side native request evidence | BLOCKED | No native request was available. |
 `;
+  const missingValidator = runIosPreviewJob("missing-validator", {
+    recordText: blockedRecord,
+    baseRecordText: blockedRecord,
+    renameRecord: true,
+    missingValidator: true,
+  });
+  const missingValidatorFailure = [
+    missingValidator.result.stdout,
+    missingValidator.result.stderr,
+  ].join("\n");
+  const fixedValidatorDependencyMessage =
+    "The iOS preview evidence check is missing its delegated validator dependency boundary: artifacts/chat-app/scripts/validate-preview-startup.mjs is not present in the checked-out commit. Restore that validator before changing the evidence record.";
+  assert.notEqual(
+    missingValidator.result.status,
+    0,
+    "a changed iOS record must fail when its delegated validator is missing",
+  );
+  assert.match(
+    missingValidator.summary,
+    new RegExp(
+      fixedValidatorDependencyMessage.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
+    ),
+    "the iOS summary must explain the missing delegated validator dependency",
+  );
+  assert.match(
+    missingValidatorFailure,
+    new RegExp(
+      fixedValidatorDependencyMessage.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
+    ),
+    "the missing delegated iOS validator diagnostic must be surfaced by the job",
+  );
+  assert.equal(
+    missingValidator.checkerInvoked,
+    false,
+    "the iOS job must report the missing delegated validator before invoking the checker",
+  );
+  assert.doesNotMatch(
+    missingValidatorFailure,
+    /Workspace curl returned HTTP 200|No physical phone was available/,
+    "the missing delegated iOS validator diagnostic must not expose evidence text",
+  );
+
   const blocked = runIosPreviewJob("blocked", {
     recordText: blockedRecord,
     baseRecordText: blockedRecord,
@@ -2498,6 +3732,103 @@ test("iOS preview evidence covers renamed records and blocks malformed changes",
     "a renamed public-edge FAIL record must be linked at its new path",
   );
 
+  const multipleRenamed = runIosPreviewJob("multiple-renamed", {
+    renameRecord: true,
+    recordText: [
+      {
+        baseTimestamp: "20260915T120000Z",
+        timestamp: "20260915T121500Z",
+        baseText: blockedRecord,
+        text: blockedRecord.replace(
+          "**Result: BLOCKED",
+          "**Result: PASS",
+        ),
+      },
+      {
+        baseTimestamp: "20260915T120500Z",
+        timestamp: "20260915T122000Z",
+        baseText: blockedRecord,
+        text: blockedRecord,
+      },
+      {
+        baseTimestamp: "20260915T121000Z",
+        timestamp: "20260915T122500Z",
+        baseText: publicFailureRecord,
+        text: publicFailureRecord,
+      },
+    ],
+  });
+  assert.notEqual(
+    multipleRenamed.result.status,
+    0,
+    "one malformed renamed iOS record must fail the job without hiding later valid records",
+  );
+  assert.match(
+    multipleRenamed.summary,
+    /- Changed records checked: \*\*3\*\*/,
+    "the summary must report the exact number of renamed destination records",
+  );
+  for (const [index, recordPath] of multipleRenamed.recordPaths.entries()) {
+    const escapedPath = recordPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const recordLinkPattern = new RegExp(
+      `\\[${escapedPath}\\]\\(https://github\\.example/example/chat-app/blob/[^)]+/${escapedPath}\\)`,
+      "g",
+    );
+    const recordSectionPattern = new RegExp(
+      `### \\[${escapedPath}\\]\\(https://github\\.example/example/chat-app/blob/[^)]+/${escapedPath}\\)[\\s\\S]*?(?=\\n### |$)`,
+      "g",
+    );
+    assert.equal(
+      multipleRenamed.summary.match(recordLinkPattern)?.length ?? 0,
+      1,
+      `each renamed iOS destination must have one stable link: ${recordPath}`,
+    );
+    assert.equal(
+      multipleRenamed.summary.match(recordSectionPattern)?.length ?? 0,
+      1,
+      `each renamed iOS destination must have one validation section: ${recordPath}`,
+    );
+    assert.match(
+      multipleRenamed.summary,
+      new RegExp(
+        `### \\[${escapedPath}\\]\\(https://github\\.example/example/chat-app/blob/[^)]+/${escapedPath}\\)[\\s\\S]*?- Validation: \\*\\*(?:PASS|FAIL)\\*\\*`,
+      ),
+      `each renamed iOS destination must report its validation result: ${recordPath}`,
+    );
+    assert.doesNotMatch(
+      multipleRenamed.summary,
+      new RegExp(
+        multipleRenamed.baseRecordPaths[index].replace(
+          /[.*+?^${}()|[\]\\]/g,
+          "\\$&",
+        ),
+      ),
+      `the renamed iOS summary must not retain the old path for ${recordPath}`,
+    );
+  }
+  const blockedDestination = multipleRenamed.recordPaths[1].replace(
+    /[.*+?^${}()|[\]\\]/g,
+    "\\$&",
+  );
+  assert.match(
+    multipleRenamed.summary,
+    new RegExp(
+      `### \\[${blockedDestination}\\][\\s\\S]*?Record result: \\*\\*BLOCKED \\(valid physical-phone handoff unavailable\\)\\*\\*`,
+    ),
+    "a valid BLOCKED result must remain visible after an earlier renamed record fails",
+  );
+  const publicFailureDestination = multipleRenamed.recordPaths[2].replace(
+    /[.*+?^${}()|[\]\\]/g,
+    "\\$&",
+  );
+  assert.match(
+    multipleRenamed.summary,
+    new RegExp(
+      `### \\[${publicFailureDestination}\\][\\s\\S]*?Record result: \\*\\*FAIL \\(public edge\\)\\*\\*`,
+    ),
+    "a valid public-edge FAIL result must remain visible after an earlier renamed record fails",
+  );
+
   const renamedMalformed = runIosPreviewJob("renamed-malformed", {
     baseRecordText: blockedRecord,
     recordText: blockedRecord.replace("**Result: BLOCKED", "**Result: PASS"),
@@ -2548,10 +3879,7 @@ test("iOS preview evidence covers renamed records and blocks malformed changes",
     "the summary must identify the missing changed iOS record",
   );
 
-  const preflightOnly = runIosPreviewJob("preflight-only", {
-    recordText: blockedRecord,
-    baseRecordText: blockedRecord,
-    basePreflightText: `{
+  const iosBlockedPreflight = `{
   "schema": "ios-preview-handoff-preflight/v1",
   "platform": "ios",
   "boundaries": {
@@ -2573,7 +3901,86 @@ test("iOS preview evidence covers renamed records and blocks malformed changes",
     }
   }
 }
-`,
+`;
+  const malformedIosPreflight =
+    '{"schema":"ios-preview-handoff-preflight/v1","platform":"ios","boundaries":{"publicManifestReachability":{"status":"PASS","evidence":"MALFORMED_IOS_PREFLIGHT_SENTINEL raw-malformed-ios-preflight-content"}';
+  const schemaInvalidIosPreflight = iosBlockedPreflight.replace(
+    "public manifest HTTP 200 (128 bytes)",
+    "SCHEMA_INVALID_IOS_PREFLIGHT_SENTINEL raw-schema-invalid-ios-preflight-content",
+  );
+  const fixedIosRedactedSchemaMessage =
+    "The iOS preview preflight JSON artifact does not satisfy the redacted schema.";
+
+  for (const {
+    name,
+    preflight,
+    forbidden,
+    description,
+  } of [
+    {
+      name: "malformed-preflight",
+      preflight: malformedIosPreflight,
+      forbidden:
+        /MALFORMED_IOS_PREFLIGHT_SENTINEL|raw-malformed-ios-preflight-content/,
+      description: "malformed",
+    },
+    {
+      name: "schema-invalid-preflight",
+      preflight: schemaInvalidIosPreflight,
+      forbidden:
+        /SCHEMA_INVALID_IOS_PREFLIGHT_SENTINEL|raw-schema-invalid-ios-preflight-content/,
+      description: "schema-invalid",
+    },
+  ]) {
+    const run = runIosPreviewJob(name, {
+      recordText: blockedRecord,
+      baseRecordText: blockedRecord,
+      basePreflightText: iosBlockedPreflight,
+      preflightText: preflight,
+      updateOnlyPreflight: true,
+    });
+    const failure = [run.result.stdout, run.result.stderr].join("\n");
+
+    assert.notEqual(
+      run.result.status,
+      0,
+      `a ${description} iOS preflight artifact must fail the release validation job`,
+    );
+    assert.match(
+      run.summary,
+      new RegExp(
+        fixedIosRedactedSchemaMessage.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
+      ),
+      `the ${description} iOS job summary must use the fixed redacted-schema contract message`,
+    );
+    assert.match(
+      failure,
+      new RegExp(
+        fixedIosRedactedSchemaMessage.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
+      ),
+      `the ${description} iOS checker failure must use the fixed redacted-schema contract message`,
+    );
+    for (const [surfaceName, surface] of [
+      ["job summary", run.summary],
+      ["surfaced checker failure", failure],
+    ]) {
+      assert.doesNotMatch(
+        surface,
+        forbidden,
+        `the ${description} iOS ${surfaceName} must not expose the marker or raw artifact content`,
+      );
+      assert.doesNotMatch(
+        surface,
+        /public manifest HTTP 200 \(128 bytes\)/,
+        `the ${description} iOS ${surfaceName} must not expose valid preflight artifact content`,
+      );
+    }
+  }
+
+  const preflightOnly = runIosPreviewJob("preflight-only", {
+    recordText: blockedRecord,
+    baseRecordText: blockedRecord,
+    basePreflightText: iosBlockedPreflight,
     preflightText: `{
   "schema": "ios-preview-handoff-preflight/v1",
   "platform": "ios",
@@ -3204,6 +4611,15 @@ function makeAndroidCommandDirectory(name, { appInstalled }) {
 function runAndroidPreflight(name, expectedStatus, { appInstalled }) {
   const sdkRoot = path.join(testRoot, `${name}-android-sdk`);
   mkdirSync(sdkRoot);
+  const commandDirectory = makeAndroidCommandDirectory(name, { appInstalled });
+  const pinnedAapt2 = path.join(
+    sdkRoot,
+    "build-tools",
+    androidBuildToolsVersion,
+    "aapt2",
+  );
+  mkdirSync(path.dirname(pinnedAapt2), { recursive: true });
+  symlinkSync(path.join(commandDirectory, "aapt2"), pinnedAapt2);
   const summaryPath = path.join(testRoot, `${name}-preflight-summary.md`);
   const result = spawnSync(
     bashPath,
@@ -3212,7 +4628,7 @@ function runAndroidPreflight(name, expectedStatus, { appInstalled }) {
       cwd: workspaceRoot,
       encoding: "utf8",
       env: {
-        PATH: makeAndroidCommandDirectory(name, { appInstalled }),
+        PATH: commandDirectory,
         HOME: homeDirectory,
         ANDROID_SDK_ROOT: sdkRoot,
         GITHUB_STEP_SUMMARY: summaryPath,
@@ -3518,6 +4934,46 @@ test("workflow summaries show candidate build IDs without exposing private value
   }
 });
 
+test("native branding summaries keep a durable report snapshot after artifact removal", () => {
+  const summaryStep = summarySteps.find(
+    ({ step }) => step.run === "scripts/summarize-native-branding.sh ios",
+  );
+  assert.ok(summaryStep, "the iOS native branding summary step must exist");
+
+  const resultsDir = path.join(testRoot, "durable-branding-snapshot");
+  addBrandingEvidenceFixtures(resultsDir, "ios");
+  const { summary } = runSummaryStep(summaryStep, {
+    name: "durable-branding-snapshot",
+    resultsDir,
+    outcome: "success",
+  });
+
+  assert.match(
+    summary,
+    /Archived report snapshot: \[available in this summary\]\(#archived-native-branding-report-snapshot\)/,
+    "the native summary must expose a durable in-summary report location",
+  );
+  assert.match(
+    summary,
+    /### Archived native branding report snapshot[\s\S]*Candidate build fingerprint \(SHA-256\)/,
+    "the durable snapshot must contain the bounded branding result",
+  );
+  assert.match(
+    summary,
+    /Detailed report: preserved in this release summary; the artifact copy is linked above while retained\./,
+    "the durable snapshot must not depend on the artifact link",
+  );
+
+  // Historical step summaries are immutable after publication. Removing the
+  // source fixture models the later artifact-retention expiry boundary.
+  rmSync(resultsDir, { recursive: true, force: true });
+  assert.match(
+    summary,
+    /### Archived native branding report snapshot[\s\S]*Candidate build fingerprint \(SHA-256\)/,
+    "the already-published summary must remain reviewable after artifact removal",
+  );
+});
+
 test("native evidence summaries link only the fixed uploaded report", () => {
   const evidenceRoot = path.join(testRoot, "evidence-link-safety");
   mkdirSync(evidenceRoot, { recursive: true });
@@ -3716,10 +5172,9 @@ test("empty platform artifact downloads preserve the other platform report", () 
     iosSection,
     /native evidence artifact download did not complete/,
   );
-  assert.match(
-    iosSection,
-    /- Recovery: \*\*Rerun the iOS native large-text job, or make the existing iOS artifact available, then rerun the mobile release gate\.\*\*/,
-    "the empty iOS download result must include a fixed recovery action",
+  assert.ok(
+    iosSection.includes(iosRecoveryLine),
+    "the empty iOS download result must include the shared fixed recovery action",
   );
   assert.match(iosSection, /- Detailed evidence report: \*\*Unavailable\*\*/);
   assert.doesNotMatch(
@@ -3796,17 +5251,15 @@ test("both empty platform artifact downloads include fixed recovery actions", ()
   );
   assert.match(iosSection, /- Status: \*\*FAIL\*\*/);
   assert.match(iosSection, /- Artifact download: \*\*FAIL\*\*/);
-  assert.match(
-    iosSection,
-    /- Recovery: \*\*Rerun the iOS native large-text job, or make the existing iOS artifact available, then rerun the mobile release gate\.\*\*/,
-    "the empty iOS download result must include a fixed recovery action",
+  assert.ok(
+    iosSection.includes(iosRecoveryLine),
+    "the empty iOS download result must include the shared fixed recovery action",
   );
   assert.match(androidSection, /- Status: \*\*FAIL\*\*/);
   assert.match(androidSection, /- Artifact download: \*\*FAIL\*\*/);
-  assert.match(
-    androidSection,
-    /- Recovery: \*\*Rerun the Android native large-text job, or make the existing Android artifact available, then rerun the mobile release gate\.\*\*/,
-    "the empty Android download result must include a fixed recovery action",
+  assert.ok(
+    androidSection.includes(androidRecoveryLine),
+    "the empty Android download result must include the shared fixed recovery action",
   );
   assert.doesNotMatch(
     summary,
@@ -3925,11 +5378,8 @@ test("unsafe download metadata cannot alter fixed platform recovery actions", ()
     .filter((line) => line.startsWith("- Recovery:"));
   assert.deepEqual(
     recoveryLines,
-    [
-      "- Recovery: **Rerun the iOS native large-text job, or make the existing iOS artifact available, then rerun the mobile release gate.**",
-      "- Recovery: **Rerun the Android native large-text job, or make the existing Android artifact available, then rerun the mobile release gate.**",
-    ],
-    "both platform recovery instructions must remain fixed plain text",
+    nativeRecoveryLines,
+    "both platform recovery instructions must come from the shared fixed contract",
   );
   assert.match(
     summary,
@@ -3957,6 +5407,63 @@ test("unsafe download metadata cannot alter fixed platform recovery actions", ()
     summary,
     /attacker\.example|::error::|::warning::|unsafe-download-metadata-shell-marker/,
     "unsafe shell and Markdown control text must stay out of the recovery summary",
+  );
+});
+
+test("cleanup-gated skipped retries preserve fixed blocking summaries", () => {
+  const evidenceRoot = path.join(testRoot, "cleanup-failure-stale-output");
+  const iosRunDir = path.join(evidenceRoot, "ios", "stale-run");
+  mkdirSync(iosRunDir, { recursive: true });
+  writeFileSync(
+    path.join(iosRunDir, brandingReportFile),
+    "private-evidence-marker must not appear in the release summary\n",
+  );
+  const summaryPath = path.join(
+    testRoot,
+    "cleanup-failure-stale-output-summary.md",
+  );
+  const iosArtifactUrl =
+    "https://github.example/example/chat-app/actions/runs/123/artifacts/456";
+  const androidArtifactUrl =
+    "https://github.example/example/chat-app/actions/runs/123/artifacts/789";
+
+  const result = spawnSync(
+    bashPath,
+    [path.join(workspaceRoot, nativeEvidenceCheckerScript), evidenceRoot],
+    {
+      cwd: workspaceRoot,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        GITHUB_STEP_SUMMARY: summaryPath,
+        NATIVE_IOS_EVIDENCE_ARTIFACT_URL: iosArtifactUrl,
+        NATIVE_ANDROID_EVIDENCE_ARTIFACT_URL: androidArtifactUrl,
+        NATIVE_IOS_EVIDENCE_DOWNLOAD_RESULT: "skipped",
+        NATIVE_ANDROID_EVIDENCE_DOWNLOAD_RESULT: "success",
+      },
+    },
+  );
+  assert.notEqual(
+    result.status,
+    0,
+    "a cleanup failure that skips the retry must keep the release blocked",
+  );
+
+  const summary = readFileSync(summaryPath, "utf8");
+  assert.match(
+    summary,
+    /## iOS native large-text evidence[\s\S]*- Status: \*\*FAIL\*\*[\s\S]*- Artifact download: \*\*FAIL\*\*/,
+    "the affected platform must retain a fixed blocking summary",
+  );
+  assert.match(
+    summary,
+    /- Recovery: \*\*Rerun the iOS native large-text job, or make the existing iOS artifact available, then rerun the mobile release gate\.\*\*/,
+    "the affected platform must retain fixed iOS recovery guidance",
+  );
+  assert.doesNotMatch(
+    summary,
+    /private-evidence-marker|github\.example/,
+    "stale evidence text and artifact metadata must not reach the summary",
   );
 });
 
@@ -4156,9 +5663,18 @@ test("partial native reruns keep each platform linked to its own artifact", () =
         `${jobId}: ${platform} cleanup must recreate the download directory`,
       );
       assert.equal(
+        cleanupStep["continue-on-error"],
+        true,
+        `${jobId}: ${platform} cleanup failure must still reach evidence validation`,
+      );
+      assert.ok(
+        cleanupStep.id,
+        `${jobId}: ${platform} cleanup must have an outcome that gates retry`,
+      );
+      assert.equal(
         retryStep.if,
-        cleanupStep.if,
-        `${jobId}: ${platform} retry must use the same failure condition as cleanup`,
+        `\${{ always() && steps.${initialStep.id}.outcome != 'success' && steps.${cleanupStep.id}.outcome == 'success' }}`,
+        `${jobId}: ${platform} retry must run only after cleanup succeeds`,
       );
       assert.equal(
         retryStep.with.path,
@@ -4190,6 +5706,29 @@ test("partial native reruns keep each platform linked to its own artifact", () =
       );
       rmSync(partialRoot, { recursive: true, force: true });
     }
+  }
+
+  for (const [jobId, checkerStepName] of [
+    ["mobile-release-gate", "Validate native evidence completeness"],
+    ["mobile-publish", "Require approved iOS and Android evidence"],
+  ]) {
+    const checkerStep = workflow.jobs[jobId].steps.find(
+      (step) => step.name === checkerStepName,
+    );
+    assert.ok(
+      checkerStep,
+      `${jobId}: evidence validation must remain present after cleanup failure`,
+    );
+    assert.match(
+      checkerStep.env.NATIVE_IOS_EVIDENCE_DOWNLOAD_RESULT,
+      /steps\.retry(?:-publish)?-ios-native-smoke\.outcome/,
+      `${jobId}: iOS validation must receive the skipped retry outcome after cleanup failure`,
+    );
+    assert.match(
+      checkerStep.env.NATIVE_ANDROID_EVIDENCE_DOWNLOAD_RESULT,
+      /steps\.retry(?:-publish)?-android-native-smoke\.outcome/,
+      `${jobId}: Android validation must receive the skipped retry outcome after cleanup failure`,
+    );
   }
 
   function runEvidenceSummary(name, artifacts, urls) {
@@ -4314,6 +5853,82 @@ test("partial native reruns keep each platform linked to its own artifact", () =
   );
 });
 
+test("expired native report artifacts are detected before a report link is published", () => {
+  for (const platform of ["ios", "android"]) {
+    const upload = workflow.jobs[`native-${platform}`].steps.find(
+      (step) => step.id === `upload-${platform}-native-smoke`,
+    );
+    assert.equal(
+      upload?.with?.["retention-days"],
+      90,
+      `${platform}: native report artifacts must use the maximum bounded retention window`,
+    );
+  }
+
+  const evidenceRoot = path.join(testRoot, "expired-native-report");
+  for (const platform of ["ios", "android"]) {
+    const runDir = path.join(evidenceRoot, platform, "expired-run");
+    mkdirSync(runDir, { recursive: true });
+    writeFileSync(
+      path.join(runDir, brandingReportFile),
+      "# Native branding validation\n\n- Status: **PASS**\n",
+    );
+  }
+
+  const summaryPath = path.join(
+    testRoot,
+    "expired-native-report-summary.md",
+  );
+  const iosArtifactUrl =
+    "https://github.example/example/chat-app/actions/runs/123/artifacts/456";
+  const androidArtifactUrl =
+    "https://github.example/example/chat-app/actions/runs/123/artifacts/789";
+  const result = spawnSync(
+    bashPath,
+    [
+      path.join(workspaceRoot, untrustedCheckerWrapperScript),
+      bashPath,
+      path.join(workspaceRoot, nativeEvidenceCheckerScript),
+      evidenceRoot,
+    ],
+    {
+      cwd: workspaceRoot,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        GITHUB_STEP_SUMMARY: summaryPath,
+        NATIVE_IOS_EVIDENCE_ARTIFACT_URL: iosArtifactUrl,
+        NATIVE_ANDROID_EVIDENCE_ARTIFACT_URL: androidArtifactUrl,
+        // GitHub reports an expired artifact as a failed download.
+        NATIVE_IOS_EVIDENCE_DOWNLOAD_RESULT: "failure",
+        NATIVE_ANDROID_EVIDENCE_DOWNLOAD_RESULT: "failure",
+      },
+    },
+  );
+  assert.notEqual(
+    result.status,
+    0,
+    "expired native report artifacts must keep release review blocked",
+  );
+
+  const summary = readFileSync(summaryPath, "utf8");
+  assert.match(
+    summary,
+    /- Artifact link check: \*\*EXPIRED OR UNAVAILABLE\*\*/,
+    "an expired artifact must be identified as unavailable instead of linked",
+  );
+  assert.match(
+    summary,
+    /artifact may have expired/,
+    "the summary must tell reviewers that expiry is one possible cause",
+  );
+  assert.doesNotMatch(
+    summary,
+    /github\.example|actions\/runs\/123\/artifacts\/(?:456|789)/,
+    "an expired artifact URL must not remain in the release summary",
+  );
+});
+
 test("native evidence checker output is isolated from workflow commands", () => {
   const wrapperCall = `bash ${untrustedCheckerWrapperScript}`;
   const checkerCall = `bash ${nativeEvidenceCheckerScript}`;
@@ -4326,7 +5941,7 @@ test("native evidence checker output is isolated from workflow commands", () => 
 
   assert.equal(
     checkerCallers.length,
-    6,
+    7,
     "every native evidence checker caller must be inventoried by this contract",
   );
   assert.equal(
@@ -4401,4 +6016,104 @@ test("native evidence checker output is isolated from workflow commands", () => 
     /::stop-commands::[0-9a-f-]+\n::warning::untrusted checker output\n::[0-9a-f-]+::/,
     "the wrapper must keep checker output visible between the command-boundary markers",
   );
+});
+
+test("release summary writers encode workflow-command sentinels", () => {
+  const sentinel = "::error::summary-control-input";
+  const safetyProbe = spawnSync(
+    bashPath,
+    [
+      "-c",
+      'source "$1"; sanitize_workflow_text "$2"',
+      "workflow-output-safety",
+      path.join(workspaceRoot, workflowOutputSafetyScript),
+      sentinel,
+    ],
+    { cwd: workspaceRoot, encoding: "utf8" },
+  );
+  assert.equal(safetyProbe.status, 0, safetyProbe.stderr);
+  assert.equal(
+    safetyProbe.stdout,
+    "&#58;&#58;error&#58;&#58;summary-control-input",
+  );
+  assert.doesNotMatch(safetyProbe.stdout, /::error::/);
+
+  const resultsDir = path.join(testRoot, "workflow-command-sentinel-results");
+  const summaryPath = path.join(
+    testRoot,
+    "workflow-command-sentinel-summary.md",
+  );
+  mkdirSync(resultsDir, { recursive: true });
+  writeFileSync(
+    path.join(resultsDir, "native-branding-summary.md"),
+    [
+      "## iOS native branding",
+      "",
+      `- Native label: ${sentinel}`,
+      "- Detailed report: [report](__NATIVE_BRANDING_REPORT_URL__)",
+      "",
+    ].join("\n"),
+  );
+
+  const brandingResult = spawnSync(
+    bashPath,
+    [path.join(workspaceRoot, nativeBrandingSummaryScript), "ios"],
+    {
+      cwd: workspaceRoot,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        GITHUB_STEP_SUMMARY: summaryPath,
+        NATIVE_SMOKE_RESULTS_DIR: resultsDir,
+        NATIVE_BRANDING_ARTIFACT_URL: "https://github.example/artifact",
+      },
+    },
+  );
+  assert.equal(brandingResult.status, 0, brandingResult.stderr);
+  const summary = readFileSync(summaryPath, "utf8");
+  assert.doesNotMatch(summary, /::error::/);
+  assert.match(summary, /&#58;&#58;error&#58;&#58;summary-control-input/);
+});
+
+test("hosted native evidence summaries record the checked revision before untrusted checks", () => {
+  const checkerCall = `bash ${nativeEvidenceCheckerScript}`;
+  const checkerCallers = listSteps().filter(({ step }) =>
+    String(step.run ?? "").includes(checkerCall),
+  );
+
+  assert.equal(
+    checkerCallers.length,
+    7,
+    "every hosted native evidence summary caller must be covered",
+  );
+
+  for (const { label, step } of checkerCallers) {
+    assert.equal(
+      step.env?.REVIEWED_REF,
+      "${{ github.ref }}",
+      `${label} must use the trusted workflow ref for revision metadata`,
+    );
+
+    const run = String(step.run);
+    const revisionMetadataIndex = run.indexOf(
+      'echo "## Reviewed release revision"',
+    );
+    const checkerIndex = run.indexOf(checkerCall);
+    assert.ok(
+      revisionMetadataIndex >= 0 && revisionMetadataIndex < checkerIndex,
+      `${label} must write trusted revision metadata before the checker can fail`,
+    );
+    assert.match(
+      run,
+      /resolved_commit_sha="\$\(git rev-parse --verify HEAD\)"/,
+      `${label} must resolve the checked commit from the checkout`,
+    );
+    assert.match(run, /Checked ref: `%s`/);
+    assert.match(run, /Resolved commit SHA: `%s`/);
+    assert.doesNotMatch(
+      run,
+      /summary_path.*(?:REVIEWED_REF|resolved_commit_sha)|(?:REVIEWED_REF|resolved_commit_sha).*summary_path/,
+      `${label} must not derive revision metadata from checker output`,
+    );
+  }
 });

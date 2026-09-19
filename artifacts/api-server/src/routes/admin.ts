@@ -11,6 +11,7 @@ import { createIpRateLimit } from "../middlewares/rateLimit";
 import { db } from "@workspace/db";
 import { roomsTable, roomMembersTable, messagesTable } from "@workspace/db";
 import { eq, isNull, count, max } from "drizzle-orm";
+import { setRoomActiveForModeration } from "../socket";
 
 const router = Router();
 const adminRateLimit = createIpRateLimit({
@@ -126,6 +127,7 @@ router.patch("/rooms/:roomId/deactivate", requireAuth, async (req: Request, res:
     .update(roomsTable)
     .set({ isActive: false })
     .where(eq(roomsTable.id, roomId));
+  setRoomActiveForModeration(roomId, false);
 
   res.json({ ok: true });
 });
@@ -141,8 +143,9 @@ router.patch("/rooms/:roomId/reactivate", requireAuth, async (req: Request, res:
 
   await db
     .update(roomsTable)
-    .set({ isActive: true })
+    .set({ isActive: true, lastAccessedAt: new Date() })
     .where(eq(roomsTable.id, roomId));
+  setRoomActiveForModeration(roomId, true);
 
   res.json({ ok: true });
 });
