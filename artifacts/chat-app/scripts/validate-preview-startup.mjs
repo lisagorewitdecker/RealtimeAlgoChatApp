@@ -354,15 +354,22 @@ function sanitizeRecordedStartupOutput(value) {
     if (!preservedSegments) return redactedPrefix;
     return `${redactedPrefix}\\${preservedSegments}`;
   };
-  const trimKnownStartupArguments = (path) => {
-    let startupProjectPath = path.trimEnd();
+  const stripTrailingStartupProjectFlags = (path) => {
+    let trimmedPath = path;
     while (true) {
-      const nextStartupProjectPath = startupProjectPath
-        .replace(/\s+--localhost$/, "")
-        .replace(/\s+--host\s+\S+$/, "")
-        .replace(/\s+--port\s+\S+(?:\s+\S+)?$/, "");
-      if (nextStartupProjectPath === startupProjectPath) return startupProjectPath;
-      startupProjectPath = nextStartupProjectPath;
+      if (/\s+--localhost$/.test(trimmedPath)) {
+        trimmedPath = trimmedPath.replace(/\s+--localhost$/, "");
+        continue;
+      }
+      if (/\s+--host\s+[^\s\\]+$/.test(trimmedPath)) {
+        trimmedPath = trimmedPath.replace(/\s+--host\s+[^\s\\]+$/, "");
+        continue;
+      }
+      if (/\s+--port\s+\d+$/.test(trimmedPath)) {
+        trimmedPath = trimmedPath.replace(/\s+--port\s+\d+$/, "");
+        continue;
+      }
+      return trimmedPath;
     }
   };
   const sanitizedLines = value
@@ -381,7 +388,7 @@ function sanitizeRecordedStartupOutput(value) {
         .replace(
           /Starting project at ((?:[A-Za-z]:\\|\\\\[^\\\r\n]+\\[^\\\r\n]+\\)[^\\"\r\n]+(?:\\[^\\"\r\n]+)*)/g,
           (_, path) => {
-            const startupProjectPath = trimKnownStartupArguments(path);
+            const startupProjectPath = stripTrailingStartupProjectFlags(path);
             return `Starting project at ${sanitizeWindowsProjectPath(startupProjectPath)}`;
           },
         )
