@@ -854,6 +854,8 @@ async function requestWithDeadline(
   }
 }
 
+const LOCAL_HANDOFF_RETRY_PAUSE_MS = 250;
+
 export async function requestLocalHandoffProbe(
   port,
   timeoutMs,
@@ -946,8 +948,22 @@ export async function requestLocalHandoffProbe(
           publicPreviewRecoveryMessage(),
         ].join(" "),
       );
-      if (Date.now() >= deadline) break;
-      await delay(Math.min(250, Math.max(1, deadline - Date.now())));
+      const remainingMs = deadline - Date.now();
+      if (remainingMs <= 0) break;
+      if (remainingMs <= LOCAL_HANDOFF_RETRY_PAUSE_MS) {
+        // The deadline falls inside the next pause. Wait it out instead of
+        // starting an attempt that has no time to complete: a timer can wake
+        // a fraction of a millisecond before Date.now() reaches the deadline,
+        // and such an attempt would replace the last real outcome with
+        // "request aborted by deadline" while leaving a half-finished
+        // manifest request behind.
+        await delay(remainingMs);
+        while (Date.now() < deadline) {
+          await delay(1);
+        }
+        break;
+      }
+      await delay(LOCAL_HANDOFF_RETRY_PAUSE_MS);
     }
   }
 
