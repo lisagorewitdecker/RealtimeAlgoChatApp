@@ -269,17 +269,25 @@ function compactStartupLibraryPath(path) {
   return `${path.slice(0, preservedPrefixLength)}${ellipsis}${path.slice(separatorIndex)}`;
 }
 
+function isGenericDevToolsWrapperFailure(value) {
+  return /(?:react native )?devtools.{0,120}(?:launcher|loader|binary).{0,120}(?:failed to start|exited|terminated|error|failed|unable|cannot|could not|status)(?:\s+with\s+(?:code|status)\s+\d+)?\s*$/i.test(
+    value,
+  );
+}
+
 function formatStartupFailure(output) {
   const failure = findStartupFailure(output);
   const loaderFailure = findLoaderFailure(output);
   if (failure) {
-    const isLoaderFailure = loaderFailure === failure;
-    const safeFailure = isLoaderFailure
-      ? redactKnownStartupFailureSecrets(failure)
-      : failure;
-    const missingLibrary = isLoaderFailure
+    const missingLibrary = loaderFailure
       ? findMissingLibrary(loaderFailure)
       : null;
+    const isLoaderFailure =
+      loaderFailure === failure ||
+      (Boolean(missingLibrary) && isGenericDevToolsWrapperFailure(failure));
+    const safeFailure = isLoaderFailure
+      ? redactKnownStartupFailureSecrets(loaderFailure)
+      : failure;
     if (isLoaderFailure && !missingLibrary) {
       return `${STARTUP_DIAGNOSTIC_PREFIX}${LOADER_COMPATIBILITY_MAINTENANCE_MESSAGE}`;
     }
@@ -1180,8 +1188,6 @@ async function validateLivePreview(
   recordOutput,
 ) {
   const launcherOnly = process.env.PREVIEW_STARTUP_REAL_LAUNCHER === "1";
-  const startupTestFixture = process.env.PREVIEW_STARTUP_TEST_FIXTURE;
-  const useStartupFixture = STARTUP_TEST_FIXTURES.has(startupTestFixture);
   const useStartupTestFixture = usesStartupTestFixture(process.env);
   if (!launcherOnly && !useStartupTestFixture) {
     getPublicPreviewManifestUrl(process.env);
