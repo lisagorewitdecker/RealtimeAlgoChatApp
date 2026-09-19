@@ -22,6 +22,10 @@ jobs:
         id: checkout
         uses: actions/checkout@v4
         with:
+          # Validate and report the submitted revision itself. In particular,
+          # a fork PR must not silently switch to GitHub's synthetic merge ref
+          # while the evidence is published against the fork head SHA.
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
 
       - name: Set up pnpm
@@ -64,7 +68,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
           API_CODEGEN_DRIFT_REPORT_PATH: ${{ runner.temp }}/api-codegen-drift-report.txt
-          API_CODEGEN_DRIFT_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          API_CODEGEN_DRIFT_HEAD_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
         run: node lib/api-spec/scripts/publish-drift-check.mjs
 
       - name: Verify generated API-break guidance

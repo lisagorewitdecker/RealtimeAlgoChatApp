@@ -12,6 +12,7 @@ if [[ "$SCRIPT_DIR" == "$SCRIPT_PATH" ]]; then
   SCRIPT_DIR="."
 fi
 SCRIPT_DIR="$(cd -- "$SCRIPT_DIR" && pwd)"
+# shellcheck source=scripts/workflow-output-safety.sh
 source "$SCRIPT_DIR/workflow-output-safety.sh"
 
 required_labels=(self-hosted linux android smallest-simulator)
