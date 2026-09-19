@@ -836,7 +836,7 @@ test("candidate build IDs use non-secret variables or reusable-workflow inputs",
   );
 });
 
-test("iOS preflight clears stale evidence before it can block unconditional uploads", () => {
+test("iOS preflight clears stale evidence before it can block evidence uploads", () => {
   const iosJob = workflow.jobs["native-ios"];
   assert.ok(iosJob, "release workflow must define the native-ios job");
   const preflightStep = iosJob.steps.find(
@@ -876,8 +876,8 @@ test("iOS preflight clears stale evidence before it can block unconditional uplo
   );
   assert.equal(
     uploadStep.if,
-    "always()",
-    "the unconditional upload must be safe after the preflight clears stale evidence",
+    "${{ always() && steps.ios-native-evidence-size.outcome == 'success' }}",
+    "the evidence upload must wait for the bounded-size check after the preflight clears stale evidence",
   );
 });
 
@@ -1507,8 +1507,8 @@ test("failed native evidence checks remain reviewable before blocking release", 
     );
     assert.equal(
       upload?.if,
-      "always()",
-      `${platform}: evidence upload must survive a failed native check`,
+      `\${{ always() && steps.${platform}-native-evidence-size.outcome == 'success' }}`,
+      `${platform}: evidence upload must survive a failed native check unless the bounded-size check fails`,
     );
     assert.equal(
       upload?.with?.["if-no-files-found"],
@@ -1873,8 +1873,8 @@ test("failed native evidence checks remain reviewable before blocking release", 
     );
     assert.equal(
       upload?.if,
-      "always()",
-      `${platform}: evidence upload must survive a failed native check`,
+      `\${{ always() && steps.${platform}-native-evidence-size.outcome == 'success' }}`,
+      `${platform}: evidence upload must survive a failed native check unless the bounded-size check fails`,
     );
     assert.equal(
       upload?.with?.["if-no-files-found"],
@@ -5941,7 +5941,7 @@ test("native evidence checker output is isolated from workflow commands", () => 
 
   assert.equal(
     checkerCallers.length,
-    7,
+    9,
     "every native evidence checker caller must be inventoried by this contract",
   );
   assert.equal(
@@ -6080,14 +6080,17 @@ test("hosted native evidence summaries record the checked revision before untrus
   const checkerCallers = listSteps().filter(({ step }) =>
     String(step.run ?? "").includes(checkerCall),
   );
+  const summaryCheckerCallers = checkerCallers.filter(
+    ({ step }) => !String(step.run ?? "").includes("--check-collection-size"),
+  );
 
   assert.equal(
-    checkerCallers.length,
+    summaryCheckerCallers.length,
     7,
     "every hosted native evidence summary caller must be covered",
   );
 
-  for (const { label, step } of checkerCallers) {
+  for (const { label, step } of summaryCheckerCallers) {
     assert.equal(
       step.env?.REVIEWED_REF,
       "${{ github.ref }}",
