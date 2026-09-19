@@ -2289,6 +2289,29 @@ test("rejects malformed preflight JSON with a fixed reason", async () => {
   }
 });
 
+test("rejects a missing preflight JSON file with a fixed reason", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "missing-preflight-"));
+  const privatePathMarker = "missing-preflight-private-path";
+  const outputPath = join(directory, `${privatePathMarker}.json`);
+
+  try {
+    await assert.rejects(
+      () => readAndValidateHandoffPreflight(outputPath),
+      (error) => {
+        assert.equal(
+          error.message,
+          "Preview handoff preflight JSON could not be read.",
+        );
+        assert.doesNotMatch(error.message, new RegExp(privatePathMarker));
+        assert.doesNotMatch(error.message, /ENOENT|no such file|open/i);
+        return true;
+      },
+    );
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("preflight record keeps public and local probes separate from phone evidence", () => {
   const record = createHandoffPreflightRecord({
     publicManifest: {

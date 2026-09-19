@@ -243,6 +243,24 @@ assert_not_contains "$unreadable_output" "$unreadable_json_sentinel"
 assert_not_contains "$unreadable_output" "$unreadable_json_path"
 assert_not_contains "$unreadable_output" "EACCES"
 
+missing_json_sentinel="android-preview-missing-preflight-sentinel"
+missing_root="$TEST_ROOT/missing-json"
+missing_record="$missing_root/validation-record.md"
+missing_json_path="$missing_root/android-preview-${missing_json_sentinel}.json"
+mkdir -p "$missing_root"
+cp "$blocked_record" "$missing_record"
+if missing_output="$(
+  bash "$CHECKER" "$missing_record" "$missing_json_path" 2>&1
+)"; then
+  printf 'Missing Android preflight JSON unexpectedly passed.\n' >&2
+  exit 1
+fi
+assert_contains "$missing_output" \
+  "The Android preview preflight JSON artifact does not exist."
+assert_not_contains "$missing_output" "$missing_json_sentinel"
+assert_not_contains "$missing_output" "$missing_json_path"
+assert_not_contains "$missing_output" "ENOENT"
+
 duplicate_json_sentinel="duplicate-preflight-secret"
 cat >"$json_contract_path" <<EOF
 {"schema":"android-preview-handoff-preflight/v1","schema":"$duplicate_json_sentinel","platform":"android","boundaries":{"publicManifestReachability":{"status":"PASS","status":"FAIL","evidence":"public manifest HTTP 200 (128 bytes)"},"localHandoffProbe":{"status":"NOT_RUN","evidence":"Local manifest/bundle probe not run — no successful probe result was recorded"},"expoGoLaunch":{"status":"NOT_ASSESSED","evidence":"Requires a physical Android phone running stock Expo Go."},"serverNativeRequestEvidence":{"status":"NOT_ASSESSED","evidence":"Requires filtered Metro or API evidence from that physical Expo Go session."}}}
