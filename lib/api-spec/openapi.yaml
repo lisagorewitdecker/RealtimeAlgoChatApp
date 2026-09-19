@@ -98,7 +98,7 @@ paths:
           $ref: "#/components/responses/Unauthorized"
 
     post:
-      operationId: createRoom
+      operationId: createRoomHostedProbe
       tags: [rooms]
       summary: Create a room
       security:
