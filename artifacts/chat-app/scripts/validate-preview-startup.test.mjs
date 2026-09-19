@@ -1012,6 +1012,67 @@ test(
 );
 
 test(
+  "identifies a public manifest body stall at its configured deadline",
+  { timeout: 1_000 },
+  async () => {
+    const originalFetch = globalThis.fetch;
+    let abortObserved = false;
+    let request;
+    globalThis.fetch = async (url, options) => {
+      request = { url, options };
+      const body = new ReadableStream({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode('{"launchAsset":'));
+          options.signal.addEventListener(
+            "abort",
+            () => {
+              abortObserved = true;
+              controller.error(new Error("body aborted by deadline"));
+            },
+            { once: true },
+          );
+        },
+      });
+      return new Response(body, { status: 200 });
+    };
+
+    try {
+      const startedAt = Date.now();
+      await assert.rejects(
+        requestPublicPreviewManifest(25, previewEnvironment),
+        (error) => {
+          assert.match(
+            error.message,
+            /Public Expo preview manifest check failed before a response:/,
+          );
+          assert.match(
+            error.message,
+            /public manifest response headers received but body did not complete/,
+          );
+          assert.match(
+            error.message,
+            /25ms configured public preview deadline/,
+          );
+          assert.match(
+            error.message,
+            /Restart or repair the managed Chat App\/Expo workflow/,
+          );
+          return true;
+        },
+      );
+      assert.ok(
+        Date.now() - startedAt < 500,
+        "public manifest body stall exceeded the bounded recovery window",
+      );
+      assert.equal(abortObserved, true);
+      assert.equal(request.options.signal.aborted, true);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  },
+);
+
+test(
   "CLI saves a redacted failed public boundary when the public probe times out",
   { timeout: 5_000 },
   () => {
