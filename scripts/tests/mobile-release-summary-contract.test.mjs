@@ -1233,6 +1233,12 @@ test("native release jobs are gated by centralized mobile release configuration"
     "${{ github.event_name != 'pull_request' && inputs.android_runner_health_only != true && needs.mobile-release-configuration.outputs.ios_configured == 'true' }}",
     "native-ios must only run when the centralized iOS release configuration is ready",
   );
+  assert.equal(
+    nativeIosJob.steps.find((step) => step.id === "ios-hosted-runner")?.env
+      ?.MAESTRO_INSTALLER_SHA256,
+    "${{ vars.MAESTRO_INSTALLER_SHA256 }}",
+    "native-ios must pass the pinned Maestro installer checksum into hosted-runner setup",
+  );
 
   const androidPreflightJob = workflow.jobs["android-prerequisite-preflight"];
   assert.ok(
@@ -1262,6 +1268,13 @@ test("native release jobs are gated by centralized mobile release configuration"
     nativeAndroidJob.if,
     "${{ github.event_name != 'pull_request' && inputs.android_runner_health_only != true && needs.mobile-release-configuration.outputs.android_configured == 'true' }}",
     "native-android must only run when the centralized Android release configuration is ready",
+  );
+  assert.equal(
+    nativeAndroidJob.steps.find(
+      (step) => step.name === "Prepare GitHub-hosted Android runner",
+    )?.env?.MAESTRO_INSTALLER_SHA256,
+    "${{ vars.MAESTRO_INSTALLER_SHA256 }}",
+    "native-android must pass the pinned Maestro installer checksum into hosted-runner setup",
   );
 
   const gateJob = workflow.jobs["mobile-release-gate"];

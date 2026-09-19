@@ -14,7 +14,6 @@ set -euo pipefail
 : "${MAESTRO_INSTALLER_SHA256:?MAESTRO_INSTALLER_SHA256 is required for verified Maestro installation.}"
 
 EAS_CLI_VERSION="${EAS_CLI_VERSION:-23.2.0}"
-MAESTRO_VERSION="${MAESTRO_VERSION:-1.39.13}"
 IOS_DEVICE_NAME="${IOS_NATIVE_DEVICE_NAME:-iPhone SE (3rd generation)}"
 RUNNER_TEMP="${RUNNER_TEMP:-${TMPDIR:-/tmp}}"
 
@@ -31,7 +30,7 @@ done
 
 if ! command -v maestro >/dev/null 2>&1; then
   maestro_installer_url="https://get.maestro.mobile.dev"
-  maestro_installer_path="$RUNNER_TEMP/maestro-installer-${MAESTRO_VERSION}.sh"
+  maestro_installer_path="$RUNNER_TEMP/maestro-installer.sh"
   curl --fail --location --silent --show-error "$maestro_installer_url" -o "$maestro_installer_path"
 
   installer_sha256="$(shasum -a 256 "$maestro_installer_path" | awk '{print $1}')"

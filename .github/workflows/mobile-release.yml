@@ -1415,6 +1415,7 @@ jobs:
         id: ios-hosted-runner
         env:
           EAS_TOKEN: ${{ secrets.EAS_TOKEN }}
+          MAESTRO_INSTALLER_SHA256: ${{ vars.MAESTRO_INSTALLER_SHA256 }}
           NATIVE_SMOKE_IOS_APP_ID: ${{ secrets.NATIVE_SMOKE_IOS_APP_ID }}
           NATIVE_SMOKE_IOS_BUILD_ID: ${{ env.NATIVE_SMOKE_IOS_BUILD_ID }}
           EAS_CLI_VERSION: ${{ env.EAS_CLI_VERSION }}
@@ -1663,6 +1664,7 @@ jobs:
       - name: Prepare GitHub-hosted Android runner
         env:
           EAS_TOKEN: ${{ secrets.EAS_TOKEN }}
+          MAESTRO_INSTALLER_SHA256: ${{ vars.MAESTRO_INSTALLER_SHA256 }}
           NATIVE_SMOKE_ANDROID_APP_ID: ${{ secrets.NATIVE_SMOKE_ANDROID_APP_ID }}
           NATIVE_SMOKE_ANDROID_BUILD_ID: ${{ env.NATIVE_SMOKE_ANDROID_BUILD_ID }}
           EAS_CLI_VERSION: ${{ env.EAS_CLI_VERSION }}
@@ -1714,6 +1716,7 @@ jobs:
       - name: Prepare GitHub-hosted Android runner
         env:
           EAS_TOKEN: ${{ secrets.EAS_TOKEN }}
+          MAESTRO_INSTALLER_SHA256: ${{ vars.MAESTRO_INSTALLER_SHA256 }}
           NATIVE_SMOKE_ANDROID_APP_ID: ${{ secrets.NATIVE_SMOKE_ANDROID_APP_ID }}
           NATIVE_SMOKE_ANDROID_BUILD_ID: ${{ env.NATIVE_SMOKE_ANDROID_BUILD_ID }}
           EAS_CLI_VERSION: ${{ env.EAS_CLI_VERSION }}
