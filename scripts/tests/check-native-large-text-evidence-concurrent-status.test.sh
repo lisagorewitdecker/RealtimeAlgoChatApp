@@ -24,12 +24,23 @@ assert_contains() {
   fi
 }
 
+assert_file_contains() {
+ local path="$1"
+ local expected="$2"
+ if ! grep -Fq -- "$expected" "$path"; then
+   printf 'Expected output file to contain: %s\n' "$expected" >&2
+   cat "$path" >&2
+   exit 1
+ fi
+}
+
 run_case() {
  local case_name="$1"
  local mode="$2"
  local expected_fragment="$3"
  local fixture_root="$TEST_ROOT/$case_name"
  local stop_file="$TEST_PARENT/$case_name.stop"
+ local output_path="$fixture_root/suite-output.txt"
  local saved_status
  local suite_output
  local suite_status
@@ -68,12 +79,13 @@ run_case() {
  writer_pid=$!
 
  set +e
- suite_output="$(
+ (
    cd "$fixture_root" &&
-     env -u NATIVE_EVIDENCE_TAMPER_FIXTURES_ROOT bash "$SUITE_RELATIVE_PATH" 2>&1
- )"
+     env -u NATIVE_EVIDENCE_TAMPER_FIXTURES_ROOT bash "$SUITE_RELATIVE_PATH"
+ ) >"$output_path" 2>&1
  suite_status=$?
  set -e
+ suite_output="$(cat "$output_path")"
 
  : > "$stop_file"
  kill "$writer_pid" 2>/dev/null || true
@@ -96,9 +108,9 @@ run_case() {
    exit 1
  fi
 
- assert_contains "$suite_output" \
+ assert_file_contains "$output_path" \
    "Skipping the saved API test status cleanup guard: $saved_status $expected_fragment"
- assert_contains "$suite_output" \
+ assert_file_contains "$output_path" \
    "Native large-text evidence completeness regression tests passed."
 }
 
