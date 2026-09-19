@@ -411,7 +411,6 @@ export default function RoomScreen() {
         });
       } else {
         recoveryRequestRef.current = null;
-        setMessageReplayGap(false);
       }
     }
     function onMessageRecoveryError(data: { requestId?: string }) {
@@ -1082,6 +1081,17 @@ export default function RoomScreen() {
               reconnects. Newer messages are shown below.
             </Text>
           </View>
+          <TouchableOpacity
+            testID="room-message-gap-dismiss"
+            accessibilityRole="button"
+            accessibilityLabel="Dismiss reconnect history warning"
+            onPress={() => setMessageReplayGap(false)}
+            style={[styles.keyWarningButton, { borderColor: colors.destructive }]}
+          >
+            <Text style={[styles.keyWarningButtonText, { color: colors.destructive }]}>
+              Dismiss
+            </Text>
+          </TouchableOpacity>
         </View>
       ) : null}
 

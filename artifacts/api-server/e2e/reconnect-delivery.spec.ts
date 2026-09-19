@@ -367,6 +367,13 @@ test("a live reconnect warns when the last-seen message is outside retained hist
     await expect(member.page.getByText(newestMessage, { exact: true })).toHaveCount(
       1,
     );
+    const gapWarning = member.page.getByTestId("room-message-gap-warning");
+    await expect(gapWarning).toBeVisible();
+    await expect(gapWarning).toContainText(
+      "This device was disconnected longer than the room history kept for reconnects.",
+    );
+    await gapWarning.getByTestId("room-message-gap-dismiss").click();
+    await expect(gapWarning).toHaveCount(0);
   } catch (error) {
     testFailure = error;
   } finally {

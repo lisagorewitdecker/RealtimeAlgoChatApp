@@ -513,6 +513,62 @@ describe("room ban handling", () => {
 
     expect(view.getByTestId("room-message-gap-warning")).toBeTruthy();
     expect(view.getByText("Some messages could not be recovered")).toBeTruthy();
+    fireEvent.press(view.getByTestId("room-message-gap-dismiss"));
+    expect(view.queryByTestId("room-message-gap-warning")).toBeNull();
+  });
+
+  it("keeps the reconnect gap warning visible after recovered messages arrive", () => {
+    const view = render(<RoomScreen />);
+    const existingMessage = {
+      id: "existing",
+      content: "Before the gap",
+      userId: "user-ada",
+      username: "Ada",
+      timestamp: 1,
+      type: "text" as const,
+    };
+    const recoveredMessage = {
+      id: "recovered-newest",
+      content: "Newest recovered message",
+      userId: "user-ada",
+      username: "Ada",
+      timestamp: 2,
+      type: "text" as const,
+    };
+
+    act(() => {
+      mockHandlers.get("room-joined")?.({
+        messages: [existingMessage],
+        users: [],
+      });
+      mockHandlers.get("connect")?.();
+      mockHandlers.get("room-joined")?.({
+        messages: [recoveredMessage],
+        users: [],
+        replayAfterMessageId: "expired-cursor",
+        replayGap: true,
+      });
+    });
+
+    const recoveryRequest = socketEmits("recover-messages").at(-1)?.[1];
+    act(() => {
+      mockHandlers.get("message-recovery-page")?.({
+        requestId: recoveryRequest.requestId,
+        messages: [],
+        hasMore: false,
+        nextCursor: {
+          id: recoveredMessage.id,
+          timestamp: recoveredMessage.timestamp,
+        },
+      });
+    });
+
+    expect(view.getByTestId("message-recovered-newest")).toBeTruthy();
+    expect(view.getByTestId("room-message-gap-warning")).toBeTruthy();
+    expect(view.getByTestId("room-message-gap-dismiss")).toBeTruthy();
+
+    fireEvent.press(view.getByTestId("room-message-gap-dismiss"));
+    expect(view.queryByTestId("room-message-gap-warning")).toBeNull();
   });
 
   it("explains when device-key registration is taking unusually long", () => {
