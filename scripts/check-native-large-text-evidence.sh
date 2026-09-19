@@ -42,11 +42,9 @@ check_native_text_evidence_sizes() {
 
   while IFS= read -r -d '' path; do
     relative_path="${path#"$results_dir"/}"
-    case "$relative_path" in
-      screenshots/[A-Za-z0-9._-]*.png|call-surface/[A-Za-z0-9._-]*.png)
-        continue
-        ;;
-    esac
+    if [[ "$relative_path" =~ ^(screenshots|call-surface)/[A-Za-z0-9._-]+\.png$ ]]; then
+      continue
+    fi
 
     if ! file_size="$(LC_ALL=C wc -c < "$path")"; then
       echo "Native evidence text file could not be read; refusing to package evidence." >&2
