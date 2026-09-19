@@ -275,6 +275,7 @@ jobs:
     if: ${{ github.event_name != 'pull_request' }}
     needs:
       - mobile-release-node-range
+      - mobile-release-credentials
     runs-on: ubuntu-latest
     environment:
       name: mobile-release
@@ -1316,18 +1317,13 @@ jobs:
   native-ios:
     name: Native large-text smoke (iOS)
     if: ${{ github.event_name != 'pull_request' && needs.native-release-configuration.outputs.ios_release_configured == 'true' }}
-    if: ${{ github.event_name != 'pull_request' && inputs.android_runner_health_only != true }}
     permissions:
       actions: write
       contents: read
     needs:
       - mobile-release-node-range
       - native-release-configuration
-    outputs:
-      native_evidence_artifact_url: ${{ steps.upload-ios-native-smoke.outputs.artifact-url }}
-    runs-on: macos-latest
       - mobile-release-credentials
-      - android-release-runner-health
     outputs:
       native_evidence_artifact_url: ${{ steps.upload-ios-native-smoke.outputs.artifact-url }}
       native_evidence_digest_manifest: ${{ steps.ios-native-evidence-digest.outputs.native_evidence_digest_manifest }}
@@ -1640,10 +1636,6 @@ jobs:
     needs:
       - mobile-release-node-range
       - native-release-configuration
-    runs-on: ubuntu-latest
-    if: ${{ github.event_name != 'pull_request' && inputs.android_runner_health_only != true }}
-    needs:
-      - mobile-release-node-range
       - mobile-release-credentials
       - android-release-runner-health
     runs-on:
@@ -1688,7 +1680,6 @@ jobs:
   native-android:
     name: Native large-text smoke (Android)
     if: ${{ github.event_name != 'pull_request' && needs.native-release-configuration.outputs.android_release_configured == 'true' }}
-    if: ${{ github.event_name != 'pull_request' && inputs.android_runner_health_only != true }}
     permissions:
       actions: write
       contents: read
