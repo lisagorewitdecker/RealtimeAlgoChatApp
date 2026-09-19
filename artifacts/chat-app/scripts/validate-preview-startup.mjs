@@ -349,7 +349,7 @@ function sanitizeRecordedStartupOutput(value) {
           return `${prefix}[redacted]/${libraryName}${suffix}`;
         })
         .replace(
-          /[A-Za-z]:\\(?:Users|home|a)\\[^\r\n]+/g,
+          /[A-Za-z]:\\(?:Users|home)\\[^\r\n]+|[A-Za-z]:\\a\\[^\\\r\n]+\\[^\r\n]+/g,
           (path) => {
             const libraryName = path.match(
               /[^/\\\s]+?\.(?:dylib|so(?:\.\d+)?|dll)\b/i,
@@ -758,15 +758,18 @@ export function getPublicPreviewManifestUrl(environment = process.env) {
   return url;
 }
 
-function usesStartupTestFixture(environment = process.env) {
+function usesStartupTestFixture(
+  environment = process.env,
+  { includeOutputOverride = true } = {},
+) {
   return (
     STARTUP_TEST_FIXTURES.has(environment.PREVIEW_STARTUP_TEST_FIXTURE) ||
-    environment.PREVIEW_STARTUP_TEST_OUTPUT != null
+    (includeOutputOverride && environment.PREVIEW_STARTUP_TEST_OUTPUT != null)
   );
 }
 
 export function validatePreviewConfiguration(environment = process.env) {
-  if (usesStartupTestFixture(environment)) {
+  if (usesStartupTestFixture(environment, { includeOutputOverride: false })) {
     return;
   }
   getPublicPreviewManifestUrl(environment);

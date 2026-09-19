@@ -422,7 +422,7 @@ test(
     try {
       for (const [index, fixtureCase] of cases.entries()) {
         const recordPath = join(temporaryDirectory, `windows-${index}.log`);
-        const live = runNodeScript(
+        const realLauncherLive = runNodeScript(
           [validatorPath, "--record-log", recordPath],
           {
             PREVIEW_STARTUP_REAL_LAUNCHER: "1",
@@ -430,8 +430,13 @@ test(
             PREVIEW_STARTUP_TEST_OUTPUT: fixtureCase.output,
           },
         );
+        const fixtureLive = runNodeScript([validatorPath], {
+          PREVIEW_STARTUP_TEST_FIXTURE: "missing-runtime-library-windows",
+          PREVIEW_STARTUP_TEST_OUTPUT: fixtureCase.output,
+        });
 
-        assert.equal(live.status, 1, fixtureCase.name);
+        assert.equal(realLauncherLive.status, 1, fixtureCase.name);
+        assert.equal(fixtureLive.status, 1, fixtureCase.name);
         const captured = runNodeScript([
           validatorPath,
           "--log-file",
@@ -439,8 +444,11 @@ test(
         ]);
         assert.equal(captured.status, 1, fixtureCase.name);
 
+        const fixtureDiagnostic = findDiagnostic(fixtureLive.output);
         const diagnostic = findDiagnostic(captured.output);
+        assert.ok(fixtureDiagnostic, fixtureCase.name);
         assert.ok(diagnostic, fixtureCase.name);
+        assert.equal(fixtureDiagnostic, diagnostic, fixtureCase.name);
         assert.match(diagnostic, fixtureCase.detail, fixtureCase.name);
         assert.match(
           diagnostic,
