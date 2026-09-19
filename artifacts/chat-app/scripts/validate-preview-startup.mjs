@@ -147,7 +147,7 @@ const STARTUP_TEST_FIXTURES = new Set([
 const MISSING_LIBRARY_PATH = String.raw`[A-Za-z0-9._+~ /\\:[\]-]`;
 const MISSING_LIBRARY_CAPTURE = String.raw`(?:(["'])([^"'\u0000-\u001f\u007f]+)\1|(${MISSING_LIBRARY_PATH}+?))`;
 const MISSING_LIBRARY_DYLD_CAPTURE = String.raw`(?:(["'])([^"'\u0000-\u001f\u007f]+)\1|(${MISSING_LIBRARY_PATH}+))`;
-const MISSING_LIBRARY_BASENAME = /(?:^|[\\/])[^/\\\s:]+\.(?:dylib|so(?:\.\d+)?|dll)$/i;
+const MISSING_LIBRARY_BASENAME = /(?:^|[\\/])[^/\\\s:]+\.(?:dylib|so(?:\.\d+)*|dll)$/i;
 const MISSING_LIBRARY_PATTERNS = [
   new RegExp(
     String.raw`error while loading shared libraries:\s*${MISSING_LIBRARY_CAPTURE}\s*:\s*cannot open shared object file(?:\s*:\s*no such file or directory)?\s*$`,
@@ -273,13 +273,11 @@ function formatStartupFailure(output) {
   const failure = findStartupFailure(output);
   const loaderFailure = findLoaderFailure(output);
   if (failure) {
-    const isLoaderFailure = Boolean(loaderFailure);
+    const isLoaderFailure = Boolean(loaderFailure && loaderFailure === failure);
     const safeFailure = isLoaderFailure
       ? redactKnownStartupFailureSecrets(failure)
       : failure;
-    const missingLibrary = loaderFailure
-      ? findMissingLibrary(loaderFailure)
-      : null;
+    const missingLibrary = isLoaderFailure ? findMissingLibrary(loaderFailure) : null;
     if (isLoaderFailure && !missingLibrary) {
       return `${STARTUP_DIAGNOSTIC_PREFIX}${LOADER_COMPATIBILITY_MAINTENANCE_MESSAGE}`;
     }
@@ -1150,11 +1148,17 @@ async function validateLivePreview(
   if (!launcherOnly && requiresPublicPreviewConfiguration) {
     getPublicPreviewManifestUrl(process.env);
   }
+  const startupTestFixture = process.env.PREVIEW_STARTUP_TEST_FIXTURE;
+  const useStartupFixture = STARTUP_TEST_FIXTURES.has(startupTestFixture);
+  const runtimeLibraryFixture =
+    useStartupFixture &&
+    startupTestFixture.startsWith("missing-runtime-library");
+  if (!launcherOnly && !runtimeLibraryFixture) getPublicPreviewManifestUrl(process.env);
   const port = await findFreePort();
   const output = [];
   const pnpmCommand = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
   const startupCommand =
-    STARTUP_TEST_FIXTURES.has(process.env.PREVIEW_STARTUP_TEST_FIXTURE)
+    useStartupFixture
       ? {
           command: process.execPath,
           args: [
@@ -1467,7 +1471,7 @@ async function main() {
     );
 }
 
-if (fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
+if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
   const cliArgs = process.argv.slice(2);
   main().catch(async (error) => {
     if (isStartupValidationInvocation(cliArgs)) {
