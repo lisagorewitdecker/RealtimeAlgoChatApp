@@ -35,10 +35,10 @@ cleanup_test_fixtures() {
   if ((SAVED_TEST_STATUS_GUARDED)); then
     if [[ ! -f "$SAVED_TEST_STATUS" ]]; then
       printf 'Skipping the saved API test status cleanup guard: %s disappeared during the test (optional gitignored Playwright output may be rewritten by other local runs).\n' \
-        "$SAVED_TEST_STATUS"
+        "$SAVED_TEST_STATUS" >&2
     elif ! cmp -s "$SAVED_TEST_STATUS_SNAPSHOT" "$SAVED_TEST_STATUS"; then
       printf 'Skipping the saved API test status cleanup guard: %s changed during the test (optional gitignored Playwright output may be rewritten by other local runs).\n' \
-        "$SAVED_TEST_STATUS"
+        "$SAVED_TEST_STATUS" >&2
     fi
   fi
 
