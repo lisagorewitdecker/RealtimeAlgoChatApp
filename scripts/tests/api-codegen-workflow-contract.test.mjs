@@ -3,6 +3,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import {
   appendFileSync,
   copyFileSync,
+  lstatSync,
   mkdtempSync,
   mkdirSync,
   readdirSync,
@@ -302,13 +303,30 @@ function createGeneratedClientFixture() {
       const source = path.join(workspaceRoot, relativePath, "node_modules");
       const destination = path.join(fixtureRoot, relativePath, "node_modules");
       mkdirSync(destination, { recursive: true });
-      for (const entry of readdirSync(source)) {
-        const fixtureEntry = path.join(destination, entry);
-        if (entry.startsWith(".pnpm-task-run-state")) {
+
+      const linkEntry = (sourceEntry, fixtureEntry) => {
+        if (path.basename(sourceEntry).startsWith(".pnpm-task-run-state")) {
           mkdirSync(fixtureEntry, { recursive: true });
-          continue;
+          return;
         }
-        symlinkSync(path.join(source, entry), fixtureEntry);
+        if (
+          path.basename(sourceEntry).startsWith("@") &&
+          lstatSync(sourceEntry).isDirectory()
+        ) {
+          mkdirSync(fixtureEntry, { recursive: true });
+          for (const scopedEntry of readdirSync(sourceEntry)) {
+            linkEntry(
+              path.join(sourceEntry, scopedEntry),
+              path.join(fixtureEntry, scopedEntry),
+            );
+          }
+          return;
+        }
+        symlinkSync(sourceEntry, fixtureEntry);
+      };
+
+      for (const entry of readdirSync(source)) {
+        linkEntry(path.join(source, entry), path.join(destination, entry));
       }
     };
 
