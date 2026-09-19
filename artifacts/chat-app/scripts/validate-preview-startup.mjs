@@ -278,6 +278,13 @@ function formatStartupFailure(output) {
       ? redactKnownStartupFailureSecrets(failure)
       : failure;
     const missingLibrary = isLoaderFailure ? findMissingLibrary(loaderFailure) : null;
+    const isLoaderFailure = Boolean(loaderFailure);
+    const safeFailure = isLoaderFailure
+      ? redactKnownStartupFailureSecrets(failure)
+      : failure;
+    const missingLibrary = loaderFailure
+      ? findMissingLibrary(loaderFailure)
+      : null;
     if (isLoaderFailure && !missingLibrary) {
       return `${STARTUP_DIAGNOSTIC_PREFIX}${LOADER_COMPATIBILITY_MAINTENANCE_MESSAGE}`;
     }
@@ -333,6 +340,26 @@ function sanitizeStartupSummaryDiagnostic(value) {
 }
 
 function sanitizeRecordedStartupOutput(value) {
+  const sanitizeWindowsPath = (path) => {
+    const libraryName = path.match(
+      /[^/\\\s]+?\.(?:dylib|so(?:\.\d+)?|dll)\b/i,
+    )?.[0];
+    const redactedPrefix = path.startsWith("\\\\")
+      ? "\\\\[redacted]"
+      : `${path.slice(0, 3)}[redacted]`;
+    if (!libraryName) return redactedPrefix;
+    const suffix = path.slice(path.indexOf(libraryName) + libraryName.length);
+    return `${redactedPrefix}\\${libraryName}${suffix}`;
+  };
+  const sanitizeWindowsProjectPath = (path) => {
+    const pathSegments = path.split("\\").filter(Boolean);
+    const preservedSegments = pathSegments.slice(-2).join("\\");
+    const redactedPrefix = path.startsWith("\\\\")
+      ? "\\\\[redacted]"
+      : `${path.slice(0, 3)}[redacted]`;
+    if (!preservedSegments) return redactedPrefix;
+    return `${redactedPrefix}\\${preservedSegments}`;
+  };
   const sanitizedLines = value
     .split(/\r?\n/)
     .map((line) =>
@@ -355,7 +382,18 @@ function sanitizeRecordedStartupOutput(value) {
             if (!libraryName) return `${path.slice(0, 3)}[redacted]`;
             const suffix = path.slice(path.indexOf(libraryName) + libraryName.length);
             return `${path.slice(0, 3)}[redacted]\\${libraryName}${suffix}`;
+          /Starting project at ((?:[A-Za-z]:\\|\\\\[^\\\r\n]+\\[^\\\r\n]+\\)[^\\"\r\n]+(?:\\[^\\"\r\n]+)*)/g,
+          (_, path) => {
+            const startupProjectPath = path.replace(
+              /\s+--port\b(?:\s+\S+)?(?:\s+\S+)?$/,
+              "",
+            );
+            return `Starting project at ${sanitizeWindowsProjectPath(startupProjectPath)}`;
           },
+        )
+        .replace(
+          /[A-Za-z]:\\(?:Users|home)\\[^"\r\n]+|[A-Za-z]:\\[^"\r\n]*?[^/\\\s]+\.(?:dylib|so(?:\.\d+)?|dll)\b[^"\r\n]*|\\\\[^\\\r\n]+\\[^\\\r\n]+\\[^"\r\n]*?[^/\\\s]+\.(?:dylib|so(?:\.\d+)?|dll)\b[^"\r\n]*/g,
+          sanitizeWindowsPath,
         )
         .slice(0, MAX_RECORDED_STARTUP_LINE_LENGTH),
     )
@@ -756,7 +794,20 @@ export function getPublicPreviewManifestUrl(environment = process.env) {
   return url;
 }
 
+function usesStartupTestFixture(
+  environment = process.env,
+  { includeOutputOverride = true } = {},
+) {
+  return (
+    STARTUP_TEST_FIXTURES.has(environment.PREVIEW_STARTUP_TEST_FIXTURE) ||
+    (includeOutputOverride && environment.PREVIEW_STARTUP_TEST_OUTPUT != null)
+  );
+}
+
 export function validatePreviewConfiguration(environment = process.env) {
+  if (usesStartupTestFixture(environment)) {
+    return;
+  }
   getPublicPreviewManifestUrl(environment);
 }
 
@@ -1154,11 +1205,16 @@ async function validateLivePreview(
     useStartupFixture &&
     startupTestFixture.startsWith("missing-runtime-library");
   if (!launcherOnly && !runtimeLibraryFixture) getPublicPreviewManifestUrl(process.env);
+  const useStartupTestFixture = usesStartupTestFixture(process.env);
+  if (!launcherOnly && !useStartupTestFixture) {
+    getPublicPreviewManifestUrl(process.env);
+  }
   const port = await findFreePort();
   const output = [];
   const pnpmCommand = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
   const startupCommand =
     useStartupFixture
+    useStartupTestFixture
       ? {
           command: process.execPath,
           args: [
@@ -1203,7 +1259,25 @@ async function validateLivePreview(
   const stopChild = () => {
     if (stopRequested) return;
     stopRequested = true;
-    const processGroupId = child.pid;
+    const childPid = child.pid;
+    const processGroupId = process.platform === "win32" ? undefined : childPid;
+    const terminateWindowsChild = (signal) => {
+      if (!childPid) {
+        child.kill(signal);
+        return;
+      }
+      const processTreeKiller = spawn(
+        "taskkill.exe",
+        ["/PID", String(childPid), "/T", "/F"],
+        { stdio: "ignore", windowsHide: true },
+      );
+      processTreeKiller.once("error", () => {
+        if (child.exitCode === null) {
+          child.kill(signal);
+        }
+      });
+      processTreeKiller.unref();
+    };
     if (child.exitCode !== null) return;
     child.once("close", () => {
       clearTimeout(closeTimer);
@@ -1216,6 +1290,8 @@ async function validateLivePreview(
         { stdio: "ignore", windowsHide: true },
       );
       processTreeKiller.unref();
+    if (process.platform === "win32") {
+      terminateWindowsChild("SIGTERM");
     } else if (!processGroupId) {
       child.kill("SIGTERM");
     } else {
@@ -1226,7 +1302,6 @@ async function validateLivePreview(
       }
     }
     closeTimer = setTimeout(() => {
-      if (!processGroupId) return;
       try {
         if (process.platform === "win32") {
           const processTreeKiller = spawn(
@@ -1235,6 +1310,9 @@ async function validateLivePreview(
             { stdio: "ignore", windowsHide: true },
           );
           processTreeKiller.unref();
+          terminateWindowsChild("SIGKILL");
+        } else if (!processGroupId) {
+          child.kill("SIGKILL");
         } else {
           process.kill(-processGroupId, "SIGKILL");
         }
