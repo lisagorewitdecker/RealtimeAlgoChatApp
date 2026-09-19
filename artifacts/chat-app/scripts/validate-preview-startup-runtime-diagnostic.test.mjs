@@ -398,6 +398,7 @@ test(
         const live = runNodeScript(
           [validatorPath, "--record-log", recordPath],
           {
+            PREVIEW_STARTUP_REAL_LAUNCHER: "1",
             PREVIEW_STARTUP_TEST_FIXTURE: "missing-runtime-library-windows",
             PREVIEW_STARTUP_TEST_OUTPUT: fixtureCase.output,
           },
@@ -409,6 +410,7 @@ test(
           existsSync(recordPath),
           `${fixtureCase.name}; live validator output: ${JSON.stringify(live.output)}`,
         );
+        assert.equal(live.status, 1, fixtureCase.name);
         const captured = runNodeScript([
           validatorPath,
           "--log-file",
