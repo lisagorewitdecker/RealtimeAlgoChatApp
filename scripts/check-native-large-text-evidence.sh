@@ -41,6 +41,11 @@ check_native_text_evidence_sizes() {
     return 0
   fi
 
+  if ! command -v perl >/dev/null 2>&1; then
+    echo "Native evidence collection-size checks require perl for portable deterministic path sorting." >&2
+    return 1
+  fi
+
   mapfile -d '' -t sorted_evidence_paths < <(
     find "$results_dir" -type f -print0 |
       perl -0e '
