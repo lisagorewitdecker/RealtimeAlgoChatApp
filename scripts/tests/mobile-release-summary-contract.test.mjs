@@ -412,7 +412,16 @@ const localModuleImportPatterns = [
   /\bexport\s+(?:[\s\S]*?\s+from\s+)["']([^"']+)["']/g,
   /\bimport\s*\(\s*["']([^"']+)["']\s*\)/g,
 ];
-const localModuleExtensions = ["", ".mjs", ".js", ".cjs"];
+const localModuleExtensions = [
+  "",
+  ".mjs",
+  ".js",
+  ".cjs",
+  ".ts",
+  ".tsx",
+  ".mts",
+  ".cts",
+];
 
 function resolveLocalModule(filePath, specifier) {
   if (!specifier.startsWith(".")) {
@@ -451,7 +460,7 @@ function discoverLocalModuleClosure(entryPath) {
     }
     discovered.add(filePath);
 
-    if (!/\.(?:mjs|js|cjs)$/.test(filePath)) {
+    if (!/\.(?:mjs|js|cjs|ts|tsx|mts|cts)$/.test(filePath)) {
       continue;
     }
 
@@ -2258,39 +2267,42 @@ test("every release JSON evidence reader rejects duplicate fields with fixed dia
   }
 });
 
-test("release evidence discovery catches an un-inventoried nested helper reader", () => {
-  const fixtureDirectory = mkdtempSync(
-    path.join(workspaceRoot, ".mobile-release-summary-contract-"),
-  );
-  const entryPath = path.join(fixtureDirectory, "release-check.mjs");
-  const helperPath = path.join(fixtureDirectory, "nested", "reader.mjs");
-  mkdirSync(path.dirname(helperPath), { recursive: true });
-  writeFileSync(
-    entryPath,
-    'import { readEvidence } from "./nested/reader.mjs";\nreadEvidence();\n',
-  );
-  writeFileSync(
-    helperPath,
-    [
-      "export function readEvidence() {",
-      "  return JSON.parse(evidence);",
-      "}",
-    ].join("\n"),
-  );
-
-  try {
-    const discovered = discoverReleaseEvidenceJsonParses([entryPath]);
-    assert.deepEqual(releaseEvidenceReaderInventory(discovered), [
-      `${path.relative(workspaceRoot, entryPath)}::evidence`,
-    ]);
-    assert.throws(
-      () => assertReleaseEvidenceReaderInventory(discovered),
-      /The release evidence JSON reader inventory must cover every JSON\.parse call in release-check scripts\./,
+test(
+  "release evidence discovery catches an un-inventoried nested TypeScript helper reader",
+  () => {
+    const fixtureDirectory = mkdtempSync(
+      path.join(workspaceRoot, ".mobile-release-summary-contract-"),
     );
-  } finally {
-    rmSync(fixtureDirectory, { recursive: true, force: true });
-  }
-});
+    const entryPath = path.join(fixtureDirectory, "release-check.mjs");
+    const helperPath = path.join(fixtureDirectory, "nested", "reader.ts");
+    mkdirSync(path.dirname(helperPath), { recursive: true });
+    writeFileSync(
+      entryPath,
+      'import { readEvidence } from "./nested/reader";\nreadEvidence();\n',
+    );
+    writeFileSync(
+      helperPath,
+      [
+        "export function readEvidence() {",
+        "  return JSON.parse(evidence);",
+        "}",
+      ].join("\n"),
+    );
+
+    try {
+      const discovered = discoverReleaseEvidenceJsonParses([entryPath]);
+      assert.deepEqual(releaseEvidenceReaderInventory(discovered), [
+        `${path.relative(workspaceRoot, entryPath)}::evidence`,
+      ]);
+      assert.throws(
+        () => assertReleaseEvidenceReaderInventory(discovered),
+        /The release evidence JSON reader inventory must cover every JSON\.parse call in release-check scripts\./,
+      );
+    } finally {
+      rmSync(fixtureDirectory, { recursive: true, force: true });
+    }
+  },
+);
 
 test("Android preview evidence keeps its pull-request validation and privacy contract", () => {
   const androidJob = workflow.jobs["android-preview-evidence"];
