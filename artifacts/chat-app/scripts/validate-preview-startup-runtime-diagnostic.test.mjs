@@ -370,10 +370,6 @@ test(
   },
   () => {
     const temporaryDirectory = mkdtempSync(
-      join(
-        packageRoot,
-        "chat-preview-windows-runner-",
-      ),
       join(tmpdir(), "chat-preview-windows-runner-"),
     );
     const longPath =
