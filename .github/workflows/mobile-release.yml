@@ -1044,10 +1044,13 @@ jobs:
           recovery_root="$(mktemp -d)"
           pass_summary_path="$(mktemp)"
           failed_retry_summary_path="$(mktemp)"
+          empty_retry_summary_path="$(mktemp)"
           attempt_file="$recovery_root/ios-download-attempt"
+          empty_attempt_file="$recovery_root/ios-empty-download-attempt"
           recovered_submission_marker="$recovery_root/recovered-submission-command-ran"
           failed_submission_marker="$recovery_root/failed-submission-command-ran"
-          trap 'rm -rf "$recovery_root" "$pass_summary_path" "$failed_retry_summary_path"' EXIT
+          empty_retry_submission_marker="$recovery_root/empty-retry-submission-command-ran"
+          trap 'rm -rf "$recovery_root" "$pass_summary_path" "$failed_retry_summary_path" "$empty_retry_summary_path"' EXIT
           resolved_commit_sha="$(git rev-parse --verify HEAD)"
           safe_reviewed_ref="$(sanitize_workflow_text "$REVIEWED_REF")"
 
@@ -1102,6 +1105,20 @@ jobs:
             write_controlled_evidence ios
           }
 
+          download_ios_empty_once() {
+            local attempt=0
+            if [[ -s "$empty_attempt_file" ]]; then
+              attempt="$(cat "$empty_attempt_file")"
+            fi
+            attempt=$((attempt + 1))
+            printf '%s\n' "$attempt" > "$empty_attempt_file"
+            if ((attempt == 1)); then
+              echo "Controlled iOS artifact outage injected before the empty retry." >&2
+              return 1
+            fi
+            mkdir -p "$recovery_root/ios"
+          }
+
           set +e
           download_ios_once
           initial_download_status=$?
@@ -1146,6 +1163,52 @@ jobs:
             echo "The recovered strict evidence check did not reach the simulated submission boundary." >&2
             exit 1
           fi
+
+          rm -rf -- "$recovery_root/ios"
+          set +e
+          download_ios_empty_once
+          empty_initial_download_status=$?
+          set -e
+          if [[ "$empty_initial_download_status" == "0" ]]; then
+            echo "The controlled iOS empty-artifact first download unexpectedly succeeded." >&2
+            exit 1
+          fi
+
+          set +e
+          download_ios_empty_once
+          empty_retry_download_status=$?
+          set -e
+          if [[ "$empty_retry_download_status" != "0" ]]; then
+            echo "The controlled iOS empty-artifact retry did not report success." >&2
+            exit 1
+          fi
+          if [[ ! -d "$recovery_root/ios" ]] ||
+            find "$recovery_root/ios" -mindepth 1 -maxdepth 1 -type d -print -quit | grep -q .; then
+            echo "The controlled iOS empty-artifact retry unexpectedly produced a timestamped evidence run." >&2
+            exit 1
+          fi
+
+          if \
+            GITHUB_STEP_SUMMARY="$empty_retry_summary_path" \
+            NATIVE_EVIDENCE_REQUIRE_APPROVAL=1 \
+            NATIVE_IOS_EVIDENCE_DOWNLOAD_RESULT=success \
+            NATIVE_ANDROID_EVIDENCE_DOWNLOAD_RESULT=success \
+            bash scripts/run-untrusted-checker.sh bash scripts/check-native-large-text-evidence.sh "$recovery_root"; then
+            simulate_store_submission "$empty_retry_submission_marker"
+            echo "The strict native evidence checker approved an empty artifact after a successful retry." >&2
+            exit 1
+          fi
+
+          if [[ -e "$empty_retry_submission_marker" ]]; then
+            echo "The successful empty retry reached the simulated store submission boundary." >&2
+            exit 1
+          fi
+          grep -Fq -- "- Status: **FAIL**" "$empty_retry_summary_path"
+          grep -Fq -- "- Artifact download: **PASS**" "$empty_retry_summary_path"
+          grep -Fq -- "no timestamped evidence run directory exists" "$empty_retry_summary_path"
+          cat "$empty_retry_summary_path" >> "$GITHUB_STEP_SUMMARY"
+
+          write_controlled_evidence ios
 
           if \
             GITHUB_STEP_SUMMARY="$failed_retry_summary_path" \

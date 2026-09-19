@@ -1531,6 +1531,21 @@ test("hosted native evidence regression proves a transient download recovers", (
   );
   assert.match(
     recoveryStep.run,
+    /download_ios_empty_once[\s\S]*empty_retry_download_status=\$\?/,
+    "the hosted regression must exercise a retry that succeeds without extracting a timestamped evidence run",
+  );
+  assert.match(
+    recoveryStep.run,
+    /NATIVE_EVIDENCE_REQUIRE_APPROVAL=1[\s\S]*NATIVE_IOS_EVIDENCE_DOWNLOAD_RESULT=success[\s\S]*empty_retry_summary_path[\s\S]*check-native-large-text-evidence\.sh "\$recovery_root"/,
+    "strict publish validation must inspect the extracted evidence after the successful empty retry",
+  );
+  assert.match(
+    recoveryStep.run,
+    /simulate_store_submission "\$empty_retry_submission_marker"[\s\S]*if \[\[ -e "\$empty_retry_submission_marker" \]\]/,
+    "the successful empty retry must not reach the simulated store submission boundary",
+  );
+  assert.match(
+    recoveryStep.run,
     /NATIVE_IOS_EVIDENCE_DOWNLOAD_RESULT=success[\s\S]*NATIVE_ANDROID_EVIDENCE_DOWNLOAD_RESULT=success[\s\S]*check-native-large-text-evidence\.sh "\$recovery_root"/,
     "the native checker must receive success only after the retry succeeds",
   );
@@ -1568,6 +1583,68 @@ test("hosted native evidence regression proves a transient download recovers", (
     recoveryStep.run,
     /cat\s+.*(?:candidate-build-id|runner-metadata|pass-fail-record|sentry-source-map)/,
     "the hosted recovery scenario must not print downloaded evidence contents",
+  );
+});
+
+test("successful artifact outcomes cannot approve empty extracted evidence", () => {
+  const evidenceRoot = path.join(testRoot, "successful-empty-artifact");
+  mkdirSync(path.join(evidenceRoot, "ios"), { recursive: true });
+  mkdirSync(path.join(evidenceRoot, "android"), { recursive: true });
+  const summaryPath = path.join(
+    testRoot,
+    "successful-empty-artifact-summary.md",
+  );
+  const result = spawnSync(
+    bashPath,
+    [
+      path.join(workspaceRoot, untrustedCheckerWrapperScript),
+      bashPath,
+      path.join(workspaceRoot, nativeEvidenceCheckerScript),
+      evidenceRoot,
+    ],
+    {
+      cwd: workspaceRoot,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        GITHUB_STEP_SUMMARY: summaryPath,
+        NATIVE_EVIDENCE_REQUIRE_APPROVAL: "1",
+        NATIVE_IOS_EVIDENCE_DOWNLOAD_RESULT: "success",
+        NATIVE_ANDROID_EVIDENCE_DOWNLOAD_RESULT: "success",
+        NATIVE_IOS_EVIDENCE_ARTIFACT_URL:
+          "https://github.example/example/chat-app/actions/runs/123/artifacts/456",
+        NATIVE_ANDROID_EVIDENCE_ARTIFACT_URL:
+          "https://github.example/example/chat-app/actions/runs/123/artifacts/789",
+      },
+    },
+  );
+
+  assert.notEqual(
+    result.status,
+    0,
+    "successful download outcomes must not approve empty extracted evidence",
+  );
+  const summary = readFileSync(summaryPath, "utf8");
+  const iosSection = summary.match(
+    /## iOS native large-text evidence[\s\S]*?(?=## Android native large-text evidence)/,
+  )?.[0];
+  assert.ok(iosSection, "the summary should include the iOS evidence section");
+  assert.match(iosSection, /- Status: \*\*FAIL\*\*/);
+  assert.match(iosSection, /- Artifact download: \*\*PASS\*\*/);
+  assert.match(
+    iosSection,
+    /download reported success, but no timestamped evidence run directory exists/,
+    "the summary must explain that a successful action did not produce evidence",
+  );
+  assert.match(
+    iosSection,
+    /- Detailed evidence report: \*\*Unavailable\*\*/,
+    "an empty extracted artifact must not receive a report link",
+  );
+  assert.doesNotMatch(
+    summary,
+    /github\.example|actions\/runs\/123\/artifacts\/(?:456|789)/,
+    "empty artifact report links must not reach the actionable summary",
   );
 });
 

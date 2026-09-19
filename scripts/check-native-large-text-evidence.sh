@@ -107,6 +107,11 @@ summary_artifact_url() {
   local download_result=""
   local download_result_is_set=0
 
+  # A successful downloader action is not evidence that the extracted artifact
+  # contains a valid timestamped run. Only link the report after validation has
+  # selected one.
+  [[ -n "${SUMMARY_RUN_DIR[$platform]}" ]] || return 0
+
   if [[ "$platform" == "ios" ]]; then
     artifact_url="${NATIVE_IOS_EVIDENCE_ARTIFACT_URL:-}"
     if [[ -v NATIVE_IOS_EVIDENCE_DOWNLOAD_RESULT ]]; then
@@ -153,6 +158,14 @@ record_download_status() {
 
   SUMMARY_DOWNLOAD_STATUS["$platform"]="FAIL"
   issue "$platform" "The ${label} native evidence artifact download did not complete. The artifact may have expired; the downloaded ${label} evidence is unavailable; rerun the release gate after the artifact is available."
+}
+
+download_result_for_platform() {
+  if [[ "$1" == "ios" ]]; then
+    printf '%s' "${NATIVE_IOS_EVIDENCE_DOWNLOAD_RESULT:-}"
+  else
+    printf '%s' "${NATIVE_ANDROID_EVIDENCE_DOWNLOAD_RESULT:-}"
+  fi
 }
 
 trusted_digest_manifest() {
@@ -542,9 +555,22 @@ validate_platform() {
   local platform_dir="$RESULTS_ROOT/$platform"
   local run_dirs=()
   local run_dir
+  local label
+  local download_result
+
+  if [[ "$platform" == "ios" ]]; then
+    label="iOS"
+  else
+    label="Android"
+  fi
+  download_result="$(download_result_for_platform "$platform")"
 
   if [[ ! -d "$platform_dir" ]]; then
-    issue "$platform" "Missing result directory: ${platform_dir}. Run the ${platform} native large-text gate and upload its timestamped result directory."
+    if [[ "$download_result" == "success" ]]; then
+      issue "$platform" "The ${label} native evidence artifact download reported success, but no extracted result directory exists at ${platform_dir}. The artifact is empty or missing its timestamped evidence directory; regenerate the native evidence artifact before submission."
+    else
+      issue "$platform" "Missing result directory: ${platform_dir}. Run the ${platform} native large-text gate and upload its timestamped result directory."
+    fi
     return
   fi
 
@@ -552,6 +578,8 @@ validate_platform() {
   if ((${#run_dirs[@]} == 0)); then
     if [[ -s "$platform_dir/runner-check.txt" ]]; then
       issue "$platform" "Only runner-check.txt is present in ${platform_dir}. It is blocked runner diagnostics, not reviewed device evidence; do not record a review decision for it. Run on a prepared ${platform} runner and upload the timestamped result directory."
+    elif [[ "$download_result" == "success" ]]; then
+      issue "$platform" "The ${label} native evidence artifact download reported success, but no timestamped evidence run directory exists under ${platform_dir}. The extracted artifact is empty or incomplete; regenerate the native evidence artifact before submission."
     else
       issue "$platform" "No timestamped evidence run directory exists in ${platform_dir}. Run the ${platform} native large-text gate and upload its complete result directory."
     fi
