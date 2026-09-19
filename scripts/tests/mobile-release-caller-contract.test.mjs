@@ -546,6 +546,7 @@ test("credential preflight reports every missing required caller key together wi
     if (
       jobId === "mobile-release-node-range" ||
       jobId === "mobile-release-credentials" ||
+      jobId === "mobile-release-configuration" ||
       jobId === "android-preview-evidence" ||
       jobId === "ios-preview-evidence" ||
       jobId === "mobile-publish"
@@ -966,8 +967,8 @@ test("blocked release diagnostics identify the supported Node range safely", () 
   );
   assert.match(
     blockStep.run,
-    /summary-regression=\$SUMMARY_REGRESSION_RESULT\./,
-    "blocked release output must use the declared summary regression result",
+    /summary-regression=\$SUMMARY_REGRESSION_RESULT tamper-regression=\$TAMPER_REGRESSION_RESULT\./,
+    "blocked release output must use the declared summary and tamper regression results",
   );
 });
 
