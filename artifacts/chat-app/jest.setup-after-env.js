@@ -8,10 +8,10 @@
 require("@testing-library/react-native").configure({ asyncUtilTimeout: 15000 });
 
 const originalConsoleError = console.error;
-var expectedConsoleErrors = [];
-var unexpectedConsoleErrors = [];
+let expectedConsoleErrors = [];
+let unexpectedConsoleErrors = [];
 
-var formatConsoleArguments = (args) =>
+const formatConsoleArguments = (args) =>
   args
     .map((value) => {
       if (value instanceof Error) return value.stack || value.message;
@@ -24,7 +24,7 @@ var formatConsoleArguments = (args) =>
     })
     .join(" ");
 
-var consoleArgumentMatches = (expected, actual) => {
+const consoleArgumentMatches = (expected, actual) => {
   if (expected instanceof RegExp) {
     expected.lastIndex = 0;
     return expected.test(String(actual));
@@ -56,7 +56,7 @@ beforeEach(() => {
   expectedConsoleErrors = [];
   unexpectedConsoleErrors = [];
   console.error = (...actualArgs) => {
-    var expectedIndex = expectedConsoleErrors.findIndex(
+    const expectedIndex = expectedConsoleErrors.findIndex(
       (expectedArgs) =>
         expectedArgs.length === actualArgs.length &&
         expectedArgs.every((expected, index) =>
@@ -76,7 +76,7 @@ beforeEach(() => {
 afterEach(() => {
   console.error = originalConsoleError;
 
-  var failures = [];
+  const failures = [];
   if (unexpectedConsoleErrors.length > 0) {
     failures.push(
       `Unexpected console.error calls:\n${unexpectedConsoleErrors
