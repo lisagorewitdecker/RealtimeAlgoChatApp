@@ -541,6 +541,17 @@ if ! bash "$CHECKER" --check-collection-size \
   exit 1
 fi
 
+ignored_collection_root="$TEST_ROOT/ignored-collection-size"
+write_valid_run "$ignored_collection_root" ios
+mkdir -p "$ignored_collection_root/ios/20260909T120000Z/untracked"
+head -c 262145 /dev/zero | tr '\0' 'x' > \
+  "$ignored_collection_root/ios/20260909T120000Z/untracked/oversized.txt"
+if ! bash "$CHECKER" --check-collection-size \
+  "$ignored_collection_root/ios/20260909T120000Z"; then
+  echo "oversized untracked collection file unexpectedly failed" >&2
+  exit 1
+fi
+
 valid_root="$TEST_ROOT/valid"
 write_valid_run "$valid_root" ios
 write_valid_run "$valid_root" android
