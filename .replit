@@ -9,7 +9,6 @@ args = ["pnpm", "store", "prune"]
 env = { "CI" = "true" }
 
 [workflows]
-runButton = "artifacts/chat-app: expo"
 
 [[workflows.workflow]]
 name = "chat-app-preview-startup"

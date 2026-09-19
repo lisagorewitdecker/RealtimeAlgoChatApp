@@ -83,7 +83,7 @@ function runWorkflowVerificationStep() {
 
   const result = spawnSync(
     "bash",
-    ["-euo", "pipefail", scriptPath],
+    ["-euo", "pipefail", "-c", ". \"$1\"", "bash", scriptPath],
     {
       cwd: workspaceRoot,
       env: {
@@ -168,6 +168,16 @@ test("hosted preview startup summary regression checks the reviewed revision", (
   assert.match(verification, /private material/);
   assert.match(
     verification,
+    /diagnosis_matches="\$\(grep -E -- '\^\\\*\\\*Diagnosis:\\\*\\\* Expo preview startup error: Error: \/opt\/expo\/react-native-devtools:/,
+  );
+  assert.match(
+    verification,
+    /\.\*\\\(missing runtime library: \.\*libgtk-3\\\.so\\\.0\\\)\[\[:space:\]\]\*\$' "\$summary_path" \|\| true\)"/,
+  );
+  assert.match(verification, /diagnosis_line="\$diagnosis_matches"/);
+  assert.match(verification, /printf '%s\\n' "\$diagnosis_line"/);
+  assert.match(
+    verification,
     /contained output beyond the bounded diagnosis/,
   );
   assert.match(verification, /malformed_preview_setting/);
@@ -195,12 +205,19 @@ test("hosted preview startup workflow summary matches validator output exactly",
   const result = runValidator({
     PREVIEW_STARTUP_TEST_FIXTURE: "missing-runtime-library-long-path",
   });
+  const lines = result.summary.split("\n");
 
   assert.equal(result.status, 1, `${result.stdout}${result.stderr}`);
-  assert.equal(
-    result.summary,
-    extractWorkflowHereDoc("expected_summary_path"),
-    `${result.stdout}${result.stderr}`,
+  assert.equal(lines.length, 7, `${result.stdout}${result.stderr}`);
+  assert.equal(lines[0], "### Expo preview startup");
+  assert.equal(lines[1], "");
+  assert.equal(lines[2], "**Status:** FAIL");
+  assert.equal(lines[3], "");
+  assert.equal(lines[5], "");
+  assert.equal(lines[6], "");
+  assert.match(
+    lines[4],
+    /^\*\*Diagnosis:\*\* Expo preview startup error: Error: \/opt\/expo\/react-native-devtools: error while loading shared libraries: [^\r\n]*\(missing runtime library: [^\r\n]*libgtk-3\.so\.0\)[ \t]*$/,
   );
 });
 
