@@ -2452,6 +2452,10 @@ test("Android preview evidence keeps its pull-request validation and privacy con
     "public manifest HTTP 200 (128 bytes)",
     "public manifest HTTP 200 (256 bytes)",
   );
+  const changedBlockedPreflight512 = blockedPreflight.replace(
+    "public manifest HTTP 200 (128 bytes)",
+    "public manifest HTTP 200 (512 bytes)",
+  );
 
   function runAndroidPreviewJob(name, recordText, options = {}) {
     const {
@@ -2859,24 +2863,40 @@ fi`,
         baseTimestamp: "20260915T120000Z",
         timestamp: "20260915T121500Z",
         baseText: blockedRecord,
-        text: blockedRecord.replace(
-          "public manifest HTTP 200 (128 bytes)",
-          "public manifest HTTP 200 (256 bytes)",
-        ),
+        text: blockedRecord
+          .replace(
+            "public manifest HTTP 200 (128 bytes)",
+            "public manifest HTTP 200 (256 bytes)",
+          )
+          .replace(
+            "No physical phone was available.",
+            "PRIVATE_RENAMED_ANDROID_EVIDENCE_A no physical phone was available.",
+          ),
         preflight: changedBlockedPreflight,
       },
       {
         baseTimestamp: "20260915T120500Z",
         timestamp: "20260915T122000Z",
         baseText: blockedRecord,
-        text: blockedRecord,
-        preflight: blockedPreflight,
+        text: blockedRecord
+          .replace(
+            "public manifest HTTP 200 (128 bytes)",
+            "public manifest HTTP 200 (512 bytes)",
+          )
+          .replace(
+            "No physical phone was available.",
+            "PRIVATE_RENAMED_ANDROID_EVIDENCE_B no physical phone was available.",
+          ),
+        preflight: changedBlockedPreflight512,
       },
       {
         baseTimestamp: "20260915T121000Z",
         timestamp: "20260915T122500Z",
         baseText: blockedRecord,
-        text: blockedRecord,
+        text: blockedRecord.replace(
+          "No physical phone was available.",
+          "PRIVATE_RENAMED_ANDROID_EVIDENCE_C no physical phone was available.",
+        ),
         preflight: blockedPreflight,
       },
     ],
@@ -2938,6 +2958,11 @@ fi`,
       `the renamed Android summary must not retain the old path for ${recordPath}`,
     );
   }
+  assert.doesNotMatch(
+    multipleRenamed.summary,
+    /PRIVATE_RENAMED_ANDROID_EVIDENCE_[ABC]|Workspace curl returned HTTP 200|No physical phone was available/,
+    "the multi-record renamed Android summary must not expose evidence text",
+  );
 
   const incompletePass = runAndroidPreviewJob(
     "incomplete-pass",
