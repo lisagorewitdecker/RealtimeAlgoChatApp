@@ -15,6 +15,9 @@ set -euo pipefail
 EAS_CLI_VERSION="${EAS_CLI_VERSION:-23.2.0}"
 IOS_DEVICE_NAME="${IOS_NATIVE_DEVICE_NAME:-iPhone SE (3rd generation)}"
 RUNNER_TEMP="${RUNNER_TEMP:-${TMPDIR:-/tmp}}"
+MAESTRO_VERSION="${MAESTRO_VERSION:-1.39.5}"
+MAESTRO_MACOS_ARM64_SHA256="${MAESTRO_MACOS_ARM64_SHA256:-REPLACE_WITH_OFFICIAL_SHA256_FOR_ARM64_ZIP}"
+MAESTRO_MACOS_X64_SHA256="${MAESTRO_MACOS_X64_SHA256:-REPLACE_WITH_OFFICIAL_SHA256_FOR_X64_ZIP}"
 
 require_command() {
   if ! command -v "$1" >/dev/null 2>&1; then
@@ -23,12 +26,42 @@ require_command() {
   fi
 }
 
-for command in curl find grep head pnpm sed unzip xcrun; do
+for command in curl find grep head pnpm sed shasum tar unzip xcrun; do
   require_command "$command"
 done
 
 if ! command -v maestro >/dev/null 2>&1; then
-  curl --fail --location --silent --show-error https://get.maestro.mobile.dev | bash
+  case "$(uname -m)" in
+    arm64)
+      maestro_arch="arm64"
+      maestro_sha256="$MAESTRO_MACOS_ARM64_SHA256"
+      ;;
+    x86_64)
+      maestro_arch="x86_64"
+      maestro_sha256="$MAESTRO_MACOS_X64_SHA256"
+      ;;
+    *)
+      echo "Unsupported macOS architecture for Maestro install: $(uname -m)" >&2
+      exit 2
+      ;;
+  esac
+
+  maestro_asset="maestro-${MAESTRO_VERSION}-macos-${maestro_arch}.zip"
+  maestro_url="https://github.com/mobile-dev-inc/maestro/releases/download/v${MAESTRO_VERSION}/${maestro_asset}"
+  maestro_download_path="$RUNNER_TEMP/$maestro_asset"
+  maestro_install_dir="$HOME/.maestro/bin"
+
+  if [[ "$maestro_sha256" == REPLACE_WITH_OFFICIAL_SHA256_* ]]; then
+    echo "Maestro checksum is not configured. Set MAESTRO_MACOS_ARM64_SHA256/MAESTRO_MACOS_X64_SHA256 to official release checksums." >&2
+    exit 2
+  fi
+
+  curl --fail --location --silent --show-error --output "$maestro_download_path" "$maestro_url"
+  printf '%s  %s\n' "$maestro_sha256" "$maestro_download_path" | shasum -a 256 -c -
+
+  mkdir -p "$maestro_install_dir"
+  unzip -q "$maestro_download_path" -d "$maestro_install_dir"
+  chmod +x "$maestro_install_dir/maestro" || true
 fi
 
 if ! command -v maestro >/dev/null 2>&1 && [[ -d "$HOME/.maestro/bin" ]]; then
