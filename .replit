@@ -195,6 +195,17 @@ router = "path"
 [workflows.workflow.tasks.env]
 PORT = "8080"
 
+[[workflows.workflow]]
+name = "reduce-transparency-tab-bar-e2e"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "E2E_CHAT_URL=https://$REPLIT_EXPO_DEV_DOMAIN E2E_API_URL=https://$REPLIT_DEV_DOMAIN flock -w 900 /tmp/replit-heavy-validation.lock pnpm --filter @workspace/api-server run test:e2e:reduce-transparency-tab-bar"
+
+[workflows.workflow.metadata]
+isValidation = true
+
 [agent]
 stack = "PNPM_WORKSPACE"
 expertMode = true
