@@ -697,6 +697,70 @@ test("unsupported loader wording fails with a maintenance message", () => {
   }
 });
 
+test("malformed loader paths fail closed without leaking corrupted text", () => {
+  const temporaryDirectory = mkdtempSync(
+    join(tmpdir(), "chat-preview-malformed-loader-"),
+  );
+  const malformedFixtures = [
+    "missing-runtime-library-malformed-quotes",
+    "missing-runtime-library-malformed-control",
+    "missing-runtime-library-malformed-trailing",
+    "missing-runtime-library-malformed-followed-by-valid",
+  ];
+
+  try {
+    for (const [index, fixtureName] of malformedFixtures.entries()) {
+      const fixture = runNodeScript([fixturePath], {
+        PREVIEW_STARTUP_TEST_FIXTURE: fixtureName,
+      });
+      assert.equal(fixture.status, 1, fixtureName);
+
+      const capturedLogPath = join(
+        temporaryDirectory,
+        `malformed-${index}.log`,
+      );
+      writeFileSync(capturedLogPath, fixture.output, "utf8");
+
+      const live = runNodeScript([validatorPath], {
+        PREVIEW_STARTUP_TEST_FIXTURE: fixtureName,
+      });
+      const captured = runNodeScript([
+        validatorPath,
+        "--log-file",
+        capturedLogPath,
+      ]);
+
+      assert.equal(live.status, 1, fixtureName);
+      assert.equal(captured.status, 1, fixtureName);
+      const liveDiagnostic = findDiagnostic(live.output);
+      const capturedDiagnostic = findDiagnostic(captured.output);
+      assert.ok(liveDiagnostic, fixtureName);
+      assert.equal(liveDiagnostic, capturedDiagnostic, fixtureName);
+      assert.match(
+        capturedDiagnostic,
+        /Expo preview loader wording changed\. Update STARTUP_FAILURES and MISSING_LIBRARY_PATTERNS/,
+        fixtureName,
+      );
+      assert.ok(
+        capturedDiagnostic.length <= 512,
+        `${fixtureName} diagnostic exceeded the 512-character limit`,
+      );
+      assert.doesNotMatch(
+        capturedDiagnostic,
+        /trailing unrelated loader text|libgtk-3\.(?:so\.0|dylib)|libgtk-3-0\.dll/i,
+        `${fixtureName} leaked malformed loader content`,
+      );
+      assert.equal(
+        containsControlCharacters(capturedDiagnostic),
+        false,
+        `${fixtureName} diagnostic contains control characters`,
+      );
+    }
+  } finally {
+    rmSync(temporaryDirectory, { recursive: true, force: true });
+  }
+});
+
 test("fixture validation does not append to an inherited workflow summary", () => {
   const temporaryDirectory = mkdtempSync(
     join(tmpdir(), "chat-preview-loader-summary-inheritance-"),

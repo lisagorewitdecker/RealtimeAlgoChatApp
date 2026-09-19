@@ -4,6 +4,7 @@
 - [Expo preview CORS](expo-preview-cors.md) — API browser allowlists must include the Expo preview origin, not only the main development domain.
 - [Expo preview DevTools GTK runtime](expo-preview-devtools-gtk.md) — SDK 57’s optional DevTools binary needs Nix `gtk3` so Metro startup stays free of a misleading loader error.
 - [Expo loader wording compatibility](expo-loader-wording-compatibility.md) — pin captured loader samples to installed Expo/React Native versions and fail clearly on new wording.
+- [Malformed loader diagnostics](malformed-loader-diagnostics.md) — require a complete safe library path and fail closed instead of echoing corrupted loader lines.
 - [Sandbox release validation](sandbox-release-validation.md) — test the generated editor and the mobile WebView host independently at their delivery boundaries.
 - [Post-merge setup timing](post-merge-setup-timing.md) — dependency reconciliation can exceed the default setup timeout; keep the configured allowance realistic.
 - [Account access policy](account-access-policy.md) — Clerk-owned bans and verified email checks apply at every server entry point, including room capabilities.
