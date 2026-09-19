@@ -10,7 +10,6 @@ import {
   readdirSync,
   readFileSync,
   rmSync,
-  statSync,
   symlinkSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -310,13 +309,14 @@ function createGeneratedClientFixture() {
       mkdirSync(destination, { recursive: true });
 
       const linkEntry = (sourceEntry, fixtureEntry) => {
+        const sourceStats = lstatSync(sourceEntry);
         if (path.basename(sourceEntry).startsWith(".pnpm-task-run-state")) {
           mkdirSync(fixtureEntry, { recursive: true });
           return;
         }
         if (
           path.basename(sourceEntry).startsWith("@") &&
-          lstatSync(sourceEntry).isDirectory()
+          sourceStats.isDirectory()
         ) {
           mkdirSync(fixtureEntry, { recursive: true });
           for (const scopedEntry of readdirSync(sourceEntry)) {
@@ -330,7 +330,7 @@ function createGeneratedClientFixture() {
         symlinkSync(
           sourceEntry,
           fixtureEntry,
-          statSync(sourceEntry).isDirectory() ? "dir" : "file",
+          sourceStats.isDirectory() ? "dir" : "file",
         );
       };
 
