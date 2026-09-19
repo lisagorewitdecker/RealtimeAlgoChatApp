@@ -418,15 +418,21 @@ function makeEditedBody(initialBody, marker) {
 }
 
 export function buildBreakingCompatibilityContent(content) {
-  const document = YAML.parse(content);
-  const operationId = document?.paths?.["/rooms"]?.post?.operationId;
-  if (operationId !== "createRoom") {
+  const document = YAML.parseDocument(content);
+  const operationIdNode = document.getIn(
+    ["paths", "/rooms", "post", "operationId"],
+    true,
+  );
+  if (operationIdNode?.value !== "createRoom") {
     throw new Error(
       "expected compatibility fixture operationId: createRoom in the /rooms POST operation",
     );
   }
-  document.paths["/rooms"].post.operationId = "createRoomHostedProbe";
-  return YAML.stringify(document);
+  document.setIn(
+    ["paths", "/rooms", "post", "operationId"],
+    "createRoomHostedProbe",
+  );
+  return document.toString();
 }
 
 async function createProbeCommit(
