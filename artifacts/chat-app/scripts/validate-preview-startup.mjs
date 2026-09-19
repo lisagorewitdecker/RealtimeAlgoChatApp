@@ -1207,16 +1207,17 @@ async function validateLivePreview(
   const stopChild = () => {
     if (stopRequested) return;
     stopRequested = true;
-    const processGroupId = child.pid;
+    const childPid = child.pid;
+    const processGroupId = process.platform === "win32" ? undefined : childPid;
     if (child.exitCode !== null) return;
     child.once("close", () => {
       clearTimeout(closeTimer);
       closeTimer = undefined;
     });
-    if (process.platform === "win32" && processGroupId) {
+    if (process.platform === "win32" && childPid) {
       const processTreeKiller = spawn(
         "taskkill.exe",
-        ["/PID", String(processGroupId), "/T", "/F"],
+        ["/PID", String(childPid), "/T", "/F"],
         { stdio: "ignore", windowsHide: true },
       );
       processTreeKiller.unref();
@@ -1230,15 +1231,20 @@ async function validateLivePreview(
       }
     }
     closeTimer = setTimeout(() => {
-      if (!processGroupId) return;
       try {
         if (process.platform === "win32") {
+          if (!childPid) {
+            child.kill("SIGKILL");
+            return;
+          }
           const processTreeKiller = spawn(
             "taskkill.exe",
-            ["/PID", String(processGroupId), "/T", "/F"],
+            ["/PID", String(childPid), "/T", "/F"],
             { stdio: "ignore", windowsHide: true },
           );
           processTreeKiller.unref();
+        } else if (!processGroupId) {
+          child.kill("SIGKILL");
         } else {
           process.kill(-processGroupId, "SIGKILL");
         }
