@@ -355,11 +355,24 @@ function sanitizeRecordedStartupOutput(value) {
     if (!preservedSegments) return redactedPrefix;
     return `${redactedPrefix}\\${preservedSegments}`;
   };
-  const stripTrailingStartupProjectFlags = (path) =>
-    path.replace(
-      /(?:\s+--localhost\b|\s+--host\b(?:\s+[^\s\\]+)+|\s+--port\b(?:\s+[^\s\\]+)+)+$/,
-      "",
-    );
+  const stripTrailingStartupProjectFlags = (path) => {
+    let trimmedPath = path;
+    while (true) {
+      if (/\s+--localhost$/.test(trimmedPath)) {
+        trimmedPath = trimmedPath.replace(/\s+--localhost$/, "");
+        continue;
+      }
+      if (/\s+--host\s+[^\s\\]+$/.test(trimmedPath)) {
+        trimmedPath = trimmedPath.replace(/\s+--host\s+[^\s\\]+$/, "");
+        continue;
+      }
+      if (/\s+--port\s+\d+$/.test(trimmedPath)) {
+        trimmedPath = trimmedPath.replace(/\s+--port\s+\d+$/, "");
+        continue;
+      }
+      return trimmedPath;
+    }
+  };
   const sanitizedLines = value
     .split(/\r?\n/)
     .map((line) =>
