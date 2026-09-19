@@ -10,6 +10,7 @@ RealtimeAlgoChatApp Studio is a real-time collaboration platform for developers 
 - `pnpm test:unit --run` — root unit suite; it must pass on a fresh clone or new git worktree with no `artifacts/api-server/test-results/` (gitignored Playwright output), so no step may require files from there — optional workspace files are guarded by an explicit, path-naming skip, and `scripts/tests/check-native-large-text-evidence-fresh-checkout.test.sh` enforces it
 - `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from the OpenAPI spec
 - `pnpm validate:api-compatibility` — fail on breaking OpenAPI changes vs. the target branch; CI rejects an intentional breaking-change override unless the pull request description follows the canonical instructions below
+- `pnpm test:unit --run` — root unit and contract suite; together with `pnpm run typecheck` and `pnpm run validate:api-codegen` it is the `Root contract checks` status check (`.github/workflows/root-contract-checks.yml`) that the GitHub ruleset requires before anything merges into `main` — see `.github/branch-protection.md`
 - `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
 - Required env: `DATABASE_URL` — Postgres connection string
 - Optional env: `SENTRY_DSN` — enables production error tracking and the `/api/livez` uptime monitor in `artifacts/api-server` (see Gotchas)
