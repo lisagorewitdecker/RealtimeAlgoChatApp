@@ -351,7 +351,7 @@ jobs:
           done < <(printf '%s\n' "$diff_output")
 
           if ((${#changed_record_candidates[@]} > 0)); then
-            mapfile -t changed_records < <(printf '%s\n' "${changed_record_candidates[@]}" | sort -u)
+            mapfile -t changed_records < <(printf '%s\n' "${changed_record_candidates[@]}" | LC_ALL=C sort -u)
           else
             changed_records=()
           fi

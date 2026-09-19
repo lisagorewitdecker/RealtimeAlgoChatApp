@@ -24,8 +24,8 @@
  *   6. A failed platform artifact download keeps the release blocked without
  *      hiding the other platform's report link.
  *   7. Mixed record-only, sidecar-only, and paired Android preview changes are
- *      validated independently; one failure does not hide valid records or
- *      expose any record's evidence text.
+ *      validated independently in deterministic path order; one failure does
+ *      not hide valid records, break sidecar pairing, or expose evidence text.
  *   8. Malformed, schema-invalid, and duplicate Android and iOS preflight
  *      artifacts fail with the fixed redacted-schema message without
  *      exposing their markers or raw artifact content.
@@ -2386,6 +2386,11 @@ test("Android preview evidence keeps its pull-request validation and privacy con
   );
   assert.match(
     validationStep.run,
+    /LC_ALL=C sort -u/,
+    "Android preview records must use a locale-independent path order",
+  );
+  assert.match(
+    validationStep.run,
     /checker_args=\("\$record_path"\)[\s\S]*checker_args\+=\("\$preflight_path"\)[\s\S]*validate:android-preview-evidence -- "\$\{checker_args\[@\]\}"/,
     "changed Android preflight sidecars must be passed explicitly to the checker",
   );
@@ -2454,6 +2459,7 @@ test("Android preview evidence keeps its pull-request validation and privacy con
       changedPreflight = blockedPreflight,
       missingValidator = false,
       renameRecord = false,
+      diffOrder = "default",
     } = options;
     const fixtureRoot = path.join(testRoot, `android-preview-${name}`);
     const recordDefinitions = Array.isArray(recordText)
@@ -2620,6 +2626,23 @@ test("Android preview evidence keeps its pull-request validation and privacy con
 
     const pnpmCalledPath = path.join(fixtureRoot, "pnpm-called");
     const checkerArgsLogPath = path.join(fixtureRoot, "checker-args.log");
+    if (diffOrder === "reverse") {
+      writeStub(
+        binDirectory,
+        "git",
+        `set -euo pipefail
+if [[ "\${1:-}" == "diff" ]]; then
+  diff_output="$(${shellQuote(gitPath)} "$@")"
+  mapfile -t diff_paths <<< "$diff_output"
+  for ((index=\${#diff_paths[@]} - 1; index >= 0; index--)); do
+    [[ -n "\${diff_paths[index]}" ]] || continue
+    printf '%s\n' "\${diff_paths[index]}"
+  done
+else
+  exec ${shellQuote(gitPath)} "$@"
+fi`,
+      );
+    }
     writeStub(
       binDirectory,
       "pnpm",
@@ -3074,32 +3097,37 @@ test("Android preview evidence keeps its pull-request validation and privacy con
   );
 
   const changedSidecarOnlyPreflight = `${blockedPreflight}\n`;
-  const mixedModes = runAndroidPreviewJob(
-    "mixed-modes",
-    [
-      {
-        timestamp: "20260915T120000Z",
-        mode: "record-only",
-        text: blockedRecord,
-      },
-      {
-        timestamp: "20260915T121500Z",
-        mode: "sidecar-only",
-        text: blockedRecord,
-      },
-      {
-        timestamp: "20260915T123000Z",
-        mode: "paired",
-        baseText: blockedRecord,
-        text: blockedRecord.replace(
-          "Workspace curl returned HTTP 200.",
-          "PRIVATE_MIXED_MODES_EVIDENCE Workspace curl returned HTTP 200.",
-        ),
-        preflight: mismatchedPreflight,
-      },
-    ],
+  const mixedModeDefinitions = [
+    {
+      timestamp: "20260915T120000Z",
+      mode: "record-only",
+      text: blockedRecord,
+    },
+    {
+      timestamp: "20260915T121500Z",
+      mode: "sidecar-only",
+      text: blockedRecord,
+    },
+    {
+      timestamp: "20260915T123000Z",
+      mode: "paired",
+      baseText: blockedRecord,
+      text: blockedRecord.replace(
+        "Workspace curl returned HTTP 200.",
+        "PRIVATE_MIXED_MODES_EVIDENCE Workspace curl returned HTTP 200.",
+      ),
+      preflight: mismatchedPreflight,
+    },
+  ];
+  const mixedModes = runAndroidPreviewJob("mixed-modes", mixedModeDefinitions, {
+    changedPreflight: changedSidecarOnlyPreflight,
+  });
+  const mixedModesReversed = runAndroidPreviewJob(
+    "mixed-modes-reversed",
+    mixedModeDefinitions,
     {
       changedPreflight: changedSidecarOnlyPreflight,
+      diffOrder: "reverse",
     },
   );
   assert.notEqual(
@@ -3120,6 +3148,20 @@ test("Android preview evidence keeps its pull-request validation and privacy con
       [mixedModes.recordPaths[2], mixedModes.preflightPaths[2]],
     ],
     "each mixed Android change must validate with only its own optional sidecar",
+  );
+  assert.deepEqual(
+    mixedModesReversed.checkerArgs,
+    mixedModes.checkerArgs,
+    "reordering the pull request diff must not change each record's sidecar pairing",
+  );
+  assert.deepEqual(
+    mixedModesReversed.recordPaths.map((recordPath) =>
+      mixedModesReversed.summary.indexOf(`### [${recordPath}]`),
+    ),
+    [...mixedModesReversed.recordPaths]
+      .sort()
+      .map((recordPath) => mixedModesReversed.summary.indexOf(`### [${recordPath}]`)),
+    "the mixed Android summary must keep sections in deterministic path order",
   );
   for (const recordPath of mixedModes.recordPaths) {
     const escapedPath = recordPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
