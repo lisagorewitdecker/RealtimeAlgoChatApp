@@ -1,0 +1,42 @@
+name: Hook lock real macOS recovery
+
+on:
+  pull_request:
+    branches: ["main"]
+    paths:
+      - ".github/workflows/hook-lock-real-macos.yml"
+      - "lib/api-spec/scripts/check-staged-codegen-backups.test.mjs"
+      - "lib/api-spec/scripts/install-repository-git-hooks.mjs"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hook-lock-real-macos-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify-hook-lock-recovery:
+    name: Verify hook lock recovery with BSD ps
+    runs-on: macos-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out reviewed revision
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+
+      - name: Exercise stale and active locks with real BSD ps
+        env:
+          REAL_MACOS_HOOK_LOCK_FIXTURE: "1"
+        run: >-
+          node --test
+          --test-name-pattern="real macOS ps reclaims a reused PID lock and protects its active owner"
+          lib/api-spec/scripts/check-staged-codegen-backups.test.mjs
