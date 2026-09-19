@@ -848,6 +848,100 @@ test(
           `${scenario.displayName} mismatch test changed installed dependencies`,
         );
       }
+
+      const combinedCapturedVersions = {
+        expoCli: "0.0.0",
+        reactNative: "0.0.1",
+      };
+      const combinedInstalledVersions = {
+        expoCli: installedPackageVersion("@expo/cli"),
+        reactNative: installedPackageVersion("react-native"),
+      };
+      assert.notEqual(
+        combinedInstalledVersions.expoCli,
+        combinedCapturedVersions.expoCli,
+        "combined Expo CLI fixture version must be stale",
+      );
+      assert.notEqual(
+        combinedInstalledVersions.reactNative,
+        combinedCapturedVersions.reactNative,
+        "combined React Native fixture version must be stale",
+      );
+      const combinedMarkerPath = join(
+        temporaryDirectory,
+        "combined-tooling.marker",
+      );
+      const combinedEnvironment = {
+        ...process.env,
+        PREVIEW_STARTUP_TEST_CAPTURED_EXPO_CLI_VERSION:
+          combinedCapturedVersions.expoCli,
+        PREVIEW_STARTUP_TEST_CAPTURED_REACT_NATIVE_VERSION:
+          combinedCapturedVersions.reactNative,
+        PREVIEW_STARTUP_TOOLING_MISMATCH: "Expo CLI and React Native",
+        PREVIEW_STARTUP_LIVE_START_MARKER: combinedMarkerPath,
+        PREVIEW_STARTUP_TEST_FIXTURE: "handoff-server",
+      };
+      delete combinedEnvironment.NODE_TEST_CONTEXT;
+      const combinedResult = spawnSync(
+        "pnpm",
+        ["run", "validate:preview-startup"],
+        {
+          cwd: packageRoot,
+          encoding: "utf8",
+          env: combinedEnvironment,
+          timeout: 60_000,
+        },
+      );
+      const combinedOutput = `${combinedResult.stdout ?? ""}${combinedResult.stderr ?? ""}`;
+
+      assert.notEqual(
+        combinedResult.error?.code,
+        "ETIMEDOUT",
+        "combined mismatch validation did not terminate",
+      );
+      assert.notEqual(combinedResult.status, 0, combinedOutput);
+      assert.match(
+        combinedOutput,
+        new RegExp(
+          `Expo CLI changed: loader samples were captured with ` +
+            escapeRegExp(combinedCapturedVersions.expoCli) +
+            `, but the installed version is ` +
+            escapeRegExp(combinedInstalledVersions.expoCli),
+        ),
+      );
+      assert.match(
+        combinedOutput,
+        new RegExp(
+          `React Native changed: loader samples were captured with ` +
+            escapeRegExp(combinedCapturedVersions.reactNative) +
+            `, but the installed version is ` +
+            escapeRegExp(combinedInstalledVersions.reactNative),
+        ),
+      );
+      assert.match(combinedOutput, /Affected captured loader samples:/);
+      for (const sampleName of capturedLoaderSampleNames.split(", ")) {
+        assert.match(combinedOutput, new RegExp(escapeRegExp(sampleName)));
+      }
+      assert.match(
+        combinedOutput,
+        /preview-startup-runtime-library-fixture\.mjs/,
+      );
+      assert.match(combinedOutput, /validate-preview-startup\.mjs/);
+      assert.equal(
+        existsSync(combinedMarkerPath),
+        false,
+        "combined mismatch validation continued into live preview startup",
+      );
+      assert.equal(
+        installedPackageVersion("@expo/cli"),
+        combinedInstalledVersions.expoCli,
+        "combined mismatch test changed the installed Expo CLI dependency",
+      );
+      assert.equal(
+        installedPackageVersion("react-native"),
+        combinedInstalledVersions.reactNative,
+        "combined mismatch test changed the installed React Native dependency",
+      );
     } finally {
       rmSync(temporaryDirectory, { recursive: true, force: true });
     }
