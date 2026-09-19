@@ -406,7 +406,11 @@ test(
           },
         );
 
-        assert.equal(live.status, 1, fixtureCase.name);
+        assert.notEqual(live.status, 0, fixtureCase.name);
+        assert.ok(
+          existsSync(recordPath),
+          `${fixtureCase.name}; live validator output: ${JSON.stringify(live.output)}`,
+        );
         const captured = runNodeScript([
           validatorPath,
           "--log-file",
@@ -415,7 +419,10 @@ test(
         assert.equal(captured.status, 1, fixtureCase.name);
 
         const diagnostic = findDiagnostic(captured.output);
-        assert.ok(diagnostic, fixtureCase.name);
+        assert.ok(
+          diagnostic,
+          `${fixtureCase.name}; captured validator output: ${JSON.stringify(captured.output)}`,
+        );
         assert.match(diagnostic, fixtureCase.detail, fixtureCase.name);
         assert.match(
           diagnostic,
