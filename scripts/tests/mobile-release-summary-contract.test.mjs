@@ -3878,6 +3878,35 @@ PRIVATE_IOS_EVIDENCE_MARKER
     "a renamed public-edge FAIL record must be linked at its new path",
   );
 
+  const iosBlockedPreflight = `{
+  "schema": "ios-preview-handoff-preflight/v1",
+  "platform": "ios",
+  "boundaries": {
+    "publicManifestReachability": {
+      "status": "PASS",
+      "evidence": "public manifest HTTP 200 (128 bytes)"
+    },
+    "localHandoffProbe": {
+      "status": "NOT_RUN",
+      "evidence": "Local manifest/bundle probe not run — no successful probe result was recorded"
+    },
+    "expoGoLaunch": {
+      "status": "NOT_ASSESSED",
+      "evidence": "Requires a physical iPhone running stock Expo Go."
+    },
+    "serverNativeRequestEvidence": {
+      "status": "NOT_ASSESSED",
+      "evidence": "Requires filtered Metro or API evidence from that physical Expo Go session."
+    }
+  }
+}
+`;
+  const iosPublicFailurePreflight = iosBlockedPreflight
+    .replace(
+      '"status": "PASS",\n      "evidence": "public manifest HTTP 200 (128 bytes)"',
+      '"status": "FAIL",\n      "evidence": "Public manifest probe failed — no successful probe result was recorded"',
+    );
+
   const multipleRenamed = runIosPreviewJob("multiple-renamed", {
     renameRecord: true,
     recordText: [
@@ -3889,18 +3918,24 @@ PRIVATE_IOS_EVIDENCE_MARKER
           "**Result: BLOCKED",
           "**Result: PASS",
         ),
+        basePreflight: iosBlockedPreflight,
+        preflight: iosBlockedPreflight,
       },
       {
         baseTimestamp: "20260915T120500Z",
         timestamp: "20260915T122000Z",
         baseText: blockedRecord,
         text: blockedRecord,
+        basePreflight: iosBlockedPreflight,
+        preflight: iosBlockedPreflight,
       },
       {
         baseTimestamp: "20260915T121000Z",
         timestamp: "20260915T122500Z",
         baseText: publicFailureRecord,
         text: publicFailureRecord,
+        basePreflight: iosPublicFailurePreflight,
+        preflight: iosPublicFailurePreflight,
       },
     ],
   });
@@ -3913,6 +3948,14 @@ PRIVATE_IOS_EVIDENCE_MARKER
     multipleRenamed.summary,
     /- Changed records checked: \*\*3\*\*/,
     "the summary must report the exact number of renamed destination records",
+  );
+  assert.deepEqual(
+    multipleRenamed.checkerArgs,
+    multipleRenamed.recordPaths.map((recordPath, index) => [
+      recordPath,
+      multipleRenamed.preflightPaths[index],
+    ]),
+    "the checker must receive each renamed iOS record with its matching sidecar exactly once",
   );
   for (const [index, recordPath] of multipleRenamed.recordPaths.entries()) {
     const escapedPath = recordPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -4025,29 +4068,6 @@ PRIVATE_IOS_EVIDENCE_MARKER
     "the summary must identify the missing changed iOS record",
   );
 
-  const iosBlockedPreflight = `{
-  "schema": "ios-preview-handoff-preflight/v1",
-  "platform": "ios",
-  "boundaries": {
-    "publicManifestReachability": {
-      "status": "PASS",
-      "evidence": "public manifest HTTP 200 (128 bytes)"
-    },
-    "localHandoffProbe": {
-      "status": "NOT_RUN",
-      "evidence": "Local manifest/bundle probe not run — no successful probe result was recorded"
-    },
-    "expoGoLaunch": {
-      "status": "NOT_ASSESSED",
-      "evidence": "Requires a physical iPhone running stock Expo Go."
-    },
-    "serverNativeRequestEvidence": {
-      "status": "NOT_ASSESSED",
-      "evidence": "Requires filtered Metro or API evidence from that physical Expo Go session."
-    }
-  }
-}
-`;
   const malformedIosPreflight =
     '{"schema":"ios-preview-handoff-preflight/v1","platform":"ios","boundaries":{"publicManifestReachability":{"status":"PASS","evidence":"MALFORMED_IOS_PREFLIGHT_SENTINEL raw-malformed-ios-preflight-content"}';
   const schemaInvalidIosPreflight = iosBlockedPreflight.replace(
