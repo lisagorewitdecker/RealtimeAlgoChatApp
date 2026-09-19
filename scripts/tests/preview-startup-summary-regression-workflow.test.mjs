@@ -151,6 +151,7 @@ test("hosted preview startup workflow summary matches validator output exactly",
   assert.equal(
     result.summary,
     extractWorkflowHereDoc("expected_summary_path"),
+    `${result.stdout}${result.stderr}`,
   );
 });
 
