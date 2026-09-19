@@ -48,7 +48,7 @@ function runValidator(env) {
     path.join(os.tmpdir(), "preview-startup-summary-workflow-"),
   );
   const summaryPath = path.join(temporaryDirectory, "summary.md");
-  const result = spawnSync("node", [validatorPath], {
+  const result = spawnSync(process.execPath, [validatorPath], {
     cwd: workspaceRoot,
     env: { ...process.env, GITHUB_STEP_SUMMARY: summaryPath, ...env },
     encoding: "utf8",
