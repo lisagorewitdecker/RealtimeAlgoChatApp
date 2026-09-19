@@ -3,6 +3,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import YAML from "yaml";
 
 const DEFAULTS = {
   baseBranch: "development",
@@ -417,17 +418,15 @@ function makeEditedBody(initialBody, marker) {
 }
 
 export function buildBreakingCompatibilityContent(content) {
-  const roomsPostOperationPattern =
-    /(^[ \t]*\/rooms:\s*\n(?:^[ \t]+.*\n)*?^[ \t]+post:\s*\n(?:^[ \t]+.*\n)*?^[ \t]+operationId:\s*)createRoom\b/m;
-  if (!roomsPostOperationPattern.test(content)) {
+  const document = YAML.parse(content);
+  const operationId = document?.paths?.["/rooms"]?.post?.operationId;
+  if (operationId !== "createRoom") {
     throw new Error(
       "expected compatibility fixture operationId: createRoom in the /rooms POST operation",
     );
   }
-  return content.replace(
-    roomsPostOperationPattern,
-    "$1createRoomHostedProbe",
-  );
+  document.paths["/rooms"].post.operationId = "createRoomHostedProbe";
+  return YAML.stringify(document);
 }
 
 async function createProbeCommit(
