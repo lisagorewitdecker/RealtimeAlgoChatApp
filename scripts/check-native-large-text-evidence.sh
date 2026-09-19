@@ -24,6 +24,7 @@ TRUSTED_EVIDENCE_PATH_PATTERN='^(candidate-build-id\.txt|runner-metadata\.txt|pa
 
 # The recovery wording is also consumed by the release workflow's contract
 # checks. Keep reviewer-facing guidance identical across both boundaries.
+# shellcheck source=scripts/native-release-recovery-contract.sh
 source "$ROOT_DIR/scripts/native-release-recovery-contract.sh"
 
 if [[ "$REQUIRE_APPROVAL" != "0" && "$REQUIRE_APPROVAL" != "1" ]]; then
