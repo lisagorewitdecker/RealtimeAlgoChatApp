@@ -60,7 +60,7 @@ check_native_text_evidence_sizes() {
       echo "Native evidence text file exceeds the ${MAX_NATIVE_TEXT_EVIDENCE_LABEL} release evidence limit: ${relative_path}." >&2
       oversized=1
     fi
-  done < <(find "$results_dir" -type f -print0)
+  done < <(find "$results_dir" -type f -print0 | LC_ALL=C sort -z)
 
   if ((oversized)); then
     echo "Native evidence collection failed its bounded text-file size check; no artifact will be uploaded." >&2
