@@ -11,6 +11,15 @@ CLEANUP_GUARD="$TEST_PARENT/cleanup-must-not-escape-fixtures"
 mkdir -p "$TEST_ROOT"
 printf 'keep\n' >"$CLEANUP_GUARD"
 
+# ImageMagick 7 installs `magick`; Debian and Ubuntu (GitHub's hosted runners)
+# still package ImageMagick 6, whose `convert` accepts the same fixture-drawing
+# arguments.
+if ! command -v magick >/dev/null 2>&1 && command -v convert >/dev/null 2>&1; then
+  magick() {
+    convert "$@"
+  }
+fi
+
 cleanup_test_fixtures() {
   rm -rf "$TEST_ROOT"
   if [[ ! -f "$CLEANUP_GUARD" ]]; then
