@@ -88,11 +88,17 @@ run_case() {
        exit 0
     fi
 
-    while [[ ! -f "$stop_file" ]]; do
-       printf '{"status":"during","tick":%s}\n' "$iteration" > "$saved_status"
-      iteration=$((iteration + 1))
-      sleep 0.01
-    done
+    if [[ "$mode" == "rewrite" ]]; then
+       while [[ ! -f "$stop_file" ]]; do
+         printf '{"status":"during","tick":%s}\n' "$iteration" > "$saved_status"
+         iteration=$((iteration + 1))
+         sleep 0.01
+       done
+       exit 0
+    fi
+
+    printf 'Unknown concurrent saved-status mode: %s\n' "$mode" >&2
+    exit 1
   ) &
   writer_pid=$!
 
