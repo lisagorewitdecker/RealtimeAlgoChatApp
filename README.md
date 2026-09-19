@@ -1,4 +1,4 @@
-# RealtimeAlgoChatApo
+# RealtimeAlgoChatApp
 
 RealtimeAlgoChatApp Studio is a real-time collaboration platform for developers, built around three modes in a single room: **Build** (collaborative code sandbox with an optional AI assistant), **Call** (voice/video), and **Ship** (chat and room coordination).
 

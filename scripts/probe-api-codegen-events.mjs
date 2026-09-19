@@ -3,10 +3,12 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import YAML from "yaml";
 
 const DEFAULTS = {
   baseBranch: "development",
   generatedFile: "lib/api-client-react/src/generated/api.schemas.ts",
+  compatibilityFile: "lib/api-spec/openapi.yaml",
   workflow: ".github/workflows/api-codegen.yml",
   pollSeconds: 10,
   timeoutSeconds: 900,
@@ -263,7 +265,7 @@ export function findMatchingWorkflowRun(
     )[0];
 }
 
-export function getRequiredFailure(run, jobs) {
+function getGeneratedClientJob(run, jobs) {
   const job = (jobs?.jobs ?? []).find(
     (candidate) => candidate.name === "Check generated API clients",
   );
@@ -272,6 +274,11 @@ export function getRequiredFailure(run, jobs) {
       `workflow run ${run.id} did not contain the "Check generated API clients" job`,
     );
   }
+  return job;
+}
+
+export function getRequiredFailure(run, jobs) {
+  const job = getGeneratedClientJob(run, jobs);
   const step = (job.steps ?? []).find(
     (candidate) => candidate.name === "Verify generated API clients",
   );
@@ -299,17 +306,39 @@ export function getRequiredFailure(run, jobs) {
   };
 }
 
-function workflowRunEvidence(event, run, requiredFailure) {
+function getCompatibilityResult(run, jobsResponse, expectedConclusion) {
+  const job = getGeneratedClientJob(run, jobsResponse);
+  const step = job.steps?.find(
+    (candidate) => candidate.name === "Check API contract compatibility",
+  );
+  if (!step || step.conclusion !== expectedConclusion) {
+    throw new Error(
+      `workflow run ${run.id} did not report API compatibility as ${expectedConclusion}`,
+    );
+  }
+  return {
+    name: step.name,
+    conclusion: step.conclusion,
+  };
+}
+
+function workflowRunEvidence(event, run, jobsResponse, compatibilityConclusion) {
   return {
     event,
     workflowRun: {
       id: run.id,
       url: run.html_url,
       event: run.event,
+      headSha: run.head_sha,
       status: run.status,
       conclusion: run.conclusion,
     },
-    ...requiredFailure,
+    ...getRequiredFailure(run, jobsResponse),
+    compatibility: getCompatibilityResult(
+      run,
+      jobsResponse,
+      compatibilityConclusion,
+    ),
   };
 }
 
@@ -376,18 +405,64 @@ function makeInitialBody(branch, marker) {
 }
 
 function makeEditedBody(initialBody, marker) {
-  return `${initialBody}\n\nEdited-event marker: ${marker}`;
+  return [
+    initialBody,
+    "",
+    `Edited-event marker: ${marker}`,
+    "API_BREAKING_CHANGE_JUSTIFICATION: Hosted description-edit compatibility probe.",
+    "API_BREAKING_CHANGE_MIGRATION_PLAN: Restore the temporary operation identifier after the hosted probe.",
+  ].join("\n");
 }
 
-async function createStaleCommit(
+export function buildBreakingCompatibilityContent(content) {
+  const document = YAML.parseDocument(content);
+  if (document.errors.length > 0) {
+    throw new Error(
+      `invalid compatibility fixture YAML: ${document.errors[0].message}`,
+    );
+  }
+  const operationIdNode = document.getIn(
+    ["paths", "/rooms", "post", "operationId"],
+    true,
+  );
+  if (operationIdNode?.value !== "createRoom") {
+    throw new Error(
+      "expected compatibility fixture operationId: createRoom in the /rooms POST operation",
+    );
+  }
+  document.setIn(
+    ["paths", "/rooms", "post", "operationId"],
+    "createRoomHostedProbe",
+  );
+  return document.toString();
+}
+
+async function createProbeCommit(
   client,
-  { repository, parentSha, generatedFile, content, marker },
+  {
+    repository,
+    parentSha,
+    generatedFile,
+    generatedContent,
+    compatibilityFile,
+    compatibilityContent,
+    marker,
+  },
 ) {
   const parentCommit = await client.getCommit(repository, parentSha);
-  const staleContent = buildStaleGeneratedContent(content, marker);
-  const blob = await client.createBlob(
+  const generatedBlob = await client.createBlob(
     repository,
-    Buffer.from(staleContent, "utf8").toString("base64"),
+    Buffer.from(
+      buildStaleGeneratedContent(generatedContent, marker),
+      "utf8",
+    ).toString("base64"),
+  );
+  const compatibilityBlob = await client.createBlob(
+    repository,
+    Buffer.from(
+      buildBreakingCompatibilityContent(compatibilityContent),
+      "utf8",
+    ).toString("base64"),
   );
   const tree = await client.createTree(
     repository,
@@ -396,7 +471,13 @@ async function createStaleCommit(
         path: generatedFile,
         mode: "100644",
         type: "blob",
-        sha: blob.sha,
+        sha: generatedBlob.sha,
+      },
+      {
+        path: compatibilityFile,
+        mode: "100644",
+        type: "blob",
+        sha: compatibilityBlob.sha,
       },
     ],
     parentCommit.tree.sha,
@@ -468,6 +549,8 @@ export async function runProbe(client, options, dependencies = {}) {
   const repository = repositoryFromOptions(options);
   const baseBranch = options.baseBranch ?? DEFAULTS.baseBranch;
   const generatedFile = options.generatedFile ?? DEFAULTS.generatedFile;
+  const compatibilityFile =
+    options.compatibilityFile ?? DEFAULTS.compatibilityFile;
   const workflow = options.workflow ?? DEFAULTS.workflow;
   const branch = options.branch ?? makeBranchName();
   const marker = `${branch}-${now().toISOString()}`;
@@ -490,23 +573,45 @@ export async function runProbe(client, options, dependencies = {}) {
 
     const baseRef = await client.getRef(repository, `heads/${baseBranch}`);
     const baseSha = baseRef.object.sha;
-    const source = await client.getContent(
+    const generatedSource = await client.getContent(
       repository,
       generatedFile,
       baseBranch,
     );
-    if (Array.isArray(source) || source.encoding !== "base64") {
+    const compatibilitySource = await client.getContent(
+      repository,
+      compatibilityFile,
+      baseBranch,
+    );
+    if (
+      Array.isArray(generatedSource) ||
+      generatedSource.encoding !== "base64"
+    ) {
       throw new Error(`expected ${generatedFile} to be a base64 file response`);
     }
-    const content = Buffer.from(
-      source.content.replace(/\s/g, ""),
+    if (
+      Array.isArray(compatibilitySource) ||
+      compatibilitySource.encoding !== "base64"
+    ) {
+      throw new Error(
+        `expected ${compatibilityFile} to be a base64 file response`,
+      );
+    }
+    const generatedContent = Buffer.from(
+      generatedSource.content.replace(/\s/g, ""),
       "base64",
     ).toString("utf8");
-    const initialCommit = await createStaleCommit(client, {
+    const compatibilityContent = Buffer.from(
+      compatibilitySource.content.replace(/\s/g, ""),
+      "base64",
+    ).toString("utf8");
+    const initialCommit = await createProbeCommit(client, {
       repository,
       parentSha: baseSha,
       generatedFile,
-      content,
+      generatedContent,
+      compatibilityFile,
+      compatibilityContent,
       marker: `${marker}-opened`,
     });
     await client.createRef(repository, branch, initialCommit.sha);
@@ -531,23 +636,19 @@ export async function runProbe(client, options, dependencies = {}) {
       timeoutMs: options.timeoutSeconds * 1000,
       pollMs: options.pollSeconds * 1000,
     });
+    const openedJobs = await client.listJobs(repository, openedRun.id);
     const events = [
-      workflowRunEvidence(
-        "opened",
-        openedRun,
-        getRequiredFailure(
-          openedRun,
-          await client.listJobs(repository, openedRun.id),
-        ),
-      ),
+      workflowRunEvidence("opened", openedRun, openedJobs, "failure"),
     ];
 
     const synchronizeAt = now().toISOString();
-    const synchronizeCommit = await createStaleCommit(client, {
+    const synchronizeCommit = await createProbeCommit(client, {
       repository,
       parentSha: initialCommit.sha,
       generatedFile,
-      content,
+      generatedContent,
+      compatibilityFile,
+      compatibilityContent,
       marker: `${marker}-synchronize`,
     });
     await client.updateRef(repository, branch, synchronizeCommit.sha);
@@ -562,14 +663,16 @@ export async function runProbe(client, options, dependencies = {}) {
       timeoutMs: options.timeoutSeconds * 1000,
       pollMs: options.pollSeconds * 1000,
     });
+    const synchronizeJobs = await client.listJobs(
+      repository,
+      synchronizeRun.id,
+    );
     events.push(
       workflowRunEvidence(
         "synchronize",
         synchronizeRun,
-        getRequiredFailure(
-          synchronizeRun,
-          await client.listJobs(repository, synchronizeRun.id),
-        ),
+        synchronizeJobs,
+        "failure",
       ),
     );
 
@@ -591,15 +694,9 @@ export async function runProbe(client, options, dependencies = {}) {
       timeoutMs: options.timeoutSeconds * 1000,
       pollMs: options.pollSeconds * 1000,
     });
+    const reopenedJobs = await client.listJobs(repository, reopenedRun.id);
     events.push(
-      workflowRunEvidence(
-        "reopened",
-        reopenedRun,
-        getRequiredFailure(
-          reopenedRun,
-          await client.listJobs(repository, reopenedRun.id),
-        ),
-      ),
+      workflowRunEvidence("reopened", reopenedRun, reopenedJobs, "failure"),
     );
 
     const editedAt = now().toISOString();
@@ -617,15 +714,9 @@ export async function runProbe(client, options, dependencies = {}) {
       timeoutMs: options.timeoutSeconds * 1000,
       pollMs: options.pollSeconds * 1000,
     });
+    const editedJobs = await client.listJobs(repository, editedRun.id);
     events.push(
-      workflowRunEvidence(
-        "edited",
-        editedRun,
-        getRequiredFailure(
-          editedRun,
-          await client.listJobs(repository, editedRun.id),
-        ),
-      ),
+      workflowRunEvidence("edited", editedRun, editedJobs, "success"),
     );
     result = {
       repository,
@@ -716,6 +807,7 @@ async function main() {
           branch,
           baseBranch: options.baseBranch,
           generatedFile: options.generatedFile,
+          compatibilityFile: options.compatibilityFile,
           workflow: options.workflow,
           cleanup: "close pull request and confirm branch deletion",
         },

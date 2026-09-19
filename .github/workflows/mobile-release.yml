@@ -8,6 +8,19 @@ on:
         required: true
         default: false
         type: boolean
+      native_smoke_ios_build_id:
+        description: Optional iOS candidate build ID override for the native smoke gate
+        required: false
+        type: string
+      native_smoke_android_build_id:
+        description: Optional Android candidate build ID override for the native smoke gate
+        required: false
+        type: string
+      android_runner_health_only:
+        description: Check the Android release runner without starting release jobs
+        required: true
+        default: false
+        type: boolean
       ios_review_candidate_build_id:
         description: Approved iOS candidate build ID (must match the tested build)
         required: false
@@ -38,39 +51,46 @@ on:
         description: Optional Node range fixture for validating the release guard
         required: false
         type: string
+      android_runner_health_only:
+        description: Check the Android release runner without starting release jobs
+        required: false
+        default: false
+        type: boolean
     secrets:
+      GITHUB_WORKFLOW_PULL_TOKEN_FINAL:
+        required: true
       EAS_TOKEN:
-        required: true
+        required: false
       SENTRY_AUTH_TOKEN:
-        required: true
+        required: false
       NATIVE_SMOKE_IOS_APP_ID:
-        required: true
+        required: false
       NATIVE_SMOKE_ANDROID_APP_ID:
-        required: true
+        required: false
       NATIVE_SMOKE_EMAIL:
-        required: true
+        required: false
       NATIVE_SMOKE_PASSWORD:
-        required: true
+        required: false
       NATIVE_SMOKE_DISPLAY_NAME:
         required: false
       NATIVE_SMOKE_IOS_SENTRY_RELEASE:
-        required: true
+        required: false
       NATIVE_SMOKE_IOS_SENTRY_DIST:
-        required: true
+        required: false
       NATIVE_SMOKE_ANDROID_SENTRY_RELEASE:
-        required: true
+        required: false
       NATIVE_SMOKE_ANDROID_SENTRY_DIST:
-        required: true
+        required: false
       E2E_CHAT_URL:
-        required: true
+        required: false
       E2E_API_URL:
-        required: true
+        required: false
       CLERK_PUBLISHABLE_KEY:
-        required: true
+        required: false
       CLERK_SECRET_KEY:
-        required: true
+        required: false
       DATABASE_URL:
-        required: true
+        required: false
 
 permissions:
   actions: read
@@ -96,7 +116,7 @@ env:
 jobs:
   mobile-release-node-range:
     name: Validate mobile release Node range
-    if: ${{ github.event_name != 'pull_request' }}
+    if: ${{ github.event_name != 'pull_request' && inputs.android_runner_health_only != true }}
     runs-on: ubuntu-latest
     steps:
       - name: Check out release candidate
@@ -126,6 +146,7 @@ jobs:
               '
             )"
           fi
+
           if [[ -z "$node_range" ]]; then
             node_range="missing or non-string value"
           fi
@@ -141,6 +162,8 @@ jobs:
         continue-on-error: true
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
+          # Keep this resolver as the shared range contract. The local contract
+          # test pins semver to setup-node's tool-cache matcher (6.3.1).
           node-version: ${{ steps.read-node-range.outputs.node_range }}
 
       - name: Reject invalid Node range before release checks
@@ -150,19 +173,102 @@ jobs:
           RESOLVE_RESULT: ${{ steps.resolve-node-range.outcome }}
         run: |
           set -euo pipefail
+          source scripts/workflow-output-safety.sh
           if [[ "$RESOLVE_RESULT" != "success" ]]; then
+            safe_node_range="$(sanitize_workflow_text "$NODE_RANGE")"
             {
               echo "## Mobile release Node range"
               echo
               echo "- Status: **FAIL**"
               echo "- Failure: release checks were not started."
-              echo "- package.json engines.node: \`$(printf '%s' "$NODE_RANGE" | sed 's/`/\\\\`/g')\`"
+              echo "- package.json engines.node: \`$safe_node_range\`"
               echo "- The configured Node range is unsupported; provide a valid semver range."
             } >> "$GITHUB_STEP_SUMMARY"
-            echo "Mobile release blocked before release checks: package.json engines.node contains an unsupported range: $(printf '%q' "$NODE_RANGE")" >&2
+            echo "Mobile release blocked before release checks: package.json engines.node contains an unsupported range: $safe_node_range" >&2
             exit 1
           fi
-          echo "Mobile release Node range is valid: $(printf '%q' "$NODE_RANGE")"
+          echo "Mobile release Node range is valid: $(sanitize_workflow_text "$NODE_RANGE")"
+
+  android-release-runner-health:
+    name: Android release runner health
+    if: ${{ always() && github.event_name != 'pull_request' && (inputs.android_runner_health_only == true || (needs.mobile-release-node-range.result == 'success' && needs.mobile-release-credentials.result == 'success')) }}
+    needs:
+      - mobile-release-node-range
+      - mobile-release-credentials
+    permissions:
+      actions: read
+      contents: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out release candidate
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Check Android release runner labels and status
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_WORKFLOW_PULL_TOKEN_FINAL }}
+        run: bash scripts/check-android-release-runner-health.sh
+
+  mobile-release-credentials:
+    name: Validate mobile release credentials
+    if: ${{ github.event_name != 'pull_request' && inputs.android_runner_health_only != true }}
+    needs:
+      - mobile-release-node-range
+    runs-on: ubuntu-latest
+    environment:
+      name: mobile-release
+    steps:
+      - name: Report every missing required release credential
+        env:
+          GITHUB_WORKFLOW_PULL_TOKEN_FINAL: ${{ secrets.GITHUB_WORKFLOW_PULL_TOKEN_FINAL }}
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          NATIVE_SMOKE_IOS_APP_ID: ${{ secrets.NATIVE_SMOKE_IOS_APP_ID }}
+          NATIVE_SMOKE_ANDROID_APP_ID: ${{ secrets.NATIVE_SMOKE_ANDROID_APP_ID }}
+          NATIVE_SMOKE_EMAIL: ${{ secrets.NATIVE_SMOKE_EMAIL }}
+          NATIVE_SMOKE_PASSWORD: ${{ secrets.NATIVE_SMOKE_PASSWORD }}
+          NATIVE_SMOKE_IOS_SENTRY_RELEASE: ${{ secrets.NATIVE_SMOKE_IOS_SENTRY_RELEASE }}
+          NATIVE_SMOKE_IOS_SENTRY_DIST: ${{ secrets.NATIVE_SMOKE_IOS_SENTRY_DIST }}
+          NATIVE_SMOKE_ANDROID_SENTRY_RELEASE: ${{ secrets.NATIVE_SMOKE_ANDROID_SENTRY_RELEASE }}
+          NATIVE_SMOKE_ANDROID_SENTRY_DIST: ${{ secrets.NATIVE_SMOKE_ANDROID_SENTRY_DIST }}
+          E2E_CHAT_URL: ${{ secrets.E2E_CHAT_URL }}
+          E2E_API_URL: ${{ secrets.E2E_API_URL }}
+          CLERK_PUBLISHABLE_KEY: ${{ secrets.CLERK_PUBLISHABLE_KEY }}
+          CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          set -euo pipefail
+          required_credentials=(
+            GITHUB_WORKFLOW_PULL_TOKEN_FINAL
+            SENTRY_AUTH_TOKEN
+            NATIVE_SMOKE_IOS_APP_ID
+            NATIVE_SMOKE_ANDROID_APP_ID
+            NATIVE_SMOKE_EMAIL
+            NATIVE_SMOKE_PASSWORD
+            NATIVE_SMOKE_IOS_SENTRY_RELEASE
+            NATIVE_SMOKE_IOS_SENTRY_DIST
+            NATIVE_SMOKE_ANDROID_SENTRY_RELEASE
+            NATIVE_SMOKE_ANDROID_SENTRY_DIST
+            E2E_CHAT_URL
+            E2E_API_URL
+            CLERK_PUBLISHABLE_KEY
+            CLERK_SECRET_KEY
+            DATABASE_URL
+          )
+          missing_credentials=()
+          for credential in "${required_credentials[@]}"; do
+            if [[ -z "${!credential:-}" ]]; then
+              missing_credentials+=("$credential")
+            fi
+          done
+
+          if ((${#missing_credentials[@]} > 0)); then
+            echo "Mobile release setup is missing required credential keys:" >&2
+            printf -- '- %s\n' "${missing_credentials[@]}" >&2
+            echo "Add every listed key to the mobile-release environment, then retry." >&2
+            exit 1
+          fi
+
+          echo "All required mobile release credential keys are configured."
 
   android-preview-evidence:
     # Keep this display name synchronized with the required check in the repository ruleset.
@@ -194,6 +300,7 @@ jobs:
           ANDROID_PREVIEW_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
+          source scripts/workflow-output-safety.sh
 
           summary_header="## Android preview evidence"
           diff_output=""
@@ -276,6 +383,7 @@ jobs:
             record_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/blob/${record_revision}/${record_path}"
             record_result=""
             validation_output=""
+            screenshot_inspection_status=""
             validation_status=0
             reasons=""
             preflight_path=""
@@ -301,12 +409,17 @@ jobs:
               if [[ -n "$preflight_path" ]]; then
                 checker_args+=("$preflight_path")
               fi
-              if validation_output="$(pnpm run validate:android-preview-evidence -- "${checker_args[@]}" 2>&1)"; then
+              if validation_output="$(bash scripts/run-untrusted-checker.sh pnpm run validate:android-preview-evidence -- "${checker_args[@]}" 2>&1)"; then
                 :
               else
                 validation_status=$?
                 reasons="$(printf '%s\n' "$validation_output" | sed -n '/^- /p')"
               fi
+              screenshot_inspection_status="$(
+                printf '%s\n' "$validation_output" |
+                  sed -nE 's/^Screenshot inspection status: (.*)$/\1/p' |
+                  tail -n 1
+              )"
             fi
 
             if ((validation_status != 0)); then
@@ -315,10 +428,14 @@ jobs:
                 reasons="- The Android preview evidence record did not satisfy the validation contract."
               fi
             fi
+            safe_record_path="$(sanitize_workflow_text "$record_path")"
+            safe_record_url="$(sanitize_workflow_text "$record_url")"
+            safe_reasons="$(sanitize_workflow_text "$reasons")"
+            safe_screenshot_inspection_status="$(sanitize_workflow_text "$screenshot_inspection_status")"
 
             {
               echo
-              echo "### [${record_path}](${record_url})"
+              echo "### [${safe_record_path}](${safe_record_url})"
               if ((validation_status == 0)); then
                 echo "- Validation: **PASS**"
                 if [[ "$record_result" == "BLOCKED" ]]; then
@@ -331,12 +448,18 @@ jobs:
                 echo "- Record result: **${record_result:-Unavailable}**"
                 echo
                 echo "#### Missing-boundary reason"
-                printf '%s\n' "$reasons"
+                printf '%s\n' "$safe_reasons"
+              fi
+              if [[ -n "$safe_screenshot_inspection_status" ]]; then
+                echo
+                echo "#### Screenshot inspection"
+                echo "- Status: \`${safe_screenshot_inspection_status}\`"
+                echo "- Review note: **Check the saved screenshot manually before approval; this status contains no image text or matched content.**"
               fi
             } >> "$GITHUB_STEP_SUMMARY"
 
             if ((validation_status != 0)); then
-              printf '%s\n' "$reasons" >&2
+              printf '%s\n' "$safe_reasons" >&2
             fi
           done
 
@@ -364,6 +487,7 @@ jobs:
           IOS_PREVIEW_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
+          source scripts/workflow-output-safety.sh
 
           summary_header="## iOS preview evidence"
           diff_output=""
@@ -429,6 +553,14 @@ jobs:
             echo "- Changed records checked: **${#changed_records[@]}**"
           } >> "$GITHUB_STEP_SUMMARY"
 
+          validator_directory="artifacts/chat-app/scripts"
+          validator_file="validate-preview-startup.mjs"
+          validator_path="${validator_directory}/${validator_file}"
+          validator_failure_reason=""
+          if [[ ! -f "$validator_path" ]]; then
+            validator_failure_reason="- The iOS preview evidence check is missing its delegated validator dependency boundary: ${validator_path} is not present in the checked-out commit. Restore that validator before changing the evidence record."
+          fi
+
           overall_status=0
           for record_path in "${changed_records[@]}"; do
             record_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/blob/${GITHUB_SHA}/${record_path}"
@@ -447,6 +579,9 @@ jobs:
             if [[ ! -f "$record_path" ]]; then
               validation_status=1
               reasons="- The changed iOS preview validation record is missing from the checked-out commit."
+            elif [[ -n "$validator_failure_reason" ]]; then
+              validation_status=1
+              reasons="$validator_failure_reason"
             else
               record_result="$(
                 sed -nE 's/^\*\*Result:[[:space:]]*(PASS|BLOCKED|FAIL).*/\1/p' "$record_path" |
@@ -456,7 +591,7 @@ jobs:
               if [[ -n "$preflight_path" ]]; then
                 checker_args+=("$preflight_path")
               fi
-              if validation_output="$(pnpm run validate:ios-preview-evidence -- "${checker_args[@]}" 2>&1)"; then
+              if validation_output="$(bash scripts/run-untrusted-checker.sh pnpm run validate:ios-preview-evidence -- "${checker_args[@]}" 2>&1)"; then
                 :
               else
                 validation_status=$?
@@ -470,10 +605,13 @@ jobs:
                 reasons="- The iOS preview evidence record did not satisfy the validation contract."
               fi
             fi
+            safe_record_path="$(sanitize_workflow_text "$record_path")"
+            safe_record_url="$(sanitize_workflow_text "$record_url")"
+            safe_reasons="$(sanitize_workflow_text "$reasons")"
 
             {
               echo
-              echo "### [${record_path}](${record_url})"
+              echo "### [${safe_record_path}](${safe_record_url})"
               if ((validation_status == 0)); then
                 echo "- Validation: **PASS**"
                 case "$record_result" in
@@ -492,12 +630,12 @@ jobs:
                 echo "- Record result: **${record_result:-Unavailable}**"
                 echo
                 echo "#### Missing-boundary reason"
-                printf '%s\n' "$reasons"
+                printf '%s\n' "$safe_reasons"
               fi
             } >> "$GITHUB_STEP_SUMMARY"
 
             if ((validation_status != 0)); then
-              printf '%s\n' "$reasons" >&2
+              printf '%s\n' "$safe_reasons" >&2
             fi
           done
 
@@ -505,13 +643,156 @@ jobs:
 
   native-evidence-summary-regression:
     name: Native evidence summary regression
-    if: ${{ github.event_name != 'pull_request' }}
+    if: ${{ github.event_name != 'pull_request' && inputs.android_runner_health_only != true }}
     needs:
       - mobile-release-node-range
+      - mobile-release-credentials
+      - android-release-runner-health
+    permissions:
+      actions: write
+      contents: read
     runs-on: ubuntu-latest
     steps:
       - name: Check out release candidate
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Upload controlled Android artifact for missing iOS scenario
+        shell: bash
+        run: |
+          set -euo pipefail
+          fixture_root="$RUNNER_TEMP/native-evidence-summary-download-fixture"
+          rm -rf -- "$fixture_root"
+          mkdir -p -- "$fixture_root/android"
+          printf 'controlled Android artifact\n' > "$fixture_root/android/controlled-marker.txt"
+
+      - name: Store controlled Android artifact for missing iOS scenario
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: native-evidence-summary-controlled-android
+          path: ${{ runner.temp }}/native-evidence-summary-download-fixture/android/**
+          if-no-files-found: error
+
+      - name: Download controlled missing iOS artifact
+        if: ${{ always() }}
+        continue-on-error: true
+        id: download-controlled-ios
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: native-evidence-summary-controlled-ios
+          path: ${{ runner.temp }}/native-evidence-summary-downloads/ios
+
+      - name: Download controlled Android artifact after iOS failure
+        if: ${{ always() }}
+        continue-on-error: true
+        id: download-controlled-android
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: native-evidence-summary-controlled-android
+          path: ${{ runner.temp }}/native-evidence-summary-downloads/android
+
+      - name: Run checker after controlled artifact outage
+        if: ${{ always() }}
+        continue-on-error: true
+        id: controlled-artifact-check
+        env:
+          REVIEWED_REF: ${{ github.ref }}
+          NATIVE_IOS_EVIDENCE_ARTIFACT_URL: ""
+          NATIVE_ANDROID_EVIDENCE_ARTIFACT_URL: ""
+          NATIVE_IOS_EVIDENCE_DOWNLOAD_RESULT: ${{ steps.download-controlled-ios.outcome }}
+          NATIVE_ANDROID_EVIDENCE_DOWNLOAD_RESULT: ${{ steps.download-controlled-android.outcome }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          controlled_summary_path="$RUNNER_TEMP/native-evidence-summary-controlled.md"
+          rm -f -- "$controlled_summary_path"
+          resolved_commit_sha="$(git rev-parse --verify HEAD)"
+
+          {
+            echo "## Reviewed release revision"
+            echo
+            printf -- '- Checked ref: `%s`\n' "$REVIEWED_REF"
+            printf -- '- Resolved commit SHA: `%s`\n' "$resolved_commit_sha"
+            echo
+            echo "## Controlled native artifact outage"
+            echo "- Scenario: iOS artifact missing; Android artifact available"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          GITHUB_STEP_SUMMARY="$controlled_summary_path" \
+            bash scripts/run-untrusted-checker.sh bash scripts/check-native-large-text-evidence.sh \
+            "$RUNNER_TEMP/native-evidence-summary-downloads"
+
+      - name: Confirm controlled outage blocks promotion and preserves both sections
+        if: ${{ always() }}
+        env:
+          CHECK_RESULT: ${{ steps.controlled-artifact-check.outcome }}
+          IOS_DOWNLOAD_RESULT: ${{ steps.download-controlled-ios.outcome }}
+          ANDROID_DOWNLOAD_RESULT: ${{ steps.download-controlled-android.outcome }}
+          CONTROLLED_SUMMARY_PATH: ${{ runner.temp }}/native-evidence-summary-controlled.md
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$IOS_DOWNLOAD_RESULT" != "failure" ]]; then
+            echo "The controlled iOS artifact download unexpectedly succeeded." >&2
+            exit 1
+          fi
+          if [[ "$ANDROID_DOWNLOAD_RESULT" != "success" ]]; then
+            echo "The Android download did not continue successfully after the iOS failure." >&2
+            exit 1
+          fi
+          if [[ "$CHECK_RESULT" != "failure" ]]; then
+            echo "The native evidence checker did not block the controlled outage." >&2
+            exit 1
+          fi
+
+          ios_section="$(
+            awk '
+              /^## iOS native large-text evidence$/ { collecting=1 }
+              /^## Android native large-text evidence$/ { collecting=0 }
+              collecting { print }
+            ' "$CONTROLLED_SUMMARY_PATH"
+          )"
+          android_section="$(
+            awk '
+              /^## Android native large-text evidence$/ { collecting=1 }
+              collecting { print }
+            ' "$CONTROLLED_SUMMARY_PATH"
+          )"
+
+          require_contains() {
+            local section="$1"
+            local expected="$2"
+            if ! grep -Fq -- "$expected" <<< "$section"; then
+              echo "Expected controlled outage summary to contain: $expected" >&2
+              exit 1
+            fi
+          }
+
+          require_not_contains() {
+            local section="$1"
+            local unexpected="$2"
+            if grep -Fq -- "$unexpected" <<< "$section"; then
+              echo "Controlled outage summary contained cross-platform detail: $unexpected" >&2
+              exit 1
+            fi
+          }
+
+          require_contains "$ios_section" "- Status: **FAIL**"
+          require_contains "$ios_section" "- Artifact download: **FAIL**"
+          require_contains "$ios_section" "Rerun the iOS native large-text job"
+          require_not_contains "$ios_section" "$RUNNER_TEMP/native-evidence-summary-downloads/android"
+
+          require_contains "$android_section" "- Status: **FAIL**"
+          require_contains "$android_section" "- Artifact download: **PASS**"
+          require_contains "$android_section" "No timestamped evidence run directory exists"
+          require_not_contains "$android_section" "$RUNNER_TEMP/native-evidence-summary-downloads/ios"
+
+          {
+            echo
+            echo "- Download continuation: **PASS** (Android completed after the iOS failure)"
+            echo "- Promotion blocker: **PASS** (checker returned failure)"
+            echo "- Recovery: **Rerun the failed native job or make its artifact available, then rerun the mobile release gate.**"
+            cat "$CONTROLLED_SUMMARY_PATH"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Verify blocked native evidence summary
         env:
@@ -519,14 +800,16 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          source scripts/workflow-output-safety.sh
           blocked_root="$(mktemp -d)"
           summary_path="$(mktemp)"
           trap 'rm -rf "$blocked_root" "$summary_path"' EXIT
           resolved_commit_sha="$(git rev-parse --verify HEAD)"
+          safe_reviewed_ref="$(sanitize_workflow_text "$REVIEWED_REF")"
 
           {
             echo "## Reviewed release revision"
-            printf -- '- Checked ref: `%s`\n' "$REVIEWED_REF"
+            printf -- '- Checked ref: `%s`\n' "$safe_reviewed_ref"
             printf -- '- Resolved commit SHA: `%s`\n' "$resolved_commit_sha"
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -587,15 +870,17 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          source scripts/workflow-output-safety.sh
           source scripts/native-release-recovery-contract.sh
           failed_download_root="$(mktemp -d)"
           summary_path="$(mktemp)"
           trap 'rm -rf "$failed_download_root" "$summary_path"' EXIT
           resolved_commit_sha="$(git rev-parse --verify HEAD)"
+          safe_reviewed_ref="$(sanitize_workflow_text "$REVIEWED_REF")"
 
           {
             echo "## Reviewed release revision"
-            printf -- '- Checked ref: `%s`\n' "$REVIEWED_REF"
+            printf -- '- Checked ref: `%s`\n' "$safe_reviewed_ref"
             printf -- '- Resolved commit SHA: `%s`\n' "$resolved_commit_sha"
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -664,15 +949,17 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          source scripts/workflow-output-safety.sh
           source scripts/native-release-recovery-contract.sh
           failed_download_root="$(mktemp -d)"
           summary_path="$(mktemp)"
           trap 'rm -rf "$failed_download_root" "$summary_path"' EXIT
           resolved_commit_sha="$(git rev-parse --verify HEAD)"
+          safe_reviewed_ref="$(sanitize_workflow_text "$REVIEWED_REF")"
 
           {
             echo "## Reviewed release revision"
-            printf -- '- Checked ref: `%s`\n' "$REVIEWED_REF"
+            printf -- '- Checked ref: `%s`\n' "$safe_reviewed_ref"
             printf -- '- Resolved commit SHA: `%s`\n' "$resolved_commit_sha"
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -737,6 +1024,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          source scripts/workflow-output-safety.sh
           recovery_root="$(mktemp -d)"
           pass_summary_path="$(mktemp)"
           failed_retry_summary_path="$(mktemp)"
@@ -745,10 +1033,11 @@ jobs:
           failed_submission_marker="$recovery_root/failed-submission-command-ran"
           trap 'rm -rf "$recovery_root" "$pass_summary_path" "$failed_retry_summary_path"' EXIT
           resolved_commit_sha="$(git rev-parse --verify HEAD)"
+          safe_reviewed_ref="$(sanitize_workflow_text "$REVIEWED_REF")"
 
           {
             echo "## Reviewed release revision"
-            printf -- '- Checked ref: `%s`\n' "$REVIEWED_REF"
+            printf -- '- Checked ref: `%s`\n' "$safe_reviewed_ref"
             printf -- '- Resolved commit SHA: `%s`\n' "$resolved_commit_sha"
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -864,11 +1153,77 @@ jobs:
           grep -Fq -- "- Artifact download: **FAIL**" "$failed_retry_summary_path"
           cat "$pass_summary_path" >> "$GITHUB_STEP_SUMMARY"
 
-  native-evidence-tamper-regression:
-    name: Native evidence tamper regression
+  mobile-release-configuration:
+    name: Mobile release configuration
     if: ${{ github.event_name != 'pull_request' }}
     needs:
       - mobile-release-node-range
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment:
+      name: mobile-release
+    outputs:
+      ios_configured: ${{ steps.release-config.outputs.ios_configured }}
+      android_configured: ${{ steps.release-config.outputs.android_configured }}
+    steps:
+      - name: Determine mobile release configuration
+        id: release-config
+        env:
+          EAS_TOKEN: ${{ secrets.EAS_TOKEN }}
+          NATIVE_SMOKE_IOS_APP_ID: ${{ secrets.NATIVE_SMOKE_IOS_APP_ID }}
+          NATIVE_SMOKE_ANDROID_APP_ID: ${{ secrets.NATIVE_SMOKE_ANDROID_APP_ID }}
+          NATIVE_SMOKE_IOS_BUILD_ID: ${{ env.NATIVE_SMOKE_IOS_BUILD_ID }}
+          NATIVE_SMOKE_ANDROID_BUILD_ID: ${{ env.NATIVE_SMOKE_ANDROID_BUILD_ID }}
+          NATIVE_SMOKE_EMAIL: ${{ secrets.NATIVE_SMOKE_EMAIL }}
+          NATIVE_SMOKE_PASSWORD: ${{ secrets.NATIVE_SMOKE_PASSWORD }}
+          NATIVE_SMOKE_IOS_SENTRY_RELEASE: ${{ secrets.NATIVE_SMOKE_IOS_SENTRY_RELEASE }}
+          NATIVE_SMOKE_IOS_SENTRY_DIST: ${{ secrets.NATIVE_SMOKE_IOS_SENTRY_DIST }}
+          NATIVE_SMOKE_ANDROID_SENTRY_RELEASE: ${{ secrets.NATIVE_SMOKE_ANDROID_SENTRY_RELEASE }}
+          NATIVE_SMOKE_ANDROID_SENTRY_DIST: ${{ secrets.NATIVE_SMOKE_ANDROID_SENTRY_DIST }}
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+        run: |
+          set -euo pipefail
+          ios_configured=true
+          android_configured=true
+
+          for value in \
+           EAS_TOKEN \
+           NATIVE_SMOKE_IOS_APP_ID \
+           NATIVE_SMOKE_IOS_BUILD_ID \
+           NATIVE_SMOKE_EMAIL \
+           NATIVE_SMOKE_PASSWORD \
+           NATIVE_SMOKE_IOS_SENTRY_RELEASE \
+           NATIVE_SMOKE_IOS_SENTRY_DIST \
+           SENTRY_AUTH_TOKEN; do
+           if [[ -z "${!value:-}" ]]; then
+             ios_configured=false
+           fi
+          done
+
+          for value in \
+           EAS_TOKEN \
+           NATIVE_SMOKE_ANDROID_APP_ID \
+           NATIVE_SMOKE_ANDROID_BUILD_ID \
+           NATIVE_SMOKE_EMAIL \
+           NATIVE_SMOKE_PASSWORD \
+           NATIVE_SMOKE_ANDROID_SENTRY_RELEASE \
+           NATIVE_SMOKE_ANDROID_SENTRY_DIST \
+           SENTRY_AUTH_TOKEN; do
+           if [[ -z "${!value:-}" ]]; then
+             android_configured=false
+           fi
+          done
+
+          echo "ios_configured=$ios_configured" >> "$GITHUB_OUTPUT"
+          echo "android_configured=$android_configured" >> "$GITHUB_OUTPUT"
+
+  native-evidence-tamper-regression:
+    name: Native evidence tamper regression
+    if: ${{ github.event_name != 'pull_request' && inputs.android_runner_health_only != true }}
+    needs:
+      - mobile-release-node-range
+      - mobile-release-credentials
+      - android-release-runner-health
     permissions:
       actions: write
       contents: read
@@ -979,20 +1334,18 @@ jobs:
 
   native-ios:
     name: Native large-text smoke (iOS)
-    if: ${{ github.event_name != 'pull_request' }}
+    if: ${{ github.event_name != 'pull_request' && inputs.android_runner_health_only != true && needs.mobile-release-configuration.outputs.ios_configured == 'true' }}
     permissions:
       actions: write
       contents: read
     needs:
       - mobile-release-node-range
+      - mobile-release-configuration
+      - mobile-release-credentials
     outputs:
       native_evidence_artifact_url: ${{ steps.upload-ios-native-smoke.outputs.artifact-url }}
       native_evidence_digest_manifest: ${{ steps.ios-native-evidence-digest.outputs.native_evidence_digest_manifest }}
-    runs-on:
-      - self-hosted
-      - macos
-      - ios
-      - smallest-simulator
+    runs-on: macos-latest
     timeout-minutes: 90
     environment:
       name: mobile-release
@@ -1015,7 +1368,7 @@ jobs:
           NATIVE_SMOKE_IOS_SENTRY_RELEASE: ${{ secrets.NATIVE_SMOKE_IOS_SENTRY_RELEASE }}
           NATIVE_SMOKE_IOS_SENTRY_DIST: ${{ secrets.NATIVE_SMOKE_IOS_SENTRY_DIST }}
           NATIVE_SMOKE_IOS_BUILD_ID: ${{ env.NATIVE_SMOKE_IOS_BUILD_ID }}
-        run: bash scripts/check-ios-release-prerequisites.sh
+        run: bash scripts/run-untrusted-checker.sh bash scripts/check-ios-release-prerequisites.sh
 
       - name: Set up pnpm
         id: setup-pnpm
@@ -1036,7 +1389,7 @@ jobs:
 
       - name: Verify app branding
         id: app-branding
-        run: pnpm --filter @workspace/chat-app run validate:branding
+        run: bash scripts/run-untrusted-checker.sh pnpm --filter @workspace/chat-app run validate:branding
 
       - name: Verify iOS release configuration
         id: ios-release-configuration
@@ -1058,6 +1411,16 @@ jobs:
             fi
           done
 
+      - name: Prepare GitHub-hosted iOS runner
+        id: ios-hosted-runner
+        env:
+          EAS_TOKEN: ${{ secrets.EAS_TOKEN }}
+          MAESTRO_INSTALLER_SHA256: ${{ vars.MAESTRO_INSTALLER_SHA256 }}
+          NATIVE_SMOKE_IOS_APP_ID: ${{ secrets.NATIVE_SMOKE_IOS_APP_ID }}
+          NATIVE_SMOKE_IOS_BUILD_ID: ${{ env.NATIVE_SMOKE_IOS_BUILD_ID }}
+          EAS_CLI_VERSION: ${{ env.EAS_CLI_VERSION }}
+        run: bash scripts/prepare-ios-hosted-runner.sh
+
       - name: Verify iOS simulator tooling
         id: ios-xcrun
         run: |
@@ -1071,6 +1434,7 @@ jobs:
         id: ios-simulator
         run: |
           set -euo pipefail
+          source scripts/workflow-output-safety.sh
           booted_devices="$(xcrun simctl list devices booted)"
           device_udid="$(
             sed -n 's/^[[:space:]]*iPhone SE (3rd generation) (\([0-9A-F-]\{8,\}\)) (Booted)[[:space:]]*$/\1/p' <<<"$booted_devices" |
@@ -1078,11 +1442,11 @@ jobs:
           )"
           if [[ -z "$device_udid" ]]; then
             echo "A booted iPhone SE (3rd generation) is required on the iOS runner." >&2
-            xcrun simctl list devices booted >&2
+            xcrun simctl list devices booted 2>&1 | sanitize_workflow_stream >&2 || true
             exit 2
           fi
           printf 'NATIVE_SMOKE_IOS_DEVICE_UDID=%s\n' "$device_udid" >> "$GITHUB_ENV"
-          echo "Prepared iPhone SE (3rd generation): $device_udid"
+          echo "Prepared iPhone SE (3rd generation): $(sanitize_workflow_text "$device_udid")"
 
       - name: Inspect installed iOS native branding
         id: ios-native-branding
@@ -1110,7 +1474,7 @@ jobs:
           echo "Verified crash-reporting preflight evidence in the installed iOS candidate."
           metadata_path="$NATIVE_SMOKE_RESULTS_DIR/native-info.json"
           plutil -convert json -o "$metadata_path" "$app_container/Info.plist"
-          pnpm --filter @workspace/chat-app run validate:branding:native -- \
+          bash scripts/run-untrusted-checker.sh pnpm --filter @workspace/chat-app run validate:branding:native -- \
             --platform ios \
             --metadata "$metadata_path" \
             --build-id "$NATIVE_SMOKE_BUILD_ID" \
@@ -1130,7 +1494,7 @@ jobs:
           NATIVE_SMOKE_BUILD_ID: ${{ env.NATIVE_SMOKE_IOS_BUILD_ID }}
           NATIVE_SMOKE_IOS_DEVICE_UDID: ${{ env.NATIVE_SMOKE_IOS_DEVICE_UDID }}
           NATIVE_SMOKE_SUMMARY_DEFER: "1"
-        run: pnpm --filter @workspace/chat-app test:native-large-text ios
+        run: bash scripts/run-untrusted-checker.sh pnpm --filter @workspace/chat-app test:native-large-text ios
 
       - name: Send controlled iOS JavaScript error
         id: ios-sentry-trigger
@@ -1139,7 +1503,7 @@ jobs:
           NATIVE_SMOKE_BUILD_ID: ${{ env.NATIVE_SMOKE_IOS_BUILD_ID }}
           NATIVE_SMOKE_IOS_DEVICE_UDID: ${{ env.NATIVE_SMOKE_IOS_DEVICE_UDID }}
           NATIVE_SENTRY_MARKER: native-${{ github.run_id }}-${{ github.run_attempt }}-ios
-        run: pnpm --filter @workspace/chat-app test:native-sentry ios
+        run: bash scripts/run-untrusted-checker.sh pnpm --filter @workspace/chat-app test:native-sentry ios
 
       - name: Verify readable iOS source maps in Sentry
         id: ios-sentry-verification
@@ -1151,7 +1515,13 @@ jobs:
           SENTRY_EXPECTED_DIST: ${{ secrets.NATIVE_SMOKE_IOS_SENTRY_DIST }}
           SENTRY_PROBE_MARKER: native-${{ github.run_id }}-${{ github.run_attempt }}-ios
           SENTRY_EVIDENCE_PATH: ${{ env.NATIVE_SMOKE_RESULTS_DIR }}/sentry-source-map-evidence.json
-        run: node scripts/verify-sentry-native-event.mjs
+        run: bash scripts/run-untrusted-checker.sh node scripts/verify-sentry-native-event.mjs
+
+      - name: Check iOS native evidence text sizes before upload
+        id: ios-native-evidence-size
+        if: ${{ always() }}
+        run: bash scripts/run-untrusted-checker.sh bash scripts/check-native-large-text-evidence.sh \
+          --check-collection-size "$NATIVE_SMOKE_RESULTS_DIR"
 
       - name: Summarize iOS readiness
         if: always()
@@ -1160,15 +1530,18 @@ jobs:
           WORKSPACE_RESULT: ${{ steps.install-dependencies.outcome }}
           APP_BRANDING_RESULT: ${{ steps.app-branding.outcome }}
           IOS_RELEASE_CONFIGURATION_RESULT: ${{ steps.ios-release-configuration.outcome }}
+          IOS_HOSTED_RUNNER_RESULT: ${{ steps.ios-hosted-runner.outcome }}
           IOS_XCRUN_RESULT: ${{ steps.ios-xcrun.outcome }}
           IOS_SIMULATOR_RESULT: ${{ steps.ios-simulator.outcome }}
           IOS_NATIVE_BRANDING_RESULT: ${{ steps.ios-native-branding.outcome }}
           IOS_MAESTRO_RESULT: ${{ steps.ios-maestro.outcome }}
           IOS_NATIVE_EVIDENCE_RESULT: ${{ steps.ios-native-evidence.outcome }}
+          IOS_NATIVE_EVIDENCE_SIZE_RESULT: ${{ steps.ios-native-evidence-size.outcome }}
           IOS_SENTRY_TRIGGER_RESULT: ${{ steps.ios-sentry-trigger.outcome }}
           IOS_SENTRY_VERIFICATION_RESULT: ${{ steps.ios-sentry-verification.outcome }}
         run: |
           set -euo pipefail
+          source scripts/workflow-output-safety.sh
           status="READY"
           blockers=()
           checks=()
@@ -1188,11 +1561,13 @@ jobs:
           add_check "Workspace dependencies" "$WORKSPACE_RESULT"
           add_check "App branding source" "$APP_BRANDING_RESULT"
           add_check "Release configuration" "$IOS_RELEASE_CONFIGURATION_RESULT"
+          add_check "GitHub-hosted iOS runner" "$IOS_HOSTED_RUNNER_RESULT"
           add_check "Xcode simulator tooling" "$IOS_XCRUN_RESULT"
           add_check "Booted iPhone SE (3rd generation)" "$IOS_SIMULATOR_RESULT"
           add_check "Installed native candidate" "$IOS_NATIVE_BRANDING_RESULT"
           add_check "Maestro" "$IOS_MAESTRO_RESULT"
           add_check "Native large-text evidence" "$IOS_NATIVE_EVIDENCE_RESULT"
+          add_check "Native evidence text-size safety gate" "$IOS_NATIVE_EVIDENCE_SIZE_RESULT"
           add_check "Controlled Sentry error" "$IOS_SENTRY_TRIGGER_RESULT"
           add_check "Readable Sentry source maps" "$IOS_SENTRY_VERIFICATION_RESULT"
 
@@ -1214,7 +1589,7 @@ jobs:
               if [[ -n "$diagnostics" ]]; then
                 echo
                 echo "### Readiness diagnostics"
-                printf '%s\n' "$diagnostics"
+                printf '%s\n' "$diagnostics" | sanitize_workflow_stream
               fi
             fi
             if ((${#blockers[@]})); then
@@ -1226,6 +1601,7 @@ jobs:
 
       - name: Create trusted iOS native evidence digest manifest
         id: ios-native-evidence-digest
+        if: ${{ always() && steps.ios-native-evidence-size.outcome == 'success' }}
         run: |
           set -euo pipefail
           manifest="$(
@@ -1248,14 +1624,18 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Upload iOS native smoke artifacts
-        if: always()
+        if: ${{ always() && steps.ios-native-evidence-size.outcome == 'success' }}
         id: upload-ios-native-smoke
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: native-large-text-ios
           path: test-results/native-large-text/ios/**
           if-no-files-found: warn
-          retention-days: 30
+          # Native report links are used for historical release review. Keep
+          # the fixed artifact through GitHub's maximum supported retention
+          # window; the release gate still downloads it before publishing a
+          # link so expired artifacts cannot be presented as available.
+          retention-days: 90
           overwrite: true
 
       - name: Summarize iOS native branding
@@ -1267,20 +1647,37 @@ jobs:
 
   android-prerequisite-preflight:
     name: Android release runner preflight
-    if: ${{ github.event_name != 'pull_request' }}
+    if: ${{ github.event_name != 'pull_request' && inputs.android_runner_health_only != true && needs.mobile-release-configuration.outputs.android_configured == 'true' }}
     needs:
       - mobile-release-node-range
-    runs-on:
-      - self-hosted
-      - linux
-      - android
-      - smallest-simulator
+      - mobile-release-configuration
+      - mobile-release-credentials
+    runs-on: ubuntu-latest
     timeout-minutes: 20
     environment:
       name: mobile-release
     steps:
       - name: Check out release candidate
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ env.RELEASE_NODE_VERSION }}
+
+      - name: Prepare GitHub-hosted Android runner
+        env:
+          EAS_TOKEN: ${{ secrets.EAS_TOKEN }}
+          MAESTRO_INSTALLER_SHA256: ${{ vars.MAESTRO_INSTALLER_SHA256 }}
+          NATIVE_SMOKE_ANDROID_APP_ID: ${{ secrets.NATIVE_SMOKE_ANDROID_APP_ID }}
+          NATIVE_SMOKE_ANDROID_BUILD_ID: ${{ env.NATIVE_SMOKE_ANDROID_BUILD_ID }}
+          EAS_CLI_VERSION: ${{ env.EAS_CLI_VERSION }}
+        run: bash scripts/prepare-android-hosted-runner.sh
 
       - name: Check Android release prerequisites
         env:
@@ -1289,11 +1686,11 @@ jobs:
           NATIVE_SMOKE_EMAIL: ${{ secrets.NATIVE_SMOKE_EMAIL }}
           NATIVE_SMOKE_PASSWORD: ${{ secrets.NATIVE_SMOKE_PASSWORD }}
           NATIVE_SMOKE_DISPLAY_NAME: ${{ secrets.NATIVE_SMOKE_DISPLAY_NAME }}
-        run: bash scripts/check-android-release-prerequisites.sh
+        run: bash scripts/run-untrusted-checker.sh bash scripts/check-android-release-prerequisites.sh
 
   native-android:
     name: Native large-text smoke (Android)
-    if: ${{ github.event_name != 'pull_request' }}
+    if: ${{ github.event_name != 'pull_request' && inputs.android_runner_health_only != true && needs.mobile-release-configuration.outputs.android_configured == 'true' }}
     permissions:
       actions: write
       contents: read
@@ -1302,12 +1699,10 @@ jobs:
       native_evidence_digest_manifest: ${{ steps.android-native-evidence-digest.outputs.native_evidence_digest_manifest }}
     needs:
       - mobile-release-node-range
+      - mobile-release-credentials
+      - mobile-release-configuration
       - android-prerequisite-preflight
-    runs-on:
-      - self-hosted
-      - linux
-      - android
-      - smallest-simulator
+    runs-on: ubuntu-latest
     timeout-minutes: 90
     environment:
       name: mobile-release
@@ -1316,6 +1711,25 @@ jobs:
     steps:
       - name: Check out release candidate
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ env.RELEASE_NODE_VERSION }}
+
+      - name: Prepare GitHub-hosted Android runner
+        env:
+          EAS_TOKEN: ${{ secrets.EAS_TOKEN }}
+          MAESTRO_INSTALLER_SHA256: ${{ vars.MAESTRO_INSTALLER_SHA256 }}
+          NATIVE_SMOKE_ANDROID_APP_ID: ${{ secrets.NATIVE_SMOKE_ANDROID_APP_ID }}
+          NATIVE_SMOKE_ANDROID_BUILD_ID: ${{ env.NATIVE_SMOKE_ANDROID_BUILD_ID }}
+          EAS_CLI_VERSION: ${{ env.EAS_CLI_VERSION }}
+        run: bash scripts/prepare-android-hosted-runner.sh
 
       - name: Clear prior Android evidence from this runner
         run: rm -rf test-results/native-large-text/android
@@ -1335,7 +1749,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Verify app branding
-        run: pnpm --filter @workspace/chat-app run validate:branding
+        run: bash scripts/run-untrusted-checker.sh pnpm --filter @workspace/chat-app run validate:branding
 
       - name: Verify prepared smallest Android emulator
         run: |
@@ -1420,7 +1834,7 @@ jobs:
             label === undefined ? { permissions } : { applicationLabel: label, permissions };
           writeFileSync(metadataPath, `${JSON.stringify(metadata, null, 2)}\n`);
           NODE
-          pnpm --filter @workspace/chat-app run validate:branding:native -- \
+          bash scripts/run-untrusted-checker.sh pnpm --filter @workspace/chat-app run validate:branding:native -- \
             --platform android \
             --metadata "$metadata_path" \
             --build-id "$NATIVE_SMOKE_BUILD_ID" \
@@ -1437,7 +1851,7 @@ jobs:
           NATIVE_SMOKE_PASSWORD: ${{ secrets.NATIVE_SMOKE_PASSWORD }}
           NATIVE_SMOKE_DISPLAY_NAME: ${{ secrets.NATIVE_SMOKE_DISPLAY_NAME }}
           NATIVE_SMOKE_BUILD_ID: ${{ env.NATIVE_SMOKE_ANDROID_BUILD_ID }}
-        run: pnpm --filter @workspace/chat-app test:native-large-text android
+        run: bash scripts/run-untrusted-checker.sh pnpm --filter @workspace/chat-app test:native-large-text android
 
       - name: Send controlled Android JavaScript error
         id: android-sentry-trigger
@@ -1445,7 +1859,7 @@ jobs:
           NATIVE_SMOKE_APP_ID: ${{ secrets.NATIVE_SMOKE_ANDROID_APP_ID }}
           NATIVE_SMOKE_BUILD_ID: ${{ env.NATIVE_SMOKE_ANDROID_BUILD_ID }}
           NATIVE_SENTRY_MARKER: native-${{ github.run_id }}-${{ github.run_attempt }}-android
-        run: pnpm --filter @workspace/chat-app test:native-sentry android
+        run: bash scripts/run-untrusted-checker.sh pnpm --filter @workspace/chat-app test:native-sentry android
 
       - name: Verify readable Android source maps in Sentry
         id: android-sentry-verification
@@ -1457,10 +1871,17 @@ jobs:
           SENTRY_EXPECTED_DIST: ${{ secrets.NATIVE_SMOKE_ANDROID_SENTRY_DIST }}
           SENTRY_PROBE_MARKER: native-${{ github.run_id }}-${{ github.run_attempt }}-android
           SENTRY_EVIDENCE_PATH: ${{ env.NATIVE_SMOKE_RESULTS_DIR }}/sentry-source-map-evidence.json
-        run: node scripts/verify-sentry-native-event.mjs
+        run: bash scripts/run-untrusted-checker.sh node scripts/verify-sentry-native-event.mjs
+
+      - name: Check Android native evidence text sizes before upload
+        id: android-native-evidence-size
+        if: ${{ always() }}
+        run: bash scripts/run-untrusted-checker.sh bash scripts/check-native-large-text-evidence.sh \
+          --check-collection-size "$NATIVE_SMOKE_RESULTS_DIR"
 
       - name: Create trusted Android native evidence digest manifest
         id: android-native-evidence-digest
+        if: ${{ always() && steps.android-native-evidence-size.outcome == 'success' }}
         run: |
           set -euo pipefail
           manifest="$(
@@ -1483,14 +1904,17 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Upload Android native smoke artifacts
-        if: always()
+        if: ${{ always() && steps.android-native-evidence-size.outcome == 'success' }}
         id: upload-android-native-smoke
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: native-large-text-android
           path: test-results/native-large-text/android/**
           if-no-files-found: warn
-          retention-days: 30
+          # Keep the fixed native report link through the full historical
+          # review window. The release gate verifies availability before
+          # carrying the link into its summary.
+          retention-days: 90
           overwrite: true
 
       - name: Summarize Android native branding
@@ -1502,12 +1926,14 @@ jobs:
 
   idle-profile-registration:
     name: Idle profile registration
-    if: ${{ github.event_name != 'pull_request' }}
+    if: ${{ github.event_name != 'pull_request' && inputs.android_runner_health_only != true }}
     permissions:
       actions: write
       contents: read
     needs:
       - mobile-release-node-range
+      - mobile-release-credentials
+      - android-release-runner-health
     runs-on: ubuntu-latest
     timeout-minutes: 20
     environment:
@@ -1629,7 +2055,7 @@ jobs:
               exit 2
             fi
           done
-          pnpm --filter @workspace/api-server run test:e2e:idle-profile-registration
+          bash scripts/run-untrusted-checker.sh pnpm --filter @workspace/api-server run test:e2e:idle-profile-registration
 
       - name: Upload idle-profile browser failure evidence
         if: ${{ always() }}
@@ -1678,7 +2104,7 @@ jobs:
 
   mobile-release-gate:
     name: Mobile release gate
-    if: ${{ github.event_name != 'pull_request' && needs.mobile-release-node-range.result == 'success' && needs.native-ios.result == 'success' && needs.native-android.result == 'success' && needs.idle-profile-registration.result == 'success' && needs.native-evidence-summary-regression.result == 'success' && needs.native-evidence-tamper-regression.result == 'success' }}
+    if: ${{ always() && github.event_name != 'pull_request' && inputs.android_runner_health_only != true && needs.mobile-release-node-range.result == 'success' && needs.mobile-release-credentials.result == 'success' && needs.mobile-release-configuration.result == 'success' && needs.idle-profile-registration.result == 'success' && needs.native-evidence-summary-regression.result == 'success' && needs.native-evidence-tamper-regression.result == 'success' }}
     outputs:
       ios_native_evidence_artifact_url: ${{ needs.native-ios.outputs.native_evidence_artifact_url }}
       android_native_evidence_artifact_url: ${{ needs.native-android.outputs.native_evidence_artifact_url }}
@@ -1686,6 +2112,8 @@ jobs:
       android_native_evidence_digest_manifest: ${{ needs.native-android.outputs.native_evidence_digest_manifest }}
     needs:
       - mobile-release-node-range
+      - mobile-release-configuration
+      - mobile-release-credentials
       - native-ios
       - native-android
       - idle-profile-registration
@@ -1759,11 +2187,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          source scripts/workflow-output-safety.sh
           resolved_commit_sha="$(git rev-parse --verify HEAD)"
+          safe_reviewed_ref="$(sanitize_workflow_text "$REVIEWED_REF")"
 
           {
             echo "## Reviewed release revision"
-            printf -- '- Checked ref: `%s`\n' "$REVIEWED_REF"
+            printf -- '- Checked ref: `%s`\n' "$safe_reviewed_ref"
             printf -- '- Resolved commit SHA: `%s`\n' "$resolved_commit_sha"
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -1772,6 +2202,9 @@ jobs:
       - name: Block release unless both native checks pass
         if: ${{ always() }}
         env:
+          RELEASE_CONFIGURATION_RESULT: ${{ needs.mobile-release-configuration.result }}
+          IOS_CONFIGURATION_READY: ${{ needs.mobile-release-configuration.outputs.ios_configured }}
+          ANDROID_CONFIGURATION_READY: ${{ needs.mobile-release-configuration.outputs.android_configured }}
           IOS_RESULT: ${{ needs.native-ios.result }}
           ANDROID_RESULT: ${{ needs.native-android.result }}
           IDLE_PROFILE_RESULT: ${{ needs.idle-profile-registration.result }}
@@ -1780,6 +2213,7 @@ jobs:
           EVIDENCE_RESULT: ${{ steps.evidence-completeness.outcome }}
         run: |
           set -euo pipefail
+          source scripts/workflow-output-safety.sh
           supported_node_range="$(
             node --input-type=module -e '
             import { readFileSync } from "node:fs";
@@ -1801,19 +2235,42 @@ jobs:
             }
             '
           )"
+          safe_supported_node_range="$(sanitize_workflow_text "$supported_node_range")"
           {
             echo "## Mobile release gate"
             echo
+            echo "- Mobile release configuration: **${RELEASE_CONFIGURATION_RESULT^^}**"
+            if [[ "$IOS_CONFIGURATION_READY" == "true" ]]; then
+              echo "- iOS release configuration: **READY**"
+            else
+              echo "- iOS release configuration: **BLOCKED**"
+            fi
+            if [[ "$ANDROID_CONFIGURATION_READY" == "true" ]]; then
+              echo "- Android release configuration: **READY**"
+            else
+              echo "- Android release configuration: **BLOCKED**"
+            fi
             echo "- Native evidence completeness: **${EVIDENCE_RESULT^^}**"
             echo "- iOS native smoke: **${IOS_RESULT^^}**"
             echo "- Android native smoke: **${ANDROID_RESULT^^}**"
             echo "- Idle profile registration: **${IDLE_PROFILE_RESULT^^}**"
             echo "- Native evidence summary regression: **${SUMMARY_REGRESSION_RESULT^^}**"
             echo "- Native evidence tamper regression: **${TAMPER_REGRESSION_RESULT^^}**"
-            echo "- Supported Node.js range: ${supported_node_range}"
+            echo "- Supported Node.js range: ${safe_supported_node_range}"
+            if [[ "$IOS_CONFIGURATION_READY" != "true" || "$ANDROID_CONFIGURATION_READY" != "true" ]]; then
+              echo "- Fix: provide the native smoke build IDs and protected release secrets before rerunning the workflow."
+            fi
           } >> "$GITHUB_STEP_SUMMARY"
-          if [[ "$EVIDENCE_RESULT" != "success" || "$IOS_RESULT" != "success" || "$ANDROID_RESULT" != "success" || "$IDLE_PROFILE_RESULT" != "success" || "$SUMMARY_REGRESSION_RESULT" != "success" || "$TAMPER_REGRESSION_RESULT" != "success" ]]; then
-            echo "Mobile release blocked: evidence=$EVIDENCE_RESULT iOS=$IOS_RESULT Android=$ANDROID_RESULT idle-profile=$IDLE_PROFILE_RESULT summary-regression=$SUMMARY_REGRESSION_RESULT. tamper-regression=$TAMPER_REGRESSION_RESULT Supported Node.js range from package.json engines.node: ${supported_node_range} (must be a valid semver range)." >&2
+          ios_gate_failed=false
+          if [[ "$IOS_CONFIGURATION_READY" == "true" && "$IOS_RESULT" != "success" ]]; then
+            ios_gate_failed=true
+          fi
+          android_gate_failed=false
+          if [[ "$ANDROID_CONFIGURATION_READY" == "true" && "$ANDROID_RESULT" != "success" ]]; then
+            android_gate_failed=true
+          fi
+          if [[ "$RELEASE_CONFIGURATION_RESULT" != "success" || "$EVIDENCE_RESULT" != "success" || "$ios_gate_failed" == "true" || "$android_gate_failed" == "true" || "$IDLE_PROFILE_RESULT" != "success" || "$SUMMARY_REGRESSION_RESULT" != "success" || "$TAMPER_REGRESSION_RESULT" != "success" ]]; then
+            echo "Mobile release blocked: configuration=$RELEASE_CONFIGURATION_RESULT evidence=$EVIDENCE_RESULT iOS=$IOS_RESULT Android=$ANDROID_RESULT idle-profile=$IDLE_PROFILE_RESULT summary-regression=$SUMMARY_REGRESSION_RESULT tamper-regression=$TAMPER_REGRESSION_RESULT. Supported Node.js range from package.json engines.node: ${safe_supported_node_range} (must be a valid semver range)." >&2
             exit 1
           fi
           echo "Mobile release gate passed native accessibility and idle-profile registration checks."
@@ -1823,6 +2280,7 @@ jobs:
     if: >-
       ${{
         github.event_name != 'pull_request' &&
+        inputs.android_runner_health_only != true &&
         needs.mobile-release-gate.result == 'success' &&
         github.event_name == 'workflow_dispatch' &&
         inputs.publish == true
@@ -1897,7 +2355,7 @@ jobs:
 
       - name: Run native large-text evidence privacy and submission-boundary regression
         id: native-evidence-privacy
-        run: pnpm run test:native-large-text-evidence
+        run: bash scripts/run-untrusted-checker.sh pnpm run test:native-large-text-evidence
 
       - name: Summarize native evidence privacy regression
         if: ${{ always() }}
@@ -1985,6 +2443,19 @@ jobs:
               exit 1
             fi
             run_dir="${run_dirs[0]}"
+            if ! awk '
+              {
+                sub(/\r$/, "")
+                line_count++
+                if ($0 !~ /^[[:space:]]*$/) non_empty_count++
+              }
+              END {
+                exit !(line_count == 1 && non_empty_count == 1)
+              }
+            ' "$run_dir/candidate-build-id.txt"; then
+              echo "The ${platform} downloaded candidate build ID must contain exactly one non-empty identifier line." >&2
+              exit 1
+            fi
             tested_build_id="$(head -n 1 "$run_dir/candidate-build-id.txt" | tr -d '\r' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
             if [[ "$approved_build_id" != "$tested_build_id" ]]; then
               echo "The ${platform} approval is for a different candidate build than the downloaded evidence." >&2
@@ -2022,11 +2493,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          source scripts/workflow-output-safety.sh
           resolved_commit_sha="$(git rev-parse --verify HEAD)"
+          safe_reviewed_ref="$(sanitize_workflow_text "$REVIEWED_REF")"
 
           {
             echo "## Reviewed release revision"
-            printf -- '- Checked ref: `%s`\n' "$REVIEWED_REF"
+            printf -- '- Checked ref: `%s`\n' "$safe_reviewed_ref"
             printf -- '- Resolved commit SHA: `%s`\n' "$resolved_commit_sha"
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -2039,7 +2512,7 @@ jobs:
           ANDROID_BUILD_ID: ${{ env.NATIVE_SMOKE_ANDROID_BUILD_ID }}
         run: |
           set -euo pipefail
-          : "${EAS_TOKEN:?Set EAS_TOKEN in the mobile-release environment.}"
+          : "${EAS_TOKEN:?Set EAS_TOKEN in the protected mobile-store-submission environment.}"
           : "${IOS_BUILD_ID:?Set the NATIVE_SMOKE_IOS_BUILD_ID repository variable.}"
           : "${ANDROID_BUILD_ID:?Set the NATIVE_SMOKE_ANDROID_BUILD_ID repository variable.}"
 

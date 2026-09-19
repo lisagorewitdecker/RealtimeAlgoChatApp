@@ -9,6 +9,8 @@ fi
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
 CHAT_APP_DIR="$ROOT_DIR/artifacts/chat-app"
+# shellcheck source=scripts/workflow-output-safety.sh
+source "$ROOT_DIR/scripts/workflow-output-safety.sh"
 WRITE_REVIEW_RECORD_TEMPLATE="$CHAT_APP_DIR/e2e/native-large-text/write-review-record-template.sh"
 RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)"
 SMALLEST_IOS_DEVICE="iPhone SE (3rd generation)"
@@ -95,14 +97,16 @@ write_ios_readiness_summary() {
       echo "### Diagnostic-only run"
       echo "- NATIVE_SMOKE_ALLOW_LARGER_DEVICE=1 is set, so this run is local troubleshooting output and must not be used as release evidence."
       if [[ -n "$BOOTED_DEVICE" && "$BOOTED_DEVICE" != "$SMALLEST_IOS_DEVICE" ]]; then
-        echo "- The override accepted a larger simulator: ${BOOTED_DEVICE}."
+        echo "- The override accepted a larger simulator: $(sanitize_workflow_text "$BOOTED_DEVICE")."
       fi
       echo "- Unset NATIVE_SMOKE_ALLOW_LARGER_DEVICE and re-run on a booted ${SMALLEST_IOS_DEVICE} to produce release evidence."
     fi
     if ((${#IOS_READINESS_BLOCKERS[@]})); then
       echo
       echo "### Blocking prerequisites"
-      printf -- '- %s\n' "${IOS_READINESS_BLOCKERS[@]}"
+      for blocker in "${IOS_READINESS_BLOCKERS[@]}"; do
+        printf -- '- %s\n' "$(sanitize_workflow_text "$blocker")"
+      done
     fi
   } > "$RESULTS_DIR/ios-readiness.md"
 
@@ -152,6 +156,7 @@ export NATIVE_SMOKE_CALL_SCREENSHOT_DIR="$RESULTS_DIR/call-surface"
 mkdir -p "$NATIVE_SMOKE_SCREENSHOT_DIR" "$NATIVE_SMOKE_CALL_SCREENSHOT_DIR"
 if [[ -n "${NATIVE_SMOKE_BUILD_ID:-}" ]]; then
   printf '%s\n' "$NATIVE_SMOKE_BUILD_ID" > "$RESULTS_DIR/candidate-build-id.txt"
+  # shellcheck source=artifacts/chat-app/e2e/native-large-text/write-review-record-template.sh
   source "$WRITE_REVIEW_RECORD_TEMPLATE" \
     "$RESULTS_DIR/review-record.template.txt" \
     "$PLATFORM" \
@@ -216,7 +221,7 @@ if [[ "$PLATFORM" == "ios" ]]; then
       IOS_SIMULATOR_STATUS="READY"
     elif [[ "$RUN_MODE" == "diagnostic-only" ]]; then
       IOS_SIMULATOR_STATUS="OVERRIDDEN"
-      IOS_SIMULATOR_DETAIL=" (diagnostic-only override accepted ${BOOTED_DEVICE})"
+      IOS_SIMULATOR_DETAIL=" (diagnostic-only override accepted $(sanitize_workflow_text "$BOOTED_DEVICE"))"
       echo "DIAGNOSTIC-ONLY RUN: the override accepted a larger simulator (${BOOTED_DEVICE}); release evidence requires a booted ${SMALLEST_IOS_DEVICE}." >&2
     else
       echo "Expected a booted iPhone SE simulator, found: $BOOTED_DEVICE" >&2
@@ -323,6 +328,11 @@ fi
 CALL_SCREENSHOT_COUNT="$(find "$NATIVE_SMOKE_CALL_SCREENSHOT_DIR" -type f -name '*.png' | wc -l | tr -d ' ')"
 if [[ "$CALL_SCREENSHOT_COUNT" -ne 2 ]]; then
   echo "Expected 2 independent call screenshots, found $CALL_SCREENSHOT_COUNT." >&2
+  exit 1
+fi
+
+if ! bash "$ROOT_DIR/scripts/check-native-large-text-evidence.sh" \
+  --check-collection-size "$RESULTS_DIR"; then
   exit 1
 fi
 
