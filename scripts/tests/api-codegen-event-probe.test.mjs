@@ -94,6 +94,13 @@ test("compatibility fixture makes a deterministic API operation breaking", () =>
   assert.match(breaking, /\/other:\n    post:\n      operationId: createRoom/);
 });
 
+test("compatibility fixture rejects malformed YAML before probing for /rooms", () => {
+  assert.throws(
+    () => buildBreakingCompatibilityContent("paths:\n  /rooms:\n    post:\n      [\n"),
+    /invalid compatibility fixture YAML:/,
+  );
+});
+
 test("matching workflow runs are bound to the branch, head, pull request, and event time", () => {
   const runs = [
     {

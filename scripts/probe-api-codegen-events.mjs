@@ -419,6 +419,11 @@ function makeEditedBody(initialBody, marker) {
 
 export function buildBreakingCompatibilityContent(content) {
   const document = YAML.parseDocument(content);
+  if (document.errors.length > 0) {
+    throw new Error(
+      `invalid compatibility fixture YAML: ${document.errors[0].message}`,
+    );
+  }
   const operationIdNode = document.getIn(
     ["paths", "/rooms", "post", "operationId"],
     true,
