@@ -147,7 +147,6 @@ const STARTUP_TEST_FIXTURES = new Set([
 const MISSING_LIBRARY_PATH = String.raw`[A-Za-z0-9._+~ /\\:[\]-]`;
 const MISSING_LIBRARY_CAPTURE = String.raw`(?:(["'])([^"'\u0000-\u001f\u007f]+)\1|(${MISSING_LIBRARY_PATH}+?))`;
 const MISSING_LIBRARY_DYLD_CAPTURE = String.raw`(?:(["'])([^"'\u0000-\u001f\u007f]+)\1|(${MISSING_LIBRARY_PATH}+))`;
-const MISSING_LIBRARY_BASENAME = /(?:^|[\\/])[^/\\\s:]+\.(?:dylib|so(?:\.\d+)?|dll)$/i;
 const MISSING_LIBRARY_BASENAME = /(?:^|[\\/])[^/\\\s:]+\.(?:dylib|so(?:\.\d+)*|dll)$/i;
 const MISSING_LIBRARY_PATTERNS = [
   new RegExp(
@@ -279,14 +278,6 @@ function formatStartupFailure(output) {
       ? redactKnownStartupFailureSecrets(loaderFailure)
       : failure;
     const missingLibrary = loaderFailure
-      ? findMissingLibrary(loaderFailure)
-      : null;
-    const isLoaderFailure = Boolean(loaderFailure && loaderFailure === failure);
-    const isLoaderFailure = loaderFailure === failure;
-    const safeFailure = isLoaderFailure
-      ? redactKnownStartupFailureSecrets(failure)
-      : failure;
-    const missingLibrary = isLoaderFailure
       ? findMissingLibrary(loaderFailure)
       : null;
     if (isLoaderFailure && !missingLibrary) {
@@ -1189,13 +1180,7 @@ async function validateLivePreview(
   recordOutput,
 ) {
   const launcherOnly = process.env.PREVIEW_STARTUP_REAL_LAUNCHER === "1";
-  if (!launcherOnly) getPublicPreviewManifestUrl(process.env);
   const startupTestFixture = process.env.PREVIEW_STARTUP_TEST_FIXTURE;
-  const useStartupFixture = STARTUP_TEST_FIXTURES.has(startupTestFixture);
-  const runtimeLibraryFixture =
-    useStartupFixture &&
-    startupTestFixture.startsWith("missing-runtime-library");
-  if (!launcherOnly && !runtimeLibraryFixture) getPublicPreviewManifestUrl(process.env);
   const useStartupTestFixture = usesStartupTestFixture(process.env);
   if (!launcherOnly && !useStartupTestFixture) {
     getPublicPreviewManifestUrl(process.env);
@@ -1526,7 +1511,6 @@ async function main() {
     );
 }
 
-if (fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
 if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
   const cliArgs = process.argv.slice(2);
   main().catch(async (error) => {
