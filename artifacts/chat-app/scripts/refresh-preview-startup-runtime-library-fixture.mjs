@@ -52,6 +52,14 @@ const PRESERVED_FIXTURE_OUTPUTS = Object.freeze({
     "was not found. Reinstalling the program may fix this problem.\n",
   "unsupported-loader-wording":
     "React Native DevTools launcher exited with status 127\n",
+  "missing-runtime-library-malformed-quotes":
+    "Error: The code execution cannot proceed because \"C:\\Program Files\\Expo\\React Native DevTools\\libgtk-3-0.dll was not found. Reinstalling the program may fix this problem.\n",
+  "missing-runtime-library-malformed-control":
+    "Error: The code execution cannot proceed because C:\\Program Files\\Expo\\React Native DevTools\\libgtk-\u00073-0.dll was not found. Reinstalling the program may fix this problem.\n",
+  "missing-runtime-library-malformed-trailing":
+    "Error: The code execution cannot proceed because C:\\Program Files\\Expo\\React Native DevTools\\libgtk-3-0.dll was not found. trailing unrelated loader text\n",
+  "missing-runtime-library-malformed-followed-by-valid":
+    "Error: The code execution cannot proceed because \"C:\\Program Files\\Expo\\React Native DevTools\\libgtk-3-0.dll was not found.\nError: The code execution cannot proceed because C:\\Program Files\\Expo\\React Native DevTools\\libgtk-3-0.dll was not found. Reinstalling the program may fix this problem.\n",
 });
 
 function installedPackageVersion(packageName) {
