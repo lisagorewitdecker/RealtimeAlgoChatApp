@@ -283,7 +283,7 @@ test("real-platform capture records macOS and Windows loader output safely", () 
         "Error: The code execution cannot proceed because " +
         "C:\\Users\\reviewer\\AppData\\Local\\Expo\\libgtk-3-0.dll " +
         "was not found. password=TOP_SECRET_VALUE\n" +
-        "Starting project at D:\\repo\\app\n",
+        "Starting project at \\\\server\\share\\repo\\app\n",
       libraryIdentifier: "libgtk-3-0.dll",
     },
   ];
@@ -307,7 +307,7 @@ test("real-platform capture records macOS and Windows loader output safely", () 
       assert.doesNotMatch(recordedOutput, /\/Users\/reviewer|C:\\Users\\reviewer/);
       assert.doesNotMatch(
         recordedOutput,
-        /D:\\repo\\app/,
+        /\\\\server\\share\\repo\\app/,
       );
       assert.doesNotMatch(recordedOutput, /TOP_SECRET_VALUE/);
       assert.match(recordedOutput, new RegExp(fixtureCase.libraryIdentifier));
