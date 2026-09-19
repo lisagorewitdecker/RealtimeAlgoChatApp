@@ -74,11 +74,31 @@ test("stale generated content changes only the checked-in generated file", () =>
 });
 
 test("compatibility fixture makes a deterministic API operation breaking", () => {
-  const content = "paths:\n  /rooms:\n    post:\n      operationId: createRoom\n";
+  const content = [
+    "components:",
+    "  schemas:",
+    "    createRoom:",
+    "      type: string",
+    "paths:",
+    "  /other:",
+    "    post:",
+    "      operationId: createRoom",
+    "  /rooms:",
+    "    post:",
+    "      operationId: createRoom",
+    "",
+  ].join("\n");
   const breaking = buildBreakingCompatibilityContent(content);
 
-  assert.match(breaking, /operationId: createRoomHostedProbe/);
-  assert.doesNotMatch(breaking, /operationId: createRoom\n/);
+  assert.match(breaking, /\/rooms:\n    post:\n      operationId: createRoomHostedProbe/);
+  assert.match(breaking, /\/other:\n    post:\n      operationId: createRoom/);
+});
+
+test("compatibility fixture rejects malformed YAML before probing for /rooms", () => {
+  assert.throws(
+    () => buildBreakingCompatibilityContent("paths:\n  /rooms:\n    post:\n      [\n"),
+    /invalid compatibility fixture YAML:/,
+  );
 });
 
 test("matching workflow runs are bound to the branch, head, pull request, and event time", () => {
@@ -220,7 +240,7 @@ test("a successful probe confirms cleanup before returning its hosted evidence",
       return {
         encoding: "base64",
         content: Buffer.from(
-          "export const generated = true;\noperationId: createRoom\n",
+          "paths:\n  /rooms:\n    post:\n      operationId: createRoom\n",
         ).toString("base64"),
       };
     },
