@@ -769,7 +769,7 @@ function usesStartupTestFixture(
 }
 
 export function validatePreviewConfiguration(environment = process.env) {
-  if (usesStartupTestFixture(environment, { includeOutputOverride: false })) {
+  if (usesStartupTestFixture(environment)) {
     return;
   }
   getPublicPreviewManifestUrl(environment);

@@ -388,6 +388,20 @@ test("startup test output override runs without preview URL configuration", () =
     rmSync(temporaryDirectory, { recursive: true, force: true });
   }
 });
+
+test(
+  "startup test output override skips preview URL configuration validation",
+  () => {
+    const result = runNodeScript([validatorPath, "--validate-configuration"], {
+      PREVIEW_STARTUP_TEST_OUTPUT:
+        'Error: The code execution cannot proceed because "C:\\Program Files\\Expo\\React Native DevTools\\libgtk-3-0.dll" was not found.\n',
+    });
+
+    assert.equal(result.status, 0, result.output);
+    assert.equal(result.output, "");
+  },
+);
+
 test(
   "Windows runner loader diagnosis keeps quoted spaced paths bounded",
   {
