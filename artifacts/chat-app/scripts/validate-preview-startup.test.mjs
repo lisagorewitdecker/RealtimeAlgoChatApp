@@ -284,7 +284,14 @@ test(
         "PREVIEW_HANDOFF_TIMEOUT_MS",
         "PREVIEW_PUBLIC_TIMEOUT_MS",
       ]) {
-        for (const value of ["not-a-number", "0", "-1"]) {
+        for (const value of [
+          "",
+          "not-a-number",
+          "2_000",
+          "0",
+          "-1",
+          "Infinity",
+        ]) {
           runPreviewTimeoutEntryPoint(entryPoint, setting, value);
         }
       }
