@@ -4,6 +4,7 @@ import { writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { spawn } from "node:child_process";
 import { setTimeout as delay } from "node:timers/promises";
+import { fileURLToPath } from "node:url";
 import {
   findDuplicateJsonObjectKeys,
   isJsonEvidenceLimitError,
@@ -348,7 +349,7 @@ function sanitizeRecordedStartupOutput(value) {
           return `${prefix}[redacted]/${libraryName}${suffix}`;
         })
         .replace(
-          /[A-Za-z]:\\(?:Users|home)\\[^\r\n]+/g,
+          /[A-Za-z]:\\(?:Users|home|a)\\[^\r\n]+/g,
           (path) => {
             const libraryName = path.match(
               /[^/\\\s]+?\.(?:dylib|so(?:\.\d+)?|dll)\b/i,
@@ -1142,9 +1143,11 @@ async function validateLivePreview(
   recordLog,
   recordOutput,
 ) {
-  getPublicPreviewManifestUrl(process.env);
+  const launcherOnly = process.env.PREVIEW_STARTUP_REAL_LAUNCHER === "1";
+  if (!launcherOnly) getPublicPreviewManifestUrl(process.env);
   const port = await findFreePort();
   const output = [];
+  const pnpmCommand = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
   const startupCommand =
     STARTUP_TEST_FIXTURES.has(process.env.PREVIEW_STARTUP_TEST_FIXTURE)
       ? {
@@ -1158,10 +1161,10 @@ async function validateLivePreview(
         }
       : process.env.PREVIEW_STARTUP_REAL_LAUNCHER === "1"
         ? {
-            command: "pnpm",
+            command: pnpmCommand,
             args: ["exec", "expo", "start", "--localhost", "--port", String(port)],
           }
-      : { command: "pnpm", args: ["run", "dev"] };
+      : { command: pnpmCommand, args: ["run", "dev"] };
   const child = spawn(startupCommand.command, startupCommand.args, {
     cwd: resolve(import.meta.dirname, ".."),
     env: {
@@ -1169,6 +1172,7 @@ async function validateLivePreview(
       PORT: String(port),
     },
     detached: process.platform !== "win32",
+    shell: process.platform === "win32" && startupCommand.command === pnpmCommand,
     stdio: ["ignore", "pipe", "pipe"],
   });
 
@@ -1196,7 +1200,14 @@ async function validateLivePreview(
       clearTimeout(closeTimer);
       closeTimer = undefined;
     });
-    if (process.platform === "win32" || !processGroupId) {
+    if (process.platform === "win32" && processGroupId) {
+      const processTreeKiller = spawn(
+        "taskkill.exe",
+        ["/PID", String(processGroupId), "/T", "/F"],
+        { stdio: "ignore", windowsHide: true },
+      );
+      processTreeKiller.unref();
+    } else if (!processGroupId) {
       child.kill("SIGTERM");
     } else {
       try {
@@ -1208,8 +1219,16 @@ async function validateLivePreview(
     closeTimer = setTimeout(() => {
       if (!processGroupId) return;
       try {
-        if (process.platform === "win32") child.kill("SIGKILL");
-        else process.kill(-processGroupId, "SIGKILL");
+        if (process.platform === "win32") {
+          const processTreeKiller = spawn(
+            "taskkill.exe",
+            ["/PID", String(processGroupId), "/T", "/F"],
+            { stdio: "ignore", windowsHide: true },
+          );
+          processTreeKiller.unref();
+        } else {
+          process.kill(-processGroupId, "SIGKILL");
+        }
       } catch (error) {
         if (error.code !== "ESRCH") throw error;
       }
@@ -1286,12 +1305,24 @@ async function validateLivePreview(
       if (!READY_MARKERS.some((pattern) => pattern.test(combinedOutput))) {
         finish(() => {
           stopChild();
+          recordStartupOutput(recordLog, combinedOutput);
           rejectResult(
             new Error(
               `Expo preview did not reach Metro running status within ${timeoutMs}ms.\n` +
                 combinedOutput,
             ),
           );
+        });
+        return;
+      }
+      if (launcherOnly) {
+        finish(() => {
+          stopChild();
+          recordStartupOutput(recordLog, combinedOutput);
+          console.log(
+            `Expo preview launcher reached Metro running status on port ${port}.`,
+          );
+          resolveResult();
         });
         return;
       }
@@ -1431,7 +1462,7 @@ async function main() {
     );
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
   const cliArgs = process.argv.slice(2);
   main().catch(async (error) => {
     if (isStartupValidationInvocation(cliArgs)) {
