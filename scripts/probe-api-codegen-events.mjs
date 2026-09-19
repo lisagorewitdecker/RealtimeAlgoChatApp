@@ -265,15 +265,22 @@ export function findMatchingWorkflowRun(
     )[0];
 }
 
-export function getRequiredFailure(run, jobs) {
-  const job = (jobs?.jobs ?? []).find(
-    (candidate) => candidate.name === "Check generated API clients",
+function getGeneratedClientJob(run, jobs) {
+  const job = (jobs?.jobs ?? []).find((candidate) =>
+    (candidate.steps ?? []).some(
+      (step) => step.name === "Verify generated API clients",
+    ),
   );
   if (!job) {
     throw new Error(
-      `workflow run ${run.id} did not contain the "Check generated API clients" job`,
+      `workflow run ${run.id} did not contain the "Verify generated API clients" step`,
     );
   }
+  return job;
+}
+
+export function getRequiredFailure(run, jobs) {
+  const job = getGeneratedClientJob(run, jobs);
   const step = (job.steps ?? []).find(
     (candidate) => candidate.name === "Verify generated API clients",
   );
@@ -301,12 +308,11 @@ export function getRequiredFailure(run, jobs) {
   };
 }
 
-function getCompatibilityResult(jobsResponse, expectedConclusion) {
-  const step = jobsResponse.jobs
-    ?.flatMap((job) => job.steps ?? [])
-    .find(
-      (candidate) => candidate.name === "Check API contract compatibility",
-    );
+function getCompatibilityResult(run, jobsResponse, expectedConclusion) {
+  const job = getGeneratedClientJob(run, jobsResponse);
+  const step = job.steps?.find(
+    (candidate) => candidate.name === "Check API contract compatibility",
+  );
   if (!step || step.conclusion !== expectedConclusion) {
     throw new Error(
       `workflow run did not report API compatibility as ${expectedConclusion}`,
@@ -331,6 +337,7 @@ function workflowRunEvidence(event, run, jobsResponse, compatibilityConclusion) 
     },
     ...getRequiredFailure(run, jobsResponse),
     compatibility: getCompatibilityResult(
+      run,
       jobsResponse,
       compatibilityConclusion,
     ),
