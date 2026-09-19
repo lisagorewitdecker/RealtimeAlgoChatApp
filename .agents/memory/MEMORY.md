@@ -115,3 +115,4 @@
 - [GitHub PR state verification](github-pr-state-verification.md) — re-read live PR state before attempting rebase, reopen, or branch operations because task snapshots can lag GitHub.
 - [Fork generated-client evidence](fork-generated-client-evidence.md) — validate and publish drift against the same PR head SHA, not a synthetic merge ref.
 - [Real-platform launcher captures](real-platform-launcher-captures.md) — Windows hosted captures need normalized entrypoints, process-tree cleanup, and redaction for runner workspace roots such as D:\a.
+- [Node stdin fixture imports](node-stdin-fixture-imports.md) — direct-execution guards must tolerate `node --input-type=module` stdin scripts with no `process.argv[1]`.

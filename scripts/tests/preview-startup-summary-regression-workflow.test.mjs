@@ -26,6 +26,7 @@ test("hosted preview startup summary regression checks the reviewed revision", (
     ".github/workflows/preview-startup-real-platform.yml",
     ".replit",
     "artifacts/chat-app/package.json",
+    "artifacts/chat-app/scripts/refresh-preview-startup-runtime-library-fixture.mjs",
     "artifacts/chat-app/scripts/preview-startup-runtime-library-fixture.mjs",
     "artifacts/chat-app/scripts/preview-startup-shared.mjs",
     "artifacts/chat-app/scripts/validate-preview-startup.mjs",
