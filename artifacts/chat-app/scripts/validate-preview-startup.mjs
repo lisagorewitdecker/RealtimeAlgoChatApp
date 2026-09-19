@@ -180,6 +180,13 @@ function sanitizeStartupDiagnostic(value, maxLength) {
     .slice(0, maxLength);
 }
 
+function redactStartupAuthorization(value) {
+  return value.replace(
+    /(?<!redacted )\b(?:authorization|proxy-authorization)\s*:?.*$/gi,
+    "[redacted authorization]",
+  );
+}
+
 function findMissingLibrary(output) {
   for (const line of output.split(/\r?\n/)) {
     for (const pattern of MISSING_LIBRARY_PATTERNS) {
@@ -220,6 +227,7 @@ function formatStartupFailure(output) {
       failure,
       MAX_STARTUP_FAILURE_LINE_LENGTH,
     );
+    const redactedFailureDetail = redactStartupAuthorization(fullFailureDetail);
     const missingLibrary = findMissingLibrary(output);
     const libraryDetail =
       missingLibrary &&
@@ -229,7 +237,7 @@ function formatStartupFailure(output) {
         : "";
 
     const failureLength = Math.min(
-      fullFailureDetail.length,
+      redactedFailureDetail.length,
       Math.max(
         0,
         MAX_STARTUP_DIAGNOSTIC_LENGTH -
@@ -237,7 +245,7 @@ function formatStartupFailure(output) {
           libraryDetail.length,
       ),
     );
-    const failureDetail = fullFailureDetail.slice(0, failureLength);
+    const failureDetail = redactedFailureDetail.slice(0, failureLength);
 
     return `${STARTUP_DIAGNOSTIC_PREFIX}${sanitizeStartupDiagnostic(
       `${failureDetail}${libraryDetail}`,
@@ -258,12 +266,12 @@ function formatStartupFailure(output) {
 }
 
 function sanitizeStartupSummaryDiagnostic(value) {
-  return sanitizeStartupDiagnostic(value, MAX_STARTUP_SUMMARY_LENGTH)
-    .replace(/https?:\/\/\S+/gi, "[redacted URL]")
-    .replace(
-      /\b(?:authorization|proxy-authorization)\s*:?.*$/gi,
-      "[redacted authorization]",
-    )
+  return redactStartupAuthorization(
+    sanitizeStartupDiagnostic(value, MAX_STARTUP_SUMMARY_LENGTH).replace(
+      /https?:\/\/\S+/gi,
+      "[redacted URL]",
+    ),
+  )
     .replace(
       /\b(?:api[_-]?key|credential|password|passwd|secret|token)\s*(?:[=:]\s*|\s+)\S+/gi,
       "[redacted credential]",
