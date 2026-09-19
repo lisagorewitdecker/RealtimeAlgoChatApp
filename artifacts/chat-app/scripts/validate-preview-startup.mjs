@@ -349,7 +349,7 @@ function sanitizeRecordedStartupOutput(value) {
           return `${prefix}[redacted]/${libraryName}${suffix}`;
         })
         .replace(
-          /[A-Za-z]:\\(?:Users|home)\\[^\r\n]+|[A-Za-z]:\\(?!Users\\|home\\)[^\r\n]+/g,
+          /[A-Za-z]:\\(?:Users|home)\\[^\\/:*?"<>|\r\n]+(?:\\[^\\/:*?"<>|\r\n]+)*\\[^\s\\/:*?"<>|\r\n]+|[A-Za-z]:\\(?!Users\\|home\\)[^\\/:*?"<>|\r\n]+(?:\\[^\\/:*?"<>|\r\n]+)*\\[^\s\\/:*?"<>|\r\n]+/g,
           (path) => {
             const libraryName = path.match(
               /[^/\\\s]+?\.(?:dylib|so(?:\.\d+)?|dll)\b/i,
