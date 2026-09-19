@@ -515,6 +515,47 @@ assert_contains "$oversized_output" "[android] Invalid Sentry source-map evidenc
 assert_contains "$oversized_output" "evidence exceeds the release evidence size limit"
 assert_not_contains "$oversized_output" "$oversized_sentinel"
 
+collection_size_root="$TEST_ROOT/collection-size"
+write_valid_run "$collection_size_root" ios
+write_valid_run "$collection_size_root" android
+collection_size_sentinel="oversized-collection-private-sentinel"
+printf '%s' "$collection_size_sentinel" > \
+  "$collection_size_root/ios/20260909T120000Z/native-branding-check.md"
+head -c 262145 /dev/zero | tr '\0' 'x' >> \
+  "$collection_size_root/ios/20260909T120000Z/native-branding-check.md"
+if collection_size_output="$(
+  bash "$CHECKER" --check-collection-size \
+    "$collection_size_root/ios/20260909T120000Z" 2>&1
+)"; then
+  echo "oversized collection text case unexpectedly passed" >&2
+  exit 1
+fi
+assert_contains "$collection_size_output" \
+  "Native evidence text file exceeds the 256 KiB release evidence limit: native-branding-check.md."
+assert_contains "$collection_size_output" \
+  "no artifact will be uploaded"
+assert_not_contains "$collection_size_output" "$collection_size_sentinel"
+if ! bash "$CHECKER" --check-collection-size \
+  "$collection_size_root/android/20260909T120000Z"; then
+  echo "valid collection text case unexpectedly failed" >&2
+  exit 1
+fi
+
+ignored_collection_root="$TEST_ROOT/ignored-collection-size"
+write_valid_run "$ignored_collection_root" ios
+mkdir -p "$ignored_collection_root/ios/20260909T120000Z/untracked"
+head -c 262145 /dev/zero | tr '\0' 'x' > \
+  "$ignored_collection_root/ios/20260909T120000Z/untracked/oversized.txt"
+if ignored_collection_output="$(
+  bash "$CHECKER" --check-collection-size \
+    "$ignored_collection_root/ios/20260909T120000Z" 2>&1
+)"; then
+  echo "oversized untracked collection file unexpectedly passed" >&2
+  exit 1
+fi
+assert_contains "$ignored_collection_output" \
+  "Native evidence collection contains an untrusted file path: untracked/oversized.txt."
+
 valid_root="$TEST_ROOT/valid"
 write_valid_run "$valid_root" ios
 write_valid_run "$valid_root" android
