@@ -39,7 +39,7 @@ if ! command -v maestro >/dev/null 2>&1; then
     exit 2
   fi
 
-  bash "$maestro_installer_path"
+  env -u EAS_TOKEN bash "$maestro_installer_path"
 fi
 
 if ! command -v maestro >/dev/null 2>&1 && [[ -d "$HOME/.maestro/bin" ]]; then
