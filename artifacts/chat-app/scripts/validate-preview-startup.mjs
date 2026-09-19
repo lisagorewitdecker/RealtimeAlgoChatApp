@@ -355,12 +355,6 @@ function sanitizeRecordedStartupOutput(value) {
     if (!preservedSegments) return redactedPrefix;
     return `${redactedPrefix}\\${preservedSegments}`;
   };
-  const splitStartupProjectPath = (value) => {
-    const tokens = value.trimEnd().split(/\s+/);
-    const argumentIndex = tokens.findIndex((token) => token.startsWith("-"));
-    if (argumentIndex < 0) return value;
-    return tokens.slice(0, argumentIndex).join(" ");
-  };
   const sanitizedLines = value
     .split(/\r?\n/)
     .map((line) =>
@@ -377,7 +371,10 @@ function sanitizeRecordedStartupOutput(value) {
         .replace(
           /Starting project at ((?:[A-Za-z]:\\|\\\\[^\\\r\n]+\\[^\\\r\n]+\\)[^\\"\r\n]+(?:\\[^\\"\r\n]+)*)/g,
           (_, path) => {
-            const startupProjectPath = splitStartupProjectPath(path);
+            const startupProjectPath = path.replace(
+              /\s+--?[A-Za-z][A-Za-z0-9-]*(?:\s+[^\r\n]*)?$/,
+              "",
+            );
             return `Starting project at ${sanitizeWindowsProjectPath(startupProjectPath)}`;
           },
         )
