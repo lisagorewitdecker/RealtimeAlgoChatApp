@@ -84,6 +84,7 @@ function runWorkflowVerificationStep() {
   const result = spawnSync(
     "bash",
     ["-euo", "pipefail", "-c", ". \"$1\"", "bash", scriptPath],
+    ["-euo", "pipefail", scriptPath],
     {
       cwd: workspaceRoot,
       env: {
