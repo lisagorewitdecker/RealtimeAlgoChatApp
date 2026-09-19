@@ -29,6 +29,13 @@ fail() {
   fail "Android runner SHA-256 pin is not a 64-character lowercase digest."
 [[ "$ANDROID_BUILD_TOOLS_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] ||
   fail "Android build-tools version pin is not a semantic version."
+child_environment="$(bash -lc 'source "$1"; env' -- "$PINS")"
+grep -Fqx -- "ANDROID_RUNNER_VERSION=$ANDROID_RUNNER_VERSION" <<<"$child_environment" ||
+  fail "Android runner version pin is not exported to child shell environments."
+grep -Fqx -- "ANDROID_RUNNER_SHA256=$ANDROID_RUNNER_SHA256" <<<"$child_environment" ||
+  fail "Android runner SHA-256 pin is not exported to child shell environments."
+grep -Fqx -- "ANDROID_BUILD_TOOLS_VERSION=$ANDROID_BUILD_TOOLS_VERSION" <<<"$child_environment" ||
+  fail "Android build-tools pin is not exported to child shell environments."
 
 grep -Fq -- 'source "$SCRIPT_DIR/android-runner-pins.sh"' "$PROVISION" ||
   fail "Android runner bootstrap does not source the shared pin contract."
