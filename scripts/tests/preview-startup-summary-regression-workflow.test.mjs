@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -55,7 +55,9 @@ function runValidator(env) {
   });
 
   try {
-    const summary = readFileSync(summaryPath, "utf8");
+    const summary = existsSync(summaryPath)
+      ? readFileSync(summaryPath, "utf8")
+      : "";
     return {
       ...result,
       summary,
