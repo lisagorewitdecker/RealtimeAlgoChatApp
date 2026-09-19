@@ -34,6 +34,23 @@ jobs:
           fetch-depth: 1
           persist-credentials: false
 
+      - name: Set up pnpm
+        id: setup-pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
+        with:
+          version: 10.26.1
+
+      - name: Set up Node.js
+        id: setup-node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install workspace dependencies
+        id: install-dependencies
+        run: pnpm install --frozen-lockfile
+
       - name: Verify healthy and failing preview startup summaries
         shell: bash
         env:
@@ -41,12 +58,84 @@ jobs:
         run: |
           set -euo pipefail
           summary_path="$(mktemp)"
+          failure_summary_path="$(mktemp)"
           setting_summary_path="$(mktemp)"
+          tooling_summary_path="$(mktemp)"
+          tooling_marker_path="$(mktemp)"
+          rm -f "$tooling_marker_path"
           healthy_log="$(mktemp)"
-          trap 'rm -f "$summary_path" "$setting_summary_path" "$healthy_log"' EXIT
+          trap 'rm -f "$summary_path" "$failure_summary_path" "$setting_summary_path" "$tooling_summary_path" "$tooling_marker_path" "$healthy_log"' EXIT
           resolved_commit_sha="$(git rev-parse --verify HEAD)"
           source scripts/workflow-output-safety.sh
           safe_reviewed_ref="$(sanitize_workflow_text "$REVIEWED_REF")"
+
+          if GITHUB_STEP_SUMMARY="$tooling_summary_path" \
+            PREVIEW_STARTUP_TEST_CAPTURED_EXPO_CLI_VERSION=0.0.0 \
+            PREVIEW_STARTUP_LIVE_START_MARKER="$tooling_marker_path" \
+            PREVIEW_STARTUP_TEST_FIXTURE=handoff-server \
+            node artifacts/chat-app/scripts/validate-preview-startup.mjs > /tmp/preview-startup-tooling-failure.log 2>&1; then
+            echo "The stale preview tooling scenario unexpectedly passed." >&2
+            exit 1
+          fi
+          if [[ -e "$tooling_marker_path" ]]; then
+            echo "The stale preview tooling scenario started the live preview." >&2
+            exit 1
+          fi
+          if ! grep -Fq -- '**Failure:** Stale preview tooling' "$tooling_summary_path" ||
+            ! grep -Fq -- 'captured version `0.0.0`' "$tooling_summary_path" ||
+            ! grep -Fq -- 'installed version `' "$tooling_summary_path" ||
+            ! grep -Fq -- '**Affected captured loader samples:**' "$tooling_summary_path" ||
+            ! grep -Fq -- 'Linux shared-library loader' "$tooling_summary_path" ||
+            ! grep -Fq -- 'Windows loader with a quoted long path' "$tooling_summary_path" ||
+            ! grep -Fq -- 'preview-startup-runtime-library-fixture.mjs' "$tooling_summary_path" ||
+            ! grep -Fq -- 'validate-preview-startup.mjs' "$tooling_summary_path"; then
+            echo "The hosted summary did not retain stale tooling guidance." >&2
+            cat "$tooling_summary_path" >&2
+            exit 1
+          fi
+          if [[ "$(grep -Fc -- "### Expo preview startup" "$tooling_summary_path")" != "1" ]] ||
+            [[ "$(wc -c < "$tooling_summary_path")" -ge 2000 ]]; then
+            echo "The stale preview tooling summary was not bounded to one guidance section." >&2
+            cat "$tooling_summary_path" >&2
+            exit 1
+          fi
+          if grep -Eiq -- 'https?://|authorization|proxy-authorization|password|passwd|secret|token|credential' "$tooling_summary_path"; then
+            echo "The stale preview tooling summary contained private material." >&2
+            cat "$tooling_summary_path" >&2
+            exit 1
+          fi
+
+          {
+            echo "## Reviewed preview startup revision"
+            printf -- '- Checked ref: `%s`\n' "$safe_reviewed_ref"
+            printf -- '- Resolved commit SHA: `%s`\n' "$resolved_commit_sha"
+            echo
+            echo "## Preview startup summary regression"
+            echo "- Stale preview tooling: **PASS** (versions, affected samples, and maintenance files retained; live startup skipped)"
+            cat "$tooling_summary_path"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if GITHUB_STEP_SUMMARY="$failure_summary_path" \
+            PREVIEW_STARTUP_TEST_FIXTURE=missing-runtime-library-long-path \
+            node artifacts/chat-app/scripts/validate-preview-startup.mjs > /tmp/preview-startup-failure.log 2>&1; then
+            echo "The missing-runtime-library-long-path preview startup scenario unexpectedly passed." >&2
+            exit 1
+          fi
+          expected_diagnosis="Expo preview startup error: Error: /opt/expo/react-native-devtools: error while loading shared libraries:"
+          if ! grep -Fq -- "### Expo preview startup" "$failure_summary_path" ||
+            ! grep -Fq -- "**Status:** FAIL" "$failure_summary_path" ||
+            ! grep -Fq -- "$expected_diagnosis" "$failure_summary_path" ||
+            [[ "$(grep -Fc -- "### Expo preview startup" "$failure_summary_path")" != "1" ]] ||
+            [[ "$(wc -c < "$failure_summary_path")" -gt 700 ]]; then
+            echo "The hosted summary did not contain the bounded missing-library diagnosis." >&2
+            cat "$failure_summary_path" >&2
+            exit 1
+          fi
+          if grep -Eiq -- 'https?://|authorization|proxy-authorization|password|passwd|secret|token|credential' "$failure_summary_path"; then
+            echo "The hosted preview startup summary contained private material." >&2
+            cat "$failure_summary_path" >&2
+            exit 1
+          fi
 
           printf 'Starting Metro Bundler\n' > "$healthy_log"
           healthy_output="$(
@@ -61,49 +150,6 @@ jobs:
           fi
           if [[ -s "$summary_path" ]]; then
             echo "The healthy preview startup validation unexpectedly wrote a failure summary." >&2
-            cat "$summary_path" >&2
-            exit 1
-          fi
-
-          if GITHUB_STEP_SUMMARY="$summary_path" \
-            PREVIEW_STARTUP_TEST_FIXTURE=missing-runtime-library-long-path \
-            node artifacts/chat-app/scripts/validate-preview-startup.mjs > /tmp/preview-startup-failure.log 2>&1; then
-            echo "The missing-runtime-library-long-path preview startup scenario unexpectedly passed." >&2
-            exit 1
-          fi
-
-          expected_diagnosis="Expo preview startup error: Error: /opt/expo/react-native-devtools: error while loading shared libraries: /opt/expo/react-native-devtools-cache/react-native-devtools-cache/react-native-devtools-cache/react-native-devtools-cache/react-native-devtools-cache/react-native-devtools-cache/react-na (missing runtime library: /opt/expo/react-native-devtools-cache/react-native-devtools-cache/react-native-devtools-cache/react-native-devtools-cache/react-native-devtools-cache/react-native-devtools-cache…/libgtk-3.so.0)"
-          if ! grep -Fq -- "### Expo preview startup" "$summary_path" ||
-            ! grep -Fq -- "**Status:** FAIL" "$summary_path" ||
-            ! grep -Fq -- "$expected_diagnosis" "$summary_path"; then
-            echo "The hosted summary did not contain the bounded missing-library diagnosis." >&2
-            cat "$summary_path" >&2
-            exit 1
-          fi
-          if [[ "$(grep -Fc -- "### Expo preview startup" "$summary_path")" != "1" ]] ||
-            [[ "$(wc -c < "$summary_path")" -gt 700 ]]; then
-            echo "The hosted preview startup failure summary was not bounded to one diagnosis." >&2
-            cat "$summary_path" >&2
-            exit 1
-          fi
-          expected_summary_path="$(mktemp)"
-          cat > "$expected_summary_path" <<'EOF'
-          ### Expo preview startup
-
-          **Status:** FAIL
-
-          **Diagnosis:** Expo preview startup error: Error: /opt/expo/react-native-devtools: error while loading shared libraries: /opt/expo/react-native-devtools-cache/react-native-devtools-cache/react-native-devtools-cache/react-native-devtools-cache/react-native-devtools-cache/react-native-devtools-cache/react-na (missing runtime library: /opt/expo/react-native-devtools-cache/react-native-devtools-cache/react-native-devtools-cache/react-native-devtools-cache/react-native-devtools-cache/react-native-devtools-cache…/libgtk-3.so.0)
-
-          EOF
-          if ! cmp -s "$summary_path" "$expected_summary_path"; then
-            echo "The hosted preview startup summary contained output beyond the bounded diagnosis." >&2
-            diff -u "$expected_summary_path" "$summary_path" >&2 || true
-            rm -f "$expected_summary_path"
-            exit 1
-          fi
-          rm -f "$expected_summary_path"
-          if grep -Eiq -- 'https?://|authorization|proxy-authorization|password|passwd|secret|token|credential' "$summary_path"; then
-            echo "The hosted preview startup summary contained private material." >&2
             cat "$summary_path" >&2
             exit 1
           fi
@@ -154,11 +200,8 @@ jobs:
           fi
 
           {
-            echo "## Reviewed preview startup revision"
-            printf -- '- Checked ref: `%s`\n' "$safe_reviewed_ref"
-            printf -- '- Resolved commit SHA: `%s`\n' "$resolved_commit_sha"
-            echo
-            echo "## Preview startup summary regression"
+            echo "- Missing library startup: **PASS** (bounded diagnosis retained; private material excluded)"
+            cat "$failure_summary_path"
             echo "- Healthy captured startup: **PASS** (success output retained; no failure section)"
             cat "$summary_path"
             echo "- Malformed preview setting: **PASS** (configuration diagnosis retained; private material excluded)"

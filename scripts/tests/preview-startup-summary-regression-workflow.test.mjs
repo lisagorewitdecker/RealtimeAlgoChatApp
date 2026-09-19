@@ -43,7 +43,7 @@ test("hosted preview startup summary regression checks the reviewed revision", (
   );
   const [, job] = jobs[0];
   assert.equal(job["runs-on"], "ubuntu-latest");
-  assert.equal(job.steps.length, 2);
+  assert.equal(job.steps.length, 5);
   assert.equal(job.steps[0].uses, "actions/checkout@v4");
   assert.equal(
     job.steps[0].with.ref,
@@ -51,8 +51,18 @@ test("hosted preview startup summary regression checks the reviewed revision", (
   );
   assert.equal(job.steps[0].with["persist-credentials"], false);
 
-  const verification = job.steps[1].run;
-  assert.deepEqual(job.steps[1].env, {
+  assert.equal(
+    job.steps[1].uses,
+    "pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1",
+  );
+  assert.equal(job.steps[1].with.version, "10.26.1");
+  assert.equal(job.steps[2].uses, "actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020");
+  assert.equal(job.steps[2].with["node-version"], 24);
+  assert.equal(job.steps[2].with.cache, "pnpm");
+  assert.equal(job.steps[3].run, "pnpm install --frozen-lockfile");
+
+  const verification = job.steps[4].run;
+  assert.deepEqual(job.steps[4].env, {
     REVIEWED_REF:
       "${{ github.event.pull_request.head.sha || inputs.reviewed_ref }}",
   });
@@ -70,6 +80,28 @@ test("hosted preview startup summary regression checks the reviewed revision", (
   assert.match(
     verification,
     /contained output beyond the bounded diagnosis/,
+  );
+  const staleBaselineIndex = verification.indexOf(
+    "PREVIEW_STARTUP_TEST_CAPTURED_EXPO_CLI_VERSION=0.0.0",
+  );
+  const healthyValidationIndex = verification.indexOf(
+    "printf 'Starting Metro Bundler\\n' > \"$healthy_log\"",
+  );
+  assert.ok(
+    staleBaselineIndex >= 0 && staleBaselineIndex < healthyValidationIndex,
+    "the stale-tooling baseline must run before the healthy captured-log check",
+  );
+  const staleSummaryPublishIndex = verification.indexOf(
+    'cat "$tooling_summary_path"',
+  );
+  const malformedSettingIndex = verification.indexOf(
+    "malformed_preview_setting=",
+  );
+  assert.ok(
+    staleSummaryPublishIndex >= 0 &&
+      staleSummaryPublishIndex < malformedSettingIndex &&
+      verification.includes('>> "$GITHUB_STEP_SUMMARY"'),
+    "stale-tooling guidance must reach the real workflow summary before later checks",
   );
   assert.match(verification, /malformed_preview_setting/);
   assert.match(

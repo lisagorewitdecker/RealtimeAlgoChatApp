@@ -1,10 +1,11 @@
 import { createServer } from "node:net";
 import { appendFile, readFile, writeFile } from "node:fs/promises";
-import { writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { spawn } from "node:child_process";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
+import { createRequire } from "node:module";
 import {
   findDuplicateJsonObjectKeys,
   isJsonEvidenceLimitError,
@@ -15,6 +16,10 @@ import {
   READY_MARKERS,
   parsePreviewTimeout,
 } from "./preview-startup-shared.mjs";
+import {
+  CAPTURED_EXPO_TOOLING,
+  CAPTURED_LOADER_SAMPLES,
+} from "./preview-startup-runtime-library-fixture.mjs";
 
 export { MAX_PREVIEW_TIMEOUT_MS, READY_MARKERS, parsePreviewTimeout };
 
@@ -29,6 +34,15 @@ const MAX_STARTUP_LIBRARY_DETAIL_LENGTH = 192;
 const MAX_RECORDED_STARTUP_OUTPUT_LENGTH = 16_384;
 const MAX_RECORDED_STARTUP_LINE_LENGTH = 1_024;
 const STARTUP_DIAGNOSTIC_PREFIX = "Expo preview startup error: ";
+const PREVIEW_TOOLING_MISMATCH_SUMMARY_PREFIX =
+  "Expo preview tooling mismatch: ";
+const PREVIEW_TOOLING_MAINTENANCE_FILES = Object.freeze([
+  "preview-startup-runtime-library-fixture.mjs",
+  "validate-preview-startup.mjs",
+]);
+const packageRequire = createRequire(
+  resolve(import.meta.dirname, "..", "package.json"),
+);
 const HANDOFF_FAILURE_PHASES = Object.freeze([
   {
     label: "public manifest",
@@ -162,6 +176,99 @@ const MISSING_LIBRARY_PATTERNS = [
     "i",
   ),
 ];
+
+const PREVIEW_TOOLING_SPECS = Object.freeze([
+  {
+    displayName: "Expo CLI",
+    packageName: "@expo/cli",
+    capturedKey: "expoCli",
+    testOverrideEnvironmentName:
+      "PREVIEW_STARTUP_TEST_CAPTURED_EXPO_CLI_VERSION",
+  },
+  {
+    displayName: "React Native",
+    packageName: "react-native",
+    capturedKey: "reactNative",
+    testOverrideEnvironmentName:
+      "PREVIEW_STARTUP_TEST_CAPTURED_REACT_NATIVE_VERSION",
+  },
+]);
+
+function installedPackageVersion(packageName) {
+  const packageJsonPath = packageRequire.resolve(`${packageName}/package.json`);
+  return JSON.parse(readFileSync(packageJsonPath, "utf8")).version;
+}
+
+function safePreviewToolingVersion(version) {
+  return typeof version === "string" &&
+    /^[A-Za-z0-9][A-Za-z0-9.+_-]{0,63}$/.test(version)
+    ? version
+    : "[invalid version]";
+}
+
+export function findPreviewToolingMismatches(environment = process.env) {
+  return PREVIEW_TOOLING_SPECS.map((spec) => {
+    const capturedVersion =
+      environment[spec.testOverrideEnvironmentName] ??
+      CAPTURED_EXPO_TOOLING[spec.capturedKey];
+    const installedVersion = installedPackageVersion(spec.packageName);
+    if (installedVersion === capturedVersion) return null;
+
+    return {
+      displayName: spec.displayName,
+      capturedVersion: safePreviewToolingVersion(capturedVersion),
+      installedVersion: safePreviewToolingVersion(installedVersion),
+    };
+  }).filter(Boolean);
+}
+
+function formatPreviewToolingMismatch(mismatch) {
+  return (
+    `${mismatch.displayName} changed: loader samples were captured with ` +
+    `${mismatch.capturedVersion}, but the installed version is ` +
+    `${mismatch.installedVersion}. Affected captured loader samples: ` +
+    `${CAPTURED_LOADER_SAMPLES.map(({ name }) => name).join(", ")}. ` +
+    `Refresh ${PREVIEW_TOOLING_MAINTENANCE_FILES[0]} and update the loader ` +
+    `wording parser in ${PREVIEW_TOOLING_MAINTENANCE_FILES[1]} before relying ` +
+    "on preview diagnostics."
+  );
+}
+
+export function formatPreviewToolingMismatchSummary(mismatches) {
+  const versionLines = mismatches
+    .map(
+      (mismatch) =>
+        `- ${mismatch.displayName}: captured version \`${mismatch.capturedVersion}\`; ` +
+        `installed version \`${mismatch.installedVersion}\``,
+    )
+    .join("\n");
+  const sampleNames = CAPTURED_LOADER_SAMPLES.map(({ name }) => name).join(
+    ", ",
+  );
+
+  return (
+    "### Expo preview startup\n\n" +
+    "**Status:** FAIL\n\n" +
+    "**Failure:** Stale preview tooling\n\n" +
+    `${versionLines}\n\n` +
+    `**Affected captured loader samples:** ${sampleNames}\n\n` +
+    `**Maintenance files:** \`${PREVIEW_TOOLING_MAINTENANCE_FILES[0]}\`, ` +
+    `\`${PREVIEW_TOOLING_MAINTENANCE_FILES[1]}\`\n\n`
+  );
+}
+
+function createPreviewToolingMismatchError(mismatches) {
+  const error = new Error(mismatches.map(formatPreviewToolingMismatch).join("\n"));
+  error.previewToolingMismatches = mismatches;
+  return error;
+}
+
+function validatePreviewTooling(environment = process.env) {
+  const mismatches = findPreviewToolingMismatches(environment);
+  if (mismatches.length > 0) {
+    throw createPreviewToolingMismatchError(mismatches);
+  }
+}
 
 function findStartupFailure(output) {
   const lines = output.split(/\r?\n/);
@@ -380,6 +487,10 @@ function getHandoffFailurePhase(message) {
 }
 
 export function formatStartupFailureSummary(error) {
+  if (Array.isArray(error?.previewToolingMismatches)) {
+    return formatPreviewToolingMismatchSummary(error.previewToolingMismatches);
+  }
+
   const message = error instanceof Error ? error.message : String(error);
   const handoffFailurePhase = getHandoffFailurePhase(message);
   if (handoffFailurePhase) {
@@ -1412,6 +1523,7 @@ async function validateLivePreview(
 
 async function main() {
   if (process.argv.includes("--validate-configuration")) {
+    validatePreviewTooling();
     validatePreviewConfiguration();
     return;
   }
@@ -1450,16 +1562,20 @@ async function main() {
     recordLog,
     recordOutput,
   } = parseArgs(process.argv.slice(2));
-  if (logFile) await validateCapturedLog(logFile);
-  else
-    await validateLivePreview(
-      platform,
-      timeoutMs,
-      handoffTimeoutMs,
-      publicPreviewTimeoutMs,
-      recordLog,
-      recordOutput,
-    );
+  if (logFile) {
+    await validateCapturedLog(logFile);
+    return;
+  }
+
+  validatePreviewTooling();
+  await validateLivePreview(
+    platform,
+    timeoutMs,
+    handoffTimeoutMs,
+    publicPreviewTimeoutMs,
+    recordLog,
+    recordOutput,
+  );
 }
 
 if (fileURLToPath(import.meta.url) === resolve(process.argv[1])) {

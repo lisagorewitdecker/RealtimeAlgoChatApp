@@ -948,6 +948,85 @@ test(
   },
 );
 
+test("stale tooling summaries retain versions, samples, and maintenance files", () => {
+  const temporaryDirectory = mkdtempSync(
+    join(tmpdir(), "chat-preview-tooling-summary-"),
+  );
+
+  try {
+    const scenarios = [
+      {
+        displayName: "Expo CLI",
+        environmentName: "PREVIEW_STARTUP_TEST_CAPTURED_EXPO_CLI_VERSION",
+        installedVersion: installedPackageVersion("@expo/cli"),
+      },
+      {
+        displayName: "React Native",
+        environmentName: "PREVIEW_STARTUP_TEST_CAPTURED_REACT_NATIVE_VERSION",
+        installedVersion: installedPackageVersion("react-native"),
+      },
+    ];
+
+    for (const scenario of scenarios) {
+      const capturedVersion = "0.0.0";
+      const summaryPath = join(
+        temporaryDirectory,
+        `${scenario.displayName.toLowerCase().replaceAll(" ", "-")}.md`,
+      );
+      const markerPath = join(
+        temporaryDirectory,
+        `${scenario.displayName.toLowerCase().replaceAll(" ", "-")}.marker`,
+      );
+      const result = runNodeScript([validatorPath], {
+        GITHUB_STEP_SUMMARY: summaryPath,
+        [scenario.environmentName]: capturedVersion,
+        PREVIEW_STARTUP_LIVE_START_MARKER: markerPath,
+        PREVIEW_STARTUP_TEST_FIXTURE: "handoff-server",
+        PREVIEW_STARTUP_TEST_PRIVATE_VALUE: "PRIVATE_ENV_VALUE",
+      });
+
+      assert.equal(result.status, 1, `${scenario.displayName}: ${result.output}`);
+      const summary = readFileSync(summaryPath, "utf8");
+      assert.match(summary, /^### Expo preview startup/m);
+      assert.match(summary, /\*\*Status:\*\* FAIL/);
+      assert.match(summary, /\*\*Failure:\*\* Stale preview tooling/);
+      assert.match(
+        summary,
+        new RegExp(
+          `captured version \\\`${escapeRegExp(capturedVersion)}\\\`; installed version ` +
+            `\\\`${escapeRegExp(scenario.installedVersion)}\\\``,
+        ),
+      );
+      for (const { name } of CAPTURED_LOADER_SAMPLES) {
+        assert.ok(
+          summary.includes(name),
+          `${scenario.displayName} summary omitted ${name}`,
+        );
+      }
+      assert.match(
+        summary,
+        /preview-startup-runtime-library-fixture\.mjs/,
+      );
+      assert.match(summary, /validate-preview-startup\.mjs/);
+      assert.doesNotMatch(
+        summary,
+        /PRIVATE_ENV_VALUE|https?:\/\/|authorization|password|secret|token|credential/i,
+      );
+      assert.equal(
+        existsSync(markerPath),
+        false,
+        `${scenario.displayName} summary validation started live preview`,
+      );
+      assert.ok(
+        summary.length < 2_000,
+        `${scenario.displayName} summary exceeded its bounded size`,
+      );
+    }
+  } finally {
+    rmSync(temporaryDirectory, { recursive: true, force: true });
+  }
+});
+
 test("unsupported loader wording fails with a maintenance message", () => {
   const temporaryDirectory = mkdtempSync(
     join(tmpdir(), "chat-preview-unsupported-loader-"),
