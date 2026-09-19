@@ -298,6 +298,17 @@ test("real-platform capture records macOS and Windows loader output safely", () 
       diagnosticPattern: /Expo preview loader wording changed/,
     },
     {
+      name: "Windows drive startup args",
+      fixture: "missing-runtime-library-windows",
+      output:
+        "Error: The code execution cannot proceed because " +
+        "C:\\Users\\reviewer\\AppData\\Local\\Expo\\libgtk-3-0.dll " +
+        "was not found. ******" +
+        "Starting project at D:\\a\\RealtimeAlgoChatApp\\artifacts\\chat-app --host 0.0.0.0\n",
+      libraryIdentifier: "libgtk-3-0.dll",
+      diagnosticPattern: /Expo preview loader wording changed/,
+    },
+    {
       name: "Windows UNC library path",
       fixture: "missing-runtime-library-windows",
       output:
@@ -334,6 +345,7 @@ test("real-platform capture records macOS and Windows loader output safely", () 
         /\\\\server\\share\\repo\\app/,
       );
       assert.doesNotMatch(recordedOutput, /--port 8081 extra/);
+      assert.doesNotMatch(recordedOutput, /--host 0\.0\.0\.0/);
       assert.doesNotMatch(recordedOutput, /TOP_SECRET_VALUE/);
       assert.match(recordedOutput, new RegExp(fixtureCase.libraryIdentifier));
 
