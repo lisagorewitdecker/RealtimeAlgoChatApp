@@ -77,7 +77,10 @@ run_case() {
 
  : > "$stop_file"
  kill "$writer_pid" 2>/dev/null || true
- wait "$writer_pid" || writer_status=$?
+ set +e
+ wait "$writer_pid"
+ writer_status=$?
+ set -e
  if [[ "$writer_status" == "143" || "$writer_status" == "130" ]]; then
    writer_status=0
  fi
