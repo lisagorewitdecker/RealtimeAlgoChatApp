@@ -57,7 +57,14 @@ suite_status=$?
 set -e
 
 : > "$STOP_FILE"
+kill "$writer_pid" 2>/dev/null || true
 if ! wait "$writer_pid"; then
+  writer_status=$?
+  if [[ "$writer_status" == "143" || "$writer_status" == "130" ]]; then
+    writer_status=0
+  fi
+fi
+if [[ "${writer_status:-0}" != "0" ]]; then
   printf 'Concurrent saved-status writer failed before the suite completed.\n%s\n' \
     "$suite_output" >&2
   exit 1
