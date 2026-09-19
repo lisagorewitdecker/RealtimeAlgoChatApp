@@ -34,12 +34,23 @@ require_command() {
   fi
 }
 
-for command in adb avdmanager curl emulator find grep head pnpm sdkmanager unzip; do
+for command in adb avdmanager curl emulator find grep head pnpm sdkmanager sha256sum tar unzip; do
   require_command "$command"
 done
 
 if ! command -v maestro >/dev/null 2>&1; then
-  curl --fail --location --silent --show-error https://get.maestro.mobile.dev | bash
+  MAESTRO_VERSION="${MAESTRO_VERSION:-1.39.13}"
+  MAESTRO_ARCHIVE="maestro-linux-amd64.tar.gz"
+  MAESTRO_URL="https://github.com/mobile-dev-inc/maestro/releases/download/cli-${MAESTRO_VERSION}/${MAESTRO_ARCHIVE}"
+  MAESTRO_SHA256="${MAESTRO_SHA256:?MAESTRO_SHA256 is required for Maestro artifact verification.}"
+  MAESTRO_TMP_ARCHIVE="${RUNNER_TEMP}/maestro-${MAESTRO_VERSION}.tar.gz"
+
+  curl --fail --location --silent --show-error "$MAESTRO_URL" --output "$MAESTRO_TMP_ARCHIVE"
+  printf '%s  %s\n' "$MAESTRO_SHA256" "$MAESTRO_TMP_ARCHIVE" | sha256sum -c -
+
+  mkdir -p "$HOME/.maestro/bin"
+  tar -xzf "$MAESTRO_TMP_ARCHIVE" -C "$HOME/.maestro/bin"
+  chmod +x "$HOME/.maestro/bin/maestro" || true
 fi
 
 if ! command -v maestro >/dev/null 2>&1 && [[ -d "$HOME/.maestro/bin" ]]; then
