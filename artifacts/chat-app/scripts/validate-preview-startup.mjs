@@ -372,7 +372,7 @@ function sanitizeRecordedStartupOutput(value) {
           /Starting project at ((?:[A-Za-z]:\\|\\\\[^\\\r\n]+\\[^\\\r\n]+\\)[^\\"\r\n]+(?:\\[^\\"\r\n]+)*)/g,
           (_, path) => {
             const startupProjectPath = path.replace(
-              /\s+--[A-Za-z][A-Za-z0-9-]*(?:\s+[^\r\n]*)?$/,
+              /\s+(?:--port|--host|--localhost)\b[^\r\n]*$/,
               "",
             );
             return `Starting project at ${sanitizeWindowsProjectPath(startupProjectPath)}`;
