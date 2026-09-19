@@ -1233,6 +1233,106 @@ test(
 );
 
 test(
+  "CLI keeps a failed local boundary and record-save recovery clear when output is unwritable",
+  { timeout: 5_000 },
+  () => {
+    const directory = mkdtempSync(
+      join(tmpdir(), "preview-handoff-local-unwritable-record-cli-"),
+    );
+    const stdoutPath = join(directory, "validator.stdout.log");
+    const stderrPath = join(directory, "validator.stderr.log");
+    const preloadPath = join(directory, "fail-local-bundle-fetch.mjs");
+    writeFileSync(
+      preloadPath,
+      `const originalFetch = globalThis.fetch;
+globalThis.fetch = async (url, options = {}) => {
+  const requestUrl = new URL(String(url));
+  if (requestUrl.origin === "https://public-preview.test") {
+    return new Response(
+      JSON.stringify({
+        launchAsset: {
+          url: "https://public-preview.test/_expo/static/js/bundle",
+        },
+      }),
+      { status: 200 },
+    );
+  }
+  if (
+    requestUrl.hostname === "127.0.0.1" &&
+    requestUrl.pathname === "/_expo/static/js/bundle"
+  ) {
+    return new Response("local response contains private-secret", {
+      status: 503,
+    });
+  }
+  return originalFetch(url, options);
+};
+`,
+      "utf8",
+    );
+
+    try {
+      const stdout = openSync(stdoutPath, "w");
+      const stderr = openSync(stderrPath, "w");
+      let result;
+      try {
+        result = spawnSync(
+          process.execPath,
+          [
+            validatorPath,
+            "--platform",
+            "android",
+            "--record-output",
+            "/dev/null/unwritable-preview-handoff.json",
+          ],
+          {
+            env: {
+              ...process.env,
+              NODE_OPTIONS: [
+                process.env.NODE_OPTIONS,
+                `--import ${preloadPath}`,
+              ]
+                .filter(Boolean)
+                .join(" "),
+              PREVIEW_PUBLIC_URL:
+                "https://public-preview.test/private-path?token=private-secret",
+              PREVIEW_PUBLIC_TIMEOUT_MS: "200",
+              PREVIEW_HANDOFF_TIMEOUT_MS: "100",
+              PREVIEW_STARTUP_TIMEOUT_MS: "2000",
+              PREVIEW_STARTUP_TEST_FIXTURE: "handoff-server",
+            },
+            stdio: ["ignore", stdout, stderr],
+          },
+        );
+      } finally {
+        closeSync(stdout);
+        closeSync(stderr);
+      }
+      const output =
+        readFileSync(stdoutPath, "utf8") + readFileSync(stderrPath, "utf8");
+
+      assert.notEqual(result.status, 0, output);
+      assert.match(output, /public_manifest_reachability=PASS/);
+      assert.match(output, /local_handoff_probe=FAIL/);
+      assert.match(
+        output,
+        /Preview handoff preflight failed at the local manifest\/bundle probe/,
+      );
+      assert.match(
+        output,
+        /Recovery: rerun with --record-output set to a writable JSON file, or omit --record-output/,
+      );
+      assert.doesNotMatch(
+        output,
+        /\/dev\/null|127\.0\.0\.1|public-preview\.test|private-path|private-secret|token=|_expo\/static\/js\/bundle|local response contains private-secret/i,
+      );
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
   "CLI saves a redacted failed local boundary when the local bundle probe times out",
   { timeout: 5_000 },
   () => {
