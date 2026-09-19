@@ -8,6 +8,9 @@ const REQUEST_EVIDENCE_TRUNCATION_NOTICE =
   `${MAX_REQUEST_EVIDENCE_LINES - 1} request lines; console output continues.`;
 
 function classifyClient(request) {
+  const userAgent = String(
+    request.headers["user-agent"] == null ? "" : request.headers["user-agent"],
+  ).toLowerCase();
   const userAgent = String(request.headers["user-agent"] || "").toLowerCase();
   if (userAgent.includes("preview-validation")) return "preview-validation";
   if (/\bexpo(?:\s+go)?(?:\/|\s|$)/.test(userAgent)) return "Expo Go";
@@ -24,11 +27,17 @@ function classifyClient(request) {
 }
 
 function normalizePlatform(request) {
+  const platform = String(
+    request.headers["expo-platform"] == null ? "" : request.headers["expo-platform"],
+  ).toLowerCase();
   const platform = String(request.headers["expo-platform"] || "").toLowerCase();
   return platform === "android" || platform === "ios" || platform === "web" ? platform : "-";
 }
 
 function classifyResource(request) {
+  const requestPath = String(
+    request.url == null ? "" : request.url,
+  ).split("?", 1)[0].toLowerCase();
   const requestPath = String(request.url || "").split("?", 1)[0].toLowerCase();
   if (requestPath.endsWith("/manifest") || requestPath.endsWith("/manifest.json")) {
     return "manifest";
@@ -56,6 +65,7 @@ function formatRequestEvidence(request, response, startedAt, now = Date.now()) {
 }
 
 function resolveEvidencePath(configuredPath, packageRoot) {
+  return configuredPath ? path.resolve(packageRoot, configuredPath) : path.join(packageRoot, ".expo", "dev-request-evidence.log");
   return configuredPath ? path.resolve(packageRoot, configuredPath)
     : path.join(packageRoot, ".expo", "dev-request-evidence.log");
 }
@@ -73,6 +83,11 @@ function createEvidenceAppender(
   let persistenceEnabled = true;
   let pendingWrite = Promise.resolve();
   let truncated = false;
+  const truncationNotice = maxLines === MAX_REQUEST_EVIDENCE_LINES ?
+    REQUEST_EVIDENCE_TRUNCATION_NOTICE :
+    `[dev-request] Evidence file truncated after ${
+      maxLines - 1
+    } request lines; console output continues.`;
   const truncationNotice = maxLines === MAX_REQUEST_EVIDENCE_LINES ? REQUEST_EVIDENCE_TRUNCATION_NOTICE
     : `[dev-request] Evidence file truncated after ${
         maxLines - 1
