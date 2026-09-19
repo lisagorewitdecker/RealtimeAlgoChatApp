@@ -337,7 +337,7 @@ function sanitizeStartupSummaryDiagnostic(value) {
 function sanitizeRecordedStartupOutput(value) {
   const sanitizeWindowsPath = (path) => {
     const libraryName = path.match(
-      /[^/\\\s]+?\.(?:dylib|so(?:\.\d+)?|dll)\b/i,
+      /[^/\\\s]+?\.(?:dylib|so(?:\.\d+)*|dll)\b/i,
     )?.[0];
     const redactedPrefix = path.startsWith("\\\\")
       ? "\\\\[redacted]"
@@ -362,7 +362,7 @@ function sanitizeRecordedStartupOutput(value) {
         .replace(/\/(?:Users|home)\/[^\r\n]+/g, (path) => {
           const prefix = path.startsWith("/Users/") ? "/Users/" : "/home/";
           const libraryName = path.match(
-            /[^/\\\s]+?\.(?:dylib|so(?:\.\d+)?|dll)\b/i,
+            /[^/\\\s]+?\.(?:dylib|so(?:\.\d+)*|dll)\b/i,
           )?.[0];
           if (!libraryName) return `${prefix}[redacted]`;
           const suffix = path.slice(path.indexOf(libraryName) + libraryName.length);
@@ -372,7 +372,7 @@ function sanitizeRecordedStartupOutput(value) {
           /[A-Za-z]:\\(?:Users|home|a)\\[^\r\n]+/g,
           (path) => {
             const libraryName = path.match(
-              /[^/\\\s]+?\.(?:dylib|so(?:\.\d+)?|dll)\b/i,
+              /[^/\\\s]+?\.(?:dylib|so(?:\.\d+)*|dll)\b/i,
             )?.[0];
             if (!libraryName) return `${path.slice(0, 3)}[redacted]`;
             const suffix = path.slice(path.indexOf(libraryName) + libraryName.length);
@@ -386,7 +386,7 @@ function sanitizeRecordedStartupOutput(value) {
           },
         )
         .replace(
-          /[A-Za-z]:\\(?:Users|home)\\[^"\r\n]+|[A-Za-z]:\\[^"\r\n]*?[^/\\\s]+\.(?:dylib|so(?:\.\d+)?|dll)\b[^"\r\n]*|\\\\[^\\\r\n]+\\[^\\\r\n]+\\[^"\r\n]*?[^/\\\s]+\.(?:dylib|so(?:\.\d+)?|dll)\b[^"\r\n]*/g,
+          /[A-Za-z]:\\(?:Users|home)\\[^"\r\n]+|[A-Za-z]:\\[^"\r\n]*?[^/\\\s]+\.(?:dylib|so(?:\.\d+)*|dll)\b[^"\r\n]*|\\\\[^\\\r\n]+\\[^\\\r\n]+\\[^"\r\n]*?[^/\\\s]+\.(?:dylib|so(?:\.\d+)*|dll)\b[^"\r\n]*/g,
           sanitizeWindowsPath,
         )
         .slice(0, MAX_RECORDED_STARTUP_LINE_LENGTH),
