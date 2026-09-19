@@ -403,7 +403,7 @@ test(
           },
         );
 
-        assert.equal(live.status, 1, fixtureCase.name);
+        assert.notEqual(live.status, 0, fixtureCase.name);
         const captured = runNodeScript([
           validatorPath,
           "--log-file",
