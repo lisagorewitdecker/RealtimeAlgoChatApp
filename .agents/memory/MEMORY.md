@@ -110,3 +110,4 @@
 - [setup-node semver contract](setup-node-semver-contract.md) — pin the local Node-range matcher to the semver version bundled by the pinned setup-node action.
 - [Metro evidence persistence](metro-evidence-persistence.md) — queue immutable rolling snapshots FIFO; disable file writes after failure while console diagnostics continue.
 - [Hosted root contract gate](hosted-root-contract-gate.md) — ubuntu-latest lacks ImageMagick/Tesseract and floats Node 24.x; signal-timing flakes and log/rerun recipes via the push token.
+- [GitHub PR state verification](github-pr-state-verification.md) — re-read live PR state before attempting rebase, reopen, or branch operations because task snapshots can lag GitHub.
