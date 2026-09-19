@@ -417,11 +417,17 @@ function makeEditedBody(initialBody, marker) {
 }
 
 export function buildBreakingCompatibilityContent(content) {
-  const operation = "operationId: createRoom";
-  if (!content.includes(operation)) {
-    throw new Error(`expected compatibility fixture operation ${operation}`);
+  const roomsPostOperationPattern =
+    /(^[ \t]*\/rooms:\s*\n(?:^[ \t]+.*\n)*?^[ \t]+post:\s*\n(?:^[ \t]+.*\n)*?^[ \t]+operationId:\s*)createRoom\b/m;
+  if (!roomsPostOperationPattern.test(content)) {
+    throw new Error(
+      "expected compatibility fixture operationId: createRoom in the /rooms POST operation",
+    );
   }
-  return content.replace(operation, "operationId: createRoomHostedProbe");
+  return content.replace(
+    roomsPostOperationPattern,
+    "$1createRoomHostedProbe",
+  );
 }
 
 async function createProbeCommit(
