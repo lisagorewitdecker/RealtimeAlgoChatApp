@@ -61,7 +61,7 @@ device_udid="$(
 if [[ -z "$device_udid" ]]; then
   available_devices="$(xcrun simctl list devices available)"
   device_udid="$(
-    grep -F "$IOS_DEVICE_NAME (" <<<"$available_devices" |
+    { grep -F "$IOS_DEVICE_NAME (" <<<"$available_devices" || true; } |
       sed -n 's/.*(\([0-9A-Fa-f-]\{8,\}\)) (Shutdown).*/\1/p' |
       head -n 1
   )"
