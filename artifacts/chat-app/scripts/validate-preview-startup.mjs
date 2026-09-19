@@ -4,6 +4,7 @@ import { writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { spawn } from "node:child_process";
 import { setTimeout as delay } from "node:timers/promises";
+import { fileURLToPath } from "node:url";
 import {
   findDuplicateJsonObjectKeys,
   isJsonEvidenceLimitError,
@@ -108,6 +109,12 @@ const STARTUP_FAILURES = [
   /(?:error|failed|unable|cannot).{0,80}(?:react native )?devtools/i,
   /(?:react native )?devtools.{0,80}(?:error|failed|unable|cannot|could not|couldn't)/i,
 ];
+const LOADER_FAILURES = [
+  /error while loading shared libraries:/i,
+  /cannot open shared object file/i,
+  /library not loaded:/i,
+  /cannot proceed because [^\r\n]+ was not found/i,
+];
 const UNRECOGNIZED_LOADER_FAILURES = [
   /(?:react native )?devtools.{0,120}(?:launcher|loader|binary).{0,120}(?:exited|terminated|error|failed|unable|cannot|could not|status)/i,
   /(?:launcher|loader).{0,120}(?:react native )?devtools.{0,120}(?:exited|terminated|error|failed|unable|cannot|could not|status)/i,
@@ -132,21 +139,26 @@ const STARTUP_TEST_FIXTURES = new Set([
   "missing-runtime-library-windows-quoted",
   "missing-runtime-library-dyld-quoted-long-path",
   "missing-runtime-library-windows-quoted-long-path",
+  "missing-runtime-library-malformed-quotes",
+  "missing-runtime-library-malformed-control",
+  "missing-runtime-library-malformed-trailing",
+  "missing-runtime-library-malformed-followed-by-valid",
 ]);
-const MISSING_LIBRARY_PATH = String.raw`[A-Za-z0-9._+~ /\\:-]`;
+const MISSING_LIBRARY_PATH = String.raw`[A-Za-z0-9._+~ /\\:[\]-]`;
 const MISSING_LIBRARY_CAPTURE = String.raw`(?:(["'])([^"'\u0000-\u001f\u007f]+)\1|(${MISSING_LIBRARY_PATH}+?))`;
 const MISSING_LIBRARY_DYLD_CAPTURE = String.raw`(?:(["'])([^"'\u0000-\u001f\u007f]+)\1|(${MISSING_LIBRARY_PATH}+))`;
+const MISSING_LIBRARY_BASENAME = /(?:^|[\\/])[^/\\\s:]+\.(?:dylib|so(?:\.\d+)*|dll)$/i;
 const MISSING_LIBRARY_PATTERNS = [
   new RegExp(
-    String.raw`error while loading shared libraries:\s*${MISSING_LIBRARY_CAPTURE}\s*:\s*cannot open shared object file`,
+    String.raw`error while loading shared libraries:\s*${MISSING_LIBRARY_CAPTURE}\s*:\s*cannot open shared object file(?:\s*:\s*no such file or directory)?\s*$`,
     "i",
   ),
   new RegExp(
-    String.raw`library not loaded:\s*${MISSING_LIBRARY_DYLD_CAPTURE}`,
+    String.raw`library not loaded:\s*${MISSING_LIBRARY_DYLD_CAPTURE}\s*$`,
     "i",
   ),
   new RegExp(
-    String.raw`cannot proceed because\s+${MISSING_LIBRARY_CAPTURE}\s+was not found`,
+    String.raw`cannot proceed because\s+${MISSING_LIBRARY_CAPTURE}\s+was not found(?:\.\s*(?:reinstalling the program may fix this problem\.)?)?\s*$`,
     "i",
   ),
 ];
@@ -157,6 +169,14 @@ function findStartupFailure(output) {
     lines.find((line) =>
       STARTUP_FAILURES.some((pattern) => pattern.test(line)),
     ) ?? null
+  );
+}
+
+function findLoaderFailure(output) {
+  const lines = output.split(/\r?\n/);
+  return (
+    lines.find((line) => LOADER_FAILURES.some((pattern) => pattern.test(line))) ??
+    null
   );
 }
 
@@ -187,12 +207,41 @@ function redactStartupAuthorization(value) {
   );
 }
 
+function redactKnownStartupFailureSecrets(value) {
+  const loaderStart = value.search(
+    /(?:error while loading shared libraries:|library not loaded:|cannot proceed because\b)/i,
+  );
+  if (loaderStart < 0) return value;
+
+  const prefix = value.slice(0, loaderStart);
+  const loaderFailure = value.slice(loaderStart);
+  return `${prefix}${loaderFailure
+    .replace(
+      /\s+(?:password|authorization|proxy-authorization|token)\s*[:=]\s*\S.*$/i,
+      "",
+    )
+    .replace(/\s+\[redacted (?:credential|authorization)\].*$/i, "")}`;
+}
+
+function normalizeLoaderFailureForMatching(value) {
+  return value
+    // eslint-disable-next-line no-control-regex
+    .replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, "")
+    // eslint-disable-next-line no-control-regex
+    .replace(/\u0007\s*$/g, "");
+}
+
 function findMissingLibrary(output) {
   for (const line of output.split(/\r?\n/)) {
+    const normalizedLine = normalizeLoaderFailureForMatching(
+      redactKnownStartupFailureSecrets(line),
+    );
     for (const pattern of MISSING_LIBRARY_PATTERNS) {
-      const match = line.match(pattern);
+      const match = normalizedLine.match(pattern);
       const missingLibrary = (match?.[2] ?? match?.[3])?.trim();
-      if (missingLibrary) return missingLibrary;
+      if (missingLibrary && MISSING_LIBRARY_BASENAME.test(missingLibrary)) {
+        return missingLibrary;
+      }
     }
   }
   return null;
@@ -222,13 +271,22 @@ function compactStartupLibraryPath(path) {
 
 function formatStartupFailure(output) {
   const failure = findStartupFailure(output);
+  const loaderFailure = findLoaderFailure(output);
   if (failure) {
+    const isLoaderFailure = Boolean(loaderFailure && loaderFailure === failure);
+    const safeFailure = isLoaderFailure
+      ? redactKnownStartupFailureSecrets(failure)
+      : failure;
+    const missingLibrary = isLoaderFailure ? findMissingLibrary(loaderFailure) : null;
+    if (isLoaderFailure && !missingLibrary) {
+      return `${STARTUP_DIAGNOSTIC_PREFIX}${LOADER_COMPATIBILITY_MAINTENANCE_MESSAGE}`;
+    }
+
     const fullFailureDetail = sanitizeStartupDiagnostic(
-      failure,
+      safeFailure,
       MAX_STARTUP_FAILURE_LINE_LENGTH,
     );
     const redactedFailureDetail = redactStartupAuthorization(fullFailureDetail);
-    const missingLibrary = findMissingLibrary(output);
     const libraryDetail =
       missingLibrary &&
       (!fullFailureDetail.includes(missingLibrary) ||
@@ -256,13 +314,7 @@ function formatStartupFailure(output) {
   const unrecognizedLoaderFailure = findUnrecognizedLoaderFailure(output);
   if (!unrecognizedLoaderFailure) return null;
 
-  return `${STARTUP_DIAGNOSTIC_PREFIX}${sanitizeStartupDiagnostic(
-    `${LOADER_COMPATIBILITY_MAINTENANCE_MESSAGE} Observed: ${sanitizeStartupDiagnostic(
-      unrecognizedLoaderFailure,
-      MAX_STARTUP_FAILURE_LINE_LENGTH,
-    )}`,
-    MAX_STARTUP_DIAGNOSTIC_LENGTH - STARTUP_DIAGNOSTIC_PREFIX.length,
-  )}`;
+  return `${STARTUP_DIAGNOSTIC_PREFIX}${LOADER_COMPATIBILITY_MAINTENANCE_MESSAGE}`;
 }
 
 function sanitizeStartupSummaryDiagnostic(value) {
@@ -295,7 +347,7 @@ function sanitizeRecordedStartupOutput(value) {
           return `${prefix}[redacted]/${libraryName}${suffix}`;
         })
         .replace(
-          /[A-Za-z]:\\(?:Users|home)\\[^\r\n]+/g,
+          /[A-Za-z]:\\(?:Users|home|a)\\[^\r\n]+/g,
           (path) => {
             const libraryName = path.match(
               /[^/\\\s]+?\.(?:dylib|so(?:\.\d+)?|dll)\b/i,
@@ -1089,11 +1141,18 @@ async function validateLivePreview(
   recordLog,
   recordOutput,
 ) {
-  getPublicPreviewManifestUrl(process.env);
+  const launcherOnly = process.env.PREVIEW_STARTUP_REAL_LAUNCHER === "1";
+  const startupTestFixture = process.env.PREVIEW_STARTUP_TEST_FIXTURE;
+  const useStartupFixture = STARTUP_TEST_FIXTURES.has(startupTestFixture);
+  const runtimeLibraryFixture =
+    useStartupFixture &&
+    startupTestFixture.startsWith("missing-runtime-library");
+  if (!launcherOnly && !runtimeLibraryFixture) getPublicPreviewManifestUrl(process.env);
   const port = await findFreePort();
   const output = [];
+  const pnpmCommand = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
   const startupCommand =
-    STARTUP_TEST_FIXTURES.has(process.env.PREVIEW_STARTUP_TEST_FIXTURE)
+    useStartupFixture
       ? {
           command: process.execPath,
           args: [
@@ -1105,10 +1164,10 @@ async function validateLivePreview(
         }
       : process.env.PREVIEW_STARTUP_REAL_LAUNCHER === "1"
         ? {
-            command: "pnpm",
+            command: pnpmCommand,
             args: ["exec", "expo", "start", "--localhost", "--port", String(port)],
           }
-      : { command: "pnpm", args: ["run", "dev"] };
+      : { command: pnpmCommand, args: ["run", "dev"] };
   const child = spawn(startupCommand.command, startupCommand.args, {
     cwd: resolve(import.meta.dirname, ".."),
     env: {
@@ -1116,6 +1175,7 @@ async function validateLivePreview(
       PORT: String(port),
     },
     detached: process.platform !== "win32",
+    shell: process.platform === "win32" && startupCommand.command === pnpmCommand,
     stdio: ["ignore", "pipe", "pipe"],
   });
 
@@ -1143,7 +1203,14 @@ async function validateLivePreview(
       clearTimeout(closeTimer);
       closeTimer = undefined;
     });
-    if (process.platform === "win32" || !processGroupId) {
+    if (process.platform === "win32" && processGroupId) {
+      const processTreeKiller = spawn(
+        "taskkill.exe",
+        ["/PID", String(processGroupId), "/T", "/F"],
+        { stdio: "ignore", windowsHide: true },
+      );
+      processTreeKiller.unref();
+    } else if (!processGroupId) {
       child.kill("SIGTERM");
     } else {
       try {
@@ -1155,8 +1222,16 @@ async function validateLivePreview(
     closeTimer = setTimeout(() => {
       if (!processGroupId) return;
       try {
-        if (process.platform === "win32") child.kill("SIGKILL");
-        else process.kill(-processGroupId, "SIGKILL");
+        if (process.platform === "win32") {
+          const processTreeKiller = spawn(
+            "taskkill.exe",
+            ["/PID", String(processGroupId), "/T", "/F"],
+            { stdio: "ignore", windowsHide: true },
+          );
+          processTreeKiller.unref();
+        } else {
+          process.kill(-processGroupId, "SIGKILL");
+        }
       } catch (error) {
         if (error.code !== "ESRCH") throw error;
       }
@@ -1233,12 +1308,24 @@ async function validateLivePreview(
       if (!READY_MARKERS.some((pattern) => pattern.test(combinedOutput))) {
         finish(() => {
           stopChild();
+          recordStartupOutput(recordLog, combinedOutput);
           rejectResult(
             new Error(
               `Expo preview did not reach Metro running status within ${timeoutMs}ms.\n` +
                 combinedOutput,
             ),
           );
+        });
+        return;
+      }
+      if (launcherOnly) {
+        finish(() => {
+          stopChild();
+          recordStartupOutput(recordLog, combinedOutput);
+          console.log(
+            `Expo preview launcher reached Metro running status on port ${port}.`,
+          );
+          resolveResult();
         });
         return;
       }
@@ -1378,7 +1465,7 @@ async function main() {
     );
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
   const cliArgs = process.argv.slice(2);
   main().catch(async (error) => {
     if (isStartupValidationInvocation(cliArgs)) {
