@@ -2756,6 +2756,79 @@ test("Android preview evidence keeps its pull-request validation and privacy con
     "a renamed Android summary must not expose evidence text",
   );
 
+  const renamedMalformed = runAndroidPreviewJob(
+    "renamed-malformed",
+    [
+      {
+        timestamp: "20260915T121500Z",
+        baseText: blockedRecord,
+        text: blockedRecord
+          .replace("**Result: BLOCKED", "**Result: PASS")
+          .replace(
+            "No physical phone was available.",
+            "PRIVATE_RENAMED_ANDROID_EVIDENCE no physical phone was available.",
+          ),
+        preflight: blockedPreflight,
+      },
+    ],
+    { renameRecord: true },
+  );
+  const renamedMalformedFailure = [
+    renamedMalformed.result.stdout,
+    renamedMalformed.result.stderr,
+  ].join("\n");
+  assert.notEqual(
+    renamedMalformed.result.status,
+    0,
+    "a malformed renamed Android preview record must fail the job",
+  );
+  assert.match(
+    renamedMalformed.summary,
+    /- Changed records checked: \*\*1\*\*/,
+    "a malformed renamed Android record must count as one changed record",
+  );
+  assert.equal(
+    renamedMalformed.checkerArgs.length,
+    1,
+    "a malformed renamed Android record must produce one checker invocation",
+  );
+  assert.deepEqual(
+    renamedMalformed.checkerArgs,
+    [[renamedMalformed.recordPath, renamedMalformed.preflightPath]],
+    "a malformed renamed Android record must be checked with its renamed sibling sidecar",
+  );
+  const renamedMalformedRecordLink = new RegExp(
+    `\\[${renamedMalformed.recordPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\]\\(https://github\\.example/example/chat-app/blob/[^)]+/${renamedMalformed.recordPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\)`,
+    "g",
+  );
+  assert.equal(
+    renamedMalformed.summary.match(renamedMalformedRecordLink)?.length ?? 0,
+    1,
+    "a malformed renamed Android record must have one destination link",
+  );
+  assert.doesNotMatch(
+    renamedMalformed.summary,
+    new RegExp(
+      renamedMalformed.baseRecordPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
+    ),
+    "a malformed renamed Android record must not leave its old path in the summary",
+  );
+  assert.match(
+    renamedMalformed.summary,
+    /Validation: \*\*FAIL\*\*[\s\S]*PASS records must include a real Device model value\./,
+    "a malformed renamed Android record must report the fixed checker reason",
+  );
+  assert.match(
+    renamedMalformedFailure,
+    /PASS records must include a real Device model value\./,
+    "the surfaced malformed renamed Android checker failure must use the fixed reason",
+  );
+  assert.doesNotMatch(
+    `${renamedMalformed.summary}\n${renamedMalformedFailure}`,
+    /PRIVATE_RENAMED_ANDROID_EVIDENCE|Workspace curl returned HTTP 200|No physical phone was available/,
+    "a malformed renamed Android record must not expose evidence text",
+  );
+
   const multipleRenamed = runAndroidPreviewJob(
     "multiple-renamed",
     [
