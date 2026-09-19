@@ -9,7 +9,7 @@ Every account is authenticated through Clerk. Any signed-in user with a verified
 This is a pnpm monorepo. The product is split across three artifacts, each independently run and previewed:
 
 ```
-artifacts/
+  artifacts/
   api-server/       Express + Socket.IO backend (auth, rooms, moderation, AI assistant proxy)
   chat-app/         Expo/React Native app (iOS, Android, Web) — the RealtimeAlgoChatApp Studio client
   mockup-sandbox/   Design/preview sandbox used while iterating on UI components
