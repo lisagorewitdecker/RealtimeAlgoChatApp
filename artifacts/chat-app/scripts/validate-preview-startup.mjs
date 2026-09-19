@@ -279,10 +279,11 @@ function formatStartupFailure(output) {
       : failure;
     const missingLibrary = isLoaderFailure ? findMissingLibrary(loaderFailure) : null;
     const isLoaderFailure = Boolean(loaderFailure);
+    const isLoaderFailure = loaderFailure === failure;
     const safeFailure = isLoaderFailure
       ? redactKnownStartupFailureSecrets(failure)
       : failure;
-    const missingLibrary = loaderFailure
+    const missingLibrary = isLoaderFailure
       ? findMissingLibrary(loaderFailure)
       : null;
     if (isLoaderFailure && !missingLibrary) {
