@@ -123,6 +123,16 @@ test("hosted preview startup summary regression checks the reviewed revision", (
   assert.match(verification, /private material/);
   assert.match(
     verification,
+    /diagnosis_matches="\$\(grep -E -- '\^\\\*\\\*Diagnosis:\\\*\\\* Expo preview startup error: Error: \/opt\/expo\/react-native-devtools:/,
+  );
+  assert.match(
+    verification,
+    /\[\^\\r\\n]\*\\\(missing runtime library: \[\^\\r\\n]\*libgtk-3\\\.so\\\.0\\\)\[\[:space:\]\]\*\$' "\$summary_path" \|\| true\)"/,
+  );
+  assert.match(verification, /diagnosis_line="\$diagnosis_matches"/);
+  assert.match(verification, /printf '%s\\n' "\$diagnosis_line"/);
+  assert.match(
+    verification,
     /contained output beyond the bounded diagnosis/,
   );
   assert.match(verification, /malformed_preview_setting/);
