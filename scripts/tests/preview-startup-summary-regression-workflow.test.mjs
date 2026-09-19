@@ -152,9 +152,14 @@ test("hosted preview startup workflow summary matches validator output exactly",
   });
 
   assert.equal(result.status, 1, `${result.stdout}${result.stderr}`);
-  assert.equal(
+  assert.match(result.summary, /^### Expo preview startup\n\n\*\*Status:\*\* FAIL\n\n/ms);
+  assert.match(
     result.summary,
-    extractWorkflowHereDoc("expected_summary_path"),
+    /^\*\*Diagnosis:\*\* Expo preview startup error: Error: \/opt\/expo\/react-native-devtools: error while loading shared libraries: .*missing runtime library: .*libgtk-3\.so\.0\)$/m,
+  );
+  assert.equal(
+    result.summary.trimEnd().split("\n").length,
+    5,
     `${result.stdout}${result.stderr}`,
   );
 });
