@@ -203,7 +203,6 @@ export function parseArgs(argv) {
       "--repo": "repository",
       "--base": "baseBranch",
       "--generated-file": "generatedFile",
-      "--compatibility-file": "compatibilityFile",
       "--workflow": "workflow",
       "--branch": "branch",
       "--output": "output",
@@ -782,7 +781,6 @@ Options:
   --repo OWNER/REPOSITORY       Repository (defaults to GITHUB_REPOSITORY)
   --base BRANCH                 Base branch (default: development)
   --generated-file PATH         Generated file to make stale
-  --compatibility-file PATH     OpenAPI file to make temporarily breaking
   --workflow PATH               Workflow file (default: .github/workflows/api-codegen.yml)
   --branch NAME                 Temporary branch name
   --poll-seconds N              Poll interval (default: 10)
