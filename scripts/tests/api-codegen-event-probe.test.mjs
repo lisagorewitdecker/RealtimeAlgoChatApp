@@ -147,7 +147,7 @@ test("required evidence is the generated-client step failure and its job URL", (
       jobs: [
         {
           id: 100,
-          name: "Generated client verification",
+          name: "Check generated API clients",
           html_url:
             "https://github.com/example/repository/actions/runs/42/job/100",
           conclusion: "failure",
@@ -165,7 +165,7 @@ test("required evidence is the generated-client step failure and its job URL", (
   assert.deepEqual(evidence, {
     job: {
       id: 100,
-      name: "Generated client verification",
+      name: "Check generated API clients",
       url: "https://github.com/example/repository/actions/runs/42/job/100",
       conclusion: "failure",
     },
@@ -275,7 +275,7 @@ test("a successful probe confirms cleanup before returning its hosted evidence",
         jobs: [
           {
             id: 100,
-            name: "Generated client verification",
+            name: "Check generated API clients",
             html_url: `https://github.com/example/repository/actions/runs/${runId}/job/100`,
             conclusion: "failure",
             steps: [

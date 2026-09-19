@@ -267,14 +267,12 @@ export function findMatchingWorkflowRun(
 }
 
 function getGeneratedClientJob(run, jobs) {
-  const job = (jobs?.jobs ?? []).find((candidate) =>
-    (candidate.steps ?? []).some(
-      (step) => step.name === "Verify generated API clients",
-    ),
+  const job = (jobs?.jobs ?? []).find(
+    (candidate) => candidate.name === "Check generated API clients",
   );
   if (!job) {
     throw new Error(
-      `workflow run ${run.id} did not contain the "Verify generated API clients" step`,
+      `workflow run ${run.id} did not contain the "Check generated API clients" job`,
     );
   }
   return job;
