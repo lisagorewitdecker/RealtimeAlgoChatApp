@@ -1457,6 +1457,7 @@ jobs:
           IOS_NATIVE_BRANDING_RESULT: ${{ steps.ios-native-branding.outcome }}
           IOS_MAESTRO_RESULT: ${{ steps.ios-maestro.outcome }}
           IOS_NATIVE_EVIDENCE_RESULT: ${{ steps.ios-native-evidence.outcome }}
+          IOS_NATIVE_EVIDENCE_SIZE_RESULT: ${{ steps.ios-native-evidence-size.outcome }}
           IOS_SENTRY_TRIGGER_RESULT: ${{ steps.ios-sentry-trigger.outcome }}
           IOS_SENTRY_VERIFICATION_RESULT: ${{ steps.ios-sentry-verification.outcome }}
         run: |
@@ -1486,6 +1487,7 @@ jobs:
           add_check "Installed native candidate" "$IOS_NATIVE_BRANDING_RESULT"
           add_check "Maestro" "$IOS_MAESTRO_RESULT"
           add_check "Native large-text evidence" "$IOS_NATIVE_EVIDENCE_RESULT"
+          add_check "Native evidence text-size safety gate" "$IOS_NATIVE_EVIDENCE_SIZE_RESULT"
           add_check "Controlled Sentry error" "$IOS_SENTRY_TRIGGER_RESULT"
           add_check "Readable Sentry source maps" "$IOS_SENTRY_VERIFICATION_RESULT"
 
