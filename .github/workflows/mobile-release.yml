@@ -1247,6 +1247,48 @@ jobs:
       - name: Check out release candidate
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
+      - name: Set up pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ env.RELEASE_NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install workspace dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Verify nested release evidence readers on hosted runner
+        id: nested-release-evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test \
+            --test-name-pattern='every release JSON evidence reader rejects duplicate fields with fixed diagnostics|release evidence discovery catches an un-inventoried nested TypeScript helper reader|release evidence discovery follows helpers dynamically imported by shell checks|nested release evidence reader rejects duplicate fields with fixed redacted diagnostic' \
+            scripts/tests/mobile-release-summary-contract.test.mjs
+
+      - name: Summarize nested release evidence validation
+        if: ${{ always() }}
+        env:
+          CHECK_RESULT: ${{ steps.nested-release-evidence.outcome }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "## Nested release evidence validation"
+            echo
+            echo "- Hosted nested-reader inventory guard: **${CHECK_RESULT^^}** (includes the expected un-inventoried-reader failure diagnostic)"
+            echo "- Hosted duplicate-field diagnostic: **${CHECK_RESULT^^}** (fixed and redacted)"
+            echo "- Evidence contents in release validation output: **NOT INCLUDED**"
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [[ "$CHECK_RESULT" != "success" ]]; then
+            echo "Nested release evidence validation failed; inspect the test result without publishing evidence contents." >&2
+            exit 1
+          fi
+
       - name: Create controlled native evidence fixture artifacts
         shell: bash
         run: |
@@ -1311,16 +1353,6 @@ jobs:
         with:
           name: native-evidence-tamper-fixture-android
           path: ${{ runner.temp }}/native-evidence-tamper-downloads/android
-
-      - name: Set up pnpm
-        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
-        with:
-          version: ${{ env.PNPM_VERSION }}
-
-      - name: Set up Node.js
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version: ${{ env.RELEASE_NODE_VERSION }}
 
       - name: Run strict tamper block check against downloaded fixtures
         id: tamper-check

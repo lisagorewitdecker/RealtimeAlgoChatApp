@@ -66,7 +66,7 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test, { after } from "node:test";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import YAML from "yaml";
 
 const workspaceRoot = path.resolve(
@@ -862,6 +862,12 @@ function discoverInvokedScripts() {
 
     for (const file of referencedScriptFiles(commandText, baseDirectories)) {
       const relative = path.relative(workspaceRoot, file);
+      // This contract test is itself executed by the hosted release workflow.
+      // Its assertions contain summary strings, but it is not a release
+      // summary writer and must not recursively expose the scripts it tests.
+      if (relative === "scripts/tests/mobile-release-summary-contract.test.mjs") {
+        continue;
+      }
       if (!discovered.has(relative)) {
         discovered.set(relative, { invokedBy: new Set() });
       }
@@ -1914,6 +1920,69 @@ test("hosted native evidence regression exercises real artifact download continu
   );
 });
 
+test("hosted release validation exercises nested evidence readers without publishing contents", () => {
+  const regressionJob = workflow.jobs["native-evidence-tamper-regression"];
+  assert.ok(
+    regressionJob,
+    "the hosted tamper-regression job must remain available for nested reader validation",
+  );
+
+  const readerStep = regressionJob.steps.find(
+    (step) =>
+      step.name === "Verify nested release evidence readers on hosted runner",
+  );
+  assert.ok(
+    readerStep,
+    "the hosted release validation must execute the nested evidence-reader checks",
+  );
+  assert.equal(
+    readerStep.id,
+    "nested-release-evidence",
+    "the nested reader check outcome must be available to the release summary",
+  );
+  assert.match(
+    readerStep.run,
+    /node --test[\s\S]*--test-name-pattern=/,
+    "the hosted validation must run the focused contract tests on the release runner",
+  );
+  assert.match(
+    readerStep.run,
+    /release evidence discovery catches an un-inventoried nested TypeScript helper reader/,
+    "the hosted validation must exercise the nested inventory guard",
+  );
+  assert.match(
+    readerStep.run,
+    /nested release evidence reader rejects duplicate fields with fixed redacted diagnostic/,
+    "the hosted validation must exercise the fixed duplicate-field diagnostic",
+  );
+
+  const summaryStep = regressionJob.steps.find(
+    (step) => step.name === "Summarize nested release evidence validation",
+  );
+  assert.ok(
+    summaryStep,
+    "the hosted nested reader check must be documented in release validation evidence",
+  );
+  assert.equal(
+    summaryStep.if,
+    "${{ always() }}",
+    "the nested reader summary must remain visible when its check fails",
+  );
+  assert.equal(
+    summaryStep.env.CHECK_RESULT,
+    "${{ steps.nested-release-evidence.outcome }}",
+  );
+  assert.match(
+    summaryStep.run,
+    /expected un-inventoried-reader failure diagnostic/,
+  );
+  assert.match(summaryStep.run, /fixed and redacted/);
+  assert.match(
+    summaryStep.run,
+    /Evidence contents in release validation output: \*\*NOT INCLUDED\*\*/,
+  );
+});
+
 test("native recovery validation uses the shared contract", () => {
   const regressionJob = workflow.jobs["native-evidence-summary-regression"];
   const failedDownloadStep = regressionJob.steps.find(
@@ -2534,6 +2603,73 @@ test("release evidence discovery follows helpers dynamically imported by shell c
     rmSync(fixtureDirectory, { recursive: true, force: true });
   }
 });
+
+test(
+  "nested release evidence reader rejects duplicate fields with fixed redacted diagnostic",
+  () => {
+    const fixtureDirectory = mkdtempSync(
+      path.join(workspaceRoot, ".mobile-release-summary-contract-"),
+    );
+    const entryPath = path.join(fixtureDirectory, "release-check.mjs");
+    const helperPath = path.join(fixtureDirectory, "nested", "reader.mjs");
+    const duplicateMarker =
+      "NESTED_RELEASE_EVIDENCE_PRIVATE_CONTENT_MUST_NOT_ESCAPE";
+    try {
+      mkdirSync(path.dirname(helperPath), { recursive: true });
+      writeFileSync(
+        entryPath,
+        'import { readEvidence } from "./nested/reader.mjs";\nreadEvidence();\n',
+      );
+      writeFileSync(
+        helperPath,
+        [
+          `import { findDuplicateJsonObjectKeys } from ${JSON.stringify(
+            pathToFileURL(
+              path.join(
+                workspaceRoot,
+                "scripts/find-duplicate-json-object-keys.mjs",
+              ),
+            ).href,
+          )};`,
+          "const rawEvidence = " +
+            JSON.stringify(
+              `{"status":"PASS","status":"${duplicateMarker}"}`,
+            ) +
+            ";",
+          "export function readEvidence() {",
+          "  if (findDuplicateJsonObjectKeys(rawEvidence).length > 0) {",
+          '    throw new Error("Nested release evidence contains duplicate fields.");',
+          "  }",
+          "  return JSON.parse(rawEvidence);",
+          "}",
+          "readEvidence();",
+        ].join("\n"),
+      );
+
+      const result = spawnSync(process.execPath, [entryPath], {
+        cwd: workspaceRoot,
+        encoding: "utf8",
+      });
+      const output = `${result.stdout}\n${result.stderr}`;
+      assert.notEqual(
+        result.status,
+        0,
+        "the nested evidence reader must reject duplicate fields",
+      );
+      assert.match(
+        output,
+        /Nested release evidence contains duplicate fields\./,
+      );
+      assert.doesNotMatch(
+        output,
+        new RegExp(duplicateMarker),
+        "the nested reader diagnostic must not expose evidence contents",
+      );
+    } finally {
+      rmSync(fixtureDirectory, { recursive: true, force: true });
+    }
+  },
+);
 
 test("the native shell evidence check keeps its dynamic helper closure", () => {
   const entryPath = path.join(
