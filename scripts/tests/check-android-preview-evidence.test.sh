@@ -307,6 +307,7 @@ cp "$ROOT_DIR/scripts/read-bounded-text.mjs" \
   "$discovery_root/scripts/"
 cp "$ROOT_DIR/artifacts/chat-app/scripts/validate-preview-startup.mjs" \
   "$ROOT_DIR/artifacts/chat-app/scripts/preview-startup-shared.mjs" \
+  "$ROOT_DIR/artifacts/chat-app/scripts/preview-startup-runtime-library-fixture.mjs" \
   "$discovery_root/artifacts/chat-app/scripts/"
 write_record "$discovery_android_root/20260101T000000Z/validation-record.md" <<'EOF'
 # Older Android preview validation record

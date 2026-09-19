@@ -66,6 +66,26 @@ E2E_API_URL="https://${REPLIT_DEV_DOMAIN}" \
 pnpm --filter @workspace/api-server run test:e2e:reduce-transparency-tab-bar
 ```
 
+## Release failure evidence
+
+The mobile release workflow always attempts to upload the idle-profile browser
+output as `idle-profile-registration-browser-evidence`, including when the
+release check fails. When reviewing a blocked run, open the workflow's
+**Artifacts** section and download that archive. It should contain one
+Playwright result directory with exactly these members:
+
+- `test-failed-1.png` — the failed browser page screenshot.
+- `trace.zip` — the Playwright trace.
+- `error-context.md` — the Playwright failure context.
+
+Open `error-context.md` and the PNG directly after extracting the archive. To
+inspect the browser timeline locally, run `pnpm --filter @workspace/api-server
+exec playwright show-trace trace.zip` from the extracted result directory.
+The secret-free `idle-profile-browser-evidence-contract` job performs the same
+upload/download round trip with a controlled local browser failure so changes
+to the Playwright configuration or artifact path fail CI before a release
+review depends on them.
+
 The test scripts install the Chromium revision pinned by `@playwright/test`
 and run a browser-runtime preflight before recovery diagnostics. The Chromium
 system libraries are declared in the Replit Nix package list. A missing browser

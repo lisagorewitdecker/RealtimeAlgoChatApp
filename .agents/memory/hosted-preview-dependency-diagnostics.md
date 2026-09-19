@@ -7,4 +7,4 @@ Platform evidence jobs should check shared validator dependencies before invokin
 
 **Why:** A missing delegated validator otherwise surfaces as a misleading schema or record failure, and platform-specific jobs can drift when only one job owns the dependency check.
 
-**How to apply:** Keep the guard and fixed diagnostic symmetric across platform jobs. Contract tests should create a changed record, omit the dependency, assert the summary and stderr contain only the fixed message, and prove the checker stub was not invoked.
+**How to apply:** Keep the guard and fixed diagnostic symmetric across platform jobs. Contract tests should create a changed record, omit the dependency, assert the summary and stderr contain only the fixed message, and prove the checker stub was not invoked. When a test copies a validator into an isolated fixture, copy every same-directory import it needs, including versioned runtime-fixture modules.

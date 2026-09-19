@@ -1930,6 +1930,105 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
           scripts/summarize-native-branding.sh android
 
+  idle-profile-browser-evidence-contract:
+    name: Idle-profile browser evidence contract
+    permissions:
+      actions: write
+      contents: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out release candidate
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ env.RELEASE_NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install workspace dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Chromium for controlled browser failure
+        run: pnpm --filter @workspace/api-server exec playwright install --with-deps chromium
+
+      - name: Run controlled idle-profile browser failure
+        id: idle-profile-evidence-check
+        continue-on-error: true
+        env:
+          E2E_RECOVERY_DIAGNOSTIC_CONTRACT: "1"
+          IDLE_PROFILE_EVIDENCE_CONTRACT: "1"
+          PLAYWRIGHT_LAST_RUN_OUTPUT_FILE: ${{ runner.temp }}/idle-profile-evidence-last-run.json
+        run: |
+          set -euo pipefail
+          rm -rf artifacts/api-server/test-results
+          pnpm --filter @workspace/api-server exec playwright test \
+            e2e/idle-profile-registration.spec.ts \
+            --config e2e/playwright.config.ts \
+            --grep "controlled browser failure"
+
+      - name: Upload controlled idle-profile browser evidence
+        if: ${{ always() }}
+        continue-on-error: true
+        id: upload-idle-profile-evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: idle-profile-registration-browser-evidence-contract
+          path: artifacts/api-server/test-results/**
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Download controlled idle-profile browser evidence
+        if: ${{ always() }}
+        continue-on-error: true
+        id: download-idle-profile-evidence
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: idle-profile-registration-browser-evidence-contract
+          path: ${{ runner.temp }}/idle-profile-browser-evidence-contract
+
+      - name: Verify controlled idle-profile browser evidence
+        if: ${{ always() }}
+        env:
+          CONTROLLED_CHECK_RESULT: ${{ steps.idle-profile-evidence-check.outcome }}
+          DOWNLOAD_RESULT: ${{ steps.download-idle-profile-evidence.outcome }}
+        run: |
+          set -euo pipefail
+          if [[ "$CONTROLLED_CHECK_RESULT" != "failure" ]]; then
+            echo "The controlled idle-profile browser test did not fail as expected." >&2
+            exit 1
+          fi
+          if [[ "$DOWNLOAD_RESULT" != "success" ]]; then
+            echo "The controlled idle-profile browser evidence artifact was not downloadable." >&2
+            exit 1
+          fi
+          bash scripts/check-idle-profile-browser-evidence.sh \
+            "$RUNNER_TEMP/idle-profile-browser-evidence-contract"
+
+      - name: Summarize idle-profile browser evidence contract
+        if: ${{ always() }}
+        env:
+          CONTROLLED_CHECK_RESULT: ${{ steps.idle-profile-evidence-check.outcome }}
+          UPLOAD_RESULT: ${{ steps.upload-idle-profile-evidence.outcome }}
+          DOWNLOAD_RESULT: ${{ steps.download-idle-profile-evidence.outcome }}
+        run: |
+          set -euo pipefail
+          {
+            echo "## Idle-profile browser evidence contract"
+            echo
+            printf -- '- Controlled browser failure: **%s**\n' "$CONTROLLED_CHECK_RESULT"
+            printf -- '- Artifact upload: **%s**\n' "$UPLOAD_RESULT"
+            printf -- '- Artifact download: **%s**\n' "$DOWNLOAD_RESULT"
+            echo "- Expected archive members: \`test-failed-1.png\`, \`trace.zip\`, and \`error-context.md\`"
+            echo "- Review the downloadable \`idle-profile-registration-browser-evidence-contract\` artifact when diagnosing a contract failure."
+          } >> "$GITHUB_STEP_SUMMARY"
+
   idle-profile-registration:
     name: Idle profile registration
     if: ${{ github.event_name != 'pull_request' && inputs.android_runner_health_only != true }}

@@ -104,6 +104,7 @@
 - [Expo Go embedded native versions](expo-go-embedded-native-versions.md) — worklets/reanimated must match the Expo Go build at patch level (57.0.5 = 0.10.0/4.5.0); SDK defaults crash it silently.
 - [Generated-check fault controls](generated-check-fault-controls.md) — test-only faults and fixture paths need explicit subprocess opt-ins; harnesses strip inherited env and prove inertness.
 - [Chat App script tests need explicit wiring](chat-app-script-tests.md) — Jest ignores `scripts/` and `.mjs`; chain node:test files into `test`; `NODE_TEST_CONTEXT=` empty still skips runs, use `env -u`.
+- [Secret-free Playwright contracts](secret-free-playwright-contracts.md) — diagnostic browser fixtures must skip setup and delay production resource imports.
 - [Expo inspector observability](expo-inspector-observability.md) — inspector connect/close exist only on stderr via DEBUG=Metro:InspectorProxy; launch evidence must follow the session's own bundle 200.
 - [Native report retention](native-report-retention.md) — durable release summaries keep bounded native review evidence usable after artifact links expire.
 - [Native artifact outage summary](native-artifact-outage-summary.md) — inspect download step outcomes and validate checker sections in a private summary before publishing.

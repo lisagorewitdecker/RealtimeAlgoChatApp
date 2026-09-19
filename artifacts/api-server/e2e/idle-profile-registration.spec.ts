@@ -1,17 +1,15 @@
 import { createClerkClient } from "@clerk/backend";
 import { setupClerkTestingToken } from "@clerk/testing/playwright";
 import { expect, test, type BrowserContext } from "@playwright/test";
-import { db, pool, userProfilesTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
-import {
-  throwTestAndCleanupFailures,
-  withClerkRetry,
-} from "./clerk-retry.js";
+import { throwTestAndCleanupFailures, withClerkRetry } from "./clerk-retry.js";
 
 const chatUrl = process.env["E2E_CHAT_URL"];
 const apiUrl = process.env["E2E_API_URL"];
 const publishableKey = process.env["CLERK_PUBLISHABLE_KEY"];
 const secretKey = process.env["CLERK_SECRET_KEY"];
+const runEvidenceContract =
+  process.env["IDLE_PROFILE_EVIDENCE_CONTRACT"] === "1";
 
 function isProfilePut(request: { method(): string; url(): string }) {
   return (
@@ -51,6 +49,7 @@ test("an idle signed-in client registers its public key only once across token r
   const email = `idle-profile-${suffix}+clerk_test@example.com`;
   const password = `E2e-${suffix}-Idle!9`;
   const clerkClient = createClerkClient({ publishableKey, secretKey });
+  const database = await import("@workspace/db");
   let userId = "";
   let context: BrowserContext | undefined;
   let testFailure: unknown;
@@ -128,16 +127,15 @@ test("an idle signed-in client registers its public key only once across token r
       await context.close().catch((error) => cleanupErrors.push(error));
     }
     if (userId) {
-      await db
-        .delete(userProfilesTable)
-        .where(eq(userProfilesTable.userId, userId))
+      await database.db
+        .delete(database.userProfilesTable)
+        .where(eq(database.userProfilesTable.userId, userId))
         .catch((error) => cleanupErrors.push(error));
       await withClerkRetry("delete idle profile user", () =>
         clerkClient.users.deleteUser(userId),
-      )
-        .catch((error) => cleanupErrors.push(error));
+      ).catch((error) => cleanupErrors.push(error));
     }
-    await pool.end().catch((error) => cleanupErrors.push(error));
+    await database.pool.end().catch((error) => cleanupErrors.push(error));
     throwTestAndCleanupFailures(
       testFailure,
       cleanupErrors,
@@ -145,4 +143,28 @@ test("an idle signed-in client registers its public key only once across token r
       "Idle profile verification and cleanup both failed",
     );
   }
+});
+
+test("controlled browser failure produces the idle-profile evidence contract", async ({
+  page,
+}) => {
+  test.skip(
+    !runEvidenceContract,
+    "IDLE_PROFILE_EVIDENCE_CONTRACT=1 is required for the secret-free evidence contract",
+  );
+
+  await page.setContent(`
+      <!doctype html>
+      <html>
+        <body>
+          <main data-testid="idle-profile-evidence-contract">
+            Controlled browser failure
+          </main>
+        </body>
+      </html>
+    `);
+  await expect(page.getByTestId("idle-profile-evidence-contract")).toHaveText(
+    "Expected browser evidence",
+    { timeout: 500 },
+  );
 });
