@@ -98,7 +98,7 @@
 - [API codegen fixture test hides nested failures](api-codegen-fixture-test-diagnosis.md) — a missing drift message usually means an earlier api-spec suite failed; rebuild the fixture by hand to see which.
 - [Stale composite TypeScript output](stale-composite-dist-typecheck.md) — untracked lib `dist` declarations outlive rebases; rebuild with `tsc -b` before believing a contradictory typecheck error.
 - [Pre-rebase guard blocks task merges](pre-rebase-guard-blocks-task-merges.md) — a local hook refusing big replays makes task merges fail as opaque UNKNOWN with no conflicts; exempt main-repl/main.
-- [Volatile tracked test results](volatile-tracked-test-results.md) — Playwright test-results/ and run markers are volatile; never re-track them, restore any committed marker before completing.
+- [Volatile tracked test results](volatile-tracked-test-results.md) — Playwright test-results/ is volatile: never re-track it, and no unit step may need it; prove fresh-checkout runs in a `.local/` worktree.
 - [iPhone simulator startup crash evidence](expo-go-native-modules.md) — `devices.json` stays empty for Expo Go 57 iOS; bundle 200 then inspector close 1006 with no `iOS LOG` = app crash, not sign-in.
 - [Generated-check fault controls](generated-check-fault-controls.md) — test-only faults and fixture paths need explicit subprocess opt-ins; harnesses strip inherited env and prove inertness.
 - [Chat App script tests need explicit wiring](chat-app-script-tests.md) — Jest ignores `scripts/` and `.mjs`; chain node:test files into `test`; `NODE_TEST_CONTEXT=` empty still skips runs, use `env -u`.
