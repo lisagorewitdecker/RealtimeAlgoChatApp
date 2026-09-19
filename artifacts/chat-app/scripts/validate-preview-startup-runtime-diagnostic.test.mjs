@@ -304,7 +304,7 @@ test("real-platform capture records macOS and Windows loader output safely", () 
         "Error: The code execution cannot proceed because " +
         "C:\\Users\\reviewer\\AppData\\Local\\Expo\\libgtk-3-0.dll " +
         "was not found. ******" +
-        "Starting project at D:\\a\\RealtimeAlgoChatApp\\artifacts\\chat-app --host 0.0.0.0\n",
+        "Starting project at D:\\a\\RealtimeAlgoChatApp\\artifacts\\chat-app --host 0.0.0.0 --port 8081\n",
       libraryIdentifier: "libgtk-3-0.dll",
       diagnosticPattern: /Expo preview loader wording changed/,
     },
@@ -345,6 +345,7 @@ test("real-platform capture records macOS and Windows loader output safely", () 
         /\\\\server\\share\\repo\\app/,
       );
       assert.doesNotMatch(recordedOutput, /--port 8081 extra/);
+      assert.doesNotMatch(recordedOutput, /--port 8081/);
       assert.doesNotMatch(recordedOutput, /--host 0\.0\.0\.0/);
       assert.doesNotMatch(recordedOutput, /TOP_SECRET_VALUE/);
       assert.match(recordedOutput, new RegExp(fixtureCase.libraryIdentifier));
