@@ -334,6 +334,119 @@ test("real-platform capture records macOS and Windows loader output safely", () 
   }
 });
 
+test("real launcher validation does not require a public preview URL", () => {
+  const temporaryDirectory = mkdtempSync(
+    join(tmpdir(), "chat-preview-real-launcher-only-"),
+  );
+  const recordPath = join(temporaryDirectory, "launcher.log");
+
+  try {
+    const result = runNodeScript(
+      [validatorPath, "--record-log", recordPath],
+      {
+        PREVIEW_STARTUP_REAL_LAUNCHER: "1",
+        PREVIEW_STARTUP_TEST_FIXTURE: "handoff-server",
+        PREVIEW_STARTUP_TIMEOUT_MS: "2000",
+      },
+    );
+
+    assert.equal(result.status, 0, result.output);
+    assert.match(
+      result.output,
+      /Expo preview launcher reached Metro running status/,
+    );
+    assert.match(readFileSync(recordPath, "utf8"), /Starting Metro Bundler/);
+  } finally {
+    rmSync(temporaryDirectory, { recursive: true, force: true });
+  }
+});
+
+test(
+  "Windows runner loader diagnosis keeps quoted spaced paths bounded",
+  {
+    skip: process.platform !== "win32",
+  },
+  () => {
+    const temporaryDirectory = mkdtempSync(
+      join(tmpdir(), "chat-preview-windows-runner-"),
+    );
+    const longPath =
+      `C:\\Program Files\\Expo\\${"React Native DevTools cache\\".repeat(14)}` +
+      "libgtk-3-0.dll";
+    const cases = [
+      {
+        name: "quoted path with spaces",
+        output:
+          'Error: The code execution cannot proceed because "C:\\Program Files\\' +
+          'Expo\\React Native DevTools\\libgtk-3-0.dll" was not found.\r\n' +
+          "unrelated log text should not be included\r\n",
+        detail:
+          /because "C:\\Program Files\\Expo\\React Native DevTools\\libgtk-3-0\.dll" was not found/,
+      },
+      {
+        name: "quoted long path with spaces",
+        output:
+          `Error: The code execution cannot proceed because "${longPath}" was not found.\r\n` +
+          "unrelated log text should not be included\r\n",
+        detail: /missing runtime library: .*libgtk-3-0\.dll/,
+      },
+    ];
+
+    try {
+      for (const [index, fixtureCase] of cases.entries()) {
+        const recordPath = join(temporaryDirectory, `windows-${index}.log`);
+        const live = runNodeScript(
+          [validatorPath, "--record-log", recordPath],
+          {
+            PREVIEW_STARTUP_TEST_FIXTURE: "missing-runtime-library-windows",
+            PREVIEW_STARTUP_TEST_OUTPUT: fixtureCase.output,
+          },
+        );
+
+        assert.equal(live.status, 1, fixtureCase.name);
+        assert.ok(
+          existsSync(recordPath),
+          `${fixtureCase.name}; live validator output: ${JSON.stringify(live.output)}`,
+        );
+        const captured = runNodeScript([
+          validatorPath,
+          "--log-file",
+          recordPath,
+        ]);
+        assert.equal(captured.status, 1, fixtureCase.name);
+
+        const diagnostic = findDiagnostic(captured.output);
+        assert.ok(
+          diagnostic,
+          `${fixtureCase.name}; captured validator output: ${JSON.stringify(captured.output)}`,
+        );
+        assert.match(diagnostic, fixtureCase.detail, fixtureCase.name);
+        assert.match(
+          diagnostic,
+          /libgtk-3-0\.dll/,
+          `${fixtureCase.name} lost the DLL basename`,
+        );
+        assert.ok(
+          diagnostic.length <= 512,
+          `${fixtureCase.name} diagnostic exceeded the 512-character limit`,
+        );
+        assert.doesNotMatch(
+          diagnostic,
+          /unrelated log text/,
+          `${fixtureCase.name} included unrelated log text`,
+        );
+        assert.equal(
+          containsControlCharacters(diagnostic),
+          false,
+          `${fixtureCase.name} included control characters`,
+        );
+      }
+    } finally {
+      rmSync(temporaryDirectory, { recursive: true, force: true });
+    }
+  },
+);
+
 test("versioned loader samples match the installed Expo tooling", () => {
   const capturedExpoCliVersion =
     process.env.PREVIEW_STARTUP_TEST_CAPTURED_EXPO_CLI_VERSION ??
@@ -613,6 +726,70 @@ test("unsupported loader wording fails with a maintenance message", () => {
     assert.equal(result.status, 1);
     assert.match(result.output, /Expo preview loader wording changed/);
     assert.match(result.output, /refresh the versioned loader samples/);
+  } finally {
+    rmSync(temporaryDirectory, { recursive: true, force: true });
+  }
+});
+
+test("malformed loader paths fail closed without leaking corrupted text", () => {
+  const temporaryDirectory = mkdtempSync(
+    join(tmpdir(), "chat-preview-malformed-loader-"),
+  );
+  const malformedFixtures = [
+    "missing-runtime-library-malformed-quotes",
+    "missing-runtime-library-malformed-control",
+    "missing-runtime-library-malformed-trailing",
+    "missing-runtime-library-malformed-followed-by-valid",
+  ];
+
+  try {
+    for (const [index, fixtureName] of malformedFixtures.entries()) {
+      const fixture = runNodeScript([fixturePath], {
+        PREVIEW_STARTUP_TEST_FIXTURE: fixtureName,
+      });
+      assert.equal(fixture.status, 1, fixtureName);
+
+      const capturedLogPath = join(
+        temporaryDirectory,
+        `malformed-${index}.log`,
+      );
+      writeFileSync(capturedLogPath, fixture.output, "utf8");
+
+      const live = runNodeScript([validatorPath], {
+        PREVIEW_STARTUP_TEST_FIXTURE: fixtureName,
+      });
+      const captured = runNodeScript([
+        validatorPath,
+        "--log-file",
+        capturedLogPath,
+      ]);
+
+      assert.equal(live.status, 1, fixtureName);
+      assert.equal(captured.status, 1, fixtureName);
+      const liveDiagnostic = findDiagnostic(live.output);
+      const capturedDiagnostic = findDiagnostic(captured.output);
+      assert.ok(liveDiagnostic, fixtureName);
+      assert.equal(liveDiagnostic, capturedDiagnostic, fixtureName);
+      assert.match(
+        capturedDiagnostic,
+        /Expo preview loader wording changed\. Update STARTUP_FAILURES and MISSING_LIBRARY_PATTERNS/,
+        fixtureName,
+      );
+      assert.ok(
+        capturedDiagnostic.length <= 512,
+        `${fixtureName} diagnostic exceeded the 512-character limit`,
+      );
+      assert.doesNotMatch(
+        capturedDiagnostic,
+        /trailing unrelated loader text|libgtk-3\.(?:so\.0|dylib)|libgtk-3-0\.dll/i,
+        `${fixtureName} leaked malformed loader content`,
+      );
+      assert.equal(
+        containsControlCharacters(capturedDiagnostic),
+        false,
+        `${fixtureName} diagnostic contains control characters`,
+      );
+    }
   } finally {
     rmSync(temporaryDirectory, { recursive: true, force: true });
   }
