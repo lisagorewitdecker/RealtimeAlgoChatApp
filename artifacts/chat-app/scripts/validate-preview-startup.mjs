@@ -273,14 +273,8 @@ function formatStartupFailure(output) {
   const failure = findStartupFailure(output);
   const loaderFailure = findLoaderFailure(output);
   if (failure) {
-    const isLoaderFailure = Boolean(loaderFailure && loaderFailure === failure);
-    const safeFailure = isLoaderFailure
-      ? redactKnownStartupFailureSecrets(failure)
-      : failure;
-    const missingLibrary = isLoaderFailure ? findMissingLibrary(loaderFailure) : null;
-    const isLoaderFailure = Boolean(loaderFailure);
     const isLoaderFailure = loaderFailure === failure;
-    const missingLibrary = loaderFailure ? findMissingLibrary(loaderFailure) : null;
+    const missingLibrary = isLoaderFailure ? findMissingLibrary(loaderFailure) : null;
     const usesLoaderDiagnosis = Boolean(missingLibrary);
     const safeFailure = usesLoaderDiagnosis
       ? redactKnownStartupFailureSecrets(failure)
@@ -385,14 +379,6 @@ function sanitizeRecordedStartupOutput(value) {
           return `${prefix}[redacted]/${libraryName}${suffix}`;
         })
         .replace(
-          /[A-Za-z]:\\(?:Users|home|a)\\[^\r\n]+/g,
-          (path) => {
-            const libraryName = path.match(
-              /[^/\\\s]+?\.(?:dylib|so(?:\.\d+)?|dll)\b/i,
-            )?.[0];
-            if (!libraryName) return `${path.slice(0, 3)}[redacted]`;
-            const suffix = path.slice(path.indexOf(libraryName) + libraryName.length);
-            return `${path.slice(0, 3)}[redacted]\\${libraryName}${suffix}`;
           /Starting project at ((?:[A-Za-z]:\\|\\\\[^\\\r\n]+\\[^\\\r\n]+\\)[^\\"\r\n]+(?:\\[^\\"\r\n]+)*)/g,
           (_, path) => {
             const startupProjectPath = trimKnownStartupArguments(path);
@@ -1201,18 +1187,6 @@ async function validateLivePreview(
   recordOutput,
 ) {
   const launcherOnly = process.env.PREVIEW_STARTUP_REAL_LAUNCHER === "1";
-  const startupFixture = process.env.PREVIEW_STARTUP_TEST_FIXTURE;
-  const requiresPublicPreviewConfiguration =
-    !startupFixture || !startupFixture.startsWith("missing-runtime-library");
-  if (!launcherOnly && requiresPublicPreviewConfiguration) {
-    getPublicPreviewManifestUrl(process.env);
-  }
-  const startupTestFixture = process.env.PREVIEW_STARTUP_TEST_FIXTURE;
-  const useStartupFixture = STARTUP_TEST_FIXTURES.has(startupTestFixture);
-  const runtimeLibraryFixture =
-    useStartupFixture &&
-    startupTestFixture.startsWith("missing-runtime-library");
-  if (!launcherOnly && !runtimeLibraryFixture) getPublicPreviewManifestUrl(process.env);
   const useStartupTestFixture = usesStartupTestFixture(process.env);
   if (!launcherOnly && !useStartupTestFixture) {
     getPublicPreviewManifestUrl(process.env);
@@ -1221,7 +1195,6 @@ async function validateLivePreview(
   const output = [];
   const pnpmCommand = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
   const startupCommand =
-    useStartupFixture
     useStartupTestFixture
       ? {
           command: process.execPath,
@@ -1291,13 +1264,6 @@ async function validateLivePreview(
       clearTimeout(closeTimer);
       closeTimer = undefined;
     });
-    if (process.platform === "win32" && processGroupId) {
-      const processTreeKiller = spawn(
-        "taskkill.exe",
-        ["/PID", String(processGroupId), "/T", "/F"],
-        { stdio: "ignore", windowsHide: true },
-      );
-      processTreeKiller.unref();
     if (process.platform === "win32") {
       terminateWindowsChild("SIGTERM");
     } else if (!processGroupId) {
@@ -1312,12 +1278,6 @@ async function validateLivePreview(
     closeTimer = setTimeout(() => {
       try {
         if (process.platform === "win32") {
-          const processTreeKiller = spawn(
-            "taskkill.exe",
-            ["/PID", String(processGroupId), "/T", "/F"],
-            { stdio: "ignore", windowsHide: true },
-          );
-          processTreeKiller.unref();
           terminateWindowsChild("SIGKILL");
         } else if (!processGroupId) {
           child.kill("SIGKILL");
