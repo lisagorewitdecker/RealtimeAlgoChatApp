@@ -81,10 +81,10 @@ run_case() {
  wait "$writer_pid"
  writer_status=$?
  set -e
- if [[ "$writer_status" == "143" || "$writer_status" == "130" ]]; then
+ if ((writer_status == 143 || writer_status == 130)); then
    writer_status=0
  fi
- if [[ "$writer_status" != "0" ]]; then
+ if ((writer_status != 0)); then
    printf 'Concurrent saved-status writer failed during the %s case.\n%s\n' \
      "$case_name" "$suite_output" >&2
    exit 1
