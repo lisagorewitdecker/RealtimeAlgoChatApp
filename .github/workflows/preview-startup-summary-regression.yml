@@ -65,6 +65,7 @@ jobs:
           fi
 
           if GITHUB_STEP_SUMMARY="$summary_path" \
+            REPLIT_EXPO_DEV_DOMAIN=fallback-preview.example.test \
             PREVIEW_PUBLIC_URL=https://preview.example.test/expo \
             PREVIEW_STARTUP_TEST_FIXTURE=missing-runtime-library-long-path \
             node artifacts/chat-app/scripts/validate-preview-startup.mjs > /tmp/preview-startup-failure.log 2>&1; then
