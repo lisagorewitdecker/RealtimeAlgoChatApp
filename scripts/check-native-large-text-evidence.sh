@@ -41,25 +41,23 @@ check_native_text_evidence_sizes() {
     return 0
   fi
 
-  if ! command -v perl >/dev/null 2>&1; then
-    echo "Native evidence collection-size checks require perl for portable deterministic path sorting." >&2
-    return 1
+  mapfile -d '' -t sorted_evidence_paths < <(find "$results_dir" -type f -print0)
+  if ((${#sorted_evidence_paths[@]} > 1)); then
+    local current_path
+    local index
+    local compare_index
+    local LC_ALL=C
+    for ((index = 1; index < ${#sorted_evidence_paths[@]}; index += 1)); do
+      current_path="${sorted_evidence_paths[index]}"
+      compare_index=$((index - 1))
+      while ((compare_index >= 0)) &&
+        [[ "${sorted_evidence_paths[compare_index]}" > "$current_path" ]]; do
+        sorted_evidence_paths[compare_index + 1]="${sorted_evidence_paths[compare_index]}"
+        compare_index=$((compare_index - 1))
+      done
+      sorted_evidence_paths[compare_index + 1]="$current_path"
+    done
   fi
-
-  mapfile -d '' -t sorted_evidence_paths < <(
-    find "$results_dir" -type f -print0 |
-      perl -0e '
-        my @paths;
-        while (defined(my $path = <>)) {
-          chomp $path;
-          push @paths, $path;
-        }
-        if (@paths) {
-          print join "\0", sort @paths;
-          print "\0";
-        }
-      '
-  )
 
   for path in "${sorted_evidence_paths[@]}"; do
     relative_path="${path#"$results_dir"/}"
