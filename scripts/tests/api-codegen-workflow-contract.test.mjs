@@ -173,7 +173,7 @@ test("API codegen workflow checks out full history for generated-client validati
   );
   assert.equal(
     checkoutStep.with?.ref,
-    "${{ github.event.pull_request.head.sha || github.sha }}",
+    "${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}",
     "the API codegen workflow checkout must use the submitted pull request head so fork reports describe the revision being reviewed instead of a synthetic merge ref",
   );
   assert.equal(
@@ -533,7 +533,7 @@ test("generated-client drift evidence is published where reviewers need no log a
   );
   assert.equal(
     driftEvidenceStep.env?.API_CODEGEN_DRIFT_HEAD_SHA,
-    "${{ github.event.pull_request.head.sha || github.sha }}",
+    "${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}",
     "the published evidence must use the same fork-safe submitted revision as checkout, with a push fallback",
   );
 
