@@ -43,10 +43,7 @@ printf '{"status":"before"}\n' > "$saved_status"
   while [[ ! -f "$STOP_FILE" ]]; do
     printf '{"status":"during","tick":%s}\n' "$iteration" > "$saved_status"
     iteration=$((iteration + 1))
-    python - <<'PY'
-import time
-time.sleep(0.01)
-PY
+    sleep 0.01
   done
 ) &
 writer_pid=$!
