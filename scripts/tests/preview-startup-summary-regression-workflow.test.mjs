@@ -61,6 +61,10 @@ test("hosted preview startup summary regression checks the reviewed revision", (
   );
   assert.match(
     verification,
+    /PREVIEW_PUBLIC_URL=https:\/\/preview\.example\.test\/expo\s+\\\s*\n\s+PREVIEW_STARTUP_TEST_FIXTURE=missing-runtime-library-long-path/,
+  );
+  assert.match(
+    verification,
     /PREVIEW_STARTUP_TEST_FIXTURE=missing-runtime-library-long-path/,
   );
   assert.match(verification, /Expo preview startup output is healthy:/);
