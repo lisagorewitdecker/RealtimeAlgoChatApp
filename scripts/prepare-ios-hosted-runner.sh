@@ -11,10 +11,10 @@ set -euo pipefail
 : "${NATIVE_SMOKE_IOS_BUILD_ID:?NATIVE_SMOKE_IOS_BUILD_ID is required.}"
 : "${NATIVE_SMOKE_IOS_APP_ID:?NATIVE_SMOKE_IOS_APP_ID is required.}"
 : "${EAS_TOKEN:?EAS_TOKEN is required.}"
+: "${MAESTRO_INSTALLER_SHA256:?MAESTRO_INSTALLER_SHA256 is required for verified Maestro installation.}"
 
 EAS_CLI_VERSION="${EAS_CLI_VERSION:-23.2.0}"
 MAESTRO_VERSION="${MAESTRO_VERSION:-1.39.13}"
-MAESTRO_INSTALLER_SHA256="${MAESTRO_INSTALLER_SHA256:-REPLACE_WITH_PINNED_SHA256}"
 IOS_DEVICE_NAME="${IOS_NATIVE_DEVICE_NAME:-iPhone SE (3rd generation)}"
 RUNNER_TEMP="${RUNNER_TEMP:-${TMPDIR:-/tmp}}"
 
@@ -25,7 +25,7 @@ require_command() {
   fi
 }
 
-for command in curl find grep head pnpm sed shasum unzip xcrun; do
+for command in curl find grep head pnpm sed shasum tar unzip xcrun; do
   require_command "$command"
 done
 
