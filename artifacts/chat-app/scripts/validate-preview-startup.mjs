@@ -147,7 +147,7 @@ const STARTUP_TEST_FIXTURES = new Set([
 const MISSING_LIBRARY_PATH = String.raw`[A-Za-z0-9._+~ /\\:[\]-]`;
 const MISSING_LIBRARY_CAPTURE = String.raw`(?:(["'])([^"'\u0000-\u001f\u007f]+)\1|(${MISSING_LIBRARY_PATH}+?))`;
 const MISSING_LIBRARY_DYLD_CAPTURE = String.raw`(?:(["'])([^"'\u0000-\u001f\u007f]+)\1|(${MISSING_LIBRARY_PATH}+))`;
-const MISSING_LIBRARY_BASENAME = /(?:^|[\\/])[^/\\\s:]+\.(?:dylib|so(?:\.\d+)?|dll)$/i;
+const MISSING_LIBRARY_BASENAME = /(?:^|[\\/])[^/\\\s:]+\.(?:dylib|so(?:\.\d+)*|dll)$/i;
 const MISSING_LIBRARY_PATTERNS = [
   new RegExp(
     String.raw`error while loading shared libraries:\s*${MISSING_LIBRARY_CAPTURE}\s*:\s*cannot open shared object file(?:\s*:\s*no such file or directory)?\s*$`,
@@ -368,6 +368,17 @@ function sanitizeRecordedStartupOutput(value) {
           const suffix = path.slice(path.indexOf(libraryName) + libraryName.length);
           return `${prefix}[redacted]/${libraryName}${suffix}`;
         })
+        .replace(
+          /[A-Za-z]:\\(?:Users|home|a)\\[^\r\n]+/g,
+          (path) => {
+            const libraryName = path.match(
+              /[^/\\\s]+?\.(?:dylib|so(?:\.\d+)?|dll)\b/i,
+            )?.[0];
+            if (!libraryName) return `${path.slice(0, 3)}[redacted]`;
+            const suffix = path.slice(path.indexOf(libraryName) + libraryName.length);
+            return `${path.slice(0, 3)}[redacted]\\${libraryName}${suffix}`;
+          },
+        )
         .replace(
           /Starting project at ((?:[A-Za-z]:\\|\\\\[^\\\r\n]+\\[^\\\r\n]+\\)[^\\\s"\r\n]+(?:\\[^\\\s"\r\n]+)*)/g,
           (_, path) => {
@@ -1506,7 +1517,7 @@ async function main() {
     );
 }
 
-if (fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
+if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
   const cliArgs = process.argv.slice(2);
   main().catch(async (error) => {
     if (isStartupValidationInvocation(cliArgs)) {

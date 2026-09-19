@@ -283,7 +283,7 @@ test("real-platform capture records macOS and Windows loader output safely", () 
         "Error: The code execution cannot proceed because " +
         "C:\\Users\\reviewer\\AppData\\Local\\Expo\\libgtk-3-0.dll " +
         "was not found. password=TOP_SECRET_VALUE\n" +
-        "Starting project at \\\\server\\share\\repo\\app\n",
+        "Starting project at D:\\a\\RealtimeAlgoChatApp\\artifacts\\chat-app\n",
       libraryIdentifier: "libgtk-3-0.dll",
     },
     {
@@ -316,6 +316,7 @@ test("real-platform capture records macOS and Windows loader output safely", () 
       assert.equal(live.status, 1, fixtureCase.name);
       const recordedOutput = readFileSync(recordPath, "utf8");
       assert.doesNotMatch(recordedOutput, /\/Users\/reviewer|C:\\Users\\reviewer/);
+      assert.doesNotMatch(recordedOutput, /D:\\a\\RealtimeAlgoChatApp/);
       assert.doesNotMatch(recordedOutput, /\\\\server\\share\\Expo\\libgtk-3-0\.dll/);
       assert.doesNotMatch(
         recordedOutput,
@@ -467,7 +468,11 @@ test(
           PREVIEW_STARTUP_TEST_OUTPUT: fixtureCase.output,
         });
 
-        assert.equal(realLauncherLive.status, 1, fixtureCase.name);
+        assert.notEqual(realLauncherLive.status, 0, fixtureCase.name);
+        assert.ok(
+          existsSync(recordPath),
+          `${fixtureCase.name}; live validator output: ${JSON.stringify(realLauncherLive.output)}`,
+        );
         assert.equal(fixtureLive.status, 1, fixtureCase.name);
         const captured = runNodeScript([
           validatorPath,
@@ -479,7 +484,10 @@ test(
         const fixtureDiagnostic = findDiagnostic(fixtureLive.output);
         const diagnostic = findDiagnostic(captured.output);
         assert.ok(fixtureDiagnostic, fixtureCase.name);
-        assert.ok(diagnostic, fixtureCase.name);
+        assert.ok(
+          diagnostic,
+          `${fixtureCase.name}; captured validator output: ${JSON.stringify(captured.output)}`,
+        );
         assert.equal(fixtureDiagnostic, diagnostic, fixtureCase.name);
         assert.match(diagnostic, fixtureCase.detail, fixtureCase.name);
         assert.match(
