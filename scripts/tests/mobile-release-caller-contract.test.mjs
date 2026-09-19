@@ -351,6 +351,18 @@ test("documented caller passes every required build ID through with", () => {
 test("controlled Node range validation input is optional and stays outside secrets", () => {
   const workflowDispatchInputs = workflow.on?.workflow_dispatch?.inputs ?? {};
   const workflowCallInputs = workflow.on?.workflow_call?.inputs ?? {};
+  for (const input of buildIdInputs) {
+    assert.equal(
+      workflowDispatchInputs[input]?.required,
+      false,
+      `${input} must remain optional for manual dispatch so repository variables still work`,
+    );
+    assert.equal(
+      workflowDispatchInputs[input]?.type,
+      "string",
+      `${input} must be exposed as a string input for manual dispatch overrides`,
+    );
+  }
   for (const inputs of [workflowDispatchInputs, workflowCallInputs]) {
     assert.equal(
       inputs.node_range_override?.required,
