@@ -379,12 +379,6 @@ function sanitizeRecordedStartupOutput(value) {
           },
         )
         .replace(
-          /Starting project at ((?:[A-Za-z]:\\|\\\\[^\\\r\n]+\\[^\\\r\n]+\\)[^\\"\r\n]+(?:\\[^\\"\r\n]+)*)/g,
-          (_, path) => {
-            return `Starting project at ${sanitizeWindowsProjectPath(path)}`;
-          },
-        )
-        .replace(
           /[A-Za-z]:\\(?:Users|home)\\[^"\r\n]+|[A-Za-z]:\\[^"\r\n]*?[^/\\\s]+\.(?:dylib|so(?:\.\d+)*|dll)\b[^"\r\n]*|\\\\[^\\\r\n]+\\[^\\\r\n]+\\[^"\r\n]*?[^/\\\s]+\.(?:dylib|so(?:\.\d+)*|dll)\b[^"\r\n]*/g,
           sanitizeWindowsPath,
         )
