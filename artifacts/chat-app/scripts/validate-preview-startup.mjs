@@ -349,7 +349,7 @@ function sanitizeRecordedStartupOutput(value) {
           return `${prefix}[redacted]/${libraryName}${suffix}`;
         })
         .replace(
-          /[A-Za-z]:\\(?:Users|home)\\[^\r\n]+|[A-Za-z]:\\a\\[^\\\r\n]+\\[^\\\r\n]+\\[^\r\n]+/g,
+          /[A-Za-z]:\\(?:Users|home)\\[^\r\n]+|[A-Za-z]:\\[A-Za-z]\\[^\\\r\n]+\\[^\\\r\n]+\\[^\r\n]+/g,
           (path) => {
             const libraryName = path.match(
               /[^/\\\s]+?\.(?:dylib|so(?:\.\d+)?|dll)\b/i,
@@ -1212,18 +1212,30 @@ async function validateLivePreview(
     stopRequested = true;
     const childPid = child.pid;
     const processGroupId = process.platform === "win32" ? undefined : childPid;
-    if (child.exitCode !== null) return;
-    child.once("close", () => {
-      clearTimeout(closeTimer);
-      closeTimer = undefined;
-    });
-    if (process.platform === "win32" && childPid) {
+    const terminateWindowsChild = (signal) => {
+      if (!childPid) {
+        child.kill(signal);
+        return;
+      }
       const processTreeKiller = spawn(
         "taskkill.exe",
         ["/PID", String(childPid), "/T", "/F"],
         { stdio: "ignore", windowsHide: true },
       );
+      processTreeKiller.once("error", () => {
+        if (child.exitCode === null) {
+          child.kill(signal);
+        }
+      });
       processTreeKiller.unref();
+    };
+    if (child.exitCode !== null) return;
+    child.once("close", () => {
+      clearTimeout(closeTimer);
+      closeTimer = undefined;
+    });
+    if (process.platform === "win32") {
+      terminateWindowsChild("SIGTERM");
     } else if (!processGroupId) {
       child.kill("SIGTERM");
     } else {
@@ -1236,16 +1248,7 @@ async function validateLivePreview(
     closeTimer = setTimeout(() => {
       try {
         if (process.platform === "win32") {
-          if (!childPid) {
-            child.kill("SIGKILL");
-            return;
-          }
-          const processTreeKiller = spawn(
-            "taskkill.exe",
-            ["/PID", String(childPid), "/T", "/F"],
-            { stdio: "ignore", windowsHide: true },
-          );
-          processTreeKiller.unref();
+          terminateWindowsChild("SIGKILL");
         } else if (!processGroupId) {
           child.kill("SIGKILL");
         } else {
