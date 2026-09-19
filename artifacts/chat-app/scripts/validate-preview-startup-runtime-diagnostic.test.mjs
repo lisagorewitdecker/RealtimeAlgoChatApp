@@ -374,6 +374,7 @@ test(
         packageRoot,
         "chat-preview-windows-runner-",
       ),
+      join(tmpdir(), "chat-preview-windows-runner-"),
     );
     const longPath =
       `C:\\Program Files\\Expo\\${"React Native DevTools cache\\".repeat(14)}` +
@@ -410,6 +411,11 @@ test(
         );
 
         assert.equal(live.status, 1, fixtureCase.name);
+        assert.notEqual(live.status, 0, fixtureCase.name);
+        assert.ok(
+          existsSync(recordPath),
+          `${fixtureCase.name}; live validator output: ${JSON.stringify(live.output)}`,
+        );
         const captured = runNodeScript([
           validatorPath,
           "--log-file",
@@ -419,6 +425,10 @@ test(
 
         const diagnostic = findDiagnostic(captured.output);
         assert.ok(diagnostic, fixtureCase.name);
+        assert.ok(
+          diagnostic,
+          `${fixtureCase.name}; captured validator output: ${JSON.stringify(captured.output)}`,
+        );
         assert.match(diagnostic, fixtureCase.detail, fixtureCase.name);
         assert.match(
           diagnostic,

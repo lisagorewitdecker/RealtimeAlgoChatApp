@@ -107,6 +107,7 @@ export const fixtureOutput = Object.freeze({
 // END GENERATED PREVIEW LOADER OUTPUT
 
 if (fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
+if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
   const fixtureName =
     process.env.PREVIEW_STARTUP_TEST_FIXTURE ?? "missing-runtime-library";
   if (
