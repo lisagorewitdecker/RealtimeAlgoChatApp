@@ -286,6 +286,17 @@ test("real-platform capture records macOS and Windows loader output safely", () 
         "Starting project at \\\\server\\share\\repo\\app\n",
       libraryIdentifier: "libgtk-3-0.dll",
     },
+    {
+      name: "Windows UNC library path",
+      fixture: "missing-runtime-library-windows",
+      output:
+        "Error: The code execution cannot proceed because " +
+        "\\\\server\\share\\Expo\\libgtk-3-0.dll " +
+        "was not found. ******" +
+        "Starting project at \\\\server\\share\\repo\\app\n",
+      libraryIdentifier: "libgtk-3-0.dll",
+      diagnosticPattern: /Expo preview loader wording changed/,
+    },
   ];
 
   try {
@@ -305,6 +316,7 @@ test("real-platform capture records macOS and Windows loader output safely", () 
       assert.equal(live.status, 1, fixtureCase.name);
       const recordedOutput = readFileSync(recordPath, "utf8");
       assert.doesNotMatch(recordedOutput, /\/Users\/reviewer|C:\\Users\\reviewer/);
+      assert.doesNotMatch(recordedOutput, /\\\\server\\share\\Expo\\libgtk-3-0\.dll/);
       assert.doesNotMatch(
         recordedOutput,
         /\\\\server\\share\\repo\\app/,
@@ -320,12 +332,15 @@ test("real-platform capture records macOS and Windows loader output safely", () 
       assert.equal(captured.status, 1, fixtureCase.name);
       const liveDiagnostic = findDiagnostic(live.output);
       const capturedDiagnostic = findDiagnostic(captured.output);
+      const diagnosticPattern =
+        fixtureCase.diagnosticPattern ??
+        new RegExp(fixtureCase.libraryIdentifier);
       assert.ok(liveDiagnostic, fixtureCase.name);
       assert.ok(capturedDiagnostic, fixtureCase.name);
-      assert.match(liveDiagnostic, new RegExp(fixtureCase.libraryIdentifier));
+      assert.match(liveDiagnostic, diagnosticPattern);
       assert.match(
         capturedDiagnostic,
-        new RegExp(fixtureCase.libraryIdentifier),
+        diagnosticPattern,
         fixtureCase.name,
       );
       assert.match(
