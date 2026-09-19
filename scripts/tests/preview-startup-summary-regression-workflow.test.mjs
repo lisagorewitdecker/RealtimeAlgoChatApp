@@ -30,6 +30,7 @@ test("hosted preview startup summary regression checks the reviewed revision", (
     "artifacts/chat-app/scripts/preview-startup-runtime-library-fixture.mjs",
     "artifacts/chat-app/scripts/preview-startup-shared.mjs",
     "artifacts/chat-app/scripts/validate-preview-startup.mjs",
+    "artifacts/chat-app/scripts/validate-preview-startup.test.mjs",
     "artifacts/chat-app/scripts/validate-preview-startup-runtime-diagnostic.test.mjs",
   ]);
   assert.equal(workflow.on.workflow_dispatch.inputs.reviewed_ref.required, true);
@@ -75,6 +76,22 @@ test("hosted preview startup summary regression checks the reviewed revision", (
     /PREVIEW_STARTUP_TEST_FIXTURE=missing-runtime-library-long-path/,
   );
   assert.match(verification, /Expo preview startup output is healthy:/);
+  assert.match(
+    verification,
+    /PREVIEW_STARTUP_TEST_FIXTURE=handoff-server-stall-manifest/,
+  );
+  assert.match(
+    verification,
+    /manifest response headers received but body did not complete/,
+  );
+  assert.match(
+    verification,
+    /250ms configured local handoff deadline/,
+  );
+  assert.match(
+    verification,
+    /The hosted Metro body-stall summary did not retain safe failure and recovery guidance/,
+  );
   assert.match(verification, /bounded missing-library diagnosis/);
   assert.match(verification, /private material/);
   assert.match(

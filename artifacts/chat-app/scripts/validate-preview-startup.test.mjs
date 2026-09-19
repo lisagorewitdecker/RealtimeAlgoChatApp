@@ -101,6 +101,30 @@ test("CI summaries keep record-save failures fixed and path-free", () => {
   assert.ok(summary.length <= 700, "summary exceeded its bounded size");
 });
 
+test("CI summaries identify a stalled Metro body and retain recovery guidance", () => {
+  const summary = formatStartupFailureSummary(
+    new Error(
+      "Local Expo Go manifest/bundle probe failed: manifest response headers " +
+        "received but body did not complete before 250ms configured local " +
+        "handoff deadline. Restart or repair the managed Chat App/Expo " +
+        "workflow, then rerun the preview handoff preflight before starting " +
+        "a phone session. https://private.example.test/expo?token=private-secret",
+    ),
+  );
+
+  assert.match(summary, /\*\*Status:\*\* FAIL/);
+  assert.match(
+    summary,
+    /\*\*Failure:\*\* local manifest response headers were received, but the body did not complete/,
+  );
+  assert.match(
+    summary,
+    /\*\*Recovery:\*\* Restart or repair the managed Chat App\/Expo workflow/,
+  );
+  assert.doesNotMatch(summary, /https?:\/\/|private-secret|250ms/);
+  assert.ok(summary.length <= 700, "summary exceeded its bounded size");
+});
+
 test("uses defaults only when preview timeout environment values are absent", () => {
   assert.deepEqual(parsePreviewTimeouts({}), {
     timeoutMs: 30_000,

@@ -11,6 +11,7 @@ on:
       - artifacts/chat-app/scripts/preview-startup-runtime-library-fixture.mjs
       - artifacts/chat-app/scripts/preview-startup-shared.mjs
       - artifacts/chat-app/scripts/validate-preview-startup.mjs
+      - artifacts/chat-app/scripts/validate-preview-startup.test.mjs
       - artifacts/chat-app/scripts/validate-preview-startup-runtime-diagnostic.test.mjs
   workflow_dispatch:
     inputs:
@@ -63,8 +64,11 @@ jobs:
           tooling_summary_path="$(mktemp)"
           tooling_marker_path="$(mktemp)"
           rm -f "$tooling_marker_path"
+          stall_summary_path="$(mktemp)"
+          stall_output_path="$(mktemp)"
+          stall_preload_path="$(mktemp --suffix=.mjs)"
           healthy_log="$(mktemp)"
-          trap 'rm -f "$summary_path" "$failure_summary_path" "$setting_summary_path" "$tooling_summary_path" "$tooling_marker_path" "$healthy_log"' EXIT
+          trap 'rm -f "$summary_path" "$failure_summary_path" "$setting_summary_path" "$tooling_summary_path" "$tooling_marker_path" "$stall_summary_path" "$stall_output_path" "$stall_preload_path" "$healthy_log"' EXIT
           resolved_commit_sha="$(git rev-parse --verify HEAD)"
           source scripts/workflow-output-safety.sh
           safe_reviewed_ref="$(sanitize_workflow_text "$REVIEWED_REF")"
@@ -136,6 +140,64 @@ jobs:
             cat "$failure_summary_path" >&2
             exit 1
           fi
+
+          cat > "$stall_preload_path" <<'EOF'
+          const originalFetch = globalThis.fetch;
+          globalThis.fetch = async (url, options = {}) => {
+            if (String(url).startsWith("https://public-preview.test/")) {
+              return new Response(
+                JSON.stringify({
+                  launchAsset: {
+                    url: "https://public-preview.test/_expo/static/js/bundle",
+                  },
+                }),
+                { status: 200 },
+              );
+            }
+            return originalFetch(url, options);
+          };
+          EOF
+          set +e
+          timeout 10s env \
+            GITHUB_STEP_SUMMARY="$stall_summary_path" \
+            NODE_OPTIONS="--import $stall_preload_path" \
+            PREVIEW_PUBLIC_URL=https://public-preview.test/expo \
+            PREVIEW_PUBLIC_TIMEOUT_MS=2000 \
+            PREVIEW_HANDOFF_TIMEOUT_MS=250 \
+            PREVIEW_STARTUP_TIMEOUT_MS=2000 \
+            PREVIEW_STARTUP_TEST_FIXTURE=handoff-server-stall-manifest \
+            node artifacts/chat-app/scripts/validate-preview-startup.mjs \
+            --platform android >"$stall_output_path" 2>&1
+          stall_status=$?
+          set -e
+          if [[ "$stall_status" -eq 124 ]]; then
+            echo "The hosted Metro body-stall scenario exceeded its outer 10-second deadline." >&2
+            cat "$stall_output_path" >&2
+            exit 1
+          fi
+          if [[ "$stall_status" -eq 0 ]]; then
+            echo "The hosted Metro body-stall scenario unexpectedly passed." >&2
+            cat "$stall_output_path" >&2
+            exit 1
+          fi
+          if ! grep -Fq -- 'manifest response headers received but body did not complete' "$stall_output_path" ||
+            ! grep -Fq -- '250ms configured local handoff deadline' "$stall_output_path" ||
+            ! grep -Fq -- 'Restart or repair the managed Chat App/Expo workflow' "$stall_output_path"; then
+            echo "The hosted Metro body-stall run did not identify the stalled resource and recovery guidance." >&2
+            cat "$stall_output_path" >&2
+            exit 1
+          fi
+          if ! grep -Fq -- '**Failure:** local manifest response headers were received, but the body did not complete' "$stall_summary_path" ||
+            ! grep -Fq -- '**Recovery:** Restart or repair the managed Chat App/Expo workflow' "$stall_summary_path" ||
+            grep -Eiq -- 'https?://|authorization|proxy-authorization|password|passwd|secret|token|credential' "$stall_summary_path"; then
+            echo "The hosted Metro body-stall summary did not retain safe failure and recovery guidance." >&2
+            cat "$stall_summary_path" >&2
+            exit 1
+          fi
+          {
+            echo "- Hosted Metro body stall: **PASS** (headers-only manifest response stopped within the configured deadline; failure and recovery guidance were published)"
+            cat "$stall_summary_path"
+          } >> "$GITHUB_STEP_SUMMARY"
 
           printf 'Starting Metro Bundler\n' > "$healthy_log"
           healthy_output="$(

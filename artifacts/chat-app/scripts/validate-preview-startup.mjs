@@ -503,6 +503,31 @@ export function formatStartupFailureSummary(error) {
       `**Recovery:** ${RECORD_WRITE_RECOVERY_MESSAGE.slice("Recovery: ".length)}\n\n`
     );
   }
+
+  const stalledResource = message.includes(
+    "public manifest response headers received but body did not complete",
+  )
+    ? "public manifest"
+    : message.includes(
+          "bundle response headers received but body did not complete",
+        )
+      ? "local bundle"
+      : message.includes(
+            "manifest response headers received but body did not complete",
+          )
+        ? "local manifest"
+        : null;
+  if (stalledResource) {
+    return (
+      "### Expo preview startup\n\n" +
+      "**Status:** FAIL\n\n" +
+      `**Failure:** ${stalledResource} response headers were received, but ` +
+      "the body did not complete before the configured preview deadline.\n\n" +
+      "**Recovery:** Restart or repair the managed Chat App/Expo workflow, " +
+      "then rerun the preview handoff preflight before starting a phone session.\n\n"
+    );
+  }
+
   const handoffFailurePhase = getHandoffFailurePhase(message);
   if (handoffFailurePhase) {
     return (
