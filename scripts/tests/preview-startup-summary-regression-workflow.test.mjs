@@ -150,17 +150,19 @@ test("hosted preview startup workflow summary matches validator output exactly",
   const result = runValidator({
     PREVIEW_STARTUP_TEST_FIXTURE: "missing-runtime-library-long-path",
   });
+  const lines = result.summary.split("\n");
 
   assert.equal(result.status, 1, `${result.stdout}${result.stderr}`);
-  assert.match(result.summary, /^### Expo preview startup\n\n\*\*Status:\*\* FAIL\n\n/ms);
+  assert.equal(lines.length, 7, `${result.stdout}${result.stderr}`);
+  assert.equal(lines[0], "### Expo preview startup");
+  assert.equal(lines[1], "");
+  assert.equal(lines[2], "**Status:** FAIL");
+  assert.equal(lines[3], "");
+  assert.equal(lines[5], "");
+  assert.equal(lines[6], "");
   assert.match(
-    result.summary,
-    /^\*\*Diagnosis:\*\* Expo preview startup error: Error: \/opt\/expo\/react-native-devtools: error while loading shared libraries: .*missing runtime library: .*libgtk-3\.so\.0\)$/m,
-  );
-  assert.equal(
-    result.summary.trimEnd().split("\n").length,
-    5,
-    `${result.stdout}${result.stderr}`,
+    lines[4],
+    /^\*\*Diagnosis:\*\* Expo preview startup error: Error: \/opt\/expo\/react-native-devtools: error while loading shared libraries: [^\r\n]*\(missing runtime library: [^\r\n]*libgtk-3\.so\.0\)[ \t]*$/,
   );
 });
 
