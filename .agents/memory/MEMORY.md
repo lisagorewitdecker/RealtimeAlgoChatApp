@@ -4,6 +4,7 @@
 - [Expo preview CORS](expo-preview-cors.md) — API browser allowlists must include the Expo preview origin, not only the main development domain.
 - [Expo preview DevTools GTK runtime](expo-preview-devtools-gtk.md) — SDK 57’s optional DevTools binary needs Nix `gtk3` so Metro startup stays free of a misleading loader error.
 - [Expo loader wording compatibility](expo-loader-wording-compatibility.md) — pin captured loader samples to installed Expo/React Native versions and fail clearly on new wording.
+- [Malformed loader diagnostics](malformed-loader-diagnostics.md) — require a complete safe library path and fail closed instead of echoing corrupted loader lines.
 - [Sandbox release validation](sandbox-release-validation.md) — test the generated editor and the mobile WebView host independently at their delivery boundaries.
 - [Post-merge setup timing](post-merge-setup-timing.md) — dependency reconciliation can exceed the default setup timeout; keep the configured allowance realistic.
 - [Account access policy](account-access-policy.md) — Clerk-owned bans and verified email checks apply at every server entry point, including room capabilities.
@@ -110,3 +111,6 @@
 - [setup-node semver contract](setup-node-semver-contract.md) — pin the local Node-range matcher to the semver version bundled by the pinned setup-node action.
 - [Metro evidence persistence](metro-evidence-persistence.md) — queue immutable rolling snapshots FIFO; disable file writes after failure while console diagnostics continue.
 - [Hosted root contract gate](hosted-root-contract-gate.md) — ubuntu-latest lacks ImageMagick/Tesseract and floats Node 24.x; signal-timing flakes and log/rerun recipes via the push token.
+- [GitHub PR state verification](github-pr-state-verification.md) — re-read live PR state before attempting rebase, reopen, or branch operations because task snapshots can lag GitHub.
+- [Fork generated-client evidence](fork-generated-client-evidence.md) — validate and publish drift against the same PR head SHA, not a synthetic merge ref.
+- [Real-platform launcher captures](real-platform-launcher-captures.md) — Windows hosted captures need normalized entrypoints, process-tree cleanup, and redaction for runner workspace roots such as D:\a.

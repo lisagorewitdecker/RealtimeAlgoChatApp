@@ -4,7 +4,7 @@ import { createServer, type Server } from "node:http";
 import { db, userProfilesTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import express from "express";
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 const userId = `profile-route-concurrency-test-${randomUUID()}`;
 const mockGetAuth = vi.hoisted(() => vi.fn(() => ({ userId })));
@@ -22,7 +22,7 @@ vi.mock("../lib/accountAccess", async (importOriginal) => {
   return { ...original, getAccountAccess: mockGetAccountAccess };
 });
 
-import { getPublicKey } from "../lib/e2eePersistence.js";
+import { getPublicKey, getPublicKeyRecord } from "../lib/e2eePersistence.js";
 import profileRouter from "./profile.js";
 
 const key = (fill: number) => Buffer.alloc(32, fill).toString("base64");
@@ -30,11 +30,19 @@ const key = (fill: number) => Buffer.alloc(32, fill).toString("base64");
 let server: Server;
 let baseUrl: string;
 
-async function replaceKey(publicKey: string, previousPublicKey: string | null) {
+async function replaceKey(
+  publicKey: string,
+  previousPublicKey: string | null,
+  registrationVersion?: number,
+) {
   const response = await fetch(baseUrl, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ publicKey, previousPublicKey }),
+    body: JSON.stringify({
+      publicKey,
+      previousPublicKey,
+      ...(registrationVersion === undefined ? {} : { registrationVersion }),
+    }),
   });
   return {
     status: response.status,
@@ -56,6 +64,10 @@ beforeAll(async () => {
   const address = server.address();
   if (!address || typeof address === "string") throw new Error("Expected TCP server");
   baseUrl = `http://127.0.0.1:${address.port}/`;
+});
+
+beforeEach(async () => {
+  await db.delete(userProfilesTable).where(eq(userProfilesTable.userId, userId));
 });
 
 afterAll(async () => {
@@ -108,5 +120,60 @@ describe("profile key replacement through the live HTTP and database boundary", 
     await expect(getPublicKey(userId)).resolves.toBe(winningKey);
     expect(mockGetAuth).toHaveBeenCalled();
     expect(mockGetAccountAccess).toHaveBeenCalledWith(userId);
+  });
+
+  it("lets only the next registration revision win against concurrent stale and future writes", async () => {
+    const initialKey = key(5);
+    const winningKey = key(6);
+    const staleKey = key(7);
+    const futureKey = key(8);
+    const initial = await replaceKey(initialKey, null, 1);
+    expect(initial).toEqual({
+      status: 200,
+      body: { publicKey: initialKey, registrationVersion: 1 },
+    });
+
+    const [winner, stale, future] = await Promise.all([
+      replaceKey(winningKey, initialKey, 2),
+      replaceKey(staleKey, initialKey, 1),
+      replaceKey(futureKey, initialKey, 4),
+    ]);
+
+    expect(winner).toEqual({
+      status: 200,
+      body: { publicKey: winningKey, registrationVersion: 2 },
+    });
+    expect(stale).toEqual({
+      status: 409,
+      body: {
+        error: expect.stringContaining("older"),
+        code: "PUBLIC_KEY_STALE",
+        publicKey: expect.any(String),
+        registrationVersion: expect.any(Number),
+      },
+    });
+    expect(future).toEqual({
+      status: 409,
+      body: {
+        error: expect.stringContaining("ahead"),
+        code: "PUBLIC_KEY_VERSION_AHEAD",
+        publicKey: expect.any(String),
+        registrationVersion: expect.any(Number),
+      },
+    });
+    for (const rejected of [stale, future]) {
+      expect([
+        { publicKey: initialKey, registrationVersion: 1 },
+        { publicKey: winningKey, registrationVersion: 2 },
+      ]).toContainEqual({
+        publicKey: rejected.body["publicKey"],
+        registrationVersion: rejected.body["registrationVersion"],
+      });
+    }
+    await expect(getPublicKeyRecord(userId)).resolves.toEqual({
+      publicKey: winningKey,
+      previousPublicKey: initialKey,
+      registrationVersion: 2,
+    });
   });
 });

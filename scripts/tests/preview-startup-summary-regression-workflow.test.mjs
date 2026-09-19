@@ -114,6 +114,10 @@ test("hosted preview startup summary regression checks the reviewed revision", (
     verification,
     /PREVIEW_STARTUP_TEST_FIXTURE=missing-runtime-library-long-path/,
   );
+  assert.match(
+    verification,
+    /REPLIT_EXPO_DEV_DOMAIN=fallback-preview\.example\.test\s+\\\s*\n\s+PREVIEW_STARTUP_TEST_FIXTURE=missing-runtime-library-long-path/,
+  );
   assert.match(verification, /Expo preview startup output is healthy:/);
   assert.match(verification, /bounded missing-library diagnosis/);
   assert.match(verification, /private material/);

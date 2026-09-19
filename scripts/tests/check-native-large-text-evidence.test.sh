@@ -32,11 +32,14 @@ cleanup_test_fixtures() {
     echo "Native evidence test cleanup escaped its fixture directory" >&2
     return 1
   fi
-  if ((SAVED_TEST_STATUS_GUARDED)) &&
-    ! cmp -s "$SAVED_TEST_STATUS_SNAPSHOT" "$SAVED_TEST_STATUS"; then
-    printf 'Native evidence test cleanup changed the saved API test status: %s no longer matches its pre-test snapshot (a concurrent API Playwright run rewrites this file too).\n' \
-      "$SAVED_TEST_STATUS" >&2
-    return 1
+  if ((SAVED_TEST_STATUS_GUARDED)); then
+    if [[ ! -f "$SAVED_TEST_STATUS" ]]; then
+      printf 'Skipping the saved API test status cleanup guard: %s disappeared during the test (optional gitignored Playwright output may be rewritten by other local runs).\n' \
+        "$SAVED_TEST_STATUS" >&2
+    elif ! cmp -s "$SAVED_TEST_STATUS_SNAPSHOT" "$SAVED_TEST_STATUS"; then
+      printf 'Skipping the saved API test status cleanup guard: %s changed during the test (optional gitignored Playwright output may be rewritten by other local runs).\n' \
+        "$SAVED_TEST_STATUS" >&2
+    fi
   fi
 
   rm -rf "$TEST_PARENT"
@@ -514,6 +517,32 @@ fi
 assert_contains "$oversized_output" "[android] Invalid Sentry source-map evidence"
 assert_contains "$oversized_output" "evidence exceeds the release evidence size limit"
 assert_not_contains "$oversized_output" "$oversized_sentinel"
+
+collection_size_root="$TEST_ROOT/collection-size"
+write_valid_run "$collection_size_root" ios
+write_valid_run "$collection_size_root" android
+collection_size_sentinel="oversized-collection-private-sentinel"
+printf '%s' "$collection_size_sentinel" > \
+  "$collection_size_root/ios/20260909T120000Z/native-branding-check.md"
+head -c 262145 /dev/zero | tr '\0' 'x' >> \
+  "$collection_size_root/ios/20260909T120000Z/native-branding-check.md"
+if collection_size_output="$(
+  bash "$CHECKER" --check-collection-size \
+    "$collection_size_root/ios/20260909T120000Z" 2>&1
+)"; then
+  echo "oversized collection text case unexpectedly passed" >&2
+  exit 1
+fi
+assert_contains "$collection_size_output" \
+  "Native evidence text file exceeds the 256 KiB release evidence limit: native-branding-check.md."
+assert_contains "$collection_size_output" \
+  "no artifact will be uploaded"
+assert_not_contains "$collection_size_output" "$collection_size_sentinel"
+if ! bash "$CHECKER" --check-collection-size \
+  "$collection_size_root/android/20260909T120000Z"; then
+  echo "valid collection text case unexpectedly failed" >&2
+  exit 1
+fi
 
 valid_root="$TEST_ROOT/valid"
 write_valid_run "$valid_root" ios

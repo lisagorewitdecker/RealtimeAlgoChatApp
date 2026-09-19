@@ -331,6 +331,11 @@ if [[ "$CALL_SCREENSHOT_COUNT" -ne 2 ]]; then
   exit 1
 fi
 
+if ! bash "$ROOT_DIR/scripts/check-native-large-text-evidence.sh" \
+  --check-collection-size "$RESULTS_DIR"; then
+  exit 1
+fi
+
 RESULT_STATUS="PASS"
 if [[ "$RUN_MODE" == "diagnostic-only" ]]; then
   echo "Native large-text smoke test passed for $PLATFORM (DIAGNOSTIC-ONLY; not release evidence)."
