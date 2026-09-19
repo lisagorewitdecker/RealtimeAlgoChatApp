@@ -1,5 +1,14 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import {
+  copyFileSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
@@ -16,6 +25,10 @@ const workflow = YAML.parse(
     path.join(workspaceRoot, ".github/workflows/mobile-release.yml"),
     "utf8",
   ),
+);
+const workflowText = readFileSync(
+  path.join(workspaceRoot, ".github/workflows/mobile-release.yml"),
+  "utf8",
 );
 const callerDocumentation = readFileSync(
   path.join(
@@ -62,6 +75,11 @@ const pinnedCheckoutAction =
 const pinnedSetupNodeAction =
   "actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020";
 const setupNodeToolCacheSemverVersion = "6.3.1";
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 function resolveWorkflowEnvExpression(value, workflowEnv, jobEnv, stepEnv) {
   const match = String(value).trim().match(/^\$\{\{\s*env\.([A-Z0-9_]+)\s*\}\}$/);
   if (!match) {
@@ -187,6 +205,53 @@ test("Node engine range validation rejects malformed and unsupported syntax", ()
       },
       `the invalid range ${JSON.stringify(range)} must be rejected`,
     );
+  }
+});
+
+test("malformed mobile release workflow expressions fail with line-specific diagnostics", () => {
+  const fixtureRoot = mkdtempSync(
+    path.join(tmpdir(), "mobile-release-actionlint-expression-"),
+  );
+  try {
+    // actionlint discovers repository configuration from the workflow's
+    // nearest .git directory, so keep the fixture shaped like a repository.
+    const fixtureWorkflowsDir = path.join(fixtureRoot, ".github/workflows");
+    mkdirSync(fixtureWorkflowsDir, { recursive: true });
+    mkdirSync(path.join(fixtureRoot, ".git"));
+    copyFileSync(
+      path.join(workspaceRoot, ".github/actionlint.yaml"),
+      path.join(fixtureRoot, ".github/actionlint.yaml"),
+    );
+
+    const malformedExpression = "run-name: ${{ github.ref == }}";
+    const fixtureSource = `${workflowText}\n# malformed expression fixture\n${malformedExpression}\n`;
+    const fixturePath = path.join(fixtureWorkflowsDir, "mobile-release.yml");
+    writeFileSync(fixturePath, fixtureSource);
+    const malformedLine =
+      fixtureSource
+        .split("\n")
+        .findIndex((line) => line === malformedExpression) + 1;
+    assert.ok(malformedLine > 0, "the malformed fixture line must be present");
+
+    const lint = spawnSync(
+      "pnpm",
+      ["exec", "actionlint", "-shellcheck=", "-oneline", fixturePath],
+      { cwd: workspaceRoot, encoding: "utf8" },
+    );
+    const diagnostics = `${lint.stdout}${lint.stderr}`;
+    assert.equal(lint.status, 1, diagnostics);
+    assert.match(
+      diagnostics,
+      new RegExp(`${escapeRegExp(fixturePath)}:${malformedLine}:\\d+:`),
+      "the diagnostic must identify the malformed workflow path and line",
+    );
+    assert.match(
+      diagnostics,
+      /unexpected end of input while parsing variable access.*\[expression\]/,
+      "the diagnostic must explain how the expression is malformed",
+    );
+  } finally {
+    rmSync(fixtureRoot, { recursive: true, force: true });
   }
 });
 
