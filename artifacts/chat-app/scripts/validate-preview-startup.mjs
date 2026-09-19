@@ -349,7 +349,7 @@ function sanitizeRecordedStartupOutput(value) {
           return `${prefix}[redacted]/${libraryName}${suffix}`;
         })
         .replace(
-          /[A-Za-z]:\\(?:Users|home)\\[^\r\n]+/g,
+          /[A-Za-z]:\\(?:Users|home|a)\\[^\r\n]+/g,
           (path) => {
             const libraryName = path.match(
               /[^/\\\s]+?\.(?:dylib|so(?:\.\d+)?|dll)\b/i,
@@ -1200,7 +1200,14 @@ async function validateLivePreview(
       clearTimeout(closeTimer);
       closeTimer = undefined;
     });
-    if (process.platform === "win32" || !processGroupId) {
+    if (process.platform === "win32" && processGroupId) {
+      const processTreeKiller = spawn(
+        "taskkill.exe",
+        ["/PID", String(processGroupId), "/T", "/F"],
+        { stdio: "ignore", windowsHide: true },
+      );
+      processTreeKiller.unref();
+    } else if (!processGroupId) {
       child.kill("SIGTERM");
     } else {
       try {
@@ -1212,8 +1219,16 @@ async function validateLivePreview(
     closeTimer = setTimeout(() => {
       if (!processGroupId) return;
       try {
-        if (process.platform === "win32") child.kill("SIGKILL");
-        else process.kill(-processGroupId, "SIGKILL");
+        if (process.platform === "win32") {
+          const processTreeKiller = spawn(
+            "taskkill.exe",
+            ["/PID", String(processGroupId), "/T", "/F"],
+            { stdio: "ignore", windowsHide: true },
+          );
+          processTreeKiller.unref();
+        } else {
+          process.kill(-processGroupId, "SIGKILL");
+        }
       } catch (error) {
         if (error.code !== "ESRCH") throw error;
       }
