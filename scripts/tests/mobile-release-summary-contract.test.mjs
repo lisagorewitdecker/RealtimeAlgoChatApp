@@ -1315,6 +1315,16 @@ test("native release jobs are gated by centralized mobile release configuration"
     /provide the native smoke build IDs and protected release secrets before rerunning the workflow/,
     "the final release gate must explain how to unblock missing native release configuration",
   );
+  assert.match(
+    blockingStep?.run ?? "",
+    /\(\s*"\$IOS_CONFIGURATION_READY"\s*==\s*"true"\s*&&\s*"\$IOS_RESULT"\s*!=\s*"success"\s*\)/,
+    "the final release gate must only require iOS success when iOS configuration is ready",
+  );
+  assert.match(
+    blockingStep?.run ?? "",
+    /\(\s*"\$ANDROID_CONFIGURATION_READY"\s*==\s*"true"\s*&&\s*"\$ANDROID_RESULT"\s*!=\s*"success"\s*\)/,
+    "the final release gate must only require Android success when Android configuration is ready",
+  );
 });
 
 test("idle-profile summary reports fixed browser target outages without leaking URLs", () => {
