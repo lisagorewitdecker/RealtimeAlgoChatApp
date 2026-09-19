@@ -178,6 +178,26 @@ assert_contains "$non_json_direct_output" \
   "Preview handoff preflight JSON is not valid JSON."
 assert_not_contains "$non_json_direct_output" "$non_json_sentinel"
 
+duplicate_json_sentinel="ios-duplicate-preflight-secret"
+cat >"$json_contract_path" <<EOF
+{"schema":"ios-preview-handoff-preflight/v1","schema":"$duplicate_json_sentinel","platform":"ios","boundaries":{"publicManifestReachability":{"status":"PASS","status":"FAIL","evidence":"public manifest HTTP 200 (128 bytes)"},"localHandoffProbe":{"status":"NOT_RUN","evidence":"Local manifest/bundle probe not run — no successful probe result was recorded"},"expoGoLaunch":{"status":"NOT_ASSESSED","evidence":"Requires a physical iPhone running stock Expo Go."},"serverNativeRequestEvidence":{"status":"NOT_ASSESSED","evidence":"Requires filtered Metro or API evidence from that physical Expo Go session."}}}
+EOF
+if duplicate_json_output="$(bash "$CHECKER" "$json_contract_record" 2>&1)"; then
+  printf 'iOS preflight JSON with duplicate fields unexpectedly passed.\n' >&2
+  exit 1
+fi
+assert_contains "$duplicate_json_output" "does not satisfy the redacted schema"
+assert_not_contains "$duplicate_json_output" "$duplicate_json_sentinel"
+if duplicate_json_direct_output="$(
+  node "$VALIDATOR" --validate-record "$json_contract_path" 2>&1
+)"; then
+  printf 'Duplicate-field iOS preflight JSON unexpectedly passed direct validation.\n' >&2
+  exit 1
+fi
+assert_contains "$duplicate_json_direct_output" \
+  "Preview handoff preflight JSON contains duplicate fields."
+assert_not_contains "$duplicate_json_direct_output" "$duplicate_json_sentinel"
+
 cat >"$json_contract_path" <<'EOF'
 {"schema":"ios-preview-handoff-preflight/v1","platform":"ios","boundaries":{"publicManifestReachability":{"status":"GARBAGE","evidence":"public manifest HTTP 200 (128 bytes)"},"localHandoffProbe":{"status":"NOT_RUN","evidence":"Local manifest/bundle probe not run — no successful probe result was recorded"},"expoGoLaunch":{"status":"NOT_ASSESSED","evidence":"Requires a physical iPhone running stock Expo Go."},"serverNativeRequestEvidence":{"status":"NOT_ASSESSED","evidence":"Requires filtered Metro or API evidence from that physical Expo Go session."}}}
 EOF

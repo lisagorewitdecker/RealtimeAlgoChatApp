@@ -271,6 +271,15 @@ if duplicate_json_output="$(bash "$CHECKER" "$json_contract_record" 2>&1)"; then
 fi
 assert_contains "$duplicate_json_output" "does not satisfy the redacted schema"
 assert_not_contains "$duplicate_json_output" "$duplicate_json_sentinel"
+if duplicate_json_direct_output="$(
+  node "$VALIDATOR" --validate-record "$json_contract_path" 2>&1
+)"; then
+  printf 'Duplicate-field Android preflight JSON unexpectedly passed direct validation.\n' >&2
+  exit 1
+fi
+assert_contains "$duplicate_json_direct_output" \
+  "Preview handoff preflight JSON contains duplicate fields."
+assert_not_contains "$duplicate_json_direct_output" "$duplicate_json_sentinel"
 
 unsafe_json_sentinel="https://preview-fixture.replit.dev/account=fixture-account/message=fixture-message"
 cat >"$json_contract_path" <<EOF
