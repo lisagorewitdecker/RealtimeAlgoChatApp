@@ -17,6 +17,8 @@ AVD_NAME="${ANDROID_NATIVE_AVD_NAME:-native-small-api35}"
 SYSTEM_IMAGE="system-images;android-${ANDROID_API_LEVEL};google_apis;x86_64"
 RUNNER_TEMP="${RUNNER_TEMP:-/tmp}"
 SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
+MAESTRO_INSTALLER_URL="https://get.maestro.mobile.dev"
+MAESTRO_INSTALLER_SHA256="${MAESTRO_INSTALLER_SHA256:?MAESTRO_INSTALLER_SHA256 is required for verified Maestro installation.}"
 
 if [[ -z "$SDK_ROOT" || ! -d "$SDK_ROOT" ]]; then
   echo "ANDROID_SDK_ROOT or ANDROID_HOME must point to the GitHub-hosted Android SDK." >&2
@@ -34,23 +36,18 @@ require_command() {
   fi
 }
 
-for command in adb avdmanager curl emulator find grep head pnpm sdkmanager sha256sum tar unzip; do
+for command in adb avdmanager curl emulator find grep head mktemp pnpm sdkmanager sha256sum unzip; do
   require_command "$command"
 done
 
 if ! command -v maestro >/dev/null 2>&1; then
-  MAESTRO_VERSION="${MAESTRO_VERSION:-1.39.13}"
-  MAESTRO_ARCHIVE="maestro-linux-amd64.tar.gz"
-  MAESTRO_URL="https://github.com/mobile-dev-inc/maestro/releases/download/cli-${MAESTRO_VERSION}/${MAESTRO_ARCHIVE}"
-  MAESTRO_SHA256="${MAESTRO_SHA256:?MAESTRO_SHA256 is required for Maestro artifact verification.}"
-  MAESTRO_TMP_ARCHIVE="${RUNNER_TEMP}/maestro-${MAESTRO_VERSION}.tar.gz"
-
-  curl --fail --location --silent --show-error "$MAESTRO_URL" --output "$MAESTRO_TMP_ARCHIVE"
-  printf '%s  %s\n' "$MAESTRO_SHA256" "$MAESTRO_TMP_ARCHIVE" | sha256sum -c -
-
-  mkdir -p "$HOME/.maestro/bin"
-  tar -xzf "$MAESTRO_TMP_ARCHIVE" -C "$HOME/.maestro/bin"
-  chmod +x "$HOME/.maestro/bin/maestro" || true
+  maestro_installer="$(mktemp "${RUNNER_TEMP%/}/maestro-installer.XXXXXX.sh")"
+  trap 'rm -f "$maestro_installer"' EXIT
+  curl --fail --location --silent --show-error "$MAESTRO_INSTALLER_URL" --output "$maestro_installer"
+  printf '%s  %s\n' "$MAESTRO_INSTALLER_SHA256" "$maestro_installer" | sha256sum -c -
+  env -u EAS_TOKEN bash "$maestro_installer"
+  rm -f "$maestro_installer"
+  trap - EXIT
 fi
 
 if ! command -v maestro >/dev/null 2>&1 && [[ -d "$HOME/.maestro/bin" ]]; then
@@ -101,8 +98,22 @@ set_avd_property "hw.initialOrientation" "Portrait"
 set_avd_property "hw.gpu.mode" "swiftshader_indirect"
 set_avd_property "skin.dynamic" "no"
 
+find_emulator_serial() {
+  local serial status avd_name
+  while read -r serial status _; do
+    [[ "$serial" == emulator-* && "$status" == "device" ]] || continue
+    avd_name="$(adb -s "$serial" emu avd name 2>/dev/null | tr -d '\r')"
+    if [[ "$avd_name" == "$AVD_NAME" ]]; then
+      printf '%s\n' "$serial"
+      return 0
+    fi
+  done < <(adb devices)
+  return 1
+}
+
 adb start-server >/dev/null
-if ! adb get-state >/dev/null 2>&1; then
+emulator_serial="$(find_emulator_serial || true)"
+if [[ -z "$emulator_serial" ]]; then
   mkdir -p "$RUNNER_TEMP"
   nohup emulator \
     "@${AVD_NAME}" \
@@ -114,10 +125,13 @@ if ! adb get-state >/dev/null 2>&1; then
     >"$RUNNER_TEMP/native-android-emulator.log" 2>&1 &
 fi
 
-timeout 180s adb wait-for-device
 boot_completed=0
 for _ in $(seq 1 90); do
-  if [[ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" == "1" ]]; then
+  if [[ -z "$emulator_serial" ]]; then
+    emulator_serial="$(find_emulator_serial || true)"
+  fi
+  if [[ -n "$emulator_serial" ]] &&
+    [[ "$(adb -s "$emulator_serial" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" == "1" ]]; then
     boot_completed=1
     break
   fi
@@ -129,8 +143,8 @@ if ((boot_completed == 0)); then
   exit 2
 fi
 
-adb shell settings put system accelerometer_rotation 0
-adb shell settings put system user_rotation 0
+adb -s "$emulator_serial" shell settings put system accelerometer_rotation 0
+adb -s "$emulator_serial" shell settings put system user_rotation 0
 
 download_root="$RUNNER_TEMP/native-smoke-android"
 rm -rf "$download_root"
@@ -148,8 +162,8 @@ if [[ ! -f "$artifact_path" ]]; then
   exit 2
 fi
 
-adb install -r "$artifact_path" >/dev/null
-if ! adb shell pm path "$NATIVE_SMOKE_ANDROID_APP_ID" >/dev/null 2>&1; then
+adb -s "$emulator_serial" install -r -t "$artifact_path" >/dev/null
+if ! adb -s "$emulator_serial" shell pm path "$NATIVE_SMOKE_ANDROID_APP_ID" >/dev/null 2>&1; then
   echo "The downloaded Android candidate did not install with the configured application ID." >&2
   exit 2
 fi
