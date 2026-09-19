@@ -41,6 +41,11 @@ const validatorPath = join(
   "validate-preview-startup.mjs",
 );
 const packageRoot = join(import.meta.dirname, "..");
+const PREVIEW_TIMEOUT_PREFLIGHT =
+  "node scripts/validate-preview-startup.mjs --validate-timeouts";
+const LIVE_PREVIEW_MARKERS = [
+  "scripts/validate-preview-startup.test.mjs",
+];
 
 test("CI summaries identify a failed public-manifest handoff without raw details", () => {
   const summary = formatStartupFailureSummary(
@@ -270,6 +275,58 @@ test("reports a DevTools failure without inventing a missing library", () => {
     },
   );
 });
+
+test("preview live entry points run timeout validation before live work", () => {
+  const packageJson = JSON.parse(
+    readFileSync(join(packageRoot, "package.json"), "utf8"),
+  );
+  const previewScripts = Object.entries(packageJson.scripts ?? {}).filter(
+    ([name]) => name.includes("preview"),
+  );
+  const livePreviewScripts = previewScripts.filter(([, command]) =>
+    Number.isFinite(findLivePreviewWorkIndex(command)),
+  );
+  const bypassingScripts = livePreviewScripts
+    .filter(([, command]) => {
+      const liveWorkIndex = findLivePreviewWorkIndex(command);
+      return (
+        command.indexOf(PREVIEW_TIMEOUT_PREFLIGHT) === -1 ||
+        command.indexOf(PREVIEW_TIMEOUT_PREFLIGHT) > liveWorkIndex
+      );
+    })
+    .map(([name]) => name);
+
+  assert.equal(
+    bypassingScripts.length,
+    0,
+    `Preview live entry points must run the shared timeout preflight before ` +
+      `tests or Metro; bypassing scripts: ${bypassingScripts.join(", ")}`,
+  );
+});
+
+function findLivePreviewWorkIndex(command) {
+  const testIndex = Math.min(
+    ...LIVE_PREVIEW_MARKERS.map((marker) => {
+      const index = command.indexOf(marker);
+      return index === -1 ? Number.POSITIVE_INFINITY : index;
+    }),
+  );
+  const liveValidatorIndex = [...command.matchAll(
+    /scripts\/validate-preview-startup\.mjs(?:\s+([^\s&|]+))?/g,
+  )]
+    .filter(
+      ([, argument]) =>
+        argument !== "--validate-configuration" &&
+        argument !== "--validate-timeouts",
+    )
+    .map((match) => match.index ?? Number.POSITIVE_INFINITY)
+    .shift();
+
+  return Math.min(
+    testIndex,
+    liveValidatorIndex ?? Number.POSITIVE_INFINITY,
+  );
+}
 
 test(
   "workflow entry points reject malformed and non-positive preview timeouts before live work",
