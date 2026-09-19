@@ -283,7 +283,6 @@ test("real-platform capture records macOS and Windows loader output safely", () 
         "Error: The code execution cannot proceed because " +
         "C:\\Users\\reviewer\\AppData\\Local\\Expo\\libgtk-3-0.dll " +
         "was not found. password=TOP_SECRET_VALUE\n" +
-        "Starting project at D:\\a\\RealtimeAlgoChatApp\\artifacts\\chat-app\n",
         "Starting project at \\\\server\\share\\repo\\app --port 8081 extra\n",
       libraryIdentifier: "libgtk-3-0.dll",
     },
@@ -451,7 +450,6 @@ test(
   },
   () => {
     const temporaryDirectory = mkdtempSync(
-      join(tmpdir(), "chat-preview-windows-runner-"),
       join(
         process.env.RUNNER_TEMP ?? tmpdir(),
         "chat-preview-windows-runner-",
@@ -482,7 +480,6 @@ test(
     try {
       for (const [index, fixtureCase] of cases.entries()) {
         const recordPath = join(temporaryDirectory, `windows-${index}.log`);
-        const live = runNodeScript(
         const realLauncherLive = runNodeScript(
           [validatorPath, "--record-log", recordPath],
           {
@@ -490,12 +487,6 @@ test(
             PREVIEW_STARTUP_TEST_FIXTURE: "missing-runtime-library-windows",
             PREVIEW_STARTUP_TEST_OUTPUT: fixtureCase.output,
           },
-        );
-
-        assert.notEqual(live.status, 0, fixtureCase.name);
-        assert.ok(
-          existsSync(recordPath),
-          `${fixtureCase.name}; live validator output: ${JSON.stringify(live.output)}`,
         );
         const fixtureLive = runNodeScript([validatorPath], {
           PREVIEW_STARTUP_TEST_FIXTURE: "missing-runtime-library-windows",
@@ -521,11 +512,6 @@ test(
         ]);
         assert.equal(captured.status, 1, fixtureCase.name);
 
-        const diagnostic = findDiagnostic(captured.output);
-        assert.ok(
-          diagnostic,
-          `${fixtureCase.name}; captured validator output: ${JSON.stringify(captured.output)}`,
-        );
         const fixtureDiagnostic = findDiagnostic(fixtureLive.output);
         const diagnostic = findDiagnostic(captured.output);
         assert.ok(diagnostic, fixtureCase.name);
