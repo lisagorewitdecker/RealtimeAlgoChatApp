@@ -1142,12 +1142,17 @@ async function validateLivePreview(
   recordOutput,
 ) {
   const launcherOnly = process.env.PREVIEW_STARTUP_REAL_LAUNCHER === "1";
-  if (!launcherOnly) getPublicPreviewManifestUrl(process.env);
+  const startupTestFixture = process.env.PREVIEW_STARTUP_TEST_FIXTURE;
+  const useStartupFixture = STARTUP_TEST_FIXTURES.has(startupTestFixture);
+  const runtimeLibraryFixture =
+    useStartupFixture &&
+    startupTestFixture.startsWith("missing-runtime-library");
+  if (!launcherOnly && !runtimeLibraryFixture) getPublicPreviewManifestUrl(process.env);
   const port = await findFreePort();
   const output = [];
   const pnpmCommand = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
   const startupCommand =
-    STARTUP_TEST_FIXTURES.has(process.env.PREVIEW_STARTUP_TEST_FIXTURE)
+    useStartupFixture
       ? {
           command: process.execPath,
           args: [
