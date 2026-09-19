@@ -280,6 +280,13 @@ const nonEvidenceJsonParseArguments = {
   "scripts/validate-mockup-clean.mjs": new Set(["listOutput"]),
 };
 
+const shellHereDocPattern =
+  /<<-?\s*['"]?([A-Za-z_][A-Za-z0-9_-]*)['"]?\s*\n([\s\S]*?)\n\1(?=\n|$)/g;
+const shellDynamicImportPattern =
+  /\bimport\s*\(\s*pathToFileURL\(\s*([A-Za-z_$][\w$]*)\s*\)\.href\s*\)/g;
+const processArgDestructurePattern =
+  /\b(?:const|let|var)\s*\[([\s\S]*?)\]\s*=\s*process\.argv\b/g;
+
 const actionExpressionPattern = /\$\{\{([\s\S]*?)\}\}/g;
 const secretExpressionPattern = /\bsecrets\s*[.[]|\bgithub\.token\b/;
 const xtracePattern =
@@ -449,6 +456,159 @@ function resolveLocalModule(filePath, specifier) {
   return null;
 }
 
+function tokenizeShellArguments(text) {
+  const tokens = [];
+  let token = "";
+  let quote = null;
+  let escaped = false;
+
+  const pushToken = () => {
+    if (token !== "") {
+      tokens.push(token);
+      token = "";
+    }
+  };
+
+  for (let index = 0; index < text.length; index += 1) {
+    const character = text[index];
+    if (escaped) {
+      if (character !== "\n") {
+        token += character;
+      }
+      escaped = false;
+      continue;
+    }
+    if (character === "\\" && quote !== "'") {
+      escaped = true;
+      continue;
+    }
+    if (quote) {
+      if (character === quote) {
+        quote = null;
+      } else {
+        token += character;
+      }
+      continue;
+    }
+    if (character === "'" || character === '"') {
+      quote = character;
+    } else if (/\s/.test(character)) {
+      pushToken();
+    } else {
+      token += character;
+    }
+  }
+  if (escaped) {
+    token += "\\";
+  }
+  pushToken();
+  return tokens;
+}
+
+function heredocCommand(source, heredocStart) {
+  let commandStart = source.lastIndexOf("\n", heredocStart - 1) + 1;
+  while (commandStart > 0) {
+    const previousLineEnd = commandStart - 1;
+    const previousLineStart = source.lastIndexOf("\n", previousLineEnd - 1) + 1;
+    if (
+      !source.slice(previousLineStart, previousLineEnd).trimEnd().endsWith("\\")
+    ) {
+      break;
+    }
+    commandStart = previousLineStart;
+  }
+  return source.slice(commandStart, heredocStart);
+}
+
+function resolveShellPathToken(filePath, token) {
+  const relative = token
+    .replace(/^\$\{?[A-Za-z_][A-Za-z0-9_]*\}?\/+/, "")
+    .replace(/^\.\//, "");
+  if (!relative || /[$'"{}]/.test(relative) || path.isAbsolute(relative)) {
+    return null;
+  }
+
+  for (const base of [path.dirname(filePath), workspaceRoot]) {
+    const candidate = path.resolve(base, relative);
+    if (
+      candidate.startsWith(`${workspaceRoot}${path.sep}`) &&
+      !candidate.includes(`${path.sep}node_modules${path.sep}`) &&
+      existsSync(candidate) &&
+      statSync(candidate).isFile()
+    ) {
+      return candidate;
+    }
+  }
+  return null;
+}
+
+function discoverShellEmbeddedLocalModules(filePath) {
+  const relativePath = path.relative(workspaceRoot, filePath);
+  const shellContract = releaseEvidenceReaderContracts[relativePath];
+  if (!filePath.endsWith(".sh") || !shellContract) {
+    return [];
+  }
+
+  const source = readFileSync(filePath, "utf8");
+  const importedPaths = new Set();
+  for (const match of source.matchAll(shellHereDocPattern)) {
+    const body = match[2];
+    const dynamicImportVariables = [
+      ...body.matchAll(shellDynamicImportPattern),
+    ].map(([, variable]) => variable);
+    if (dynamicImportVariables.length === 0) {
+      continue;
+    }
+
+    const processArgumentIndexes = new Map();
+    for (const destructure of body.matchAll(processArgDestructurePattern)) {
+      destructure[1].split(",").forEach((part, index) => {
+        const variable = part.trim();
+        if (/^[A-Za-z_$][\w$]*$/.test(variable)) {
+          processArgumentIndexes.set(variable, index);
+        }
+      });
+    }
+
+    const commandTokens = tokenizeShellArguments(
+      heredocCommand(source, match.index),
+    );
+    const dashIndex = commandTokens.findIndex(
+      (token, index) =>
+        token === "-" &&
+        index > 0 &&
+        commandTokens
+          .slice(0, index)
+          .some(
+            (candidate) =>
+              /(?:^|\/)node$/.test(candidate) ||
+              candidate.includes("NODE_BINARY"),
+          ),
+    );
+    if (dashIndex < 0) {
+      continue;
+    }
+
+    for (const variable of dynamicImportVariables) {
+      const processArgumentIndex = processArgumentIndexes.get(variable);
+      if (processArgumentIndex === undefined) {
+        continue;
+      }
+      // Node's process.argv contains the executable and "-" before the
+      // arguments supplied to a stdin script.
+      const argumentToken =
+        commandTokens[dashIndex + 1 + processArgumentIndex - 2];
+      const importedPath = argumentToken
+        ? resolveShellPathToken(filePath, argumentToken)
+        : null;
+      if (importedPath) {
+        importedPaths.add(importedPath);
+      }
+    }
+  }
+  return [...importedPaths];
+}
+
 function discoverLocalModuleClosure(entryPath) {
   const discovered = new Set();
   const queue = [entryPath];
@@ -461,6 +621,11 @@ function discoverLocalModuleClosure(entryPath) {
     discovered.add(filePath);
 
     if (!/\.(?:mjs|js|cjs|ts|tsx|mts|cts)$/.test(filePath)) {
+      for (const importedPath of discoverShellEmbeddedLocalModules(filePath)) {
+        if (!discovered.has(importedPath)) {
+          queue.push(importedPath);
+        }
+      }
       continue;
     }
 
@@ -483,11 +648,17 @@ function jsonParseMatches(filePath) {
   const relativePath = path.relative(workspaceRoot, filePath);
   const ignoredArguments =
     nonEvidenceJsonParseArguments[relativePath] ?? new Set();
+  const shellContract = releaseEvidenceReaderContracts[relativePath];
   const source = readFileSync(filePath, "utf8");
 
   return [...source.matchAll(parsePattern)]
     .map(([, argument]) => argument)
     .filter((argument) => !ignoredArguments.has(argument))
+    .filter(
+      (argument) =>
+        !filePath.endsWith(".sh") ||
+        (shellContract && argument === shellContract.argument),
+    )
     .map((argument) => ({ filePath, argument }));
 }
 
@@ -2227,43 +2398,47 @@ function assertReleaseEvidenceReaderInventory(discovered) {
   );
 }
 
+function assertReleaseEvidenceReader({ entryPath, parserPath, argument }) {
+  const contract = releaseEvidenceReaderContracts[entryPath];
+  assert.ok(
+    contract,
+    `The release evidence JSON reader ${entryPath} must have an inventory contract.`,
+  );
+  const source = scriptSource(parserPath);
+  const scannerCall = contract.scannerCall.replace(
+    /\([^)]*\)$/,
+    `(${argument})`,
+  );
+  const scannerIndex = source.indexOf(scannerCall);
+  const parseIndex = source.search(
+    new RegExp(`JSON\\.parse\\(\\s*${argument}\\s*\\)`),
+  );
+
+  assert.ok(
+    scannerIndex >= 0,
+    `${contract.name} must use the shared duplicate-key scanner.`,
+  );
+  assert.ok(
+    parseIndex >= 0,
+    `${contract.name} must parse its evidence source with JSON.parse.`,
+  );
+  assert.ok(
+    scannerIndex < parseIndex,
+    `${contract.name} must scan for duplicate fields before JSON.parse applies last-value-wins semantics.`,
+  );
+  assert.match(
+    source,
+    contract.duplicateFailure,
+    `${contract.name} must keep duplicate-field failures fixed and redacted.`,
+  );
+}
+
 test("every release JSON evidence reader rejects duplicate fields with fixed diagnostics", () => {
   const discovered = discoverReleaseEvidenceJsonParses();
   assertReleaseEvidenceReaderInventory(discovered);
 
   for (const { entryPath, parserPath, argument } of discovered) {
-    const contract = releaseEvidenceReaderContracts[entryPath];
-    assert.ok(
-      contract,
-      `The release evidence JSON reader ${entryPath} must have an inventory contract.`,
-    );
-    const source = scriptSource(parserPath);
-    const scannerCall = contract.scannerCall.replace(
-      /\([^)]*\)$/,
-      `(${argument})`,
-    );
-    const scannerIndex = source.indexOf(scannerCall);
-    const parseIndex = source.search(
-      new RegExp(`JSON\\.parse\\(\\s*${argument}\\s*\\)`),
-    );
-
-    assert.ok(
-      scannerIndex >= 0,
-      `${contract.name} must use the shared duplicate-key scanner.`,
-    );
-    assert.ok(
-      parseIndex >= 0,
-      `${contract.name} must parse its evidence source with JSON.parse.`,
-    );
-    assert.ok(
-      scannerIndex < parseIndex,
-      `${contract.name} must scan for duplicate fields before JSON.parse applies last-value-wins semantics.`,
-    );
-    assert.match(
-      source,
-      contract.duplicateFailure,
-      `${contract.name} must keep duplicate-field failures fixed and redacted.`,
-    );
+    assertReleaseEvidenceReader({ entryPath, parserPath, argument });
   }
 });
 
@@ -2303,6 +2478,103 @@ test(
     }
   },
 );
+
+test("release evidence discovery follows helpers dynamically imported by shell checks", () => {
+  const fixtureDirectory = mkdtempSync(
+    path.join(workspaceRoot, ".mobile-release-summary-contract-"),
+  );
+  const entryPath = path.join(fixtureDirectory, "release-check.sh");
+  const helperPath = path.join(fixtureDirectory, "nested", "reader.mjs");
+  const relativeEntryPath = path.relative(workspaceRoot, entryPath);
+  mkdirSync(path.dirname(helperPath), { recursive: true });
+  writeFileSync(
+    entryPath,
+    [
+      "#!/usr/bin/env bash",
+      'ROOT_DIR="$(pwd)"',
+      'node --input-type=module - "$ROOT_DIR/PLACEHOLDER/nested/reader.mjs" <<\'NODE\'',
+      'import { pathToFileURL } from "node:url";',
+      "const [, , readerPath] = process.argv;",
+      "const { readEvidence } = await import(pathToFileURL(readerPath).href);",
+      "readEvidence(rawEvidence);",
+      "NODE",
+    ].join("\n").replace("PLACEHOLDER", path.basename(fixtureDirectory)),
+  );
+  writeFileSync(
+    helperPath,
+    [
+      "export function readEvidence(rawEvidence) {",
+      "  return JSON.parse(rawEvidence);",
+      "}",
+    ].join("\n"),
+  );
+
+  releaseEvidenceReaderContracts[relativeEntryPath] = {
+    name: "shell delegated evidence",
+    argument: "rawEvidence",
+    scannerCall: "findDuplicateJsonObjectKeys(rawEvidence)",
+    duplicateFailure: /delegated evidence contains duplicate fields/,
+  };
+
+  try {
+    const discovered = discoverReleaseEvidenceJsonParses([entryPath]);
+    assert.deepEqual(discovered, [
+      {
+        entryPath: relativeEntryPath,
+        parserPath: path.relative(workspaceRoot, helperPath),
+        argument: "rawEvidence",
+      },
+    ]);
+    assert.throws(
+      () => assertReleaseEvidenceReader({ ...discovered[0] }),
+      /shell delegated evidence must use the shared duplicate-key scanner\./,
+    );
+  } finally {
+    delete releaseEvidenceReaderContracts[relativeEntryPath];
+    rmSync(fixtureDirectory, { recursive: true, force: true });
+  }
+});
+
+test("the native shell evidence check keeps its dynamic helper closure", () => {
+  const entryPath = path.join(
+    workspaceRoot,
+    "scripts/check-native-large-text-evidence.sh",
+  );
+  const closure = discoverLocalModuleClosure(entryPath);
+
+  for (const helperPath of [
+    "scripts/find-duplicate-json-object-keys.mjs",
+    "scripts/read-bounded-text.mjs",
+  ]) {
+    assert.ok(
+      closure.has(path.join(workspaceRoot, helperPath)),
+      `${entryPath} must keep its local ${helperPath} helper visible to the release contract`,
+    );
+  }
+});
+
+test("non-evidence JSON parsing embedded in shell remains excluded", () => {
+  const fixtureDirectory = mkdtempSync(
+    path.join(workspaceRoot, ".mobile-release-summary-contract-"),
+  );
+  const entryPath = path.join(fixtureDirectory, "utility.sh");
+  writeFileSync(
+    entryPath,
+    [
+      "#!/usr/bin/env bash",
+      "node --input-type=module - <<'NODE'",
+      'const [, , packageJson] = process.argv;',
+      "JSON.parse(packageJson);",
+      "NODE",
+    ].join("\n"),
+  );
+
+  try {
+    assert.deepEqual(discoverReleaseEvidenceJsonParses([entryPath]), []);
+  } finally {
+    rmSync(fixtureDirectory, { recursive: true, force: true });
+  }
+});
 
 test("Android preview evidence keeps its pull-request validation and privacy contract", () => {
   const androidJob = workflow.jobs["android-preview-evidence"];

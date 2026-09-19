@@ -120,3 +120,4 @@
 - [Windows fixture replacement](windows-fixture-replacement.md) — generated preview fixtures need same-directory backup/restore because Windows cannot rename over an existing file.
 - [React Native Web switch checked state](rnw-switch-checked-state.md) — RNW 0.21 drops `accessibilityState.checked`; assert toggles via their `: off` / `: on` accessible name, never `toBeChecked()`.
 - [Validation registration side effects](validation-registration-side-effects.md) — `setValidationCommand` can flip `runButton` to a new `Project` wrapper; diff `.replit` against HEAD and restore via `verifyAndReplaceDotReplit`.
+- [Shell evidence helper discovery](shell-evidence-helper-discovery.md) — shell heredocs need explicit evidence scoping when they dynamically import local JavaScript helpers.
