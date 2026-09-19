@@ -112,14 +112,23 @@ run_case() {
   suite_output="$(cat "$output_path")"
 
   : > "$stop_file"
-  kill "$writer_pid" 2>/dev/null || true
+  for _ in $(seq 1 100); do
+    if ! kill -0 "$writer_pid" 2>/dev/null; then
+      break
+    fi
+    sleep 0.01
+  done
+  if kill -0 "$writer_pid" 2>/dev/null; then
+    kill "$writer_pid" 2>/dev/null || true
+    wait "$writer_pid" || true
+    printf 'Concurrent saved-status writer did not stop after signaling the %s case.\n%s\n' \
+      "$case_name" "$suite_output" >&2
+    exit 1
+  fi
   set +e
   wait "$writer_pid"
   writer_status=$?
   set -e
-  if ((writer_status == 143 || writer_status == 130)); then
-    writer_status=0
-  fi
   if ((writer_status != 0)); then
     printf 'Concurrent saved-status writer failed during the %s case.\n%s\n' \
       "$case_name" "$suite_output" >&2
