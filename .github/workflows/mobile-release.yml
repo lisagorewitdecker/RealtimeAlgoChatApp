@@ -2245,7 +2245,15 @@ jobs:
               echo "- Fix: provide the native smoke build IDs and protected release secrets before rerunning the workflow."
             fi
           } >> "$GITHUB_STEP_SUMMARY"
-          if [[ "$RELEASE_CONFIGURATION_RESULT" != "success" || "$EVIDENCE_RESULT" != "success" || ( "$IOS_CONFIGURATION_READY" == "true" && "$IOS_RESULT" != "success" ) || ( "$ANDROID_CONFIGURATION_READY" == "true" && "$ANDROID_RESULT" != "success" ) || "$IDLE_PROFILE_RESULT" != "success" || "$SUMMARY_REGRESSION_RESULT" != "success" || "$TAMPER_REGRESSION_RESULT" != "success" ]]; then
+          ios_gate_failed=false
+          if [[ "$IOS_CONFIGURATION_READY" == "true" && "$IOS_RESULT" != "success" ]]; then
+            ios_gate_failed=true
+          fi
+          android_gate_failed=false
+          if [[ "$ANDROID_CONFIGURATION_READY" == "true" && "$ANDROID_RESULT" != "success" ]]; then
+            android_gate_failed=true
+          fi
+          if [[ "$RELEASE_CONFIGURATION_RESULT" != "success" || "$EVIDENCE_RESULT" != "success" || "$ios_gate_failed" == "true" || "$android_gate_failed" == "true" || "$IDLE_PROFILE_RESULT" != "success" || "$SUMMARY_REGRESSION_RESULT" != "success" || "$TAMPER_REGRESSION_RESULT" != "success" ]]; then
             echo "Mobile release blocked: configuration=$RELEASE_CONFIGURATION_RESULT evidence=$EVIDENCE_RESULT iOS=$IOS_RESULT Android=$ANDROID_RESULT idle-profile=$IDLE_PROFILE_RESULT summary-regression=$SUMMARY_REGRESSION_RESULT tamper-regression=$TAMPER_REGRESSION_RESULT. Supported Node.js range from package.json engines.node: ${safe_supported_node_range} (must be a valid semver range)." >&2
             exit 1
           fi

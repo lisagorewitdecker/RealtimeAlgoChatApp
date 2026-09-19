@@ -98,6 +98,9 @@ if [[ -z "$app_path" && -f "$artifact_path" ]]; then
     unzip -q "$artifact_path" -d "$extract_root"
   elif tar -tzf "$artifact_path" >/dev/null 2>&1; then
     tar -xzf "$artifact_path" -C "$extract_root"
+  else
+    echo "The downloaded iOS candidate uses an unsupported archive format; expected a .zip or .tar.gz containing an .app bundle." >&2
+    exit 2
   fi
   app_path="$(
     find "$extract_root" -type d -name '*.app' -print -quit

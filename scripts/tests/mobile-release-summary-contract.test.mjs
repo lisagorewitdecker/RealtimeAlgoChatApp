@@ -1317,12 +1317,12 @@ test("native release jobs are gated by centralized mobile release configuration"
   );
   assert.match(
     blockingStep?.run ?? "",
-    /\(\s*"\$IOS_CONFIGURATION_READY"\s*==\s*"true"\s*&&\s*"\$IOS_RESULT"\s*!=\s*"success"\s*\)/,
+    /if \[\[ "\$IOS_CONFIGURATION_READY" == "true" && "\$IOS_RESULT" != "success" \]\]; then[\s\S]*ios_gate_failed=true/,
     "the final release gate must only require iOS success when iOS configuration is ready",
   );
   assert.match(
     blockingStep?.run ?? "",
-    /\(\s*"\$ANDROID_CONFIGURATION_READY"\s*==\s*"true"\s*&&\s*"\$ANDROID_RESULT"\s*!=\s*"success"\s*\)/,
+    /if \[\[ "\$ANDROID_CONFIGURATION_READY" == "true" && "\$ANDROID_RESULT" != "success" \]\]; then[\s\S]*android_gate_failed=true/,
     "the final release gate must only require Android success when Android configuration is ready",
   );
 });
