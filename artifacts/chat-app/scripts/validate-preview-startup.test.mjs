@@ -186,7 +186,6 @@ test("validates captured startup logs with a bounded, sanitized library diagnost
   const longLibraryPath =
     `/opt/${"nested-directory/".repeat(30)}libgtk-3.so.0`;
   const capturedOutput = [
-    "\u001b[31mReact Native DevTools launcher failed to start\u001b[0m",
     `\u001b[31mError while loading shared libraries: ${longLibraryPath}: cannot open shared object file\u0007\u001b[0m`,
     "unrelated captured output ".repeat(200),
   ].join("\n");
@@ -223,6 +222,23 @@ test("reports a DevTools failure without inventing a missing library", () => {
         error.message.length <= 512,
         "startup diagnostic exceeded its bounded length",
       );
+      return true;
+    },
+  );
+});
+
+test("keeps the primary startup failure when a later loader line is present", () => {
+  const output = [
+    "\u001b[31mReact Native DevTools launcher failed to start: primary failure detail\u001b[0m",
+    "\u001b[31mError while loading shared libraries: libgtk-3.so.0: cannot open shared object file\u001b[0m",
+  ].join("\n");
+
+  assert.throws(
+    () => validatePreviewOutput(output),
+    (error) => {
+      assert.match(error.message, /Expo preview startup error: .*primary failure detail/);
+      assert.doesNotMatch(error.message, /missing runtime library/i);
+      assert.doesNotMatch(error.message, /loader wording changed/i);
       return true;
     },
   );
