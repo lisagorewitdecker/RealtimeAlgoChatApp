@@ -116,3 +116,4 @@
 - [Fork generated-client evidence](fork-generated-client-evidence.md) — validate and publish drift against the same PR head SHA, not a synthetic merge ref.
 - [Real-platform launcher captures](real-platform-launcher-captures.md) — Windows hosted captures need normalized entrypoints, process-tree cleanup, and redaction for runner workspace roots such as D:\a.
 - [Node stdin fixture imports](node-stdin-fixture-imports.md) — direct-execution guards must tolerate `node --input-type=module` stdin scripts with no `process.argv[1]`.
+- [Windows fixture replacement](windows-fixture-replacement.md) — generated preview fixtures need same-directory backup/restore because Windows cannot rename over an existing file.

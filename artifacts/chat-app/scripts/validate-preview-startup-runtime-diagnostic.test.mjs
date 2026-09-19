@@ -51,6 +51,49 @@ function runNodeScript(args, env = {}) {
   };
 }
 
+function runNodeScriptWithPreload(preloadPath, args, env = {}) {
+  return runNodeScript(["--import", preloadPath, ...args], env);
+}
+
+function writeWindowsPlatformPreload(preloadPath, { failDestination } = {}) {
+  const failureHook = failDestination
+    ? `
+const originalRenameSync = fs.renameSync;
+let failReplacement = true;
+fs.renameSync = (source, destination) => {
+  if (failReplacement && destination === ${JSON.stringify(failDestination)}) {
+    failReplacement = false;
+    throw new Error("simulated Windows replacement failure");
+  }
+  return originalRenameSync(source, destination);
+};
+`
+    : "";
+  writeFileSync(
+    preloadPath,
+    `import fs from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
+
+Object.defineProperty(process, "platform", { value: "win32" });
+${failureHook}
+syncBuiltinESMExports();
+`,
+    "utf8",
+  );
+}
+
+function withoutGeneratedEvidence(source) {
+  return source
+    .replace(
+      /\/\/ BEGIN GENERATED PREVIEW LOADER EVIDENCE[\s\S]*?\/\/ END GENERATED PREVIEW LOADER EVIDENCE\n?/,
+      "",
+    )
+    .replace(
+      /\/\/ BEGIN GENERATED PREVIEW LOADER OUTPUT[\s\S]*?\/\/ END GENERATED PREVIEW LOADER OUTPUT\n?/,
+      "",
+    );
+}
+
 function findDiagnostic(output) {
   return output
     .split(/\r?\n/)
@@ -572,6 +615,7 @@ test("refresh command leaves the existing fixture untouched when a platform capt
     join(tmpdir(), "chat-preview-loader-refresh-incomplete-"),
   );
   const captureDirectory = join(temporaryDirectory, "captures");
+  const preloadPath = join(temporaryDirectory, "windows-preload.mjs");
   const outputPath = join(
     temporaryDirectory,
     "preview-startup-runtime-library-fixture.mjs",
@@ -590,8 +634,9 @@ test("refresh command leaves the existing fixture untouched when a platform capt
       );
     }
     writeFileSync(outputPath, existingFixture, "utf8");
+    writeWindowsPlatformPreload(preloadPath);
 
-    const result = runNodeScript([
+    const result = runNodeScriptWithPreload(preloadPath, [
       refreshPath,
       "--capture-dir",
       captureDirectory,
@@ -602,6 +647,103 @@ test("refresh command leaves the existing fixture untouched when a platform capt
     assert.equal(result.status, 1);
     assert.match(result.output, /Could not read windows capture/);
     assert.equal(readFileSync(outputPath, "utf8"), existingFixture);
+    assert.doesNotMatch(
+      result.output,
+      /TOP_SECRET|password=|Authorization:/i,
+    );
+  } finally {
+    rmSync(temporaryDirectory, { recursive: true, force: true });
+  }
+});
+
+test("Windows refresh restores the existing fixture when replacement fails", () => {
+  const temporaryDirectory = mkdtempSync(
+    join(tmpdir(), "chat-preview-loader-refresh-windows-failure-"),
+  );
+  const captureDirectory = join(temporaryDirectory, "captures");
+  const outputPath = join(
+    temporaryDirectory,
+    "preview-startup-runtime-library-fixture.mjs",
+  );
+  const preloadPath = join(temporaryDirectory, "windows-preload.mjs");
+  const existingFixture = readFileSync(fixturePath, "utf8");
+
+  try {
+    writeIndependentCaptureArtifacts(captureDirectory, "windows-refresh-");
+    writeFileSync(outputPath, existingFixture, "utf8");
+    writeWindowsPlatformPreload(preloadPath, { failDestination: outputPath });
+
+    const result = runNodeScriptWithPreload(
+      preloadPath,
+      [
+        refreshPath,
+        "--capture-dir",
+        captureDirectory,
+        "--output",
+        outputPath,
+      ],
+    );
+
+    assert.equal(result.status, 1);
+    assert.match(result.output, /simulated Windows replacement failure/);
+    assert.equal(readFileSync(outputPath, "utf8"), existingFixture);
+    assert.doesNotMatch(
+      result.output,
+      /TOP_SECRET|password=|Authorization:/i,
+    );
+  } finally {
+    rmSync(temporaryDirectory, { recursive: true, force: true });
+  }
+});
+
+test("Windows refresh replaces generated sections without changing the handoff server", () => {
+  const temporaryDirectory = mkdtempSync(
+    join(tmpdir(), "chat-preview-loader-refresh-windows-success-"),
+  );
+  const captureDirectory = join(temporaryDirectory, "captures");
+  const outputPath = join(
+    temporaryDirectory,
+    "preview-startup-runtime-library-fixture.mjs",
+  );
+  const preloadPath = join(temporaryDirectory, "windows-preload.mjs");
+  const existingFixture = readFileSync(fixturePath, "utf8");
+
+  try {
+    writeIndependentCaptureArtifacts(captureDirectory, "windows-refresh-");
+    writeFileSync(outputPath, existingFixture, "utf8");
+    writeWindowsPlatformPreload(preloadPath);
+
+    const result = runNodeScriptWithPreload(
+      preloadPath,
+      [
+        refreshPath,
+        "--capture-dir",
+        captureDirectory,
+        "--output",
+        outputPath,
+      ],
+    );
+
+    assert.equal(result.status, 0, result.output);
+    const refreshedSource = readFileSync(outputPath, "utf8");
+    assert.equal(
+      withoutGeneratedEvidence(refreshedSource),
+      withoutGeneratedEvidence(existingFixture),
+      "the non-generated handoff server portion changed",
+    );
+    for (const sample of CAPTURED_LOADER_SAMPLES) {
+      assert.match(
+        refreshedSource,
+        new RegExp(
+          `${escapeRegExp(sample.fixture)}[\\s\\S]+windows-refresh-${sample.platform}`,
+        ),
+        sample.name,
+      );
+    }
+    assert.doesNotMatch(
+      result.output,
+      /TOP_SECRET|password=|Authorization:/i,
+    );
   } finally {
     rmSync(temporaryDirectory, { recursive: true, force: true });
   }

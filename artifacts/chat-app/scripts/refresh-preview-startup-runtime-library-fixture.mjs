@@ -9,7 +9,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { createRequire } from "node:module";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
@@ -312,6 +312,11 @@ function writeAtomically(outputPath, content) {
     join(outputDirectory, ".preview-loader-refresh-"),
   );
   const temporaryPath = join(temporaryDirectory, "fixture.mjs");
+  const backupPath = join(
+    outputDirectory,
+    `.${basename(outputPath)}.${basename(temporaryDirectory)}.backup`,
+  );
+  let backupCreated = false;
 
   try {
     writeFileSync(temporaryPath, content, "utf8");
@@ -319,9 +324,32 @@ function writeAtomically(outputPath, content) {
       chmodSync(temporaryPath, statSync(outputPath).mode);
     }
     if (process.platform === "win32" && existsSync(outputPath)) {
-      rmSync(outputPath);
+      // Windows rename cannot replace an existing file. Move the old fixture
+      // aside first so a failed replacement can restore the last good copy.
+      // Keep the backup in the same directory so the move remains on one
+      // filesystem and does not become a copy-and-delete operation.
+      renameSync(outputPath, backupPath);
+      backupCreated = true;
     }
     renameSync(temporaryPath, outputPath);
+    if (backupCreated) {
+      rmSync(backupPath);
+      backupCreated = false;
+    }
+  } catch (error) {
+    if (backupCreated && existsSync(backupPath) && !existsSync(outputPath)) {
+      try {
+        renameSync(backupPath, outputPath);
+        backupCreated = false;
+      } catch (restoreError) {
+        throw new Error(
+          `${error.message} The previous fixture could not be restored; ` +
+            `recover it from ${backupPath}.`,
+          { cause: restoreError },
+        );
+      }
+    }
+    throw error;
   } finally {
     rmSync(temporaryDirectory, { recursive: true, force: true });
   }
