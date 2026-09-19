@@ -4,6 +4,7 @@ import { writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { spawn } from "node:child_process";
 import { setTimeout as delay } from "node:timers/promises";
+import { fileURLToPath } from "node:url";
 import {
   findDuplicateJsonObjectKeys,
   isJsonEvidenceLimitError,
@@ -348,7 +349,7 @@ function sanitizeRecordedStartupOutput(value) {
           return `${prefix}[redacted]/${libraryName}${suffix}`;
         })
         .replace(
-          /[A-Za-z]:\\(?:Users|home)\\[^\r\n]+/g,
+          /[A-Za-z]:\\(?:Users|home|a)\\[^\r\n]+/g,
           (path) => {
             const libraryName = path.match(
               /[^/\\\s]+?\.(?:dylib|so(?:\.\d+)?|dll)\b/i,
@@ -757,7 +758,17 @@ export function getPublicPreviewManifestUrl(environment = process.env) {
   return url;
 }
 
+function usesStartupTestFixture(environment = process.env) {
+  return (
+    STARTUP_TEST_FIXTURES.has(environment.PREVIEW_STARTUP_TEST_FIXTURE) ||
+    environment.PREVIEW_STARTUP_TEST_OUTPUT != null
+  );
+}
+
 export function validatePreviewConfiguration(environment = process.env) {
+  if (usesStartupTestFixture(environment)) {
+    return;
+  }
   getPublicPreviewManifestUrl(environment);
 }
 
@@ -1143,9 +1154,7 @@ async function validateLivePreview(
   recordOutput,
 ) {
   const launcherOnly = process.env.PREVIEW_STARTUP_REAL_LAUNCHER === "1";
-  const useStartupTestFixture =
-    STARTUP_TEST_FIXTURES.has(process.env.PREVIEW_STARTUP_TEST_FIXTURE) ||
-    process.env.PREVIEW_STARTUP_TEST_OUTPUT != null;
+  const useStartupTestFixture = usesStartupTestFixture(process.env);
   if (!launcherOnly && !useStartupTestFixture) {
     getPublicPreviewManifestUrl(process.env);
   }
@@ -1204,7 +1213,14 @@ async function validateLivePreview(
       clearTimeout(closeTimer);
       closeTimer = undefined;
     });
-    if (process.platform === "win32" || !processGroupId) {
+    if (process.platform === "win32" && processGroupId) {
+      const processTreeKiller = spawn(
+        "taskkill.exe",
+        ["/PID", String(processGroupId), "/T", "/F"],
+        { stdio: "ignore", windowsHide: true },
+      );
+      processTreeKiller.unref();
+    } else if (!processGroupId) {
       child.kill("SIGTERM");
     } else {
       try {
@@ -1216,8 +1232,16 @@ async function validateLivePreview(
     closeTimer = setTimeout(() => {
       if (!processGroupId) return;
       try {
-        if (process.platform === "win32") child.kill("SIGKILL");
-        else process.kill(-processGroupId, "SIGKILL");
+        if (process.platform === "win32") {
+          const processTreeKiller = spawn(
+            "taskkill.exe",
+            ["/PID", String(processGroupId), "/T", "/F"],
+            { stdio: "ignore", windowsHide: true },
+          );
+          processTreeKiller.unref();
+        } else {
+          process.kill(-processGroupId, "SIGKILL");
+        }
       } catch (error) {
         if (error.code !== "ESRCH") throw error;
       }
@@ -1451,7 +1475,7 @@ async function main() {
     );
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
   const cliArgs = process.argv.slice(2);
   main().catch(async (error) => {
     if (isStartupValidationInvocation(cliArgs)) {

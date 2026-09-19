@@ -1,5 +1,6 @@
 import { appendFileSync } from "node:fs";
 import { createServer } from "node:http";
+import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 // BEGIN GENERATED PREVIEW LOADER EVIDENCE
@@ -97,15 +98,15 @@ export const fixtureOutput = Object.freeze({
   "missing-runtime-library-windows-quoted": "Error: The code execution cannot proceed because \"C:\\Program Files\\Expo\\React Native DevTools\\libgtk-3-0.dll\" was not found. Reinstalling the program may fix this problem.\nunrelated log text should not be included\n",
   "missing-runtime-library-dyld-quoted-long-path": "dyld[12345]: Library not loaded: '/opt/homebrew/Library/Application Support/Expo/react native devtools cache/react native devtools cache/react native devtools cache/react native devtools cache/react native devtools cache/react native devtools cache/react native devtools cache/react native devtools cache/react native devtools cache/react native devtools cache/react native devtools cache/react native devtools cache/libgtk-3.dylib'\n  Referenced from: /opt/expo/react-native-devtools\n  Reason: tried: '/opt/homebrew/Library/Application Support/Expo/react native devtools cache/react native devtools cache/react native devtools cache/react native devtools cache/react native devtools cache/react native devtools cache/react native devtools cache/react native devtools cache/react native devtools cache/react native devtools cache/react native devtools cache/react native devtools cache/libgtk-3.dylib' (no such file)\n",
   "missing-runtime-library-windows-quoted-long-path": "Error: The code execution cannot proceed because \"C:\\Program Files\\Expo\\react native devtools cache\\react native devtools cache\\react native devtools cache\\react native devtools cache\\react native devtools cache\\react native devtools cache\\react native devtools cache\\react native devtools cache\\react native devtools cache\\react native devtools cache\\react native devtools cache\\react native devtools cache\\libgtk-3-0.dll\" was not found. Reinstalling the program may fix this problem.\n",
-  "missing-runtime-library-malformed-quotes": "Error: The code execution cannot proceed because \"C:\\Program Files\\Expo\\React Native DevTools\\libgtk-3-0.dll was not found. Reinstalling the program may fix this problem.\n",
-  "missing-runtime-library-malformed-control": "Error: The code execution cannot proceed because C:\\Program Files\\Expo\\React Native DevTools\\libgtk-\u00073-0.dll was not found. Reinstalling the program may fix this problem.\n",
+  "missing-runtime-library-malformed-quotes": "dyld[12345]: Library not loaded: '/opt/homebrew/Library/Application Support/Expo/libgtk-3.dylib\" trailing unrelated loader text\n",
+  "missing-runtime-library-malformed-control": "Error: /opt/expo/react-native-devtools: error while loading shared libraries: /opt/expo/libgtk-3.so.0\u0000 trailing unrelated loader text: cannot open shared object file: No such file or directory\n",
   "missing-runtime-library-malformed-trailing": "Error: The code execution cannot proceed because C:\\Program Files\\Expo\\React Native DevTools\\libgtk-3-0.dll was not found. trailing unrelated loader text\n",
-  "missing-runtime-library-malformed-followed-by-valid": "Error: The code execution cannot proceed because \"C:\\Program Files\\Expo\\React Native DevTools\\libgtk-3-0.dll was not found.\nError: The code execution cannot proceed because C:\\Program Files\\Expo\\React Native DevTools\\libgtk-3-0.dll was not found. Reinstalling the program may fix this problem.\n",
+  "missing-runtime-library-malformed-followed-by-valid": "dyld[12345]: Library not loaded: '/opt/homebrew/Library/Application Support/Expo/libgtk-3.dylib\" trailing unrelated loader text\ndyld[12345]: Library not loaded: /opt/homebrew/lib/libgtk-3.dylib\n",
   "unsupported-loader-wording": "React Native DevTools launcher exited with status 127\n"
 });
 // END GENERATED PREVIEW LOADER OUTPUT
 
-if (fileURLToPath(import.meta.url) === process.argv[1]) {
+if (fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
   const fixtureName =
     process.env.PREVIEW_STARTUP_TEST_FIXTURE ?? "missing-runtime-library";
   if (

@@ -282,7 +282,8 @@ test("real-platform capture records macOS and Windows loader output safely", () 
       output:
         "Error: The code execution cannot proceed because " +
         "C:\\Users\\reviewer\\AppData\\Local\\Expo\\libgtk-3-0.dll " +
-        "was not found. password=TOP_SECRET_VALUE\n",
+        "was not found. password=TOP_SECRET_VALUE\n" +
+        "Starting project at D:\\a\\RealtimeAlgoChatApp\\artifacts\\chat-app\n",
       libraryIdentifier: "libgtk-3-0.dll",
     },
   ];
@@ -304,6 +305,7 @@ test("real-platform capture records macOS and Windows loader output safely", () 
       assert.equal(live.status, 1, fixtureCase.name);
       const recordedOutput = readFileSync(recordPath, "utf8");
       assert.doesNotMatch(recordedOutput, /\/Users\/reviewer|C:\\Users\\reviewer/);
+      assert.doesNotMatch(recordedOutput, /D:\\a\\RealtimeAlgoChatApp/);
       assert.doesNotMatch(recordedOutput, /TOP_SECRET_VALUE/);
       assert.match(recordedOutput, new RegExp(fixtureCase.libraryIdentifier));
 
@@ -383,7 +385,6 @@ test("startup test output override runs without preview URL configuration", () =
     rmSync(temporaryDirectory, { recursive: true, force: true });
   }
 });
-
 test(
   "Windows runner loader diagnosis keeps quoted spaced paths bounded",
   {
@@ -424,6 +425,7 @@ test(
         const live = runNodeScript(
           [validatorPath, "--record-log", recordPath],
           {
+            PREVIEW_STARTUP_REAL_LAUNCHER: "1",
             PREVIEW_STARTUP_TEST_FIXTURE: "missing-runtime-library-windows",
             PREVIEW_STARTUP_TEST_OUTPUT: fixtureCase.output,
           },
