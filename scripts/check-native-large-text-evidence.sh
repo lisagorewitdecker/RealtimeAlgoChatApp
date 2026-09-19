@@ -43,6 +43,11 @@ check_native_text_evidence_sizes() {
   while IFS= read -r -d '' path; do
     relative_path="${path#"$results_dir"/}"
     if [[ ! "$relative_path" =~ $TRUSTED_EVIDENCE_PATH_PATTERN ]]; then
+      if [[ "$relative_path" =~ \.png$ ]]; then
+        continue
+      fi
+      echo "Native evidence collection contains an untrusted non-image file: ${relative_path}." >&2
+      oversized=1
       continue
     fi
     if [[ "$relative_path" =~ ^(screenshots|call-surface)/[A-Za-z0-9._-]+\.png$ ]]; then
