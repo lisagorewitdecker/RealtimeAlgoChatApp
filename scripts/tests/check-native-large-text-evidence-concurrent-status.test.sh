@@ -60,7 +60,11 @@ suite_status=$?
 set -e
 
 : > "$STOP_FILE"
-wait "$writer_pid" || true
+if ! wait "$writer_pid"; then
+  printf 'Concurrent saved-status writer failed before the suite completed.\n%s\n' \
+    "$suite_output" >&2
+  exit 1
+fi
 
 if ((suite_status != 0)); then
   printf 'Native large-text evidence suite failed while the optional saved API status changed concurrently (exit %s):\n%s\n' \
