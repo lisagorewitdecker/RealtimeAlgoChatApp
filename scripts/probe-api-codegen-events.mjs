@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
-import { mkdirSync, writeFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { mkdirSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { dirname, extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const DEFAULTS = {
@@ -11,6 +11,7 @@ const DEFAULTS = {
   workflow: ".github/workflows/api-codegen.yml",
   pollSeconds: 10,
   timeoutSeconds: 900,
+  recordFormat: "markdown",
 };
 
 function encodePath(path) {
@@ -198,6 +199,10 @@ export function parseArgs(argv) {
       options.dryRun = true;
       continue;
     }
+    if (argument === "--overwrite") {
+      options.overwrite = true;
+      continue;
+    }
     const optionValues = {
       "--repo": "repository",
       "--base": "baseBranch",
@@ -206,6 +211,9 @@ export function parseArgs(argv) {
       "--workflow": "workflow",
       "--branch": "branch",
       "--output": "output",
+      "--record-output": "recordOutput",
+      "--record-dir": "recordDir",
+      "--record-format": "recordFormat",
     };
     const optionName = optionValues[argument];
     if (optionName) {
@@ -213,6 +221,9 @@ export function parseArgs(argv) {
         throw new Error(`${argument} requires a value`);
       }
       options[optionName] = next;
+      if (optionName === "recordFormat") {
+        options.recordFormatExplicit = true;
+      }
       index += 1;
       continue;
     }
@@ -230,6 +241,148 @@ export function parseArgs(argv) {
   }
 
   return { options, showHelp };
+}
+
+function formatRecordTimestamp(value) {
+  return value
+    .toISOString()
+    .replace(/[-:]/g, "")
+    .replace(/\.\d{3}Z$/, "Z");
+}
+
+function validateRecordFormat(format) {
+  if (format !== "markdown" && format !== "json") {
+    throw new Error(`record format must be "markdown" or "json"`);
+  }
+  return format;
+}
+
+function recordFormatForPath(path, requestedFormat) {
+  if (requestedFormat) {
+    return validateRecordFormat(requestedFormat);
+  }
+  return extname(path).toLowerCase() === ".json" ? "json" : "markdown";
+}
+
+function markdownLink(label, url) {
+  return url ? `[${label}](${url})` : label;
+}
+
+export function formatMarkdownEvidence(result) {
+  const lines = [
+    "# API generated-client pull-request event probe",
+    "",
+    "**Result: PASS — the hosted probe captured four pull-request events and confirmed cleanup.**",
+    "",
+    "This record contains reviewable GitHub metadata only. It does not include the",
+    "temporary pull-request description or its declaration values.",
+    "",
+    "## Metadata",
+    "",
+    "| Field | Value |",
+    "| --- | --- |",
+    `| Checked at (UTC) | ${result.checkedAt ?? "Not recorded"} |`,
+    `| Repository | \`${result.repository}\` |`,
+    `| Probe branch | \`${result.branch}\` |`,
+    `| Probe pull request | ${markdownLink(`#${result.pullRequest.number}`, result.pullRequest.url)} (closed unmerged) |`,
+    "",
+    "## Acceptance result",
+    "",
+    "| Event | Workflow run | Check-generated job | Failed step | Compatibility |",
+    "| --- | --- | --- | --- | --- |",
+  ];
+
+  for (const event of result.events ?? []) {
+    lines.push(
+      `| ${event.event} | ${markdownLink(`#${event.workflowRun.id}`, event.workflowRun.url)} | ${markdownLink(`${event.job.name} (#${event.job.id})`, event.job.url)} | \`${event.step.name}\`: **${event.step.conclusion}** | \`${event.compatibility.name}\`: **${event.compatibility.conclusion}** |`,
+    );
+  }
+
+  lines.push(
+    "",
+    "## Cleanup",
+    "",
+    `- Pull request closed without merging: **${result.cleanup?.pullRequestClosed === true ? "confirmed" : "not confirmed"}**.`,
+    `- Temporary branch deleted: **${result.cleanup?.branchDeleted === true ? "confirmed" : "not confirmed"}**.`,
+    `- Cleanup failures: **${result.cleanup?.failures?.length ? result.cleanup.failures.join("; ") : "none"}**.`,
+    "",
+  );
+  return lines.join("\n");
+}
+
+export function serializeEvidenceRecord(result, format) {
+  const validatedFormat = validateRecordFormat(format);
+  return validatedFormat === "json"
+    ? `${JSON.stringify(result, null, 2)}\n`
+    : `${formatMarkdownEvidence(result)}\n`;
+}
+
+function writeSafely(path, content, overwrite) {
+  mkdirSync(dirname(path), { recursive: true });
+  if (!overwrite) {
+    try {
+      writeFileSync(path, content, {
+        encoding: "utf8",
+        mode: 0o600,
+        flag: "wx",
+      });
+    } catch (error) {
+      if (error.code === "EEXIST") {
+        throw new Error(
+          `refusing to overwrite existing evidence record ${path}; pass --overwrite to replace it`,
+        );
+      }
+      throw error;
+    }
+    return;
+  }
+
+  const temporaryPath = `${path}.tmp-${process.pid}-${Date.now()}`;
+  try {
+    writeFileSync(temporaryPath, content, {
+      encoding: "utf8",
+      mode: 0o600,
+      flag: "wx",
+    });
+    renameSync(temporaryPath, path);
+  } catch (error) {
+    try {
+      // Best effort cleanup; preserve the original error.
+      unlinkSync(temporaryPath);
+    } catch {
+      // The temporary file was either never created or was already removed.
+    }
+    throw error;
+  }
+}
+
+export function writeEvidenceRecord(path, result, format, overwrite = false) {
+  const outputPath = resolve(path);
+  writeSafely(
+    outputPath,
+    serializeEvidenceRecord(result, format),
+    overwrite,
+  );
+  return outputPath;
+}
+
+export function resolveRecordOutput(options, checkedAt) {
+  if (options.recordOutput && options.recordDir) {
+    throw new Error("--record-output and --record-dir cannot be used together");
+  }
+  if (options.recordOutput) {
+    return resolve(options.recordOutput);
+  }
+  if (options.recordDir) {
+    const format = validateRecordFormat(options.recordFormat);
+    return resolve(
+      join(
+        options.recordDir,
+        `api-codegen-event-probe-${formatRecordTimestamp(checkedAt)}.${format === "json" ? "json" : "md"}`,
+      ),
+    );
+  }
+  return undefined;
 }
 
 export function buildStaleGeneratedContent(content, marker) {
@@ -527,6 +680,7 @@ async function cleanupProbe(client, repository, { branch, pullRequestNumber }) {
 
 export async function runProbe(client, options, dependencies = {}) {
   const now = dependencies.now ?? (() => new Date());
+  const checkedAt = now().toISOString();
   const repository = repositoryFromOptions(options);
   const baseBranch = options.baseBranch ?? DEFAULTS.baseBranch;
   const generatedFile = options.generatedFile ?? DEFAULTS.generatedFile;
@@ -700,6 +854,7 @@ export async function runProbe(client, options, dependencies = {}) {
       workflowRunEvidence("edited", editedRun, editedJobs, "success"),
     );
     result = {
+      checkedAt,
       repository,
       branch,
       pullRequest: {
@@ -767,7 +922,11 @@ Options:
   --branch NAME                 Temporary branch name
   --poll-seconds N              Poll interval (default: 10)
   --timeout-seconds N           Timeout for each hosted run (default: 900)
-  --output PATH                 Write the successful JSON record to this file
+  --output PATH                 Write the successful JSON result to this file
+  --record-output PATH          Write a reviewable Markdown or JSON evidence record
+  --record-dir DIR              Write a UTC-dated evidence record inside DIR
+  --record-format FORMAT        markdown or json (default: markdown for --record-dir)
+  --overwrite                   Allow replacing an existing output or evidence record
   --dry-run                     Print the plan without calling GitHub
   --help                        Show this help
 `;
@@ -791,6 +950,10 @@ async function main() {
           generatedFile: options.generatedFile,
           compatibilityFile: options.compatibilityFile,
           workflow: options.workflow,
+          recordOutput: options.recordOutput,
+          recordDir: options.recordDir,
+          recordFormat: options.recordFormat,
+          overwrite: options.overwrite === true,
           cleanup: "close pull request and confirm branch deletion",
         },
         null,
@@ -811,9 +974,21 @@ async function main() {
   const result = await runProbe(client, { ...options, repository, branch });
   const serialized = `${JSON.stringify(result, null, 2)}\n`;
   if (options.output) {
-    const outputPath = resolve(options.output);
-    mkdirSync(dirname(outputPath), { recursive: true });
-    writeFileSync(outputPath, serialized, { encoding: "utf8", mode: 0o600 });
+    writeSafely(resolve(options.output), serialized, options.overwrite === true);
+  }
+  const recordPath = resolveRecordOutput(options, new Date(result.checkedAt));
+  if (recordPath) {
+    const recordFormat = recordFormatForPath(
+      recordPath,
+      options.recordFormatExplicit ? options.recordFormat : undefined,
+    );
+    writeEvidenceRecord(
+      recordPath,
+      result,
+      recordFormat,
+      options.overwrite === true,
+    );
+    console.error(`Wrote API codegen event evidence record: ${recordPath}`);
   }
   console.log(serialized);
 }

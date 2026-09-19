@@ -1,14 +1,21 @@
 import assert from "node:assert/strict";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 
 import {
   buildBreakingCompatibilityContent,
   buildStaleGeneratedContent,
   findMatchingWorkflowRun,
+  formatMarkdownEvidence,
   GitHubClient,
   getRequiredFailure,
   parseArgs,
+  resolveRecordOutput,
   runProbe,
+  serializeEvidenceRecord,
+  writeEvidenceRecord,
 } from "../probe-api-codegen-events.mjs";
 
 test("probe arguments keep the hosted check defaults and accept an output path", () => {
@@ -34,6 +41,102 @@ test("probe arguments keep the hosted check defaults and accept an output path",
   assert.equal(options.output, "test-results/probe.json");
   assert.equal(options.pollSeconds, 2);
   assert.equal(options.timeoutSeconds, 30);
+});
+
+test("record arguments support dated Markdown/JSON output without implicit replacement", () => {
+  const { options } = parseArgs([
+    "--record-dir",
+    "artifacts/chat-app/docs/api-codegen-event-probes",
+    "--record-format",
+    "json",
+    "--overwrite",
+  ]);
+
+  assert.equal(options.recordDir, "artifacts/chat-app/docs/api-codegen-event-probes");
+  assert.equal(options.recordFormat, "json");
+  assert.equal(options.recordFormatExplicit, true);
+  assert.equal(options.overwrite, true);
+  assert.equal(
+    resolveRecordOutput(options, new Date("2026-09-19T02:40:12.345Z")),
+    join(
+      process.cwd(),
+      "artifacts/chat-app/docs/api-codegen-event-probes/api-codegen-event-probe-20260919T024012Z.json",
+    ),
+  );
+});
+
+test("review records retain links, failed steps, and cleanup confirmations", () => {
+  const result = {
+    checkedAt: "2026-09-19T02:40:12.345Z",
+    repository: "example/repository",
+    branch: "api-codegen-probe",
+    pullRequest: {
+      number: 10,
+      url: "https://github.com/example/repository/pull/10",
+      merged: false,
+    },
+    events: [
+      {
+        event: "edited",
+        workflowRun: {
+          id: 104,
+          url: "https://github.com/example/repository/actions/runs/104",
+        },
+        job: {
+          id: 100,
+          name: "Check generated API clients",
+          url: "https://github.com/example/repository/actions/runs/104/job/100",
+        },
+        step: {
+          name: "Verify generated API clients",
+          conclusion: "failure",
+        },
+        compatibility: {
+          name: "Check API contract compatibility",
+          conclusion: "success",
+        },
+      },
+    ],
+    cleanup: {
+      pullRequestClosed: true,
+      branchDeleted: true,
+      failures: [],
+    },
+  };
+
+  const markdown = formatMarkdownEvidence(result);
+  assert.match(markdown, /# API generated-client pull-request event probe/);
+  assert.match(markdown, /\[#10\]\(https:\/\/github\.com\/example\/repository\/pull\/10\)/);
+  assert.match(markdown, /\[#104\]\(https:\/\/github\.com\/example\/repository\/actions\/runs\/104\)/);
+  assert.match(markdown, /Verify generated API clients.*failure/);
+  assert.match(markdown, /Temporary branch deleted: \*\*confirmed\*\*/);
+  assert.doesNotMatch(markdown, /API_BREAKING_CHANGE_/);
+  assert.match(serializeEvidenceRecord(result, "json"), /"pullRequest"/);
+});
+
+test("evidence records refuse replacement unless overwrite is explicit", () => {
+  const directory = mkdtempSync(join(tmpdir(), "api-codegen-event-probe-"));
+  const path = join(directory, "record.md");
+  const result = {
+    checkedAt: "2026-09-19T02:40:12.345Z",
+    repository: "example/repository",
+    branch: "api-codegen-probe",
+    pullRequest: { number: 10, url: "https://example.test/pull/10" },
+    events: [],
+    cleanup: { pullRequestClosed: true, branchDeleted: true, failures: [] },
+  };
+
+  try {
+    assert.equal(writeEvidenceRecord(path, result, "markdown"), path);
+    assert.throws(
+      () => writeEvidenceRecord(path, result, "markdown"),
+      /refusing to overwrite existing evidence record/,
+    );
+    writeEvidenceRecord(path, result, "markdown", true);
+    assert.match(readFileSync(path, "utf8"), /confirmed cleanup/);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 test("workflow paths are sent to GitHub as one filename identifier", async () => {
