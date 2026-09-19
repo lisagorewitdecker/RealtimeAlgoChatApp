@@ -33,8 +33,11 @@ const refreshPath = join(
 );
 const packageRequire = createRequire(join(packageRoot, "package.json"));
 
-function runNodeScript(args, env = {}) {
+function runNodeScript(args, env = {}, unsetEnvironmentVariables = []) {
   const childEnvironment = { ...process.env, ...env };
+  for (const variableName of unsetEnvironmentVariables) {
+    delete childEnvironment[variableName];
+  }
   if (!Object.hasOwn(env, "GITHUB_STEP_SUMMARY")) {
     delete childEnvironment.GITHUB_STEP_SUMMARY;
   }
@@ -1373,6 +1376,15 @@ test("CI summaries preserve direct preview-setting rejection reasons without val
       expectedReason:
         /Public Expo preview manifest URL must not contain credentials/,
     },
+    {
+      name: "both preview settings missing",
+      expectedReason:
+        /Public Expo preview manifest URL is not configured\. Set REPLIT_EXPO_DEV_DOMAIN or PREVIEW_PUBLIC_URL before running the live preview handoff preflight\./,
+      unsetEnvironmentVariables: [
+        "PREVIEW_PUBLIC_URL",
+        "REPLIT_EXPO_DEV_DOMAIN",
+      ],
+    },
   ];
 
   try {
@@ -1383,16 +1395,30 @@ test("CI summaries preserve direct preview-setting rejection reasons without val
       );
       const result = runNodeScript([validatorPath], {
         GITHUB_STEP_SUMMARY: summaryPath,
-        PREVIEW_PUBLIC_URL: previewValue.value,
-        REPLIT_EXPO_DEV_DOMAIN: "fallback-preview.example.test",
+        ...(previewValue.value
+          ? {
+              PREVIEW_PUBLIC_URL: previewValue.value,
+              REPLIT_EXPO_DEV_DOMAIN: "fallback-preview.example.test",
+            }
+          : {}),
         PREVIEW_PUBLIC_TIMEOUT_MS: "25",
         PREVIEW_STARTUP_TIMEOUT_MS: "2000",
         PREVIEW_STARTUP_TEST_FIXTURE: "handoff-server",
-      });
+      }, previewValue.unsetEnvironmentVariables);
 
       assert.equal(result.status, 1, previewValue.name);
       const summary = readFileSync(summaryPath, "utf8");
       assert.match(summary, previewValue.expectedReason, previewValue.name);
+      if (previewValue.name === "both preview settings missing") {
+        assert.equal(
+          summary,
+          "### Expo preview startup\n\n" +
+            "**Status:** FAIL\n\n" +
+            "**Diagnosis:** Public Expo preview manifest URL is not configured. " +
+            "Set REPLIT_EXPO_DEV_DOMAIN or PREVIEW_PUBLIC_URL before running the " +
+            "live preview handoff preflight.\n\n",
+        );
+      }
       assert.ok(
         !summary.includes(previewValue.value),
         `${previewValue.name} leaked its configured value`,
