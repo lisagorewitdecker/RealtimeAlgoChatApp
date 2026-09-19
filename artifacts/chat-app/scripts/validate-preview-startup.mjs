@@ -1144,7 +1144,6 @@ async function validateLivePreview(
   recordOutput,
 ) {
   const launcherOnly = process.env.PREVIEW_STARTUP_REAL_LAUNCHER === "1";
-  if (!launcherOnly) getPublicPreviewManifestUrl(process.env);
   const startupTestFixture = process.env.PREVIEW_STARTUP_TEST_FIXTURE;
   const useStartupFixture = STARTUP_TEST_FIXTURES.has(startupTestFixture);
   const runtimeLibraryFixture =
