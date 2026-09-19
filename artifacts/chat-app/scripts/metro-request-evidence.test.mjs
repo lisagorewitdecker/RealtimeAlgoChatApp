@@ -59,6 +59,112 @@ test("keeps synthetic preview validation separate from physical Expo Go", () => 
   assert.equal(classifyClient(request("Expo/57.0.0 (Android)")), "Expo Go");
 });
 
+test("starts a fresh retained evidence file for each Metro process", async () => {
+  const temporaryDirectory = await fs.mkdtemp(
+    path.join(os.tmpdir(), "chat-app-metro-fresh-start-"),
+  );
+  const evidencePath = path.join(temporaryDirectory, "request-evidence.log");
+  const oldRunMarker = "[dev-request] old Metro run must not be retained";
+
+  try {
+    await fs.writeFile(evidencePath, `${oldRunMarker}\n`, "utf8");
+
+    const { stdout } = await execFileAsync(
+      process.execPath,
+      [
+        "-e",
+        `
+          const fs = require("node:fs");
+          const { EventEmitter } = require("node:events");
+
+          const warnings = [];
+          console.log = () => {};
+          console.warn = (...args) => warnings.push(args.join(" "));
+
+          const config = require("./metro.config.js");
+          const evidencePath = process.env.EXPO_DEV_REQUEST_EVIDENCE_FILE;
+          const startupContents = fs.readFileSync(evidencePath, "utf8");
+          const metroMiddleware = (req, res, next) => {
+            res.statusCode = 200;
+            res.emit("finish");
+            next?.();
+          };
+          const wrappedMiddleware = config.server.enhanceMiddleware(
+            metroMiddleware,
+            {},
+          );
+          const req = {
+            method: "GET",
+            url:
+              "https://preview-user:preview-password@private.example.com/" +
+              "manifest.json?token=secret-query-token",
+            headers: {
+              "expo-platform": "ios",
+              "user-agent":
+                "Expo/57.0.0 (iOS); account=private@example.com",
+            },
+          };
+          const res = new EventEmitter();
+          res.statusCode = 200;
+          wrappedMiddleware(req, res, () => {});
+
+          const checkFile = setInterval(() => {
+            let fileContents = "";
+            try {
+              fileContents = fs.readFileSync(evidencePath, "utf8");
+            } catch {
+              return;
+            }
+
+            if (!fileContents.includes("resource=manifest")) return;
+
+            clearInterval(checkFile);
+            process.stdout.end(
+              JSON.stringify({ fileContents, startupContents, warnings }),
+              () => process.exit(0),
+            );
+          }, 5);
+
+          setTimeout(() => {
+            clearInterval(checkFile);
+            process.stderr.write(
+              "Timed out waiting for fresh retained Metro evidence.",
+            );
+            process.exit(1);
+          }, 10_000);
+        `,
+      ],
+      {
+        cwd: packageRoot,
+        env: {
+          ...process.env,
+          EXPO_DEV_REQUEST_EVIDENCE_FILE: evidencePath,
+          EXPO_DEV_REQUEST_LOG: "",
+        },
+        maxBuffer: 2 * 1024 * 1024,
+      },
+    );
+    const result = JSON.parse(stdout);
+    const retainedContent = await fs.readFile(evidencePath, "utf8");
+
+    assert.deepEqual(result.warnings, []);
+    assert.equal(result.startupContents, "");
+    assert.equal(result.fileContents, retainedContent);
+    assert.doesNotMatch(retainedContent, /old Metro run/);
+    assert.doesNotMatch(
+      retainedContent,
+      /private\.example\.com|private@example\.com|secret-query-token/,
+    );
+    assert.match(
+      retainedContent,
+      /^\[dev-request\] \S+ GET 200 \d+ms platform=ios client=Expo Go user-agent=\[redacted\] resource=manifest\n$/,
+    );
+    assert.equal(retainedContent.trimEnd().split("\n").length, 1);
+  } finally {
+    await fs.rm(temporaryDirectory, { recursive: true, force: true });
+  }
+});
+
 test("distinguishes browser and curl probes", () => {
   assert.equal(classifyClient(request("Mozilla/5.0")), "browser");
   assert.equal(classifyClient(request("curl/8.14.1")), "curl");
