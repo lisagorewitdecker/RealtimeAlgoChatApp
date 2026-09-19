@@ -361,6 +361,29 @@ test("real launcher validation does not require a public preview URL", () => {
   }
 });
 
+test("startup test output override runs without preview URL configuration", () => {
+  const temporaryDirectory = mkdtempSync(
+    join(tmpdir(), "chat-preview-startup-test-output-"),
+  );
+  const recordPath = join(temporaryDirectory, "startup.log");
+
+  try {
+    const result = runNodeScript(
+      [validatorPath, "--record-log", recordPath],
+      {
+        PREVIEW_STARTUP_TEST_OUTPUT:
+          'Error: The code execution cannot proceed because "C:\\Program Files\\Expo\\React Native DevTools\\libgtk-3-0.dll" was not found.\n',
+      },
+    );
+
+    assert.equal(result.status, 1, result.output);
+    assert.match(result.output, /Expo preview startup error:/);
+    assert.match(readFileSync(recordPath, "utf8"), /libgtk-3-0\.dll/);
+  } finally {
+    rmSync(temporaryDirectory, { recursive: true, force: true });
+  }
+});
+
 test(
   "Windows runner loader diagnosis keeps quoted spaced paths bounded",
   {
