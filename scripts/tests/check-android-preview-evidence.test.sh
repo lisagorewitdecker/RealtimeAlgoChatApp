@@ -346,6 +346,23 @@ cp "$blocked_preflight" "$discovery_android_root/20260102T000000Z/android-previe
 default_output="$(bash "$discovery_root/scripts/check-android-preview-evidence.sh" 2>&1)"
 assert_contains "$default_output" "validation passed: $discovery_android_root/20260102T000000Z/validation-record.md"
 
+# Default discovery must fail closed when the selected newest record has a
+# malformed preflight sidecar. The checker must use the same fixed diagnostic
+# as explicit-sidecar validation without exposing the malformed content.
+discovery_malformed_sentinel="android-preview-default-discovery-malformed-preflight-sentinel"
+cat >"$discovery_android_root/20260102T000000Z/android-preview-preflight.json" <<EOF
+{"schema":"android-preview-handoff-preflight/v1","platform":"android","boundaries":{"publicManifestReachability":{"status":"PASS","evidence":"$discovery_malformed_sentinel"
+EOF
+if discovery_malformed_output="$(
+  bash "$discovery_root/scripts/check-android-preview-evidence.sh" 2>&1
+)"; then
+  printf 'Default discovery unexpectedly trusted a malformed Android preflight sidecar.\n' >&2
+  exit 1
+fi
+assert_contains "$discovery_malformed_output" \
+  "The Android preview preflight JSON artifact does not satisfy the redacted schema."
+assert_not_contains "$discovery_malformed_output" "$discovery_malformed_sentinel"
+
 # Repository handoff records are durable review evidence even though the
 # artifact-level test-results directory is ignored by default. Keep every
 # retained record on the current four-boundary and sidecar contract; a stale
