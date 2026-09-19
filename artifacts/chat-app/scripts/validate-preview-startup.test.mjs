@@ -1880,6 +1880,17 @@ test(
 );
 
 test(
+  "live Metro iOS manifest timeout exits with the timed-out resource and recovery guidance",
+  { timeout: 5_000 },
+  () =>
+    runLiveMetroTimeoutFixture(
+      "handoff-server-stall-manifest",
+      /manifest response headers received but body did not complete/,
+      "ios",
+    ),
+);
+
+test(
   "live Metro bundle timeout exits with the timed-out resource and recovery guidance",
   { timeout: 5_000 },
   () =>
