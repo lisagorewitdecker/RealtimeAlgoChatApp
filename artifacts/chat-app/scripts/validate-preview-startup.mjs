@@ -375,7 +375,10 @@ function sanitizeRecordedStartupOutput(value) {
               /[^/\\\s]+?\.(?:dylib|so(?:\.\d+)*|dll)\b/i,
             )?.[0];
             if (!libraryName) {
-              return path.startsWith("\\\\") || /^[A-Za-z]:\\a\\/.test(path)
+              const isWindowsWorkspacePath =
+                path.startsWith("\\\\") ||
+                (/^[A-Za-z]$/.test(path[0] ?? "") && path.slice(1, 5) === ":\\a\\");
+              return isWindowsWorkspacePath
                 ? sanitizeWindowsProjectPath(path)
                 : `${path.slice(0, 3)}[redacted]`;
             }
