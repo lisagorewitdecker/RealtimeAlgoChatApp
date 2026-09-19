@@ -286,6 +286,7 @@ const shellDynamicImportPattern =
   /\bimport\s*\(\s*pathToFileURL\(\s*([A-Za-z_$][\w$]*)\s*\)\.href\s*\)/g;
 const processArgDestructurePattern =
   /\b(?:const|let|var)\s*\[([\s\S]*?)\]\s*=\s*process\.argv\b/g;
+const MAX_INVOKED_SCRIPT_DISCOVERY_DEPTH = 4;
 
 const actionExpressionPattern = /\$\{\{([\s\S]*?)\}\}/g;
 const secretExpressionPattern = /\bsecrets\s*[.[]|\bgithub\.token\b/;
@@ -837,14 +838,19 @@ function referencedScriptFiles(text, baseDirectories) {
 /**
  * Every repository script the workflow runs, keyed by workspace-relative path,
  * with the workflow steps that (transitively) invoke it. Follows script file
- * references and `pnpm --filter <package> <script>` invocations up to three
- * levels deep.
+ * references and `pnpm --filter <package> <script>` invocations up to the
+ * configured depth. If another helper is found at the boundary, fail instead
+ * of silently leaving that helper (and any summary writer it invokes)
+ * unreviewed.
  */
-function discoverInvokedScripts() {
+function discoverInvokedScripts({
+  steps = allSteps,
+  maxDepth = MAX_INVOKED_SCRIPT_DISCOVERY_DEPTH,
+} = {}) {
   const packages = workspacePackages();
   const discovered = new Map();
   const visited = new Set();
-  const queue = allSteps
+  const queue = steps
     .filter(({ step }) => typeof step.run === "string")
     .map((origin) => ({
       origin,
@@ -909,8 +915,15 @@ function discoverInvokedScripts() {
       });
     }
 
-    if (depth >= 3) {
-      continue;
+    if (depth >= maxDepth) {
+      const unvisitedNested = nested.find(
+        (item) => !visited.has(`${origin.label}|${item.key}`),
+      );
+      if (unvisitedNested) {
+        throw new Error(
+          `${origin.label} exceeds the supported mobile release helper depth of ${maxDepth} while following ${unvisitedNested.key}; extend discovery before adding a deeper helper.`,
+        );
+      }
     }
     for (const item of nested) {
       const visitKey = `${origin.label}|${item.key}`;
@@ -2437,6 +2450,71 @@ test("every summary-writing script the release workflow invokes has a contract",
       "Add a contract (static rules plus a sentinel run) for a new summary writer, or remove an entry that no longer writes a summary.",
     ].join("\n"),
   );
+});
+
+test("deeply nested release helpers fail before bypassing the summary inventory", () => {
+  const fixtureDirectory = mkdtempSync(
+    path.join(workspaceRoot, ".mobile-release-summary-contract-"),
+  );
+  const helperNames = [
+    "entry.sh",
+    ...Array.from(
+      { length: MAX_INVOKED_SCRIPT_DISCOVERY_DEPTH + 1 },
+      (_, index) => `helper-${index + 1}.sh`,
+    ),
+  ];
+  const helperPaths = helperNames.map((name) =>
+    path.join(fixtureDirectory, name),
+  );
+
+  helperPaths.forEach((helperPath, index) => {
+    const nextName = helperNames[index + 1];
+    writeFileSync(
+      helperPath,
+      [
+        "#!/usr/bin/env bash",
+        ...(nextName
+          ? [`bash ${nextName}`]
+          : ['printf "hidden summary writer\\n" >> "$GITHUB_STEP_SUMMARY"']),
+      ].join("\n"),
+    );
+  });
+
+  try {
+    assert.throws(
+      () =>
+        discoverInvokedScripts({
+          steps: [
+            {
+              label: "deep helper fixture",
+              step: {
+                run: `bash ${path.relative(workspaceRoot, helperPaths[0])}`,
+                "working-directory": ".",
+              },
+            },
+          ],
+          maxDepth: MAX_INVOKED_SCRIPT_DISCOVERY_DEPTH,
+        }),
+      (error) => {
+        assert.match(
+          error.message,
+          new RegExp(
+            `supported mobile release helper depth of ${MAX_INVOKED_SCRIPT_DISCOVERY_DEPTH}`,
+          ),
+        );
+        assert.match(
+          error.message,
+          new RegExp(
+            `helper-${MAX_INVOKED_SCRIPT_DISCOVERY_DEPTH}\\.sh`,
+          ),
+        );
+        return true;
+      },
+      "a summary writer beyond the supported helper depth must not disappear from discovery",
+    );
+  } finally {
+    rmSync(fixtureDirectory, { recursive: true, force: true });
+  }
 });
 
 function releaseEvidenceReaderInventory(discovered) {
