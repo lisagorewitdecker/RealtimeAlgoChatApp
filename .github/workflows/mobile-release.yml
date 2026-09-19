@@ -2085,7 +2085,7 @@ jobs:
 
   mobile-release-gate:
     name: Mobile release gate
-    if: ${{ github.event_name != 'pull_request' && inputs.android_runner_health_only != true && needs.mobile-release-node-range.result == 'success' && needs.mobile-release-credentials.result == 'success' && needs.mobile-release-configuration.result == 'success' && needs.idle-profile-registration.result == 'success' && needs.native-evidence-summary-regression.result == 'success' && needs.native-evidence-tamper-regression.result == 'success' }}
+    if: ${{ always() && github.event_name != 'pull_request' && inputs.android_runner_health_only != true && needs.mobile-release-node-range.result == 'success' && needs.mobile-release-credentials.result == 'success' && needs.mobile-release-configuration.result == 'success' && needs.idle-profile-registration.result == 'success' && needs.native-evidence-summary-regression.result == 'success' && needs.native-evidence-tamper-regression.result == 'success' }}
     outputs:
       ios_native_evidence_artifact_url: ${{ needs.native-ios.outputs.native_evidence_artifact_url }}
       android_native_evidence_artifact_url: ${{ needs.native-android.outputs.native_evidence_artifact_url }}
