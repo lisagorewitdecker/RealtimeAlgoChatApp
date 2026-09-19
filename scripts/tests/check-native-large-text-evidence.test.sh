@@ -9,14 +9,20 @@ TEST_PARENT="$(mktemp -d)"
 TEST_ROOT="$TEST_PARENT/fixtures"
 CLEANUP_GUARD="$TEST_PARENT/cleanup-must-not-escape-fixtures"
 SAVED_TEST_STATUS_SNAPSHOT="$TEST_PARENT/last-run.snapshot.json"
+SAVED_TEST_STATUS_GUARDED=0
 mkdir -p "$TEST_ROOT"
 printf 'keep\n' > "$CLEANUP_GUARD"
-# .last-run.json is gitignored Playwright output; it is absent until the first
-# local browser run, so only guard it when it exists.
+# .last-run.json is gitignored Playwright output that only exists after the API
+# browser suite has run locally, so a fresh clone or new git worktree has none.
+# These tests never read it; the snapshot only proves that fixture cleanup left
+# the developer's saved test status alone. Without the file there is nothing to
+# protect, so say so explicitly instead of failing on the missing input.
 if [[ -f "$SAVED_TEST_STATUS" ]]; then
   cp "$SAVED_TEST_STATUS" "$SAVED_TEST_STATUS_SNAPSHOT"
+  SAVED_TEST_STATUS_GUARDED=1
 else
-  printf 'saved-test-status-absent\n' > "$SAVED_TEST_STATUS_SNAPSHOT"
+  printf 'Skipping the saved API test status guard: %s is absent (gitignored Playwright output written by the API browser suite; these tests do not need it).\n' \
+    "$SAVED_TEST_STATUS"
 fi
 
 cleanup_test_fixtures() {
@@ -26,9 +32,10 @@ cleanup_test_fixtures() {
     echo "Native evidence test cleanup escaped its fixture directory" >&2
     return 1
   fi
-  if [[ "$(cat "$SAVED_TEST_STATUS_SNAPSHOT")" != "saved-test-status-absent" ]] &&
+  if ((SAVED_TEST_STATUS_GUARDED)) &&
     ! cmp -s "$SAVED_TEST_STATUS_SNAPSHOT" "$SAVED_TEST_STATUS"; then
-    echo "Native evidence test cleanup changed the saved API test status" >&2
+    printf 'Native evidence test cleanup changed the saved API test status: %s no longer matches its pre-test snapshot (a concurrent API Playwright run rewrites this file too).\n' \
+      "$SAVED_TEST_STATUS" >&2
     return 1
   fi
 
