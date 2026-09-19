@@ -167,6 +167,323 @@ test("workflow paths are sent to GitHub as one filename identifier", async () =>
   );
 });
 
+test("safe GET requests retry transient GitHub failures before succeeding", async () => {
+  let now = 0;
+  let requestCount = 0;
+  const delays = [];
+  const client = new GitHubClient({
+    token: "test-token",
+    retryDeadlineMs: 10,
+    retryBaseDelayMs: 2,
+    retryMaxDelayMs: 4,
+    nowImpl: () => now,
+    sleepImpl: async (delayMs) => {
+      delays.push(delayMs);
+      now += delayMs;
+    },
+    fetchImpl: async () => {
+      requestCount += 1;
+      if (requestCount < 3) {
+        return {
+          ok: false,
+          status: 503,
+          async text() {
+            return '{"message":"GitHub is temporarily unavailable"}';
+          },
+        };
+      }
+      return {
+        ok: true,
+        status: 200,
+        async json() {
+          return { object: { sha: "base-sha" } };
+        },
+      };
+    },
+  });
+
+  assert.deepEqual(
+    await client.getRef("owner/repository", "heads/development"),
+    { object: { sha: "base-sha" } },
+  );
+  assert.equal(requestCount, 3);
+  assert.deepEqual(delays, [2, 4]);
+});
+
+test("safe GET requests retry transient transport failures before succeeding", async () => {
+  let now = 0;
+  let requestCount = 0;
+  const client = new GitHubClient({
+    token: "test-token",
+    retryDeadlineMs: 10,
+    retryBaseDelayMs: 2,
+    retryMaxDelayMs: 2,
+    nowImpl: () => now,
+    sleepImpl: async (delayMs) => {
+      now += delayMs;
+    },
+    fetchImpl: async () => {
+      requestCount += 1;
+      if (requestCount === 1) {
+        throw new Error("socket hang up");
+      }
+      return {
+        ok: true,
+        status: 200,
+        async json() {
+          return { object: { sha: "base-sha" } };
+        },
+      };
+    },
+  });
+
+  assert.deepEqual(
+    await client.getRef("owner/repository", "heads/development"),
+    { object: { sha: "base-sha" } },
+  );
+  assert.equal(requestCount, 2);
+});
+
+test("safe GET requests stop retrying when their bounded deadline expires", async () => {
+  let now = 0;
+  let requestCount = 0;
+  const requestTimes = [];
+  const delays = [];
+  const client = new GitHubClient({
+    token: "test-token",
+    retryDeadlineMs: 5,
+    retryBaseDelayMs: 2,
+    retryMaxDelayMs: 2,
+    nowImpl: () => now,
+    sleepImpl: async (delayMs) => {
+      delays.push(delayMs);
+      now += delayMs;
+    },
+    fetchImpl: async () => {
+      requestCount += 1;
+      requestTimes.push(now);
+      return {
+        ok: false,
+        status: 503,
+        async text() {
+          return '{"message":"GitHub is temporarily unavailable"}';
+        },
+      };
+    },
+  });
+
+  await assert.rejects(
+    client.getRef("owner/repository", "heads/development"),
+    (error) => {
+      assert.equal(error.name, "GitHubApiError");
+      assert.equal(error.status, 503);
+      assert.match(error.message, /temporarily unavailable/);
+      return true;
+    },
+  );
+  assert.equal(requestCount, 3);
+  assert.deepEqual(requestTimes, [0, 2, 4]);
+  assert.deepEqual(delays, [2, 2, 1]);
+});
+
+test("safe GET requests abort a request that remains in flight at the deadline", async () => {
+  let aborted = false;
+  const client = new GitHubClient({
+    token: "test-token",
+    retryDeadlineMs: 20,
+    fetchImpl: async (_url, requestInit) =>
+      new Promise((_resolve, reject) => {
+        requestInit.signal.addEventListener("abort", () => {
+          aborted = true;
+          reject(new Error("aborted"));
+        });
+      }),
+  });
+
+  await assert.rejects(
+    client.getRef("owner/repository", "heads/development"),
+    (error) => {
+      assert.equal(error.name, "GitHubRequestTimeoutError");
+      return true;
+    },
+  );
+  assert.equal(aborted, true);
+});
+
+test("safe GET requests keep the deadline active while reading a response body", async () => {
+  let bodyAborted = false;
+  const client = new GitHubClient({
+    token: "test-token",
+    retryDeadlineMs: 20,
+    fetchImpl: async (_url, requestInit) => ({
+      ok: true,
+      status: 200,
+      async json() {
+        return new Promise((_resolve, reject) => {
+          requestInit.signal.addEventListener("abort", () => {
+            bodyAborted = true;
+            reject(new Error("body aborted"));
+          });
+        });
+      },
+    }),
+  });
+
+  await assert.rejects(
+    client.getRef("owner/repository", "heads/development"),
+    (error) => {
+      assert.equal(error.name, "GitHubRequestTimeoutError");
+      return true;
+    },
+  );
+  assert.equal(bodyAborted, true);
+});
+
+test("safe GET requests retry a transient response-body failure", async () => {
+  let now = 0;
+  let requestCount = 0;
+  const client = new GitHubClient({
+    token: "test-token",
+    retryDeadlineMs: 10,
+    retryBaseDelayMs: 2,
+    retryMaxDelayMs: 2,
+    nowImpl: () => now,
+    sleepImpl: async (delayMs) => {
+      now += delayMs;
+    },
+    fetchImpl: async () => {
+      requestCount += 1;
+      return {
+        ok: true,
+        status: 200,
+        async json() {
+          if (requestCount === 1) {
+            throw new Error("response stream reset");
+          }
+          return { object: { sha: "base-sha" } };
+        },
+      };
+    },
+  });
+
+  assert.deepEqual(
+    await client.getRef("owner/repository", "heads/development"),
+    { object: { sha: "base-sha" } },
+  );
+  assert.equal(requestCount, 2);
+});
+
+test("safe GET requests do not retry semantic JSON parsing failures", async () => {
+  let requestCount = 0;
+  const client = new GitHubClient({
+    token: "test-token",
+    retryDeadlineMs: 10,
+    sleepImpl: async () => {
+      throw new Error("semantic parsing failures must not retry");
+    },
+    fetchImpl: async () => {
+      requestCount += 1;
+      return {
+        ok: true,
+        status: 200,
+        async json() {
+          throw new SyntaxError("Unexpected token");
+        },
+      };
+    },
+  });
+
+  await assert.rejects(
+    client.getRef("owner/repository", "heads/development"),
+    SyntaxError,
+  );
+  assert.equal(requestCount, 1);
+});
+
+test("safe GET requests retry a rate-limited 403 but not an ordinary 403", async () => {
+  let now = 0;
+  let requestCount = 0;
+  const client = new GitHubClient({
+    token: "test-token",
+    retryDeadlineMs: 10,
+    retryBaseDelayMs: 1,
+    retryMaxDelayMs: 1,
+    nowImpl: () => now,
+    sleepImpl: async (delayMs) => {
+      now += delayMs;
+    },
+    fetchImpl: async () => {
+      requestCount += 1;
+      if (requestCount === 1) {
+        return {
+          ok: false,
+          status: 403,
+          headers: { "x-ratelimit-remaining": "0" },
+          async text() {
+            return '{"message":"API rate limit exceeded"}';
+          },
+        };
+      }
+      return {
+        ok: true,
+        status: 200,
+        async json() {
+          return { object: { sha: "base-sha" } };
+        },
+      };
+    },
+  });
+
+  await client.getRef("owner/repository", "heads/development");
+  assert.equal(requestCount, 2);
+
+  const ordinaryForbiddenClient = new GitHubClient({
+    token: "test-token",
+    retryDeadlineMs: 10,
+    sleepImpl: async () => {
+      throw new Error("ordinary 403 responses must not be retried");
+    },
+    fetchImpl: async () => ({
+      ok: false,
+      status: 403,
+      async text() {
+        return '{"message":"Resource not accessible"}';
+      },
+    }),
+  });
+
+  await assert.rejects(
+    ordinaryForbiddenClient.getRef("owner/repository", "heads/development"),
+    /HTTP 403: Resource not accessible/,
+  );
+});
+
+test("mutating requests are not retried after transient GitHub failures", async () => {
+  let requestCount = 0;
+  const client = new GitHubClient({
+    token: "test-token",
+    sleepImpl: async () => {
+      throw new Error("mutating requests must not sleep for retries");
+    },
+    fetchImpl: async () => {
+      requestCount += 1;
+      return {
+        ok: false,
+        status: 503,
+        async text() {
+          return '{"message":"GitHub is temporarily unavailable"}';
+        },
+      };
+    },
+  });
+
+  await assert.rejects(
+    client.createRef("owner/repository", "probe", "commit-sha"),
+    /HTTP 503: GitHub is temporarily unavailable/,
+  );
+  assert.equal(requestCount, 1);
+});
+
 test("stale generated content changes only the checked-in generated file", () => {
   const content = "export const generated = true;\n";
   const stale = buildStaleGeneratedContent(content, "probe-marker");
@@ -443,4 +760,85 @@ test("a successful probe confirms cleanup before returning its hosted evidence",
     branchDeleted: true,
     failures: [],
   });
+});
+
+test("an API outage during polling still runs cleanup after the probe fails", async () => {
+  const updates = [];
+  const deletedBranches = [];
+  let optionalRefCalls = 0;
+  const client = {
+    async getOptionalRef() {
+      optionalRefCalls += 1;
+      return null;
+    },
+    async getRef() {
+      return { object: { sha: "base-sha" } };
+    },
+    async getCommit() {
+      return { tree: { sha: "base-tree" } };
+    },
+    async getContent() {
+      return {
+        encoding: "base64",
+        content: Buffer.from(
+          "export const generated = true;\noperationId: createRoom\n",
+        ).toString("base64"),
+      };
+    },
+    async createBlob() {
+      return { sha: "blob-sha" };
+    },
+    async createTree() {
+      return { sha: "tree-sha" };
+    },
+    async createCommit() {
+      return { sha: "commit-sha" };
+    },
+    async createRef() {},
+    async createPullRequest() {
+      return {
+        number: 10,
+        html_url: "https://github.com/example/repository/pull/10",
+      };
+    },
+    async listWorkflowRuns() {
+      throw new Error(
+        "GitHub GET workflow runs failed with HTTP 503: service unavailable",
+      );
+    },
+    async updatePullRequest(_repository, number, update) {
+      updates.push({ number, update });
+    },
+    async getPullRequest() {
+      return { state: "closed", merged: false };
+    },
+    async deleteRef(_repository, branch) {
+      deletedBranches.push(branch);
+    },
+  };
+
+  await assert.rejects(
+    runProbe(
+      client,
+      {
+        repository: "example/repository",
+        branch: "api-codegen-probe",
+        timeoutSeconds: 1,
+        pollSeconds: 0.001,
+      },
+      {
+        now: () => new Date("2026-09-17T10:00:00.000Z"),
+      },
+    ),
+    /HTTP 503: service unavailable/,
+  );
+
+  assert.deepEqual(updates, [
+    {
+      number: 10,
+      update: { state: "closed" },
+    },
+  ]);
+  assert.deepEqual(deletedBranches, ["api-codegen-probe"]);
+  assert.equal(optionalRefCalls, 2);
 });

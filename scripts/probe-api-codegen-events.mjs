@@ -14,6 +14,11 @@ const DEFAULTS = {
   recordFormat: "markdown",
 };
 
+const RETRYABLE_GET_STATUS_CODES = new Set([408, 429, 500, 502, 503, 504]);
+const DEFAULT_GET_RETRY_DEADLINE_MS = 30_000;
+const DEFAULT_GET_RETRY_BASE_DELAY_MS = 250;
+const DEFAULT_GET_RETRY_MAX_DELAY_MS = 2_000;
+
 function encodePath(path) {
   return path.split("/").map(encodeURIComponent).join("/");
 }
@@ -35,37 +40,268 @@ function describeResponseBody(body) {
   return message ? `: ${message}` : "";
 }
 
+function getResponseHeader(response, name) {
+  return (
+    response.headers?.get?.(name) ??
+    response.headers?.[name] ??
+    response.headers?.[name.toLowerCase()] ??
+    null
+  );
+}
+
+function getRetryAfterMs(response, nowMs) {
+  const value = getResponseHeader(response, "retry-after");
+  if (value === undefined || value === null || value === "") {
+    return null;
+  }
+  const seconds = Number(value);
+  if (Number.isFinite(seconds) && seconds >= 0) {
+    return seconds * 1000;
+  }
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) ? Math.max(0, timestamp - nowMs) : null;
+}
+
+function isRetryableGetResponse(response, nowMs) {
+  if (RETRYABLE_GET_STATUS_CODES.has(response.status)) {
+    return true;
+  }
+  return (
+    response.status === 403 &&
+    (getResponseHeader(response, "x-ratelimit-remaining") === "0" ||
+      getRetryAfterMs(response, nowMs) !== null)
+  );
+}
+
+class GitHubRequestTimeoutError extends GitHubApiError {
+  constructor(path) {
+    super(`GitHub GET ${path} exceeded its retry deadline`, 408, path);
+    this.name = "GitHubRequestTimeoutError";
+  }
+}
+
+class GitHubTransportError extends Error {
+  constructor(cause) {
+    super(cause?.message ?? "GitHub request failed");
+    this.name = "GitHubTransportError";
+    this.cause = cause;
+  }
+}
+
+class GitHubResponseBodyError extends Error {
+  constructor(cause) {
+    super(cause?.message ?? "GitHub response body could not be read");
+    this.name = "GitHubResponseBodyError";
+    this.cause = cause;
+  }
+}
+
+async function readResponseText(response) {
+  try {
+    return await response.text();
+  } catch (error) {
+    throw new GitHubResponseBodyError(error);
+  }
+}
+
+async function readResponseJson(response) {
+  try {
+    return await response.json();
+  } catch (error) {
+    if (error instanceof SyntaxError) {
+      throw error;
+    }
+    throw new GitHubResponseBodyError(error);
+  }
+}
+
+function unwrapRequestError(error) {
+  return error instanceof GitHubTransportError ||
+    error instanceof GitHubResponseBodyError
+    ? error.cause
+    : error;
+}
+
 export class GitHubClient {
-  constructor({ token, apiUrl = "https://api.github.com", fetchImpl = fetch }) {
+  constructor({
+    token,
+    apiUrl = "https://api.github.com",
+    fetchImpl = fetch,
+    sleepImpl = wait,
+    nowImpl = Date.now,
+    retryDeadlineMs = DEFAULT_GET_RETRY_DEADLINE_MS,
+    retryBaseDelayMs = DEFAULT_GET_RETRY_BASE_DELAY_MS,
+    retryMaxDelayMs = DEFAULT_GET_RETRY_MAX_DELAY_MS,
+  }) {
     this.fetchImpl = fetchImpl;
+    this.sleepImpl = sleepImpl;
+    this.nowImpl = nowImpl;
+    this.retryDeadlineMs = retryDeadlineMs;
+    this.retryBaseDelayMs = retryBaseDelayMs;
+    this.retryMaxDelayMs = retryMaxDelayMs;
     this.token = token;
     this.apiUrl = apiUrl.replace(/\/+$/, "");
   }
 
-  async request(path, { method = "GET", body, allowNotFound = false } = {}) {
-    const response = await this.fetchImpl(`${this.apiUrl}${path}`, {
-      method,
-      headers: {
-        Accept: "application/vnd.github+json",
-        Authorization: `Bearer ${this.token}`,
-        "X-GitHub-Api-Version": "2022-11-28",
-        ...(body ? { "Content-Type": "application/json" } : {}),
-      },
-      ...(body ? { body: JSON.stringify(body) } : {}),
-    });
+  async fetchWithDeadline(
+    url,
+    requestInit,
+    deadlineAt,
+    path,
+    consumeResponse,
+  ) {
+    if (deadlineAt === undefined) {
+      const response = await this.fetchImpl(url, requestInit);
+      return consumeResponse(response);
+    }
 
-    if (response.status === 404 && allowNotFound) {
-      return null;
+    const remainingMs = deadlineAt - this.nowImpl();
+    if (remainingMs <= 0) {
+      throw new GitHubRequestTimeoutError(path);
     }
-    if (!response.ok) {
-      const text = await response.text();
-      throw new GitHubApiError(
-        `GitHub ${method} ${path} failed with HTTP ${response.status}${describeResponseBody(text)}`,
-        response.status,
-        path,
-      );
+
+    const controller = new AbortController();
+    let timer;
+    const fetchPromise = Promise.resolve()
+      .then(() =>
+        this.fetchImpl(url, { ...requestInit, signal: controller.signal }),
+      )
+      .catch((error) => {
+        throw new GitHubTransportError(error);
+      })
+      .then((response) => consumeResponse(response));
+    const timeoutPromise = new Promise((_, reject) => {
+      timer = setTimeout(() => {
+        controller.abort();
+        reject(new GitHubRequestTimeoutError(path));
+      }, remainingMs);
+    });
+    try {
+      return await Promise.race([fetchPromise, timeoutPromise]);
+    } finally {
+      clearTimeout(timer);
     }
-    return response.status === 204 ? undefined : response.json();
+  }
+
+  async waitBeforeRetry(deadlineAt, attempt, retryAfterMs = null) {
+    const remainingMs = deadlineAt - this.nowImpl();
+    if (remainingMs <= 0) {
+      return false;
+    }
+    const backoffMs = Math.min(
+      this.retryMaxDelayMs,
+      this.retryBaseDelayMs * 2 ** attempt,
+    );
+    const delayMs = Math.min(
+      remainingMs,
+      Math.max(backoffMs, retryAfterMs ?? 0),
+    );
+    if (delayMs <= 0) {
+      return false;
+    }
+    await this.sleepImpl(delayMs);
+    return this.nowImpl() < deadlineAt;
+  }
+
+  async request(
+    path,
+    { method = "GET", body, allowNotFound = false, deadlineAt } = {},
+  ) {
+    const safeGet = method === "GET";
+    const retryDeadline = safeGet
+      ? (deadlineAt ?? this.nowImpl() + this.retryDeadlineMs)
+      : undefined;
+    let attempt = 0;
+
+    while (true) {
+      if (safeGet && this.nowImpl() >= retryDeadline) {
+        throw new GitHubRequestTimeoutError(path);
+      }
+      const requestInit = {
+        method,
+        headers: {
+          Accept: "application/vnd.github+json",
+          Authorization: `Bearer ${this.token}`,
+          "X-GitHub-Api-Version": "2022-11-28",
+          ...(body ? { "Content-Type": "application/json" } : {}),
+        },
+        ...(body ? { body: JSON.stringify(body) } : {}),
+      };
+      let outcome;
+      const consumeResponse = async (response) => {
+        if (response.status === 404 && allowNotFound) {
+          return { kind: "value", value: null };
+        }
+        if (!response.ok) {
+          return {
+            kind: "http-error",
+            response,
+            text: await readResponseText(response),
+          };
+        }
+        return {
+          kind: "value",
+          value:
+            response.status === 204
+              ? undefined
+              : await readResponseJson(response),
+        };
+      };
+      try {
+        outcome = await this.fetchWithDeadline(
+          `${this.apiUrl}${path}`,
+          requestInit,
+          retryDeadline,
+          path,
+          consumeResponse,
+        );
+      } catch (error) {
+        if (
+          !safeGet ||
+          (!(error instanceof GitHubTransportError) &&
+            !(error instanceof GitHubResponseBodyError)) ||
+          error instanceof GitHubRequestTimeoutError ||
+          this.nowImpl() >= retryDeadline
+        ) {
+          throw unwrapRequestError(error);
+        }
+        if (!(await this.waitBeforeRetry(retryDeadline, attempt))) {
+          throw unwrapRequestError(error);
+        }
+        attempt += 1;
+        continue;
+      }
+
+      if (outcome.kind === "value") {
+        return outcome.value;
+      }
+      if (outcome.kind === "http-error") {
+        const { response, text } = outcome;
+        const shouldRetry =
+          safeGet &&
+          isRetryableGetResponse(response, this.nowImpl()) &&
+          this.nowImpl() < retryDeadline;
+        if (shouldRetry) {
+          const retryAfterMs = getRetryAfterMs(response, this.nowImpl());
+          if (
+            await this.waitBeforeRetry(
+              retryDeadline,
+              attempt,
+              retryAfterMs,
+            )
+          ) {
+            attempt += 1;
+            continue;
+          }
+        }
+        throw new GitHubApiError(
+          `GitHub ${method} ${path} failed with HTTP ${response.status}${describeResponseBody(text)}`,
+          response.status,
+          path,
+        );
+      }
+      throw new Error("GitHub request returned an unknown response outcome");
+    }
   }
 
   getRef(repository, ref) {
@@ -154,7 +390,7 @@ export class GitHubClient {
     return this.request(`/repos/${repository}/pulls/${number}`);
   }
 
-  listWorkflowRuns(repository, workflow, branch) {
+  listWorkflowRuns(repository, workflow, branch, options = {}) {
     const workflowIdentifier = workflow.split("/").at(-1);
     return this.request(
       `/repos/${repository}/actions/workflows/${encodeURIComponent(
@@ -162,11 +398,12 @@ export class GitHubClient {
       )}/runs?event=pull_request&branch=${encodeURIComponent(
         branch,
       )}&per_page=100`,
+      options,
     );
   }
 
-  getWorkflowRun(repository, runId) {
-    return this.request(`/repos/${repository}/actions/runs/${runId}`);
+  getWorkflowRun(repository, runId, options = {}) {
+    return this.request(`/repos/${repository}/actions/runs/${runId}`, options);
   }
 
   listJobs(repository, runId) {
@@ -516,6 +753,7 @@ async function waitForWorkflowRun(
       repository,
       workflow,
       branch,
+      { deadlineAt: deadline },
     );
     candidate = findMatchingWorkflowRun(response.workflow_runs, {
       branch,
@@ -525,7 +763,9 @@ async function waitForWorkflowRun(
       excludedRunIds,
     });
     if (candidate) {
-      const current = await client.getWorkflowRun(repository, candidate.id);
+      const current = await client.getWorkflowRun(repository, candidate.id, {
+        deadlineAt: deadline,
+      });
       if (current.status === "completed") {
         return current;
       }
