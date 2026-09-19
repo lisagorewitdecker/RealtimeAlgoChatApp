@@ -3,6 +3,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import YAML from "yaml";
 
 const DEFAULTS = {
   baseBranch: "development",
@@ -202,7 +203,6 @@ export function parseArgs(argv) {
       "--repo": "repository",
       "--base": "baseBranch",
       "--generated-file": "generatedFile",
-      "--compatibility-file": "compatibilityFile",
       "--workflow": "workflow",
       "--branch": "branch",
       "--output": "output",
@@ -265,7 +265,7 @@ export function findMatchingWorkflowRun(
     )[0];
 }
 
-export function getRequiredFailure(run, jobs) {
+function getGeneratedClientJob(run, jobs) {
   const job = (jobs?.jobs ?? []).find(
     (candidate) => candidate.name === "Check generated API clients",
   );
@@ -274,6 +274,11 @@ export function getRequiredFailure(run, jobs) {
       `workflow run ${run.id} did not contain the "Check generated API clients" job`,
     );
   }
+  return job;
+}
+
+export function getRequiredFailure(run, jobs) {
+  const job = getGeneratedClientJob(run, jobs);
   const step = (job.steps ?? []).find(
     (candidate) => candidate.name === "Verify generated API clients",
   );
@@ -301,16 +306,14 @@ export function getRequiredFailure(run, jobs) {
   };
 }
 
-function getCompatibilityResult(jobsResponse, expectedConclusion) {
-  const job = jobsResponse.jobs?.find(
-    (candidate) => candidate.name === "Check generated API clients",
-  );
-  const step = job?.steps?.find(
+function getCompatibilityResult(run, jobsResponse, expectedConclusion) {
+  const job = getGeneratedClientJob(run, jobsResponse);
+  const step = job.steps?.find(
     (candidate) => candidate.name === "Check API contract compatibility",
   );
   if (!step || step.conclusion !== expectedConclusion) {
     throw new Error(
-      `workflow run did not report API compatibility as ${expectedConclusion}`,
+      `workflow run ${run.id} did not report API compatibility as ${expectedConclusion}`,
     );
   }
   return {
@@ -332,6 +335,7 @@ function workflowRunEvidence(event, run, jobsResponse, compatibilityConclusion) 
     },
     ...getRequiredFailure(run, jobsResponse),
     compatibility: getCompatibilityResult(
+      run,
       jobsResponse,
       compatibilityConclusion,
     ),
@@ -411,11 +415,26 @@ function makeEditedBody(initialBody, marker) {
 }
 
 export function buildBreakingCompatibilityContent(content) {
-  const operation = "operationId: createRoom";
-  if (!content.includes(operation)) {
-    throw new Error(`expected compatibility fixture operation ${operation}`);
+  const document = YAML.parseDocument(content);
+  if (document.errors.length > 0) {
+    throw new Error(
+      `invalid compatibility fixture YAML: ${document.errors[0].message}`,
+    );
   }
-  return content.replace(operation, "operationId: createRoomHostedProbe");
+  const operationIdNode = document.getIn(
+    ["paths", "/rooms", "post", "operationId"],
+    true,
+  );
+  if (operationIdNode?.value !== "createRoom") {
+    throw new Error(
+      "expected compatibility fixture operationId: createRoom in the /rooms POST operation",
+    );
+  }
+  document.setIn(
+    ["paths", "/rooms", "post", "operationId"],
+    "createRoomHostedProbe",
+  );
+  return document.toString();
 }
 
 async function createProbeCommit(
@@ -762,7 +781,6 @@ Options:
   --repo OWNER/REPOSITORY       Repository (defaults to GITHUB_REPOSITORY)
   --base BRANCH                 Base branch (default: development)
   --generated-file PATH         Generated file to make stale
-  --compatibility-file PATH     OpenAPI file to make temporarily breaking
   --workflow PATH               Workflow file (default: .github/workflows/api-codegen.yml)
   --branch NAME                 Temporary branch name
   --poll-seconds N              Poll interval (default: 10)

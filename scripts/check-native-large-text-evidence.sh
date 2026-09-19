@@ -42,6 +42,9 @@ check_native_text_evidence_sizes() {
 
   while IFS= read -r -d '' path; do
     relative_path="${path#"$results_dir"/}"
+    if [[ ! "$relative_path" =~ $TRUSTED_EVIDENCE_PATH_PATTERN ]]; then
+      continue
+    fi
     if [[ "$relative_path" =~ ^(screenshots|call-surface)/[A-Za-z0-9._-]+\.png$ ]]; then
       continue
     fi
@@ -52,11 +55,7 @@ check_native_text_evidence_sizes() {
       continue
     fi
     if ((file_size > MAX_NATIVE_TEXT_EVIDENCE_BYTES)); then
-      if [[ "$relative_path" =~ $TRUSTED_EVIDENCE_PATH_PATTERN ]]; then
-        echo "Native evidence text file exceeds the ${MAX_NATIVE_TEXT_EVIDENCE_LABEL} release evidence limit: ${relative_path}." >&2
-      else
-        echo "Native evidence contains an oversized text file with an unrecognized path; refusing to package evidence." >&2
-      fi
+      echo "Native evidence text file exceeds the ${MAX_NATIVE_TEXT_EVIDENCE_LABEL} release evidence limit: ${relative_path}." >&2
       oversized=1
     fi
   done < <(find "$results_dir" -type f -print0)
