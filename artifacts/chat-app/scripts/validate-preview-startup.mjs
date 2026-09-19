@@ -362,13 +362,13 @@ function sanitizeRecordedStartupOutput(value) {
           const suffix = path.slice(path.indexOf(libraryName) + libraryName.length);
           return `${prefix}[redacted]/${libraryName}${suffix}`;
         })
+        .replace(/Starting project at ([A-Za-z]:\\[^"\r\n]+)/g, (_, path) => {
+          return `Starting project at ${sanitizeWindowsProjectPath(path)}`;
+        })
         .replace(
           /[A-Za-z]:\\(?:Users|home)\\[^"\r\n]+|[A-Za-z]:\\[^"\r\n]*?[^/\\\s]+\.(?:dylib|so(?:\.\d+)?|dll)\b[^"\r\n]*/g,
           sanitizeWindowsPath,
         )
-        .replace(/Starting project at ([A-Za-z]:\\[^"\r\n]+)/g, (_, path) => {
-          return `Starting project at ${sanitizeWindowsProjectPath(path)}`;
-        })
         .slice(0, MAX_RECORDED_STARTUP_LINE_LENGTH),
     )
     .join("\n");
