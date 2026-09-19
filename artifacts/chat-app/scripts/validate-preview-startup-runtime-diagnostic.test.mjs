@@ -334,6 +334,85 @@ test("real-platform capture records macOS and Windows loader output safely", () 
   }
 });
 
+test(
+  "Windows runner loader diagnosis keeps quoted spaced paths bounded",
+  {
+    skip: process.platform !== "win32",
+  },
+  () => {
+    const temporaryDirectory = mkdtempSync(
+      join(tmpdir(), "chat-preview-windows-runner-"),
+    );
+    const longPath =
+      `C:\\Program Files\\Expo\\${"React Native DevTools cache\\".repeat(14)}` +
+      "libgtk-3-0.dll";
+    const cases = [
+      {
+        name: "quoted path with spaces",
+        output:
+          'Error: The code execution cannot proceed because "C:\\Program Files\\' +
+          'Expo\\React Native DevTools\\libgtk-3-0.dll" was not found.\r\n' +
+          "unrelated log text should not be included\r\n",
+        detail:
+          /because "C:\\Program Files\\Expo\\React Native DevTools\\libgtk-3-0\.dll" was not found/,
+      },
+      {
+        name: "quoted long path with spaces",
+        output:
+          `Error: The code execution cannot proceed because "${longPath}" was not found.\r\n` +
+          "unrelated log text should not be included\r\n",
+        detail: /missing runtime library: .*libgtk-3-0\.dll/,
+      },
+    ];
+
+    try {
+      for (const [index, fixtureCase] of cases.entries()) {
+        const recordPath = join(temporaryDirectory, `windows-${index}.log`);
+        const live = runNodeScript(
+          [validatorPath, "--record-log", recordPath],
+          {
+            PREVIEW_STARTUP_TEST_FIXTURE: "missing-runtime-library-windows",
+            PREVIEW_STARTUP_TEST_OUTPUT: fixtureCase.output,
+          },
+        );
+
+        assert.equal(live.status, 1, fixtureCase.name);
+        const captured = runNodeScript([
+          validatorPath,
+          "--log-file",
+          recordPath,
+        ]);
+        assert.equal(captured.status, 1, fixtureCase.name);
+
+        const diagnostic = findDiagnostic(captured.output);
+        assert.ok(diagnostic, fixtureCase.name);
+        assert.match(diagnostic, fixtureCase.detail, fixtureCase.name);
+        assert.match(
+          diagnostic,
+          /libgtk-3-0\.dll/,
+          `${fixtureCase.name} lost the DLL basename`,
+        );
+        assert.ok(
+          diagnostic.length <= 512,
+          `${fixtureCase.name} diagnostic exceeded the 512-character limit`,
+        );
+        assert.doesNotMatch(
+          diagnostic,
+          /unrelated log text/,
+          `${fixtureCase.name} included unrelated log text`,
+        );
+        assert.equal(
+          containsControlCharacters(diagnostic),
+          false,
+          `${fixtureCase.name} included control characters`,
+        );
+      }
+    } finally {
+      rmSync(temporaryDirectory, { recursive: true, force: true });
+    }
+  },
+);
+
 test("versioned loader samples match the installed Expo tooling", () => {
   const capturedExpoCliVersion =
     process.env.PREVIEW_STARTUP_TEST_CAPTURED_EXPO_CLI_VERSION ??

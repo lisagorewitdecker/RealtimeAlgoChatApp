@@ -41,6 +41,11 @@ jobs:
       - name: Install workspace dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Run Windows loader diagnosis smoke check
+        if: matrix.os == 'windows-latest'
+        shell: bash
+        run: pnpm --filter @workspace/chat-app run test:preview-loader-windows
+
       - name: Capture and revalidate real Expo launcher output
         shell: bash
         env:
