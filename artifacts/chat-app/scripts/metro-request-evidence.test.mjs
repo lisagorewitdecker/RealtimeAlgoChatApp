@@ -335,6 +335,88 @@ test("keeps every client marker while redacting console and file evidence", asyn
   }
 });
 
+test("keeps console diagnostics when the evidence file cannot be opened", async () => {
+  const temporaryDirectory = await fs.mkdtemp(
+    path.join(os.tmpdir(), "chat-app-metro-unavailable-evidence-"),
+  );
+  const unavailableParent = path.join(temporaryDirectory, "evidence-parent");
+  const evidencePath = path.join(unavailableParent, "request-evidence.log");
+  await fs.writeFile(unavailableParent, "not a directory", "utf8");
+
+  try {
+    const { stdout, stderr } = await execFileAsync(
+      process.execPath,
+      [
+        "-e",
+        `
+          const { EventEmitter } = require("node:events");
+
+          const diagnostics = [];
+          const warnings = [];
+          console.log = (...args) => diagnostics.push(args.join(" "));
+          console.warn = (...args) => warnings.push(args.join(" "));
+
+          const config = require("./metro.config.js");
+          const metroMiddleware = (req, res, next) => {
+            res.statusCode = req.url.includes("manifest") ? 404 : 200;
+            res.emit("finish");
+            next?.();
+          };
+          const wrappedMiddleware = config.server.enhanceMiddleware(
+            metroMiddleware,
+            {},
+          );
+
+          for (const url of ["/index.bundle", "/manifest.json"]) {
+            const req = {
+              method: "GET",
+              url,
+              headers: {
+                "expo-platform": "ios",
+                "user-agent": "Expo/57.0.0 (iOS)",
+              },
+            };
+            const res = new EventEmitter();
+            wrappedMiddleware(req, res, () => {});
+          }
+
+          process.stdout.write(JSON.stringify({ diagnostics, warnings }));
+        `,
+      ],
+      {
+        cwd: packageRoot,
+        env: {
+          ...process.env,
+          EXPO_DEV_REQUEST_EVIDENCE_FILE: evidencePath,
+          EXPO_DEV_REQUEST_LOG: "",
+        },
+        maxBuffer: 2 * 1024 * 1024,
+      },
+    );
+    const result = JSON.parse(stdout);
+
+    assert.equal(result.diagnostics.length, 2);
+    assert.match(
+      result.diagnostics[0],
+      /^\[dev-request\].*GET 200 .*platform=ios client=Expo Go .*resource=bundle$/,
+    );
+    assert.match(
+      result.diagnostics[1],
+      /^\[dev-request\].*GET 404 .*platform=ios client=Expo Go .*resource=manifest$/,
+    );
+    assert.equal(result.warnings.length, 1);
+    assert.match(
+      result.warnings[0],
+      /^\[dev-request\] Could not open the redacted evidence file; continuing with console output \((?:EEXIST|ENOTDIR)\)\.$/,
+    );
+    assert.doesNotMatch(stderr, /Unhandled '(?:error|rejection)'/i);
+  } finally {
+    await fs.rm(temporaryDirectory, { recursive: true, force: true });
+  }
+
+  await assert.rejects(fs.access(temporaryDirectory), { code: "ENOENT" });
+});
+
 test("keeps the newest evidence in a bounded rolling window", async () => {
   assert.equal(MAX_REQUEST_EVIDENCE_LINES, 1_000);
   const retainedContents = [];
