@@ -13,6 +13,8 @@ set -euo pipefail
 : "${EAS_TOKEN:?EAS_TOKEN is required.}"
 
 EAS_CLI_VERSION="${EAS_CLI_VERSION:-23.2.0}"
+MAESTRO_VERSION="${MAESTRO_VERSION:-1.39.13}"
+MAESTRO_INSTALLER_SHA256="${MAESTRO_INSTALLER_SHA256:-REPLACE_WITH_PINNED_SHA256}"
 IOS_DEVICE_NAME="${IOS_NATIVE_DEVICE_NAME:-iPhone SE (3rd generation)}"
 RUNNER_TEMP="${RUNNER_TEMP:-${TMPDIR:-/tmp}}"
 
@@ -23,12 +25,22 @@ require_command() {
   fi
 }
 
-for command in curl find grep head pnpm sed unzip xcrun; do
+for command in curl find grep head pnpm sed shasum unzip xcrun; do
   require_command "$command"
 done
 
 if ! command -v maestro >/dev/null 2>&1; then
-  curl --fail --location --silent --show-error https://get.maestro.mobile.dev | bash
+  maestro_installer_url="https://get.maestro.mobile.dev"
+  maestro_installer_path="$RUNNER_TEMP/maestro-installer-${MAESTRO_VERSION}.sh"
+  curl --fail --location --silent --show-error "$maestro_installer_url" -o "$maestro_installer_path"
+
+  installer_sha256="$(shasum -a 256 "$maestro_installer_path" | awk '{print $1}')"
+  if [[ "$installer_sha256" != "$MAESTRO_INSTALLER_SHA256" ]]; then
+    echo "Maestro installer checksum mismatch. Expected $MAESTRO_INSTALLER_SHA256, got $installer_sha256." >&2
+    exit 2
+  fi
+
+  bash "$maestro_installer_path"
 fi
 
 if ! command -v maestro >/dev/null 2>&1 && [[ -d "$HOME/.maestro/bin" ]]; then
