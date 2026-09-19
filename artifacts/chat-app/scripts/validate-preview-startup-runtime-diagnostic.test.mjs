@@ -287,6 +287,17 @@ test("real-platform capture records macOS and Windows loader output safely", () 
       libraryIdentifier: "libgtk-3-0.dll",
     },
     {
+      name: "Windows UNC startup args",
+      fixture: "missing-runtime-library-windows",
+      output:
+        "Error: The code execution cannot proceed because " +
+        "C:\\Users\\reviewer\\AppData\\Local\\Expo\\libgtk-3-0.dll " +
+        "was not found. ******" +
+        "Starting project at \\\\server\\share\\repo\\app --port 8081 extra\n",
+      libraryIdentifier: "libgtk-3-0.dll",
+      diagnosticPattern: /Expo preview loader wording changed/,
+    },
+    {
       name: "Windows UNC library path",
       fixture: "missing-runtime-library-windows",
       output:
@@ -322,6 +333,7 @@ test("real-platform capture records macOS and Windows loader output safely", () 
         recordedOutput,
         /\\\\server\\share\\repo\\app/,
       );
+      assert.doesNotMatch(recordedOutput, /--port 8081 extra/);
       assert.doesNotMatch(recordedOutput, /TOP_SECRET_VALUE/);
       assert.match(recordedOutput, new RegExp(fixtureCase.libraryIdentifier));
 

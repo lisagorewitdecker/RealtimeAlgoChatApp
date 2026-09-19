@@ -369,24 +369,13 @@ function sanitizeRecordedStartupOutput(value) {
           return `${prefix}[redacted]/${libraryName}${suffix}`;
         })
         .replace(
-          /(?:(?<=^)|(?<=[\s"']))(?:[A-Za-z]:\\(?:Users|home)\\[^\r\n]+|[A-Za-z]:\\a\\[^\\\r\n]+(?:\\[^\r\n]+)+|\\\\[^\\\r\n]+\\[^\\\r\n]+\\[^\r\n]+)(?=$|[\s"'])/g,
-          (path) => {
-            const libraryName = path.match(
-              /[^/\\\s]+?\.(?:dylib|so(?:\.\d+)*|dll)\b/i,
-            )?.[0];
-            if (!libraryName) {
-              const isWindowsWorkspacePath =
-                path.startsWith("\\\\") ||
-                (/^[A-Za-z]$/.test(path[0] ?? "") && path.slice(1, 5) === ":\\a\\");
-              return isWindowsWorkspacePath
-                ? sanitizeWindowsProjectPath(path)
-                : `${path.slice(0, 3)}[redacted]`;
-            }
-            const suffix = path.slice(path.indexOf(libraryName) + libraryName.length);
-            const redactedPrefix = path.startsWith("\\\\")
-              ? "\\\\[redacted]"
-              : `${path.slice(0, 3)}[redacted]`;
-            return `${redactedPrefix}\\${libraryName}${suffix}`;
+          /Starting project at ((?:[A-Za-z]:\\|\\\\[^\\\r\n]+\\[^\\\r\n]+\\)[^\\"\r\n]+(?:\\[^\\"\r\n]+)*)/g,
+          (_, path) => {
+            const startupProjectPath = path.replace(
+              /\s+--port\b(?:\s+\S+)?(?:\s+\S+)?$/,
+              "",
+            );
+            return `Starting project at ${sanitizeWindowsProjectPath(startupProjectPath)}`;
           },
         )
         .replace(
