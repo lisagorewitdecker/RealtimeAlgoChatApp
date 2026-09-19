@@ -1687,7 +1687,7 @@ test("rejects non-HTTPS public preview configuration before making a request", a
       requestPublicPreviewManifest(1_000, {
         PREVIEW_PUBLIC_URL: "http://preview.example.test/expo",
       }),
-      /Public Expo preview manifest URL must use HTTPS/,
+      /Public Expo preview manifest URL configured by PREVIEW_PUBLIC_URL must use HTTPS/,
     );
     assert.equal(fetchMock.request, undefined);
   } finally {
@@ -1703,7 +1703,7 @@ test("rejects credential-bearing public preview configuration before making a re
       requestPublicPreviewManifest(1_000, {
         PREVIEW_PUBLIC_URL: "https://user:password@preview.example.test/expo",
       }),
-      /Public Expo preview manifest URL must not contain credentials/,
+      /Public Expo preview manifest URL configured by PREVIEW_PUBLIC_URL must not contain credentials/,
     );
     assert.equal(fetchMock.request, undefined);
   } finally {

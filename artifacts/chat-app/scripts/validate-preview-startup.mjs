@@ -855,11 +855,15 @@ export function getPublicPreviewManifestUrl(environment = process.env) {
     );
   }
   if (url.protocol !== "https:") {
-    throw new Error("Public Expo preview manifest URL must use HTTPS.");
+    throw new Error(
+      `Public Expo preview manifest URL configured by ${configuredSetting} ` +
+        "must use HTTPS.",
+    );
   }
   if (url.username || url.password) {
     throw new Error(
-      "Public Expo preview manifest URL must not contain credentials.",
+      `Public Expo preview manifest URL configured by ${configuredSetting} ` +
+        "must not contain credentials.",
     );
   }
 

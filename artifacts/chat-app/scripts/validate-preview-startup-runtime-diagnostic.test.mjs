@@ -1367,14 +1367,15 @@ test("CI summaries preserve direct preview-setting rejection reasons without val
     {
       name: "non-HTTPS selected setting",
       value: "http://preview-setting-secret.example.test/expo",
-      expectedReason: /Public Expo preview manifest URL must use HTTPS/,
+      expectedReason:
+        /Public Expo preview manifest URL configured by PREVIEW_PUBLIC_URL must use HTTPS/,
     },
     {
       name: "credential-bearing selected setting",
       value:
         "https://preview-user:preview-password@credential-preview.example.test/expo",
       expectedReason:
-        /Public Expo preview manifest URL must not contain credentials/,
+        /Public Expo preview manifest URL configured by PREVIEW_PUBLIC_URL must not contain credentials/,
     },
     {
       name: "both preview settings missing",
@@ -1424,6 +1425,66 @@ test("CI summaries preserve direct preview-setting rejection reasons without val
         `${previewValue.name} leaked its configured value`,
       );
       if (previewValue.name === "malformed selected setting") {
+        assert.doesNotMatch(
+          summary,
+          /https?:\/\/|authorization|proxy-authorization|password|passwd|secret|token/i,
+          `${previewValue.name} leaked credential-like text`,
+        );
+      }
+    }
+  } finally {
+    rmSync(temporaryDirectory, { recursive: true, force: true });
+  }
+});
+
+test("CI summaries preserve fallback preview-setting rejection reasons without values", () => {
+  const temporaryDirectory = mkdtempSync(
+    join(tmpdir(), "chat-preview-fallback-setting-rejection-summary-"),
+  );
+  const cases = [
+    {
+      name: "malformed fallback setting",
+      value: "https://[fallback-preview-setting-secret",
+      expectedReason:
+        /Public Expo preview manifest URL configuration from REPLIT_EXPO_DEV_DOMAIN is invalid/,
+    },
+    {
+      name: "non-HTTPS fallback setting",
+      value: "http://fallback-preview-setting-secret.example.test/expo",
+      expectedReason:
+        /Public Expo preview manifest URL configured by REPLIT_EXPO_DEV_DOMAIN must use HTTPS/,
+    },
+    {
+      name: "credential-bearing fallback setting",
+      value:
+        "https://fallback-user:fallback-password@credential-fallback.example.test/expo",
+      expectedReason:
+        /Public Expo preview manifest URL configured by REPLIT_EXPO_DEV_DOMAIN must not contain credentials/,
+    },
+  ];
+
+  try {
+    for (const [index, previewValue] of cases.entries()) {
+      const summaryPath = join(
+        temporaryDirectory,
+        `summary-${index}.md`,
+      );
+      const result = runNodeScript([validatorPath], {
+        GITHUB_STEP_SUMMARY: summaryPath,
+        REPLIT_EXPO_DEV_DOMAIN: previewValue.value,
+        PREVIEW_PUBLIC_TIMEOUT_MS: "25",
+        PREVIEW_STARTUP_TIMEOUT_MS: "2000",
+        PREVIEW_STARTUP_TEST_FIXTURE: "handoff-server",
+      });
+
+      assert.equal(result.status, 1, previewValue.name);
+      const summary = readFileSync(summaryPath, "utf8");
+      assert.match(summary, previewValue.expectedReason, previewValue.name);
+      assert.ok(
+        !summary.includes(previewValue.value),
+        `${previewValue.name} leaked its configured value`,
+      );
+      if (previewValue.name === "malformed fallback setting") {
         assert.doesNotMatch(
           summary,
           /https?:\/\/|authorization|proxy-authorization|password|passwd|secret|token/i,
