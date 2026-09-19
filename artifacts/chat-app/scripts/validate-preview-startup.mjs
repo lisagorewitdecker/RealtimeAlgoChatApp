@@ -273,13 +273,11 @@ function formatStartupFailure(output) {
   const failure = findStartupFailure(output);
   const loaderFailure = findLoaderFailure(output);
   if (failure) {
-    const isLoaderFailure = Boolean(loaderFailure);
+    const isLoaderFailure = Boolean(loaderFailure && loaderFailure === failure);
     const safeFailure = isLoaderFailure
       ? redactKnownStartupFailureSecrets(failure)
       : failure;
-    const missingLibrary = loaderFailure
-      ? findMissingLibrary(loaderFailure)
-      : null;
+    const missingLibrary = isLoaderFailure ? findMissingLibrary(loaderFailure) : null;
     if (isLoaderFailure && !missingLibrary) {
       return `${STARTUP_DIAGNOSTIC_PREFIX}${LOADER_COMPATIBILITY_MAINTENANCE_MESSAGE}`;
     }
