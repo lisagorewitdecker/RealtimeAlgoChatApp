@@ -59,6 +59,9 @@ expected_labels="$(
     tr '\n' ','
 )"
 expected_labels="${expected_labels%,}"
+if [[ -z "$expected_labels" ]]; then
+  expected_labels="$(sed -n 's/^RUNNER_LABELS="\([^"]*\)"$/\1/p' "$PROVISION" | head -n 1)"
+fi
 [[ "$expected_labels" == *,*,* ]] || fail "could not read the native-ios runs-on labels (got '$expected_labels')"
 
 expected_environment="$(printf '%s\n' "$native_ios_job" | sed -n 's/^      name: \([a-z][a-z-]*\)$/\1/p' | head -n 1)"

@@ -66,6 +66,7 @@ jobs:
 
           if GITHUB_STEP_SUMMARY="$summary_path" \
             REPLIT_EXPO_DEV_DOMAIN=fallback-preview.example.test \
+            PREVIEW_PUBLIC_URL=https://preview.example.test/expo \
             PREVIEW_STARTUP_TEST_FIXTURE=missing-runtime-library-long-path \
             node artifacts/chat-app/scripts/validate-preview-startup.mjs > /tmp/preview-startup-failure.log 2>&1; then
             echo "The missing-runtime-library-long-path preview startup scenario unexpectedly passed." >&2
@@ -84,7 +85,7 @@ jobs:
             cat "$summary_path" >&2
             exit 1
           fi
-          diagnosis_matches="$(grep -E -- '^\*\*Diagnosis:\*\* Expo preview startup error: Error: /opt/expo/react-native-devtools: error while loading shared libraries: [^\r\n]*\(missing runtime library: [^\r\n]*libgtk-3\.so\.0\)[[:space:]]*$' "$summary_path" || true)"
+          diagnosis_matches="$(grep -E -- '^\*\*Diagnosis:\*\* Expo preview startup error: Error: /opt/expo/react-native-devtools: error while loading shared libraries: .*\(missing runtime library: .*libgtk-3\.so\.0\)[[:space:]]*$' "$summary_path" || true)"
           if [[ "$(printf '%s\n' "$diagnosis_matches" | sed '/^$/d' | wc -l)" != "1" ]]; then
             echo "The hosted preview startup summary contained output beyond the bounded diagnosis." >&2
             cat "$summary_path" >&2

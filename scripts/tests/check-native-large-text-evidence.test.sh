@@ -554,7 +554,7 @@ if ignored_collection_output="$(
   exit 1
 fi
 assert_contains "$ignored_collection_output" \
-  "Native evidence collection contains an untrusted file: untracked/oversized.txt."
+  "Native evidence collection contains an untrusted file path: untracked/oversized.txt."
 
 ignored_png_collection_root="$TEST_ROOT/ignored-png-collection-size"
 write_valid_run "$ignored_png_collection_root" ios
@@ -569,7 +569,7 @@ if ignored_png_collection_output="$(
   exit 1
 fi
 assert_contains "$ignored_png_collection_output" \
-  "Native evidence collection contains an untrusted file: untracked/private.png."
+  "Native evidence collection contains an untrusted file path: untracked/private.png."
 
 deterministic_collection_root="$TEST_ROOT/deterministic-collection-size"
 write_valid_run "$deterministic_collection_root" ios
@@ -586,11 +586,11 @@ if deterministic_collection_output="$(
   exit 1
 fi
 first_untrusted_line="$(
-  grep -nF 'Native evidence collection contains an untrusted file: untracked/a-first.txt.' \
+  grep -nF 'Native evidence collection contains an untrusted file path: untracked/a-first.txt.' \
     <<<"$deterministic_collection_output" | cut -d: -f1
 )"
 second_untrusted_line="$(
-  grep -nF 'Native evidence collection contains an untrusted file: untracked/z-last.txt.' \
+  grep -nF 'Native evidence collection contains an untrusted file path: untracked/z-last.txt.' \
     <<<"$deterministic_collection_output" | cut -d: -f1
 )"
 [[ -n "$first_untrusted_line" && -n "$second_untrusted_line" ]] ||

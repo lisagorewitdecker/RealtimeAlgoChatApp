@@ -298,6 +298,17 @@ test("real-platform capture records macOS and Windows loader output safely", () 
       diagnosticPattern: /Expo preview loader wording changed/,
     },
     {
+      name: "Windows drive startup args",
+      fixture: "missing-runtime-library-windows",
+      output:
+        "Error: The code execution cannot proceed because " +
+        "C:\\Users\\reviewer\\AppData\\Local\\Expo\\libgtk-3-0.dll " +
+        "was not found. ******" +
+        "Starting project at D:\\a\\RealtimeAlgoChatApp\\artifacts\\chat-app --host 0.0.0.0 --port 8081\n",
+      libraryIdentifier: "libgtk-3-0.dll",
+      diagnosticPattern: /Expo preview loader wording changed/,
+    },
+    {
       name: "Windows embedded host path text",
       fixture: "missing-runtime-library-windows",
       output:
@@ -340,6 +351,7 @@ test("real-platform capture records macOS and Windows loader output safely", () 
       assert.equal(live.status, 1, fixtureCase.name);
       const recordedOutput = readFileSync(recordPath, "utf8");
       assert.doesNotMatch(recordedOutput, /\/Users\/reviewer|C:\\Users\\reviewer/);
+      assert.doesNotMatch(recordedOutput, /D:\\a\\RealtimeAlgoChatApp/);
       assert.doesNotMatch(recordedOutput, /\\\\server\\share\\Expo\\libgtk-3-0\.dll/);
       assert.doesNotMatch(
         recordedOutput,
@@ -348,6 +360,7 @@ test("real-platform capture records macOS and Windows loader output safely", () 
       assert.doesNotMatch(recordedOutput, /--localhost/);
       assert.doesNotMatch(recordedOutput, /--host tunnel/);
       assert.doesNotMatch(recordedOutput, /--port 8081/);
+      assert.doesNotMatch(recordedOutput, /--host 0\.0\.0\.0/);
       assert.doesNotMatch(recordedOutput, /TOP_SECRET_VALUE/);
       assert.match(recordedOutput, new RegExp(fixtureCase.libraryIdentifier));
       if (fixtureCase.expectedRedactedProjectPath) {
@@ -503,6 +516,10 @@ test(
           PREVIEW_STARTUP_TEST_OUTPUT: fixtureCase.output,
         });
 
+        assert.ok(
+          existsSync(recordPath),
+          `${fixtureCase.name}; live validator output: ${JSON.stringify(realLauncherLive.output)}`,
+        );
         assert.equal(realLauncherLive.status, 1, fixtureCase.name);
         assert.notEqual(realLauncherLive.status, 0, fixtureCase.name);
         assert.ok(
@@ -526,6 +543,10 @@ test(
           `${fixtureCase.name}; captured validator output: ${JSON.stringify(captured.output)}`,
         );
         assert.ok(fixtureDiagnostic, fixtureCase.name);
+        assert.ok(
+          diagnostic,
+          `${fixtureCase.name}; captured validator output: ${JSON.stringify(captured.output)}`,
+        );
         assert.ok(diagnostic, fixtureCase.name);
         assert.equal(fixtureDiagnostic, diagnostic, fixtureCase.name);
         assert.match(diagnostic, fixtureCase.detail, fixtureCase.name);

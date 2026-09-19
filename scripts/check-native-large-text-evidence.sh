@@ -26,6 +26,7 @@ MAX_NATIVE_TEXT_EVIDENCE_LABEL="256 KiB"
 
 # The recovery wording is also consumed by the release workflow's contract
 # checks. Keep reviewer-facing guidance identical across both boundaries.
+# shellcheck source=scripts/native-release-recovery-contract.sh
 source "$ROOT_DIR/scripts/native-release-recovery-contract.sh"
 
 check_native_text_evidence_sizes() {
@@ -62,7 +63,7 @@ check_native_text_evidence_sizes() {
   for path in "${sorted_evidence_paths[@]}"; do
     relative_path="${path#"$results_dir"/}"
     if [[ ! "$relative_path" =~ $TRUSTED_EVIDENCE_PATH_PATTERN ]]; then
-      echo "Native evidence collection contains an untrusted file: ${relative_path}." >&2
+      echo "Native evidence collection contains an untrusted file path: ${relative_path}." >&2
       oversized=1
       continue
     fi

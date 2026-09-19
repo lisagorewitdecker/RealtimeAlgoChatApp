@@ -274,12 +274,11 @@ function formatStartupFailure(output) {
   const loaderFailure = findLoaderFailure(output);
   if (failure) {
     const isLoaderFailure = loaderFailure === failure;
-    const safeFailure = isLoaderFailure
-      ? redactKnownStartupFailureSecrets(loaderFailure)
+    const missingLibrary = isLoaderFailure ? findMissingLibrary(loaderFailure) : null;
+    const usesLoaderDiagnosis = Boolean(missingLibrary);
+    const safeFailure = usesLoaderDiagnosis
+      ? redactKnownStartupFailureSecrets(failure)
       : failure;
-    const missingLibrary = isLoaderFailure
-      ? findMissingLibrary(loaderFailure)
-      : null;
     if (isLoaderFailure && !missingLibrary) {
       return `${STARTUP_DIAGNOSTIC_PREFIX}${LOADER_COMPATIBILITY_MAINTENANCE_MESSAGE}`;
     }
@@ -290,7 +289,7 @@ function formatStartupFailure(output) {
     );
     const redactedFailureDetail = redactStartupAuthorization(fullFailureDetail);
     const libraryDetail =
-      missingLibrary &&
+      usesLoaderDiagnosis &&
       (!fullFailureDetail.includes(missingLibrary) ||
         missingLibrary.length > MAX_STARTUP_LIBRARY_DETAIL_LENGTH)
         ? ` (missing runtime library: ${compactStartupLibraryPath(missingLibrary)})`
@@ -337,7 +336,7 @@ function sanitizeStartupSummaryDiagnostic(value) {
 function sanitizeRecordedStartupOutput(value) {
   const sanitizeWindowsPath = (path) => {
     const libraryName = path.match(
-      /[^/\\\s]+?\.(?:dylib|so(?:\.\d+)?|dll)\b/i,
+      /[^/\\\s]+?\.(?:dylib|so(?:\.\d+)*|dll)\b/i,
     )?.[0];
     const redactedPrefix = path.startsWith("\\\\")
       ? "\\\\[redacted]"
@@ -380,7 +379,7 @@ function sanitizeRecordedStartupOutput(value) {
         .replace(/\/(?:Users|home)\/[^\r\n]+/g, (path) => {
           const prefix = path.startsWith("/Users/") ? "/Users/" : "/home/";
           const libraryName = path.match(
-            /[^/\\\s]+?\.(?:dylib|so(?:\.\d+)?|dll)\b/i,
+            /[^/\\\s]+?\.(?:dylib|so(?:\.\d+)*|dll)\b/i,
           )?.[0];
           if (!libraryName) return `${prefix}[redacted]`;
           const suffix = path.slice(path.indexOf(libraryName) + libraryName.length);
@@ -394,7 +393,7 @@ function sanitizeRecordedStartupOutput(value) {
           },
         )
         .replace(
-          /[A-Za-z]:\\(?:Users|home)\\[^"\r\n]+|[A-Za-z]:\\[^"\r\n]*?[^/\\\s]+\.(?:dylib|so(?:\.\d+)?|dll)\b[^"\r\n]*|\\\\[^\\\r\n]+\\[^\\\r\n]+\\[^"\r\n]*?[^/\\\s]+\.(?:dylib|so(?:\.\d+)?|dll)\b[^"\r\n]*/g,
+          /[A-Za-z]:\\(?:Users|home)\\[^"\r\n]+|[A-Za-z]:\\[^"\r\n]*?[^/\\\s]+\.(?:dylib|so(?:\.\d+)*|dll)\b[^"\r\n]*|\\\\[^\\\r\n]+\\[^\\\r\n]+\\[^"\r\n]*?[^/\\\s]+\.(?:dylib|so(?:\.\d+)*|dll)\b[^"\r\n]*/g,
           sanitizeWindowsPath,
         )
         .slice(0, MAX_RECORDED_STARTUP_LINE_LENGTH),
