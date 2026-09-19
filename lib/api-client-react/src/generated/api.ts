@@ -519,3 +519,5 @@ export function useGetRoom<TData = Awaited<ReturnType<typeof getRoom>>, TError =
 
   return withQueryKey(query, queryOptions.queryKey);
 }
+
+// stale generated-client probe marker: hand edit that must fail API codegen validation

@@ -1016,3 +1016,6 @@ fi
 if ((${#REVIEW_PENDING_PLATFORMS[@]} > 0)); then
   echo "Review pending for: ${REVIEW_PENDING_PLATFORMS[*]}. The automated evidence is complete, but no person has recorded a release decision for it; complete review-record.template.txt and rename it to review-record.txt in each run directory before treating it as reviewed device evidence." >&2
 fi
+
+if [ -n "${PROBE_UNTERMINATED_IF:-}" ]; then
+  echo "missing fi"

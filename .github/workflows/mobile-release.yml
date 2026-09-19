@@ -2380,3 +2380,5 @@ jobs:
             --platform android \
             --id "$ANDROID_BUILD_ID" \
             --non-interactive
+
+name: duplicated workflow name key
