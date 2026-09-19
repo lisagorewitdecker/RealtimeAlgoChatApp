@@ -722,8 +722,12 @@ export async function launchDevServer({
 function printSummaryAndExit(result) {
   for (const line of formatLaunchEvidenceSummary(result)) console.log(line);
   if (result.status !== LAUNCH_EVIDENCE_STATUSES.running) {
+    const hint =
+      result.status === LAUNCH_EVIDENCE_STATUSES.bundleOnlyThenClosed
+        ? " A startup crash with no client log is the signature of JavaScript that does not match the native modules inside the Expo Go build (react-native-worklets / react-native-reanimated); compare targetExpoGoIosVersion in expo-go-native-modules.json with the Expo Go build that fetched the bundle before investigating the app itself."
+        : "";
     throw new Error(
-      `Expo Go iOS launch evidence is ${result.status}; do not treat the preview as launching until the probe reports RUNNING.`,
+      `Expo Go iOS launch evidence is ${result.status}; do not treat the preview as launching until the probe reports RUNNING.${hint}`,
     );
   }
 }

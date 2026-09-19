@@ -101,6 +101,7 @@
 - [Pre-rebase guard blocks task merges](pre-rebase-guard-blocks-task-merges.md) — a local hook refusing big replays makes task merges fail as opaque UNKNOWN with no conflicts; exempt main-repl/main.
 - [Volatile tracked test results](volatile-tracked-test-results.md) — Playwright test-results/ is volatile: never re-track it, and no unit step may need it; prove fresh-checkout runs in a `.local/` worktree.
 - [iPhone simulator startup crash evidence](expo-go-native-modules.md) — `devices.json` stays empty for Expo Go 57 iOS; bundle 200 then inspector close 1006 with no `iOS LOG` = app crash, not sign-in.
+- [Expo Go embedded native versions](expo-go-embedded-native-versions.md) — worklets/reanimated must match the Expo Go build at patch level (57.0.5 = 0.10.0/4.5.0); SDK defaults crash it silently.
 - [Generated-check fault controls](generated-check-fault-controls.md) — test-only faults and fixture paths need explicit subprocess opt-ins; harnesses strip inherited env and prove inertness.
 - [Chat App script tests need explicit wiring](chat-app-script-tests.md) — Jest ignores `scripts/` and `.mjs`; chain node:test files into `test`; `NODE_TEST_CONTEXT=` empty still skips runs, use `env -u`.
 - [Expo inspector observability](expo-inspector-observability.md) — inspector connect/close exist only on stderr via DEBUG=Metro:InspectorProxy; launch evidence must follow the session's own bundle 200.

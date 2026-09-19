@@ -14,8 +14,10 @@
     "test:preview-runtime": "pnpm run validate:preview-runtime",
     "validate:preview-configuration": "node scripts/validate-preview-startup.mjs --validate-configuration",
     "validate:preview-startup": "pnpm run validate:preview-runtime && pnpm run validate:preview-configuration && node scripts/validate-preview-startup.mjs --validate-timeouts && pnpm run test:preview-loader-compatibility && pnpm run test:preview-live-timeout && node scripts/validate-preview-startup.mjs",
-    "test": "pnpm run test:keyboard-strategy && jest --passWithNoTests --runInBand && pnpm run test:build-preflight && pnpm run test:branding && pnpm run test:sentry-upload-policy && pnpm run test:preview-runtime && pnpm run test:preview-startup && pnpm run test:request-evidence && pnpm run test:preview-launch-evidence",
+    "test": "pnpm run test:keyboard-strategy && jest --passWithNoTests --runInBand && pnpm run test:build-preflight && pnpm run test:branding && pnpm run test:sentry-upload-policy && pnpm run test:expo-go-native-compatibility && pnpm run test:preview-runtime && pnpm run test:preview-startup && pnpm run test:request-evidence && pnpm run test:preview-launch-evidence",
     "test:keyboard-strategy": "node --test scripts/validate-keyboard-strategy.test.mjs",
+    "test:expo-go-native-compatibility": "node --test scripts/expo-go-native-compatibility.test.mjs",
+    "validate:expo-go-native-compatibility": "node scripts/expo-go-native-compatibility.mjs",
     "test:build-preflight": "node --test scripts/build.test.js",
     "test:sentry-upload-policy": "node --test plugins/withSentryNativeUpload.test.mjs",
     "test:preview-loader-compatibility": "node scripts/validate-preview-startup-runtime-diagnostic.test.mjs",
@@ -85,12 +87,12 @@
     "react-native": "0.86.3",
     "react-native-gesture-handler": "~2.32.0",
     "react-native-keyboard-controller": "1.21.9",
-    "react-native-reanimated": "~4.5.1",
+    "react-native-reanimated": "4.5.0",
     "react-native-safe-area-context": "~5.7.0",
     "react-native-screens": "~4.26.2",
     "react-native-svg": "15.15.4",
     "react-native-web": "^0.21.2",
-    "react-native-worklets": "0.10.1",
+    "react-native-worklets": "0.10.0",
     "typescript": "~6.0.3",
     "zod": "catalog:",
     "zod-validation-error": "^3.5.4"
@@ -101,5 +103,13 @@
     "socket.io-client": "^4.8.3",
     "tweetnacl": "^1.0.3",
     "tweetnacl-util": "^0.15.1"
+  },
+  "expo": {
+    "install": {
+      "exclude": [
+        "react-native-reanimated",
+        "react-native-worklets"
+      ]
+    }
   }
 }

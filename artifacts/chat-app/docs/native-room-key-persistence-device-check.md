@@ -100,10 +100,49 @@ published build is not a substitute.
    downloaded the iOS bundle (HTTP 200, ~16 MB), then the inspector connection
    closed with code 1006 about 4 s later with no `iOS LOG`, asset, lazy-bundle,
    or API request, and the simulator showed the iOS home screen. Result:
-   `Expo Go launch` = FAIL (app quits during startup in Expo Go 57 iOS —
-   tracked as a follow-up task), `Server-side native request evidence` = PASS
-   (`platform=ios` bundle request with an Expo Go client, user agent redacted).
-   Physical iPhone and Android rows were not assessed in that session.
+   `Expo Go launch` = FAIL (app quits during startup in Expo Go 57 iOS),
+   `Server-side native request evidence` = PASS (`platform=ios` bundle request
+   with an Expo Go client, user agent redacted). Physical iPhone and Android
+   rows were not assessed in that session.
+
+   Cause (established 2026-09-19 from the served bundle and the Expo Go
+   sources, without a simulator session): Expo Go iOS 57.0.5 was built with
+   `react-native-worklets` 0.10.0 and `react-native-reanimated` 4.5.0, while
+   SDK 57's `bundledNativeModules.json` — and therefore `expo install --check`
+   — asks for 0.10.1 / 4.5.1. Worklets compares only major.minor between its
+   JavaScript and native halves, and 0.10.1 changed the argument list of a JSI
+   binding that runs while the bundle is evaluated
+   (`createSerializableNonWorkletFunction`, three arguments in 0.10.0, two in
+   0.10.1), so the SDK-default JavaScript makes the 0.10.0 native module inside
+   Expo Go read a missing argument: a native crash before
+   `AppRegistry.runApplication`, hence no red box, no `iOS LOG`, no asset or
+   API request, and the inspector close 1006. Expo Go 57.0.6 and later embed
+   0.10.1 / 4.5.1 (expo/expo commit f076696a, 2026-07-27); the mismatch
+   crashes in either direction. The app therefore pins both packages to the
+   versions inside the targeted Expo Go build (`expo-go-native-modules.json`,
+   `targetExpoGoIosVersion` = 57.0.5), `expo.install.exclude` keeps
+   `expo install --check` quiet about that deliberate pin, and
+   `pnpm run validate:preview-runtime` fails when the pins, the exclusion
+   list, and the targeted build stop agreeing. Verified from the workspace on
+   2026-09-19: the iOS bundle served after the pin (HTTP 200, ~15.8 MB)
+   carries worklets 0.10.0 / reanimated 4.5.0 and compiles with Hermes;
+   typecheck and the Jest suites pass on the pinned versions.
+
+   Platform results after the pin: Replit iPhone simulator — NOT YET
+   OBSERVED (the fix was prepared in a task environment with no simulator
+   attached; run the launch-evidence probe below from a workspace with the
+   iPhone simulator open and expect `RUNNING`); physical iPhone — NOT
+   ASSESSED, and note that App Store Expo Go is 57.0.9 (2026-09-19), which
+   embeds the 0.10.1 / 4.5.1 native parts, so a phone on the store build
+   crashes the same way against the pinned JavaScript; Android — NOT ASSESSED
+   (check the Android Expo Go build's embedded versions before a session).
+   Expo Go shows its own version in its Settings tab. To move the app to a
+   different Expo Go build: set `targetExpoGoIosVersion`, change the two pins
+   in `package.json` to that build's row (add the row from
+   `apps/expo-go/ios/Podfile.lock` in the expo/expo repository if it is
+   missing), remove the `expo.install.exclude` entries that no longer differ
+   from the SDK default, run `pnpm install`, and restart the Expo workflow;
+   the validator names every piece that is left behind.
 6. Save `validation-record.md` under
    `test-results/encrypted-room-recovery/ios/<UTC timestamp>/`. Keep all four
    rows below even when one is `FAIL`, `BLOCKED`, or `NOT_ASSESSED`. A public
@@ -194,10 +233,15 @@ startup failure into `RUNNING`.
 If the simulator's app instance survives the restart instead of relaunching,
 the result is `INCONCLUSIVE` with "no iOS Expo Go bundle HTTP 200 was logged";
 arm again and reopen the preview (or reload the app) during the device budget
-so a fresh bundle fetch is observed. Until the Expo Go 57 iOS startup crash
-follow-up lands, the expected result on the Replit iPhone simulator is
-`BUNDLE_ONLY_THEN_CLOSED`, and the probe must keep reporting it (non-zero
-exit) rather than passing.
+so a fresh bundle fetch is observed. With the Expo Go native-module pin in
+place (step 5 above), the expected result on the Replit iPhone simulator is
+`RUNNING`; the 2026-09-17 session produced `BUNDLE_ONLY_THEN_CLOSED` because
+the bundle carried worklets 0.10.1 against Expo Go 57.0.5's 0.10.0 native
+module. A new `BUNDLE_ONLY_THEN_CLOSED` means the JavaScript and the Expo Go
+native parts have diverged again — compare `targetExpoGoIosVersion` in
+`expo-go-native-modules.json` with the Expo Go build in the simulator before
+suspecting the app — and the probe keeps reporting it (non-zero exit) rather
+than passing.
 
 Run the focused checker before committing a timestamped record:
 
