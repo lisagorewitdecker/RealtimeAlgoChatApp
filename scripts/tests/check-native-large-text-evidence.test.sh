@@ -554,7 +554,7 @@ if ignored_collection_output="$(
   exit 1
 fi
 assert_contains "$ignored_collection_output" \
-  "Native evidence collection contains an untrusted non-image file: untracked/oversized.txt."
+  "Native evidence collection contains an untrusted file path: untracked/oversized.txt."
 
 valid_root="$TEST_ROOT/valid"
 write_valid_run "$valid_root" ios
