@@ -425,14 +425,7 @@ test(
   },
   () => {
     const temporaryDirectory = mkdtempSync(
-      join(
-        packageRoot,
-        "chat-preview-windows-runner-",
-      ),
-      join(tmpdir(), "chat-preview-windows-runner-"),
-        process.env.RUNNER_TEMP ?? tmpdir(),
-        "chat-preview-windows-runner-",
-      ),
+      join(process.env.RUNNER_TEMP ?? tmpdir(), "chat-preview-windows-runner-"),
     );
     const longPath =
       `C:\\Program Files\\Expo\\${"React Native DevTools cache\\".repeat(14)}` +
@@ -472,11 +465,9 @@ test(
           PREVIEW_STARTUP_TEST_OUTPUT: fixtureCase.output,
         });
 
-        assert.equal(live.status, 1, fixtureCase.name);
-        assert.notEqual(live.status, 0, fixtureCase.name);
         assert.ok(
           existsSync(recordPath),
-          `${fixtureCase.name}; live validator output: ${JSON.stringify(live.output)}`,
+          `${fixtureCase.name}; live validator output: ${JSON.stringify(realLauncherLive.output)}`,
         );
         assert.equal(realLauncherLive.status, 1, fixtureCase.name);
         assert.equal(fixtureLive.status, 1, fixtureCase.name);
