@@ -263,6 +263,14 @@ test("a successful probe confirms cleanup before returning its hosted evidence",
                 name: "Verify generated API clients",
                 conclusion: "failure",
               },
+            ],
+          },
+          {
+            id: 101,
+            name: "Compatibility follow-up",
+            html_url: `https://github.com/example/repository/actions/runs/${runId}/job/101`,
+            conclusion: runId === 104 ? "success" : "failure",
+            steps: [
               {
                 name: "Check API contract compatibility",
                 conclusion: runId === 104 ? "success" : "failure",

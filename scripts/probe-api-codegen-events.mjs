@@ -302,12 +302,11 @@ export function getRequiredFailure(run, jobs) {
 }
 
 function getCompatibilityResult(jobsResponse, expectedConclusion) {
-  const job = jobsResponse.jobs?.find(
-    (candidate) => candidate.name === "Check generated API clients",
-  );
-  const step = job?.steps?.find(
-    (candidate) => candidate.name === "Check API contract compatibility",
-  );
+  const step = jobsResponse.jobs
+    ?.flatMap((job) => job.steps ?? [])
+    .find(
+      (candidate) => candidate.name === "Check API contract compatibility",
+    );
   if (!step || step.conclusion !== expectedConclusion) {
     throw new Error(
       `workflow run did not report API compatibility as ${expectedConclusion}`,
