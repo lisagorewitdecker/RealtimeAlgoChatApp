@@ -73,7 +73,7 @@ function createEvidenceAppender(
   }
 
   const retainedRequestLines = [];
-  let persistenceEnabled = true;
+  var persistenceEnabled = true;
   let pendingWrite = Promise.resolve();
   let truncated = false;
   const truncationNotice =
@@ -83,7 +83,7 @@ function createEvidenceAppender(
           maxLines - 1
         } request lines; console output continues.`;
 
-  const appendEvidence = (evidence) => {
+  var appendEvidence = (evidence) => {
     if (retainedRequestLines.length === maxLines - 1) {
       truncated = true;
     }
