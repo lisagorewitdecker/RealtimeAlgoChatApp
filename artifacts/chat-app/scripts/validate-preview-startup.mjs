@@ -369,7 +369,7 @@ function sanitizeRecordedStartupOutput(value) {
           return `${prefix}[redacted]/${libraryName}${suffix}`;
         })
         .replace(
-          /Starting project at ((?:[A-Za-z]:\\|\\\\[^\\\r\n]+\\[^\\\r\n]+\\)[^"\r\n]+)/g,
+          /Starting project at ((?:[A-Za-z]:\\|\\\\[^\\\r\n]+\\[^\\\r\n]+\\)[^\\\s"\r\n]+(?:\\[^\\\s"\r\n]+)*)/g,
           (_, path) => {
             return `Starting project at ${sanitizeWindowsProjectPath(path)}`;
           },
