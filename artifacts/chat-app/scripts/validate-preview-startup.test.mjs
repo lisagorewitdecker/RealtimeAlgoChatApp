@@ -82,6 +82,25 @@ test("CI summaries identify a failed local handoff without raw details", () => {
   assert.ok(summary.length <= 700, "summary exceeded its bounded size");
 });
 
+test("CI summaries keep record-save failures fixed and path-free", () => {
+  const summary = formatStartupFailureSummary(
+    new Error(
+      "Preview handoff preflight record could not be saved. " +
+        "EACCES: permission denied, open /private/preview-handoff.json",
+    ),
+  );
+
+  assert.match(summary, /^### Expo preview startup/m);
+  assert.match(summary, /\*\*Status:\*\* FAIL/);
+  assert.match(summary, /\*\*Failed phase:\*\* record save/);
+  assert.match(
+    summary,
+    /\*\*Recovery:\*\* rerun with --record-output set to a writable JSON file, or omit --record-output/,
+  );
+  assert.doesNotMatch(summary, /EACCES|permission denied|preview-handoff\.json/i);
+  assert.ok(summary.length <= 700, "summary exceeded its bounded size");
+});
+
 test("uses defaults only when preview timeout environment values are absent", () => {
   assert.deepEqual(parsePreviewTimeouts({}), {
     timeoutMs: 30_000,
@@ -1386,6 +1405,105 @@ globalThis.fetch = async (url, options = {}) => {
       assert.doesNotMatch(
         output,
         /\/dev\/null|127\.0\.0\.1|public-preview\.test|private-path|private-secret|token=|_expo\/static\/js\/bundle|local response contains private-secret/i,
+      );
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
+  "CLI keeps successful probe statuses and hides record-save errors when output is unwritable",
+  { timeout: 5_000 },
+  () => {
+    const directory = mkdtempSync(
+      join(tmpdir(), "preview-handoff-successful-unwritable-record-cli-"),
+    );
+    const stdoutPath = join(directory, "validator.stdout.log");
+    const stderrPath = join(directory, "validator.stderr.log");
+    const summaryPath = join(directory, "github-step-summary.md");
+    const preloadPath = join(directory, "successful-public-fetch.mjs");
+    writeFileSync(
+      preloadPath,
+      `const originalFetch = globalThis.fetch;
+globalThis.fetch = async (url, options) => {
+  if (String(url).startsWith("https://public-preview.test/")) {
+    return new Response(
+      JSON.stringify({
+        launchAsset: {
+          url: "https://public-preview.test/_expo/static/js/bundle",
+        },
+      }),
+      { status: 200 },
+    );
+  }
+  return originalFetch(url, options);
+};
+`,
+      "utf8",
+    );
+
+    try {
+      const stdout = openSync(stdoutPath, "w");
+      const stderr = openSync(stderrPath, "w");
+      let result;
+      try {
+        result = spawnSync(
+          process.execPath,
+          [
+            validatorPath,
+            "--platform",
+            "android",
+            "--record-output",
+            "/dev/null/unwritable-preview-handoff.json",
+          ],
+          {
+            env: {
+              ...process.env,
+              NODE_OPTIONS: [
+                process.env.NODE_OPTIONS,
+                `--import ${preloadPath}`,
+              ]
+                .filter(Boolean)
+                .join(" "),
+              GITHUB_STEP_SUMMARY: summaryPath,
+              PREVIEW_PUBLIC_URL:
+                "https://public-preview.test/private-path?token=private-secret",
+              PREVIEW_PUBLIC_TIMEOUT_MS: "200",
+              PREVIEW_HANDOFF_TIMEOUT_MS: "100",
+              PREVIEW_STARTUP_TIMEOUT_MS: "2000",
+              PREVIEW_STARTUP_TEST_FIXTURE: "handoff-server",
+            },
+            stdio: ["ignore", stdout, stderr],
+          },
+        );
+      } finally {
+        closeSync(stdout);
+        closeSync(stderr);
+      }
+      const output =
+        readFileSync(stdoutPath, "utf8") + readFileSync(stderrPath, "utf8");
+      const summary = readFileSync(summaryPath, "utf8");
+
+      assert.notEqual(result.status, 0, output);
+      assert.match(output, /public_manifest_reachability=PASS/);
+      assert.match(output, /local_handoff_probe=PASS/);
+      assert.match(
+        output,
+        /Preview handoff preflight record could not be saved/,
+      );
+      assert.match(
+        output,
+        /Recovery: rerun with --record-output set to a writable JSON file, or omit --record-output/,
+      );
+      assert.match(summary, /\*\*Failed phase:\*\* record save/);
+      assert.match(
+        summary,
+        /\*\*Recovery:\*\* rerun with --record-output set to a writable JSON file, or omit --record-output/,
+      );
+      assert.doesNotMatch(
+        `${output}\n${summary}`,
+        /\/dev\/null|private-preview|private-path|private-secret|token=|EACCES|permission denied|unexpected request URL/i,
       );
     } finally {
       rmSync(directory, { recursive: true, force: true });

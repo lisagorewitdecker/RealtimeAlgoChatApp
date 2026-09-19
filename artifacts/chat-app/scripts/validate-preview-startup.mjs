@@ -36,6 +36,9 @@ const MAX_RECORDED_STARTUP_LINE_LENGTH = 1_024;
 const STARTUP_DIAGNOSTIC_PREFIX = "Expo preview startup error: ";
 const PREVIEW_TOOLING_MISMATCH_SUMMARY_PREFIX =
   "Expo preview tooling mismatch: ";
+const RECORD_WRITE_RECOVERY_MESSAGE =
+  "Recovery: rerun with --record-output set to a writable JSON file, " +
+  "or omit --record-output.";
 const PREVIEW_TOOLING_MAINTENANCE_FILES = Object.freeze([
   "preview-startup-runtime-library-fixture.mjs",
   "validate-preview-startup.mjs",
@@ -492,6 +495,14 @@ export function formatStartupFailureSummary(error) {
   }
 
   const message = error instanceof Error ? error.message : String(error);
+  if (message.startsWith("Preview handoff preflight record could not be saved.")) {
+    return (
+      "### Expo preview startup\n\n" +
+      "**Status:** FAIL\n\n" +
+      "**Failed phase:** record save\n\n" +
+      `**Recovery:** ${RECORD_WRITE_RECOVERY_MESSAGE.slice("Recovery: ".length)}\n\n`
+    );
+  }
   const handoffFailurePhase = getHandoffFailurePhase(message);
   if (handoffFailurePhase) {
     return (
@@ -547,6 +558,13 @@ function safePreflightFailure(status) {
 }
 
 function formatRecordWriteFailure(phase) {
+  if (phase === "record") {
+    return (
+      "Preview handoff preflight record could not be saved. " +
+      RECORD_WRITE_RECOVERY_MESSAGE
+    );
+  }
+
   const boundary =
     phase === "public"
       ? "public manifest probe"
@@ -554,8 +572,7 @@ function formatRecordWriteFailure(phase) {
   return (
     `Preview handoff preflight failed at the ${boundary}. ` +
     "The failed-boundary record could not be saved. " +
-    "Recovery: rerun with --record-output set to a writable JSON file, " +
-    "or omit --record-output."
+    RECORD_WRITE_RECOVERY_MESSAGE
   );
 }
 
@@ -1507,7 +1524,9 @@ async function validateLivePreview(
           console.log(formatHandoffPreflight(record));
 
           let finalError = error;
-          if (recordOutput && phase !== "record") {
+          if (phase === "record") {
+            finalError = new Error(formatRecordWriteFailure(phase));
+          } else if (recordOutput) {
             try {
               await writeHandoffPreflight(recordOutput, record);
             } catch (recordError) {
