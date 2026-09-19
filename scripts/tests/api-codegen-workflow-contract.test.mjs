@@ -9,6 +9,7 @@ import {
   readdirSync,
   readFileSync,
   rmSync,
+  statSync,
   symlinkSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -322,7 +323,11 @@ function createGeneratedClientFixture() {
           }
           return;
         }
-        symlinkSync(sourceEntry, fixtureEntry);
+        symlinkSync(
+          sourceEntry,
+          fixtureEntry,
+          statSync(sourceEntry).isDirectory() ? "dir" : "file",
+        );
       };
 
       for (const entry of readdirSync(source)) {
