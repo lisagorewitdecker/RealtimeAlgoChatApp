@@ -228,6 +228,23 @@ test("reports a DevTools failure without inventing a missing library", () => {
   );
 });
 
+test("prefers the real startup failure over unrelated loader-like output", () => {
+  const output = [
+    "React Native DevTools launcher failed to start: preview bundle crashed",
+    "dyld[12345]: Library not loaded: '/opt/homebrew/lib/libgtk-3.dylib\" trailing unrelated loader text",
+  ].join("\n");
+
+  assert.throws(
+    () => validatePreviewOutput(output),
+    (error) => {
+      assert.match(error.message, /Expo preview startup error: .*preview bundle crashed/);
+      assert.doesNotMatch(error.message, /loader wording changed/i);
+      assert.doesNotMatch(error.message, /missing runtime library/i);
+      return true;
+    },
+  );
+});
+
 test(
   "workflow entry points reject malformed and non-positive preview timeouts before live work",
   { skip: process.env.PREVIEW_TIMEOUT_ENTRYPOINT_TEST === "1" },
