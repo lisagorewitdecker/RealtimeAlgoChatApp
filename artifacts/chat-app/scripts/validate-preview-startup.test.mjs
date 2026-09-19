@@ -1958,6 +1958,76 @@ test(
 );
 
 test(
+  "CLI records startup, public preview, and local handoff timings without URL details",
+  { timeout: 5_000 },
+  () => {
+    const directory = mkdtempSync(join(tmpdir(), "preview-timing-cli-"));
+    const preloadPath = join(directory, "mock-public-preview.mjs");
+    const timingPath = join(directory, "preview-timing.json");
+    writeFileSync(
+      preloadPath,
+      `const originalFetch = globalThis.fetch;
+globalThis.fetch = async (url, options = {}) => {
+  if (String(url).startsWith("https://public-preview.test/")) {
+    return new Response(
+      JSON.stringify({
+        launchAsset: {
+          url: "https://public-preview.test/_expo/static/js/bundle",
+        },
+      }),
+      { status: 200 },
+    );
+  }
+  return originalFetch(url, options);
+};
+`,
+      "utf8",
+    );
+
+    try {
+      const result = spawnSync(process.execPath, [validatorPath], {
+        env: {
+          ...process.env,
+          REPLIT_EXPO_SESSION_SECRET: "",
+          NODE_OPTIONS: [
+            process.env.NODE_OPTIONS,
+            `--import ${preloadPath}`,
+          ]
+            .filter(Boolean)
+            .join(" "),
+          PREVIEW_PUBLIC_URL: "https://public-preview.test/expo",
+          PREVIEW_PUBLIC_TIMEOUT_MS: "1000",
+          PREVIEW_HANDOFF_TIMEOUT_MS: "1000",
+          PREVIEW_STARTUP_TIMEOUT_MS: "1000",
+          PREVIEW_STARTUP_TEST_FIXTURE: "handoff-server",
+          PREVIEW_TIMING_OUTPUT: timingPath,
+        },
+        encoding: "utf8",
+      });
+
+      assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+      const timing = JSON.parse(readFileSync(timingPath, "utf8"));
+      assert.equal(timing.schema, "preview-startup-timing/v1");
+      assert.equal(timing.maxTimeoutMs, MAX_PREVIEW_TIMEOUT_MS);
+      assert.deepEqual(timing.budgetsMs, {
+        startup: 1000,
+        publicPreview: 1000,
+        localHandoff: 1000,
+      });
+      for (const phase of ["startup", "publicPreview", "localHandoff"]) {
+        assert.equal(timing.phases[phase].status, "PASS");
+        assert.ok(Number.isFinite(timing.phases[phase].elapsedMs));
+        assert.ok(timing.phases[phase].elapsedMs >= 0);
+        assert.ok(timing.phases[phase].elapsedMs < timing.budgetsMs[phase]);
+      }
+      assert.doesNotMatch(JSON.stringify(timing), /public-preview\.test|https?:\/\//);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
   "live Metro manifest timeout exits with the timed-out resource and recovery guidance",
   { timeout: 5_000 },
   () =>

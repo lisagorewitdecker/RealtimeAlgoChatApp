@@ -34,6 +34,7 @@ const MAX_STARTUP_LIBRARY_DETAIL_LENGTH = 192;
 const MAX_RECORDED_STARTUP_OUTPUT_LENGTH = 16_384;
 const MAX_RECORDED_STARTUP_LINE_LENGTH = 1_024;
 const STARTUP_DIAGNOSTIC_PREFIX = "Expo preview startup error: ";
+const PREVIEW_TIMING_SCHEMA = "preview-startup-timing/v1";
 const PREVIEW_TOOLING_MISMATCH_SUMMARY_PREFIX =
   "Expo preview tooling mismatch: ";
 const RECORD_WRITE_RECOVERY_MESSAGE =
@@ -479,6 +480,11 @@ function sanitizeRecordedStartupOutput(value) {
 function recordStartupOutput(recordLog, output) {
   if (!recordLog) return;
   writeFileSync(resolve(recordLog), sanitizeRecordedStartupOutput(output), "utf8");
+}
+
+function writePreviewTiming(timingOutput, timing) {
+  if (!timingOutput) return;
+  writeFileSync(resolve(timingOutput), `${JSON.stringify(timing)}\n`, "utf8");
 }
 
 function getHandoffFailurePhase(message) {
@@ -1277,6 +1283,7 @@ function parseArgs(argv) {
     logFile: logFileIndex === -1 ? null : argv[logFileIndex + 1],
     recordLog,
     recordOutput,
+    timingOutput: process.env.PREVIEW_TIMING_OUTPUT ?? null,
     ...parsePreviewTimeouts(),
   };
 }
@@ -1299,10 +1306,46 @@ async function validateLivePreview(
   publicPreviewTimeoutMs,
   recordLog,
   recordOutput,
+  timingOutput,
 ) {
-  const launcherOnly = process.env.PREVIEW_STARTUP_REAL_LAUNCHER === "1";
-  if (!launcherOnly) getPublicPreviewManifestUrl(process.env);
+  const launcherOnly =
+    process.env.PREVIEW_STARTUP_REAL_LAUNCHER === "1" &&
+    process.env.PREVIEW_STARTUP_REAL_HANDOFF !== "1";
+  const skipPublicPreview = process.env.PREVIEW_STARTUP_SKIP_PUBLIC === "1";
+  if (!launcherOnly && !skipPublicPreview) {
+    getPublicPreviewManifestUrl(process.env);
+  }
   const port = await findFreePort();
+  const timing = {
+    schema: PREVIEW_TIMING_SCHEMA,
+    maxTimeoutMs: MAX_PREVIEW_TIMEOUT_MS,
+    budgetsMs: {
+      startup: timeoutMs,
+      publicPreview: publicPreviewTimeoutMs,
+      localHandoff: handoffTimeoutMs,
+    },
+    phases: {
+      startup: { status: "NOT_RUN", elapsedMs: null },
+      publicPreview: {
+        status: skipPublicPreview ? "NOT_ASSESSED" : "NOT_RUN",
+        elapsedMs: null,
+      },
+      localHandoff: { status: "NOT_RUN", elapsedMs: null },
+    },
+  };
+  const startedAt = performance.now();
+  const finalizeTiming = () => {
+    if (timing.phases.startup.elapsedMs === null) {
+      timing.phases.startup.elapsedMs = Math.max(
+        0,
+        Math.round(performance.now() - startedAt),
+      );
+      if (timing.phases.startup.status === "NOT_RUN") {
+        timing.phases.startup.status = "FAIL";
+      }
+    }
+    writePreviewTiming(timingOutput, timing);
+  };
   const output = [];
   const pnpmCommand = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
   const startupCommand =
@@ -1338,6 +1381,7 @@ async function validateLivePreview(
   let timer;
   let closeTimer;
   let failureTimer;
+  let handoffStarted = false;
 
   const finish = (callback) => {
     if (settled) return;
@@ -1370,7 +1414,7 @@ async function validateLivePreview(
       try {
         process.kill(-processGroupId, "SIGTERM");
       } catch (error) {
-        if (error.code !== "ESRCH") throw error;
+        if (error.code !== "ESRCH" && error.code !== "EPERM") throw error;
       }
     }
     closeTimer = setTimeout(() => {
@@ -1387,7 +1431,7 @@ async function validateLivePreview(
           process.kill(-processGroupId, "SIGKILL");
         }
       } catch (error) {
-        if (error.code !== "ESRCH") throw error;
+        if (error.code !== "ESRCH" && error.code !== "EPERM") throw error;
       }
     }, 2_000);
     closeTimer.unref();
@@ -1414,17 +1458,178 @@ async function validateLivePreview(
       return false;
     };
 
+    const beginHandoff = () => {
+      if (handoffStarted) return;
+      handoffStarted = true;
+      clearTimeout(timer);
+      timer = undefined;
+      const combinedOutput = output.join("");
+      if (!READY_MARKERS.some((pattern) => pattern.test(combinedOutput))) {
+        timing.phases.startup.status = "FAIL";
+        finish(() => {
+          stopChild();
+          recordStartupOutput(recordLog, combinedOutput);
+          finalizeTiming();
+          rejectResult(
+            new Error(
+              `Expo preview did not reach Metro running status within ${timeoutMs}ms.\n` +
+                combinedOutput,
+            ),
+          );
+        });
+        return;
+      }
+      timing.phases.startup.status = "PASS";
+      timing.phases.startup.elapsedMs = Math.max(
+        0,
+        Math.round(performance.now() - startedAt),
+      );
+      if (launcherOnly) {
+        finish(() => {
+          stopChild();
+          recordStartupOutput(recordLog, combinedOutput);
+          finalizeTiming();
+          console.log(
+            `Expo preview launcher reached Metro running status on port ${port}.`,
+          );
+          resolveResult();
+        });
+        return;
+      }
+      void (async () => {
+        let publicManifest;
+        let localHandoff;
+        let phase = skipPublicPreview ? "local" : "public";
+        let phaseStartedAt = performance.now();
+        try {
+          if (!skipPublicPreview) {
+            phaseStartedAt = performance.now();
+            publicManifest = await requestPublicPreviewManifest(
+              publicPreviewTimeoutMs,
+              process.env,
+              platform,
+            );
+            timing.phases.publicPreview = {
+              status: "PASS",
+              elapsedMs: Math.max(
+                0,
+                Math.round(performance.now() - phaseStartedAt),
+              ),
+            };
+          }
+          phase = "local";
+          phaseStartedAt = performance.now();
+          localHandoff = await requestLocalHandoffProbe(
+            port,
+            handoffTimeoutMs,
+            platform,
+          );
+          timing.phases.localHandoff = {
+            status: "PASS",
+            elapsedMs: Math.max(
+              0,
+              Math.round(performance.now() - phaseStartedAt),
+            ),
+          };
+          phase = "record";
+          const record = createHandoffPreflightRecord({
+            platform,
+            publicManifest,
+            localHandoff,
+          });
+          if (recordOutput) await writeHandoffPreflight(recordOutput, record);
+          // The reachability record above is complete regardless of sign-in
+          // state; the sign-in check is a separate gate for iOS Expo Go 57.
+          const signIn = classifyDevServerSignIn(
+            {
+              localSignedIn: localHandoff.signedInDeveloper,
+              publicSignedIn: publicManifest?.signedInDeveloper,
+            },
+            process.env,
+          );
+          finish(() => {
+            stopChild();
+            recordStartupOutput(recordLog, output.join(""));
+            finalizeTiming();
+            console.log(
+              `Expo preview reached Metro running status on port ${port}.`,
+            );
+            console.log(formatHandoffPreflight(record));
+            if (signIn.severity === "pass") {
+              console.log(formatDevServerSignIn(signIn));
+              resolveResult();
+              return;
+            }
+            console.warn(formatDevServerSignIn(signIn));
+            if (signIn.severity === "fail") {
+              rejectResult(
+                new Error(
+                  `Expo dev server sign-in check failed: ${signIn.evidence}`,
+                ),
+              );
+              return;
+            }
+            resolveResult();
+          });
+        } catch (error) {
+          if (phase !== "record") {
+            const failedPhase =
+              phase === "public" ? "publicPreview" : "localHandoff";
+            timing.phases[failedPhase] = {
+              status: "FAIL",
+              elapsedMs: Math.max(
+                0,
+                Math.round(performance.now() - phaseStartedAt),
+              ),
+            };
+          }
+          const record = createHandoffPreflightRecord({
+            platform,
+            publicManifest,
+            localHandoff,
+            publicManifestFailed: phase === "public",
+            localHandoffFailed: phase === "local",
+          });
+          console.log(formatHandoffPreflight(record));
+
+          let finalError = error;
+          if (phase === "record" && recordOutput) {
+            finalError = new Error(formatRecordWriteFailure(phase));
+          } else if (recordOutput) {
+            try {
+              await writeHandoffPreflight(recordOutput, record);
+            } catch (recordError) {
+              finalError = new Error(formatRecordWriteFailure(phase));
+            }
+          }
+          finish(() => {
+            stopChild();
+            recordStartupOutput(recordLog, output.join(""));
+            finalizeTiming();
+            rejectResult(finalError);
+          });
+        }
+      })();
+    };
+
     const onChunk = (chunk) => {
       output.push(chunk.toString());
-      checkOutput();
+      if (
+        !checkOutput() &&
+        READY_MARKERS.some((pattern) => pattern.test(output.join("")))
+      ) {
+        beginHandoff();
+      }
     };
     child.stdout.on("data", onChunk);
     child.stderr.on("data", onChunk);
 
     child.once("error", (error) => {
+      timing.phases.startup.status = "FAIL";
       finish(() => {
         stopChild();
         recordStartupOutput(recordLog, output.join(""));
+        finalizeTiming();
         rejectResult(error);
       });
     });
@@ -1433,6 +1638,10 @@ async function validateLivePreview(
       finish(() => {
         const combinedOutput = output.join("");
         recordStartupOutput(recordLog, combinedOutput);
+        if (timing.phases.startup.status === "NOT_RUN") {
+          timing.phases.startup.status = "FAIL";
+        }
+        finalizeTiming();
         const startupFailure = formatStartupFailure(combinedOutput);
         if (startupFailure) {
           rejectResult(new Error(startupFailure));
@@ -1458,113 +1667,7 @@ async function validateLivePreview(
 
     timer = setTimeout(() => {
       if (checkOutput()) return;
-      const combinedOutput = output.join("");
-      if (!READY_MARKERS.some((pattern) => pattern.test(combinedOutput))) {
-        finish(() => {
-          stopChild();
-          recordStartupOutput(recordLog, combinedOutput);
-          rejectResult(
-            new Error(
-              `Expo preview did not reach Metro running status within ${timeoutMs}ms.\n` +
-                combinedOutput,
-            ),
-          );
-        });
-        return;
-      }
-      if (launcherOnly) {
-        finish(() => {
-          stopChild();
-          recordStartupOutput(recordLog, combinedOutput);
-          console.log(
-            `Expo preview launcher reached Metro running status on port ${port}.`,
-          );
-          resolveResult();
-        });
-        return;
-      }
-      void (async () => {
-        let publicManifest;
-        let localHandoff;
-        let phase = "public";
-        try {
-          publicManifest = await requestPublicPreviewManifest(
-            publicPreviewTimeoutMs,
-            process.env,
-            platform,
-          );
-          phase = "local";
-          localHandoff = await requestLocalHandoffProbe(
-            port,
-            handoffTimeoutMs,
-            platform,
-          );
-          phase = "record";
-          const record = createHandoffPreflightRecord({
-            platform,
-            publicManifest,
-            localHandoff,
-          });
-          if (recordOutput) await writeHandoffPreflight(recordOutput, record);
-          // The reachability record above is complete regardless of sign-in
-          // state; the sign-in check is a separate gate for iOS Expo Go 57.
-          const signIn = classifyDevServerSignIn(
-            {
-              localSignedIn: localHandoff.signedInDeveloper,
-              publicSignedIn: publicManifest.signedInDeveloper,
-            },
-            process.env,
-          );
-          finish(() => {
-            stopChild();
-            recordStartupOutput(recordLog, output.join(""));
-            console.log(
-              `Expo preview reached Metro running status on port ${port}.`,
-            );
-            console.log(formatHandoffPreflight(record));
-            if (signIn.severity === "pass") {
-              console.log(formatDevServerSignIn(signIn));
-              resolveResult();
-              return;
-            }
-            console.warn(formatDevServerSignIn(signIn));
-            if (signIn.severity === "fail") {
-              rejectResult(
-                new Error(
-                  `Expo dev server sign-in check failed: ${signIn.evidence}`,
-                ),
-              );
-              return;
-            }
-            resolveResult();
-          });
-        } catch (error) {
-          const record = createHandoffPreflightRecord({
-            platform,
-            publicManifest,
-            localHandoff,
-            publicManifestFailed: phase === "public",
-            localHandoffFailed: phase === "local",
-          });
-          console.log(formatHandoffPreflight(record));
-
-          let finalError = error;
-          if (phase === "record") {
-            finalError = new Error(formatRecordWriteFailure(phase));
-          } else if (recordOutput) {
-            try {
-              await writeHandoffPreflight(recordOutput, record);
-            } catch (recordError) {
-              finalError = new Error(formatRecordWriteFailure(phase));
-            }
-          }
-          finish(() => {
-            stopChild();
-            recordStartupOutput(recordLog, output.join(""));
-            rejectResult(finalError);
-          });
-        }
-      })();
+      beginHandoff();
     }, timeoutMs);
   });
 }
@@ -1609,6 +1712,7 @@ async function main() {
     publicPreviewTimeoutMs,
     recordLog,
     recordOutput,
+    timingOutput,
   } = parseArgs(process.argv.slice(2));
   if (logFile) {
     await validateCapturedLog(logFile);
@@ -1623,6 +1727,7 @@ async function main() {
     publicPreviewTimeoutMs,
     recordLog,
     recordOutput,
+    timingOutput,
   );
 }
 

@@ -269,3 +269,77 @@ jobs:
             echo "- Malformed preview setting: **PASS** (configuration diagnosis retained; private material excluded)"
             cat "$setting_summary_path"
           } >> "$GITHUB_STEP_SUMMARY"
+
+  measure-preview-timing:
+    name: Measure preview timing on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - name: Check out reviewed revision
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || inputs.reviewed_ref }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
+        with:
+          version: 10.26.1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install workspace dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Measure startup, public preview, and local handoff phases
+        shell: bash
+        run: |
+          set -euo pipefail
+          timing_path="$RUNNER_TEMP/preview-startup-timing.json"
+          trap 'rm -f "$timing_path"' EXIT
+          {
+            echo "## Preview timing evidence"
+            echo "- Runner: \`${{ matrix.os }}\`"
+            echo "- Startup and local handoff budget: **300000ms each** (five-minute validator ceiling)"
+            echo "- Public preview: **NOT ASSESSED** (no managed public preview URL is available to this read-only hosted check)"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          PREVIEW_STARTUP_REAL_LAUNCHER=1 \
+            PREVIEW_STARTUP_REAL_HANDOFF=1 \
+            PREVIEW_STARTUP_SKIP_PUBLIC=1 \
+            REPLIT_EXPO_SESSION_SECRET= \
+            PREVIEW_STARTUP_TIMEOUT_MS=300000 \
+            PREVIEW_HANDOFF_TIMEOUT_MS=300000 \
+            PREVIEW_TIMING_OUTPUT="$timing_path" \
+            node artifacts/chat-app/scripts/validate-preview-startup.mjs
+
+          TIMING_PATH="$timing_path" node --input-type=module <<'NODE' >> "$GITHUB_STEP_SUMMARY"
+          import { readFileSync } from "node:fs";
+          const timing = JSON.parse(readFileSync(process.env.TIMING_PATH, "utf8"));
+          if (timing.schema !== "preview-startup-timing/v1" ||
+              timing.maxTimeoutMs !== 300000 ||
+              timing.phases.publicPreview.status !== "NOT_ASSESSED") {
+            throw new Error("Preview timing evidence is not aligned with the five-minute cap.");
+          }
+          for (const phase of ["startup", "localHandoff"]) {
+            const evidence = timing.phases[phase];
+            const budgetMs = timing.budgetsMs[phase];
+            if (evidence?.status !== "PASS" ||
+                !Number.isFinite(evidence.elapsedMs) ||
+                evidence.elapsedMs < 0 ||
+                evidence.elapsedMs >= budgetMs) {
+              throw new Error(`Preview ${phase} timing exceeded its configured budget.`);
+            }
+            console.log(`- ${phase}: **PASS** (${evidence.elapsedMs}ms / ${budgetMs}ms; ${budgetMs - evidence.elapsedMs}ms headroom)`);
+          }
+          console.log("- publicPreview: **NOT ASSESSED** (managed public preview URL unavailable)");
+          NODE

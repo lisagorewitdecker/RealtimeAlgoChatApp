@@ -40,7 +40,7 @@ test("hosted preview startup summary regression checks the reviewed revision", (
   const jobs = Object.entries(workflow.jobs);
   assert.deepEqual(
     jobs.map(([jobId]) => jobId),
-    ["verify-hosted-summary"],
+    ["verify-hosted-summary", "measure-preview-timing"],
   );
   const [, job] = jobs[0];
   assert.equal(job["runs-on"], "ubuntu-latest");
@@ -154,8 +154,32 @@ test("hosted preview startup summary regression checks the reviewed revision", (
   assert.doesNotMatch(workflowText, /EAS_TOKEN|CLERK_SECRET_KEY|DATABASE_URL/);
 });
 
-test("hosted preview startup summary regression is a read-only Linux check", () => {
+test("hosted preview timing evidence covers every supported runner profile", () => {
+  const timingJob = workflow.jobs["measure-preview-timing"];
+  assert.equal(timingJob["runs-on"], "${{ matrix.os }}");
+  assert.equal(timingJob["timeout-minutes"], 30);
+  assert.deepEqual(timingJob.strategy.matrix.os, [
+    "ubuntu-latest",
+    "macos-latest",
+    "windows-latest",
+  ]);
+  const timingStep = timingJob.steps.at(-1);
+  assert.equal(timingStep.name, "Measure startup, public preview, and local handoff phases");
+  assert.match(timingStep.run, /PREVIEW_STARTUP_REAL_LAUNCHER=1/);
+  assert.match(timingStep.run, /PREVIEW_STARTUP_REAL_HANDOFF=1/);
+  assert.match(timingStep.run, /PREVIEW_STARTUP_SKIP_PUBLIC=1/);
+  assert.match(timingStep.run, /REPLIT_EXPO_SESSION_SECRET=/);
+  assert.match(timingStep.run, /PREVIEW_TIMING_OUTPUT="\$timing_path"/);
+  assert.match(timingStep.run, /PREVIEW_STARTUP_TIMEOUT_MS=300000/);
+  assert.match(timingStep.run, /PREVIEW_HANDOFF_TIMEOUT_MS=300000/);
+  assert.match(timingStep.run, /preview-startup-timing\/v1/);
+  assert.match(timingStep.run, /timing\.maxTimeoutMs !== 300000/);
+  assert.match(timingStep.run, /evidence\.elapsedMs >= budgetMs/);
+  assert.match(timingStep.run, /publicPreview\.status !== "NOT_ASSESSED"/);
+  assert.doesNotMatch(timingStep.run, /PREVIEW_STARTUP_TEST_FIXTURE|preview-timing\.test/);
+});
+
+test("hosted preview startup checks remain read-only", () => {
   assert.doesNotMatch(workflowText, /self-hosted/);
-  assert.doesNotMatch(workflowText, /runs-on:\s*.*(?:macos|windows)/i);
   assert.doesNotMatch(workflowText, /\b(publish|deploy|submit)\b/i);
 });
