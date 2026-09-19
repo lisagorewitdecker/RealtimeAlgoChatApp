@@ -80,7 +80,7 @@ jest.mock("react-native-keyboard-controller", () => ({
     children: React.ReactNode;
     [key: string]: unknown;
   }) => {
-    const mockReact = require("react");
+  const mockReact = require("react");
     const { View: MockView } = require("react-native");
     return mockReact.createElement(MockView, props, children);
   },
@@ -108,9 +108,11 @@ const accessibilityValue = {
   highContrast: false,
   fontScale: 1.0 as const,
   reduceMotion: false,
+  reduceTransparency: false,
   setHighContrast: jest.fn(),
   setFontScale: jest.fn(),
   setReduceMotion: jest.fn(),
+  setReduceTransparency: jest.fn(),
   persistenceError: null,
   retryPersistence: jest.fn(),
 };
@@ -191,6 +193,35 @@ describe("profile moderation controls", () => {
     expect(accessibilityValue.setReduceMotion).toHaveBeenCalledWith(true);
   });
 
+  it("lets users turn on reduce transparency from accessibility settings", () => {
+    const { getByTestId, getByRole } = render(<ProfileScreen />);
+
+    const toggle = getByTestId("accessibility-reduce-transparency-toggle");
+    // Announced like the other toggles: a switch whose name carries its state.
+    expect(toggle.props.accessibilityRole).toBe("switch");
+    expect(toggle.props.accessibilityLabel).toBe("Reduce transparency: off");
+    expect(toggle.props.accessibilityState).toEqual({ checked: false });
+    expect(getByRole("switch", { name: "Reduce transparency: off" })).toBe(toggle);
+
+    fireEvent.press(toggle);
+
+    expect(accessibilityValue.setReduceTransparency).toHaveBeenLastCalledWith(true);
+  });
+
+  it("lets users turn reduce transparency back off", () => {
+    mockUseAccessibility.mockReturnValue({ ...accessibilityValue, reduceTransparency: true });
+    const { getByTestId, getByText } = render(<ProfileScreen />);
+
+    const toggle = getByTestId("accessibility-reduce-transparency-toggle");
+    expect(toggle.props.accessibilityLabel).toBe("Reduce transparency: on");
+    expect(toggle.props.accessibilityState).toEqual({ checked: true });
+    expect(getByText("Use a solid tab bar instead of a see-through one.")).toBeTruthy();
+
+    fireEvent.press(toggle);
+
+    expect(accessibilityValue.setReduceTransparency).toHaveBeenLastCalledWith(false);
+  });
+
   it("does not show account moderation controls to non-administrators", () => {
     const { queryByTestId } = render(<ProfileScreen />);
 
@@ -201,60 +232,143 @@ describe("profile moderation controls", () => {
     mockUseApp.mockReturnValue({ ...appValue, isAdmin: true });
     mockFetch.mockResolvedValue({
       ok: true,
-      json: async () => ({ ok: true }),
-    });
-    const { getByTestId, findByTestId } = render(<ProfileScreen />);
-
-    fireEvent.changeText(getByTestId("moderation-user-id"), "user-target");
-    fireEvent.press(getByTestId("ban-account-button"));
-
-    await waitFor(() =>
-      expect(mockFetch).toHaveBeenCalledWith(
-        "https://api.example.test/api/moderation/ban",
-        expect.objectContaining({
-          method: "POST",
-          headers: {
-            Authorization: "Bearer clerk-token",
-            "Content-Type": "application/json",
+      json: async () => ({
+        results: [
+          {
+            userId: "user-target",
+            username: "Grace Hopper",
+            avatarEmoji: "🧑‍💻",
+            email: "grace@example.test",
+            banned: false,
           },
-          body: JSON.stringify({ userId: "user-target" }),
-        }),
-      ),
-    );
-    expect((await findByTestId("moderation-feedback")).props.children).toBe(
-      "Account user-target is banned and can no longer access RealtimeAlgoChatApp Studio.",
-    );
-  });
-
-  it("restores an account and reports the completed action to administrators", async () => {
-    mockUseApp.mockReturnValue({ ...appValue, isAdmin: true });
-    mockFetch.mockResolvedValue({
-      ok: true,
-      json: async () => ({ ok: true }),
+        ],
+        actions: [
+          {
+            id: 4,
+            action: "ban",
+            actorUserId: "user-admin",
+            actorUsername: "Ada",
+            targetUserId: "user-target",
+            targetUsername: "Grace Hopper",
+            targetEmail: "grace@example.test",
+            createdAt: "2026-08-22T00:00:00.000Z",
+          },
+        ],
+        nextCursor: null,
+      }),
     });
     const { getByTestId, findByTestId } = render(<ProfileScreen />);
 
-    fireEvent.changeText(getByTestId("moderation-user-id"), "user-target");
-    fireEvent.press(getByTestId("restore-account-button"));
+    fireEvent.changeText(getByTestId("moderation-search-input"), "grace");
+    fireEvent.press(getByTestId("moderation-search-button"));
+    fireEvent.press(await findByTestId("moderation-search-result-user-target"));
+
+    fireEvent.press(await findByTestId("moderation-selected-account-filter-history"));
 
     await waitFor(() =>
       expect(mockFetch).toHaveBeenCalledWith(
-        "https://api.example.test/api/moderation/ban/user-target",
-        expect.objectContaining({
-          method: "DELETE",
-          headers: { Authorization: "Bearer clerk-token" },
-        }),
+        "https://api.example.test/api/moderation/history?targetUserId=user-target",
+        expect.anything(),
       ),
     );
-    expect((await findByTestId("moderation-feedback")).props.children).toBe(
-      "Account user-target has been restored and can access RealtimeAlgoChatApp Studio again.",
-    );
+    expect(await findByTestId("moderation-history-entry-4")).toBeTruthy();
+    expect(getByTestId("moderation-history-target-filter").props.value).toBe("user-target");
   });
 
-  it("does not show account search controls to non-administrators", () => {
+  it("lets an administrator filter history by tapping an account name in a history row", async () => {
+    mockUseApp.mockReturnValue({ ...appValue, isAdmin: true });
+    mockFetch.mockImplementation(async (url: string) => {
+      if (typeof url === "string" && url.includes("actorUserId=user-admin")) {
+        return {
+          ok: true,
+          json: async () => ({
+            actions: [
+              {
+                id: 4,
+                action: "ban",
+                actorUserId: "user-admin",
+                actorUsername: "Ada",
+                targetUserId: "user-target",
+                targetUsername: "Grace Hopper",
+                targetEmail: "grace@example.test",
+                createdAt: "2026-08-22T00:00:00.000Z",
+              },
+            ],
+            nextCursor: null,
+          }),
+        };
+      }
+      if (typeof url === "string" && url.includes("/api/moderation/history")) {
+        return {
+          ok: true,
+          json: async () => ({
+            actions: [
+              {
+                id: 4,
+                action: "ban",
+                actorUserId: "user-admin",
+                actorUsername: "Ada",
+                targetUserId: "user-target",
+                targetUsername: "Grace Hopper",
+                targetEmail: "grace@example.test",
+                createdAt: "2026-08-22T00:00:00.000Z",
+              },
+            ],
+            nextCursor: null,
+          }),
+        };
+      }
+      return { ok: true, json: async () => ({ ok: true }) };
+    });
+    const { getByTestId, findByTestId } = render(<ProfileScreen />);
+
+    fireEvent.press(await findByTestId("moderation-history-entry-4-filter-actor"));
+
+    await waitFor(() =>
+      expect(mockFetch).toHaveBeenCalledWith(
+        "https://api.example.test/api/moderation/history?actorUserId=user-admin",
+        expect.anything(),
+      ),
+    );
+    expect(getByTestId("moderation-history-actor-filter").props.value).toBe("user-admin");
+  });
+
+  it("does not show moderation history to non-administrators", async () => {
     const { queryByTestId } = render(<ProfileScreen />);
 
     expect(queryByTestId("moderation-search-input")).toBeNull();
+  });
+
+  it("shows who deleted a message with its room and message IDs", async () => {
+    mockUseApp.mockReturnValue({ ...appValue, isAdmin: true });
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        actions: [
+          {
+            id: 9,
+            action: "message_delete",
+            actorUserId: "user-admin",
+            actorUsername: "Ada",
+            targetUserId: null,
+            targetUsername: null,
+            targetEmail: null,
+            roomId: "room-123",
+            messageId: "message-456",
+            createdAt: "2026-09-17T12:00:00.000Z",
+          },
+        ],
+        nextCursor: null,
+      }),
+    });
+
+    const { findByTestId, getByText, queryByTestId } = render(<ProfileScreen />);
+
+    expect(await findByTestId("moderation-history-entry-9")).toBeTruthy();
+    expect(
+      getByText(" deleted message message-456 from room room-123", { exact: false }),
+    ).toBeTruthy();
+    expect(queryByTestId("moderation-history-entry-9-filter-target")).toBeNull();
   });
 
   it("lets an administrator find and select an account before banning it", async () => {
@@ -309,7 +423,7 @@ describe("profile moderation controls", () => {
       ),
     );
     expect((await findByTestId("moderation-feedback")).props.children).toBe(
-      "Account Grace Hopper (user-target) is banned and can no longer access RealtimeAlgoChatApp Studio.",
+      "Account Grace Hopper (user-target) is banned and can no longer access RealtimeAlgoChatApp.",
     );
   });
 
@@ -888,8 +1002,8 @@ describe("profile layout under the tab bar and keyboard", () => {
 
   it("reserves the measured tab bar height below the profile content", () => {
     // The classic tab navigator publishes its measured bar height (bottom
-    // inset included) through this context; the bar overlays the screen (it
-    // is see-through, but still dims and blocks whatever scrolls under it), so
+    // inset included) through this context; the bar overlays the screen and
+    // covers or dims whatever scrolls under it (it is opaque on Android), so
     // the scroll content must clear it. This suite runs under the iOS and
     // Android Jest projects, so the reservation is checked on both platforms
     // that draw the classic bar.
@@ -899,12 +1013,9 @@ describe("profile layout under the tab bar and keyboard", () => {
         <ProfileScreen />
       </BottomTabBarHeightContext.Provider>,
     );
-
     expect(contentPaddingBottom(view)).toBe(83 + 24);
-  });
 
-  it("tracks the tab bar height as the navigator re-measures it", () => {
-    const view = render(
+    view.rerender(
       <BottomTabBarHeightContext.Provider value={49}>
         <ProfileScreen />
       </BottomTabBarHeightContext.Provider>,
@@ -925,7 +1036,6 @@ describe("profile layout under the tab bar and keyboard", () => {
     // draws at the bottom.
     mockInsets.bottom = 34;
     const view = render(<ProfileScreen />);
-
     expect(contentPaddingBottom(view)).toBe(34 + 24);
   });
 

@@ -1,4 +1,9 @@
-import { chromium, type Browser, type Page } from "@playwright/test";
+import {
+  chromium,
+  type Browser,
+  type BrowserContext,
+  type Page,
+} from "@playwright/test";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 vi.mock("@clerk/express", () => ({
@@ -200,8 +205,12 @@ describe("sandbox AI tab in a browser", () => {
     await browser?.close();
   });
 
-  async function openSandbox(options: { installClock?: boolean } = {}) {
-    const page = await browser.newPage({ viewport: { width: 375, height: 667 } });
+  async function openSandbox(
+    options: { installClock?: boolean; context?: BrowserContext } = {},
+  ) {
+    const page = await (options.context ?? browser).newPage({
+      viewport: { width: 375, height: 667 },
+    });
     if (options.installClock) await page.clock.install();
     await page.addInitScript(
       (key) => {
@@ -320,7 +329,7 @@ describe("sandbox AI tab in a browser", () => {
     expect(await page.locator("#ai-declined").isVisible()).toBe(true);
     expect(await emitsOf(page, "assistant-request")).toEqual([]);
     await page.close();
-  });
+  }, 15_000);
 
   it("sends only the current files and prompt with the acknowledgement, and renders replies as text", async () => {
     const page = await openSandbox();
@@ -479,6 +488,28 @@ describe("sandbox AI tab in a browser", () => {
     );
     expect(await page.locator("#aiRetryBtn").isDisabled()).toBe(false);
 
+    // Events from the interrupted request can arrive after the room has
+    // rejoined. None of them may replace the restored retry state.
+    await fire(page, "assistant-chunk", {
+      requestId: interrupted,
+      text: "stale answer",
+    });
+    await fire(page, "assistant-done", {
+      requestId: interrupted,
+      cancelled: false,
+    });
+    await fire(page, "assistant-error", {
+      requestId: interrupted,
+      code: "SERVICE_ERROR",
+      message: "Stale failure from the interrupted request.",
+    });
+    expect(await page.locator("#aiOutput").textContent()).toBe("");
+    expect(await status(page)).toBe(
+      "Connection restored — you can retry your question.",
+    );
+    expect(await page.locator("#aiRetryBtn").isVisible()).toBe(true);
+    expect(await page.locator("#aiRetryBtn").isDisabled()).toBe(false);
+
     await page.click('.tab[data-tab="html"]');
     await page.fill("#htmlEditor", "<main>after reconnect</main>");
     await page.click('.tab[data-tab="ai"]');
@@ -496,6 +527,101 @@ describe("sandbox AI tab in a browser", () => {
     );
     await page.close();
   });
+
+  it("keeps retry behavior working inside the native sandbox WebView host", async () => {
+    // The native screen loads the document directly from the API origin in a
+    // WebView, rather than through the browser-only srcDoc preparation path.
+    // Use a mobile, touch-enabled context with a WebView-style user agent so
+    // this check exercises that delivery boundary independently.
+    const nativeContext = await browser.newContext({
+      viewport: { width: 375, height: 667 },
+      isMobile: true,
+      hasTouch: true,
+      userAgent:
+        "Mozilla/5.0 (Linux; Android 15; Pixel 9 Build/AP3A.241105.008; wv) AppleWebKit/537.36 Version/4.0 Chrome/131.0.0.0 Mobile Safari/537.36",
+    });
+    const page = await openSandbox({
+      context: nativeContext,
+      installClock: true,
+    });
+
+    try {
+      await acceptDisclosure(page);
+      await page.click('.tab[data-tab="html"]');
+      await page.fill("#htmlEditor", "<main>latest native HTML</main>");
+      await page.click('.tab[data-tab="css"]');
+      await page.fill("#cssEditor", "main { color: rebeccapurple; }");
+      await page.click('.tab[data-tab="js"]');
+      await page.fill("#jsEditor", "document.body.dataset.native = 'yes';");
+      await page.click('.tab[data-tab="ai"]');
+
+      const firstRequestId = await ask(page, "Explain the native sandbox.");
+      await fire(page, "assistant-error", {
+        requestId: firstRequestId,
+        code: "TIMEOUT",
+        message:
+          "The assistant did not finish within 45 seconds. Any partial answer is kept; please try again.",
+      });
+      expect(await page.locator("#aiRetryBtn").isVisible()).toBe(true);
+      expect(await page.locator("#aiRetryBtn").isDisabled()).toBe(false);
+
+      await page.click("#aiRetryBtn");
+      const timeoutRetry = (await emitsOf(page, "assistant-request")).at(-1)!
+        .payload as {
+        requestId: string;
+        prompt: string;
+        files: { html: string; css: string; js: string };
+        disclosureAcknowledged: boolean;
+      };
+      expect(timeoutRetry).toMatchObject({
+        prompt: "Explain the native sandbox.",
+        files: {
+          html: "<main>latest native HTML</main>",
+          css: "main { color: rebeccapurple; }",
+          js: "document.body.dataset.native = 'yes';",
+        },
+        disclosureAcknowledged: true,
+      });
+      expect(await page.locator("#aiRetryBtn").isHidden()).toBe(true);
+
+      await fire(page, "assistant-error", {
+        requestId: timeoutRetry.requestId,
+        code: "SERVICE_ERROR",
+        message: "The AI service is temporarily unavailable. Please try again.",
+      });
+      expect(await page.locator("#aiRetryBtn").isVisible()).toBe(true);
+      expect(await page.locator("#aiRetryBtn").isDisabled()).toBe(false);
+
+      await page.click("#aiRetryBtn");
+      const rateLimitedRequest = (await emitsOf(page, "assistant-request")).at(-1)!
+        .payload as { requestId: string };
+      await fire(page, "assistant-error", {
+        requestId: rateLimitedRequest.requestId,
+        code: "RATE_LIMITED",
+        retryAfterSeconds: 3,
+        message: "The AI service is rate limited right now.",
+      });
+      expect(await page.locator("#aiRetryBtn").isHidden()).toBe(true);
+      expect(await page.locator("#aiAskBtn").isDisabled()).toBe(true);
+      await page.click("#aiAskBtn", { force: true });
+      expect(await emitsOf(page, "assistant-request")).toHaveLength(3);
+
+      await page.clock.runFor(3_000);
+      expect(await page.locator("#aiAskBtn").isDisabled()).toBe(false);
+
+      const cooldownRequestId = await ask(page, "Try once more after the limit.");
+      await fire(page, "assistant-error", {
+        requestId: cooldownRequestId,
+        code: "COOLDOWN",
+        retryAfterSeconds: 2,
+        message: "Too soon after your last question.",
+      });
+      expect(await page.locator("#aiRetryBtn").isHidden()).toBe(true);
+      expect(await page.locator("#aiAskBtn").isDisabled()).toBe(true);
+    } finally {
+      await nativeContext.close();
+    }
+  }, 15_000);
 
   it("refuses to send empty prompts or files over the server limits", async () => {
     const page = await openSandbox();

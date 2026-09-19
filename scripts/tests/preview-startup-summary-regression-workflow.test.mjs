@@ -23,9 +23,11 @@ test("hosted preview startup summary regression checks the reviewed revision", (
   ]);
   assert.deepEqual(workflow.on.pull_request.paths, [
     ".github/workflows/preview-startup-summary-regression.yml",
+    ".github/workflows/preview-startup-real-platform.yml",
     ".replit",
     "artifacts/chat-app/package.json",
     "artifacts/chat-app/scripts/preview-startup-runtime-library-fixture.mjs",
+    "artifacts/chat-app/scripts/preview-startup-shared.mjs",
     "artifacts/chat-app/scripts/validate-preview-startup.mjs",
     "artifacts/chat-app/scripts/validate-preview-startup-runtime-diagnostic.test.mjs",
   ]);
@@ -59,7 +61,7 @@ test("hosted preview startup summary regression checks the reviewed revision", (
   );
   assert.match(
     verification,
-    /PREVIEW_STARTUP_TEST_FIXTURE=missing-runtime-library/,
+    /PREVIEW_STARTUP_TEST_FIXTURE=missing-runtime-library-long-path/,
   );
   assert.match(verification, /Expo preview startup output is healthy:/);
   assert.match(verification, /bounded missing-library diagnosis/);
@@ -68,6 +70,16 @@ test("hosted preview startup summary regression checks the reviewed revision", (
     verification,
     /contained output beyond the bounded diagnosis/,
   );
+  assert.match(verification, /malformed_preview_setting/);
+  assert.match(
+    verification,
+    /malformed preview-setting diagnosis/,
+  );
+  assert.match(
+    verification,
+    /malformed preview-setting summary contained private material/,
+  );
+  assert.match(verification, /base64 --decode/);
   assert.match(verification, /"\$GITHUB_STEP_SUMMARY"/);
   assert.doesNotMatch(workflowText, /\$\{\{\s*secrets\./);
   assert.doesNotMatch(workflowText, /EAS_TOKEN|CLERK_SECRET_KEY|DATABASE_URL/);

@@ -28,6 +28,12 @@ Native evidence checker output must be bracketed by GitHub's stop-commands guard
 
 **How to apply:** Around every direct workflow invocation of the checker, generate a cryptographically random unique stop token independently of run metadata, run the checker without a transforming pipeline, restore command parsing afterward, and exit with the captured checker status. Test both the log output and `GITHUB_STEP_SUMMARY`.
 
+Approval records do not establish artifact integrity by themselves; strict publishing must verify provenance-bound digests kept outside the mutable evidence bundle.
+
+**Why:** A changed screenshot or schema-valid Sentry record can pass completeness and semantic checks while still invalidating the human approval. A manifest stored beside the evidence could be changed along with it.
+
+**How to apply:** Keep the expected digest source at a trusted release boundary, compare every downloaded evidence file before submission, and report only fixed integrity categories rather than file contents.
+
 Artifact download outcomes are part of the evidence trust boundary. The final gate must pass each platform's download result into the checker so a failed or empty download is a fixed platform-specific blocking finding, its unavailable report is not linked, and a successfully downloaded platform keeps its own safe artifact link.
 
 **Why:** A missing directory alone does not distinguish an artifact download failure from an incomplete uploaded run, and carrying an unavailable link forward can mislead reviewers about which platform evidence they can inspect.

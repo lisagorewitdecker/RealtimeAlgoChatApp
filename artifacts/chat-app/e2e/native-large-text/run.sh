@@ -9,6 +9,7 @@ fi
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
 CHAT_APP_DIR="$ROOT_DIR/artifacts/chat-app"
+source "$ROOT_DIR/scripts/workflow-output-safety.sh"
 WRITE_REVIEW_RECORD_TEMPLATE="$CHAT_APP_DIR/e2e/native-large-text/write-review-record-template.sh"
 RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)"
 SMALLEST_IOS_DEVICE="iPhone SE (3rd generation)"
@@ -95,14 +96,16 @@ write_ios_readiness_summary() {
       echo "### Diagnostic-only run"
       echo "- NATIVE_SMOKE_ALLOW_LARGER_DEVICE=1 is set, so this run is local troubleshooting output and must not be used as release evidence."
       if [[ -n "$BOOTED_DEVICE" && "$BOOTED_DEVICE" != "$SMALLEST_IOS_DEVICE" ]]; then
-        echo "- The override accepted a larger simulator: ${BOOTED_DEVICE}."
+        echo "- The override accepted a larger simulator: $(sanitize_workflow_text "$BOOTED_DEVICE")."
       fi
       echo "- Unset NATIVE_SMOKE_ALLOW_LARGER_DEVICE and re-run on a booted ${SMALLEST_IOS_DEVICE} to produce release evidence."
     fi
     if ((${#IOS_READINESS_BLOCKERS[@]})); then
       echo
       echo "### Blocking prerequisites"
-      printf -- '- %s\n' "${IOS_READINESS_BLOCKERS[@]}"
+      for blocker in "${IOS_READINESS_BLOCKERS[@]}"; do
+        printf -- '- %s\n' "$(sanitize_workflow_text "$blocker")"
+      done
     fi
   } > "$RESULTS_DIR/ios-readiness.md"
 
@@ -185,20 +188,20 @@ if [[ "$PLATFORM" == "ios" ]]; then
     IOS_XCRUN_STATUS="READY"
     BOOTED_DEVICES="$(xcrun simctl list devices booted)"
     IOS_DEVICE_UDID="$(
-      sed -n "s/^[[:space:]]*${SMALLEST_IOS_DEVICE//\//\\/} (\([0-9A-F-]\{8,\}\)) (Booted)$/\1/p" <<<"$BOOTED_DEVICES" |
+      sed -n "s/^[[:space:]]*${SMALLEST_IOS_DEVICE//\//\\/} (\([0-9A-F-]\{8,\}\)) (Booted)[[:space:]]*$/\1/p" <<<"$BOOTED_DEVICES" |
         head -n 1
     )"
     if [[ -n "$IOS_DEVICE_UDID" ]]; then
       BOOTED_DEVICE="$SMALLEST_IOS_DEVICE"
     else
       BOOTED_DEVICE="$(
-        sed -n 's/^[[:space:]]*\(.*\) ([0-9A-F-]\{8,\}) (Booted)$/\1/p' <<<"$BOOTED_DEVICES" |
+        sed -n 's/^[[:space:]]*\(.*\) ([0-9A-F-]\{8,\}) (Booted)[[:space:]]*$/\1/p' <<<"$BOOTED_DEVICES" |
           head -n 1
       )"
     fi
     if [[ -z "$IOS_DEVICE_UDID" && "$RUN_MODE" == "diagnostic-only" ]]; then
       IOS_DEVICE_UDID="$(
-        sed -n 's/^[[:space:]]*.* (\([0-9A-F-]\{8,\}\)) (Booted)$/\1/p' <<<"$BOOTED_DEVICES" |
+        sed -n 's/^[[:space:]]*.* (\([0-9A-F-]\{8,\}\)) (Booted)[[:space:]]*$/\1/p' <<<"$BOOTED_DEVICES" |
           head -n 1
       )"
     fi
@@ -216,7 +219,7 @@ if [[ "$PLATFORM" == "ios" ]]; then
       IOS_SIMULATOR_STATUS="READY"
     elif [[ "$RUN_MODE" == "diagnostic-only" ]]; then
       IOS_SIMULATOR_STATUS="OVERRIDDEN"
-      IOS_SIMULATOR_DETAIL=" (diagnostic-only override accepted ${BOOTED_DEVICE})"
+      IOS_SIMULATOR_DETAIL=" (diagnostic-only override accepted $(sanitize_workflow_text "$BOOTED_DEVICE"))"
       echo "DIAGNOSTIC-ONLY RUN: the override accepted a larger simulator (${BOOTED_DEVICE}); release evidence requires a booted ${SMALLEST_IOS_DEVICE}." >&2
     else
       echo "Expected a booted iPhone SE simulator, found: $BOOTED_DEVICE" >&2

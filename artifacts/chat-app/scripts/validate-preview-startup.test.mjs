@@ -15,13 +15,20 @@ import { join } from "node:path";
 import test from "node:test";
 
 import {
+  classifyDevServerSignIn,
   createHandoffPreflightRecord,
+  formatDevServerSignIn,
   formatHandoffPreflight,
+  formatStartupFailureSummary,
   getPublicPreviewManifestUrl,
+  MAX_PREVIEW_TIMEOUT_MS,
+  manifestHasSignedInDeveloper,
+  parsePreviewTimeouts,
   parsePreviewTimeout,
   requestLocalHandoffProbe,
   requestPublicPreviewManifest,
   readAndValidateHandoffPreflight,
+  validatePreviewOutput,
   validateHandoffPreflightRecord,
   writeHandoffPreflight,
 } from "./validate-preview-startup.mjs";
@@ -33,8 +40,54 @@ const validatorPath = join(
   import.meta.dirname,
   "validate-preview-startup.mjs",
 );
+const packageRoot = join(import.meta.dirname, "..");
+
+test("CI summaries identify a failed public-manifest handoff without raw details", () => {
+  const summary = formatStartupFailureSummary(
+    new Error(
+      "Public Expo preview manifest check failed: public manifest HTTP 502 " +
+        "(128 bytes). https://private.example.test/expo?token=private-secret " +
+        "child process output: private-child-output",
+    ),
+  );
+
+  assert.match(summary, /^### Expo preview startup/m);
+  assert.match(summary, /\*\*Status:\*\* FAIL/);
+  assert.match(summary, /\*\*Failed phase:\*\* public manifest/);
+  assert.doesNotMatch(summary, /\*\*Diagnosis:\*\*/);
+  assert.doesNotMatch(
+    summary,
+    /502|128 bytes|https?:\/\/|private-secret|private-child-output/i,
+  );
+  assert.ok(summary.length <= 700, "summary exceeded its bounded size");
+});
+
+test("CI summaries identify a failed local handoff without raw details", () => {
+  const summary = formatStartupFailureSummary(
+    new Error(
+      "Local Expo Go manifest/bundle probe failed: manifest HTTP 200 " +
+        "(64 bytes); bundle request did not complete; " +
+        "http://127.0.0.1:4321/_expo/static/js/bundle?token=private-secret " +
+        "child process output: private-child-output",
+    ),
+  );
+
+  assert.match(summary, /\*\*Status:\*\* FAIL/);
+  assert.match(summary, /\*\*Failed phase:\*\* local handoff/);
+  assert.doesNotMatch(summary, /\*\*Diagnosis:\*\*/);
+  assert.doesNotMatch(
+    summary,
+    /200|64 bytes|https?:\/\/|private-secret|private-child-output/i,
+  );
+  assert.ok(summary.length <= 700, "summary exceeded its bounded size");
+});
 
 test("uses defaults only when preview timeout environment values are absent", () => {
+  assert.deepEqual(parsePreviewTimeouts({}), {
+    timeoutMs: 30_000,
+    handoffTimeoutMs: 60_000,
+    publicPreviewTimeoutMs: 15_000,
+  });
   assert.equal(
     parsePreviewTimeout("PREVIEW_STARTUP_TIMEOUT_MS", undefined, 30_000),
     30_000,
@@ -59,6 +112,32 @@ test("accepts positive finite preview timeout values", () => {
   }
 });
 
+test("rejects preview timeout values above the safe limit without echoing them", () => {
+  const oversizedValue = "999999999999999999999";
+
+  for (const name of [
+    "PREVIEW_STARTUP_TIMEOUT_MS",
+    "PREVIEW_HANDOFF_TIMEOUT_MS",
+    "PREVIEW_PUBLIC_TIMEOUT_MS",
+  ]) {
+    assert.equal(
+      parsePreviewTimeout(name, String(MAX_PREVIEW_TIMEOUT_MS), 999),
+      MAX_PREVIEW_TIMEOUT_MS,
+    );
+    assert.throws(
+      () => parsePreviewTimeout(name, oversizedValue, 999),
+      (error) => {
+        assert.equal(
+          error.message,
+          `${name} must be between 1 and ${MAX_PREVIEW_TIMEOUT_MS} milliseconds.`,
+        );
+        assert.doesNotMatch(error.message, new RegExp(oversizedValue));
+        return true;
+      },
+    );
+  }
+});
+
 test("rejects malformed and non-positive preview timeout values", () => {
   for (const name of [
     "PREVIEW_STARTUP_TIMEOUT_MS",
@@ -80,6 +159,100 @@ test("rejects malformed and non-positive preview timeout values", () => {
   }
 });
 
+test("keeps the missing library when a DevTools wrapper precedes the loader line", () => {
+  const output = [
+    "\u001b[31mReact Native DevTools launcher exited with code 1\u001b[0m",
+    "\u001b[31mError while loading shared libraries: libgtk-3.so.0: cannot open shared object file\u0007\u001b[0m",
+  ].join("\n");
+
+  assert.throws(
+    () => validatePreviewOutput(output),
+    (error) => {
+      assert.match(
+        error.message,
+        /Expo preview startup error: .*libgtk-3\.so\.0/,
+      );
+      assert.doesNotMatch(error.message, /[\u0000-\u001f\u007f]/);
+      assert.ok(
+        error.message.length <= 512,
+        "startup diagnostic exceeded its bounded length",
+      );
+      return true;
+    },
+  );
+});
+
+test("validates captured startup logs with a bounded, sanitized library diagnostic", () => {
+  const longLibraryPath =
+    `/opt/${"nested-directory/".repeat(30)}libgtk-3.so.0`;
+  const capturedOutput = [
+    "\u001b[31mReact Native DevTools launcher failed to start\u001b[0m",
+    `\u001b[31mError while loading shared libraries: ${longLibraryPath}: cannot open shared object file\u0007\u001b[0m`,
+    "unrelated captured output ".repeat(200),
+  ].join("\n");
+  const validation = runCapturedPreviewValidation(capturedOutput);
+
+  try {
+    assert.equal(validation.result.status, 1, validation.output);
+    const diagnostic = startupDiagnostic(validation.output);
+    assert.ok(diagnostic, "captured-log validation omitted its diagnostic");
+    assert.match(diagnostic, /missing runtime library: .*libgtk-3\.so\.0/);
+    assert.ok(
+      diagnostic.length <= 512,
+      "captured startup diagnostic exceeded its bounded length",
+    );
+    assert.doesNotMatch(diagnostic, /[\u0000-\u001f\u007f]/);
+    assert.doesNotMatch(diagnostic, /unrelated captured output/);
+  } finally {
+    rmSync(validation.directory, { recursive: true, force: true });
+  }
+});
+
+test("reports a DevTools failure without inventing a missing library", () => {
+  const output =
+    "\u001b[31mReact Native DevTools launcher failed to start: " +
+    `${"diagnostic detail ".repeat(100)}\u001b[0m`;
+
+  assert.throws(
+    () => validatePreviewOutput(output),
+    (error) => {
+      assert.match(error.message, /Expo preview startup error: .*DevTools/);
+      assert.doesNotMatch(error.message, /missing runtime library/i);
+      assert.doesNotMatch(error.message, /[\u0000-\u001f\u007f]/);
+      assert.ok(
+        error.message.length <= 512,
+        "startup diagnostic exceeded its bounded length",
+      );
+      return true;
+    },
+  );
+});
+
+test(
+  "workflow entry points reject malformed and non-positive preview timeouts before live work",
+  { skip: process.env.PREVIEW_TIMEOUT_ENTRYPOINT_TEST === "1" },
+  () => {
+    for (const entryPoint of [
+      "validate:preview-startup",
+      "test:preview-live-timeout",
+    ]) {
+      for (const setting of [
+        "PREVIEW_STARTUP_TIMEOUT_MS",
+        "PREVIEW_HANDOFF_TIMEOUT_MS",
+        "PREVIEW_PUBLIC_TIMEOUT_MS",
+      ]) {
+        for (const value of ["not-a-number", "0", "-1"]) {
+          runPreviewTimeoutEntryPoint(entryPoint, setting, value);
+        }
+      }
+    }
+  },
+);
+
+// Never a real value: the tests only prove it stays out of every message.
+const SESSION_SECRET_SENTINEL = "sentinel-expo-session-secret-value";
+const SIGNED_IN_ACCOUNT = "replit-private-test-account";
+
 function mockFetch(response) {
   const originalFetch = globalThis.fetch;
   let request;
@@ -98,7 +271,117 @@ function mockFetch(response) {
   };
 }
 
-function runLiveMetroTimeoutFixture(fixtureName, expectedResource) {
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function startupDiagnostic(output) {
+  return output
+    .split(/\r?\n/)
+    .find((line) => line.startsWith("Expo preview startup error:"));
+}
+
+function runCapturedPreviewValidation(capturedOutput) {
+  const directory = mkdtempSync(join(tmpdir(), "preview-startup-diagnostic-"));
+  const logPath = join(directory, "expo-startup.log");
+  writeFileSync(logPath, capturedOutput, "utf8");
+
+  const result = spawnSync(
+    process.execPath,
+    [validatorPath, "--log-file", logPath],
+    {
+      cwd: packageRoot,
+      env: { ...process.env },
+      encoding: "utf8",
+    },
+  );
+
+  return {
+    directory,
+    output: `${result.stdout ?? ""}${result.stderr ?? ""}`,
+    result,
+  };
+}
+
+function runPreviewTimeoutEntryPoint(entryPoint, setting, value) {
+  const directory = mkdtempSync(join(tmpdir(), "preview-timeout-entrypoint-"));
+  const metroMarkerPath = join(directory, "metro-started.marker");
+  const requestMarkerPath = join(directory, "public-request.marker");
+  const preloadPath = join(directory, "reject-public-request.mjs");
+
+  writeFileSync(
+    preloadPath,
+    `import { appendFileSync } from "node:fs";
+const markerPath = ${JSON.stringify(requestMarkerPath)};
+const originalFetch = globalThis.fetch;
+globalThis.fetch = async (url, options) => {
+  if (String(url).startsWith("https://preview-timeout-entrypoint.test/")) {
+    appendFileSync(markerPath, "public request attempted\\n");
+  }
+  return originalFetch(url, options);
+};
+`,
+    "utf8",
+  );
+
+  try {
+    const result = spawnSync(
+      "pnpm",
+      ["run", entryPoint],
+      {
+        cwd: packageRoot,
+        env: {
+          ...process.env,
+          NODE_OPTIONS: [
+            process.env.NODE_OPTIONS,
+            `--import ${preloadPath}`,
+          ]
+            .filter(Boolean)
+            .join(" "),
+          PREVIEW_TIMEOUT_ENTRYPOINT_TEST: "1",
+          PREVIEW_PUBLIC_URL:
+            "https://preview-timeout-entrypoint.test/expo",
+          PREVIEW_STARTUP_TEST_FIXTURE: "handoff-server",
+          PREVIEW_STARTUP_LIVE_START_MARKER: metroMarkerPath,
+          [setting]: value,
+        },
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+        timeout: 15_000,
+      },
+    );
+    const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
+    const expectedMessage =
+      `${setting} must be a positive finite number of milliseconds.`;
+
+    assert.notEqual(
+      result.error?.code,
+      "ETIMEDOUT",
+      `${entryPoint} did not reject ${setting}=${value} promptly`,
+    );
+    assert.notEqual(result.status, 0, output);
+    assert.match(output, new RegExp(escapeRegExp(expectedMessage)));
+    assert.equal(
+      existsSync(metroMarkerPath),
+      false,
+      `${entryPoint} started Metro before rejecting ${setting}=${value}`,
+    );
+    assert.equal(
+      existsSync(requestMarkerPath),
+      false,
+      `${entryPoint} made a public request before rejecting ${setting}=${value}`,
+    );
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+}
+
+function runLiveMetroTimeoutFixture(
+  fixtureName,
+  expectedResource,
+  platform = "android",
+  handoffTimeoutMs = 250,
+) {
   const directory = mkdtempSync(join(tmpdir(), "preview-live-timeout-"));
   const preloadPath = join(directory, "mock-public-preview.mjs");
   writeFileSync(
@@ -123,24 +406,29 @@ globalThis.fetch = async (url, options = {}) => {
 
   try {
     const startedAt = Date.now();
-    const result = spawnSync(process.execPath, [validatorPath], {
-      env: {
-        ...process.env,
-        NODE_OPTIONS: [
-          process.env.NODE_OPTIONS,
-          `--import ${preloadPath}`,
-        ]
-          .filter(Boolean)
-          .join(" "),
-        PREVIEW_PUBLIC_URL: "https://public-preview.test/expo",
-        PREVIEW_PUBLIC_TIMEOUT_MS: "100",
-        PREVIEW_HANDOFF_TIMEOUT_MS: "40",
-        PREVIEW_STARTUP_TIMEOUT_MS: "1000",
-        PREVIEW_STARTUP_TEST_FIXTURE: fixtureName,
+    const result = spawnSync(
+      process.execPath,
+      [validatorPath, "--platform", platform],
+      {
+        env: {
+          ...process.env,
+          NODE_OPTIONS: [
+            process.env.NODE_OPTIONS,
+            `--import ${preloadPath}`,
+          ]
+            .filter(Boolean)
+            .join(" "),
+          PREVIEW_PUBLIC_URL: "https://public-preview.test/expo",
+          PREVIEW_PUBLIC_TIMEOUT_MS: "100",
+          PREVIEW_HANDOFF_TIMEOUT_MS: String(handoffTimeoutMs),
+          PREVIEW_STARTUP_TIMEOUT_MS: "1000",
+          PREVIEW_STARTUP_TEST_FIXTURE: fixtureName,
+          PREVIEW_STARTUP_EXPECTED_EXPO_PLATFORM: platform,
+        },
+        stdio: ["ignore", "pipe", "pipe"],
+        timeout: 4_000,
       },
-      stdio: ["ignore", "pipe", "pipe"],
-      timeout: 4_000,
-    });
+    );
     const output =
       result.stdout.toString() + result.stderr.toString();
 
@@ -157,8 +445,16 @@ globalThis.fetch = async (url, options = {}) => {
     assert.match(output, /public_manifest_reachability=PASS/);
     assert.match(output, /local_handoff_probe=FAIL/);
     assert.match(output, expectedResource);
-    assert.match(output, /40ms configured local handoff deadline/);
-    assert.match(output, /request aborted by deadline/);
+    assert.match(
+      output,
+      new RegExp(`${handoffTimeoutMs}ms configured local handoff deadline`),
+    );
+    if (platform === "android") {
+      assert.match(
+        output,
+        /response headers received but body did not complete/,
+      );
+    }
     assert.match(
       output,
       /Restart or repair the managed Chat App\/Expo workflow/,
@@ -169,69 +465,69 @@ globalThis.fetch = async (url, options = {}) => {
 }
 
 function runMalformedPreviewConfigurationCli(setting, value) {
-  const directory = mkdtempSync(join(tmpdir(), "preview-malformed-config-cli-"));
-  const markerPath = join(directory, "unexpected-public-request.marker");
-  const preloadPath = join(directory, "reject-public-request.mjs");
+  const environment = {
+    ...process.env,
+    PREVIEW_PUBLIC_TIMEOUT_MS: "1000",
+    PREVIEW_HANDOFF_TIMEOUT_MS: "1000",
+    PREVIEW_STARTUP_TIMEOUT_MS: "1000",
+  };
+  delete environment.PREVIEW_PUBLIC_URL;
+  delete environment.REPLIT_EXPO_DEV_DOMAIN;
+  environment[setting] = value;
 
-  writeFileSync(
-    preloadPath,
-    `import { appendFileSync } from "node:fs";
-const markerPath = ${JSON.stringify(markerPath)};
-globalThis.fetch = async () => {
-  appendFileSync(markerPath, "public request attempted\\n");
-  throw new Error("public request should not be attempted");
-};
-`,
-    "utf8",
-  );
-
-  try {
-    const environment = {
-      ...process.env,
-      NODE_OPTIONS: [
-        process.env.NODE_OPTIONS,
-        `--import ${preloadPath}`,
-      ]
-        .filter(Boolean)
-        .join(" "),
-      PREVIEW_PUBLIC_TIMEOUT_MS: "1000",
-      PREVIEW_HANDOFF_TIMEOUT_MS: "1000",
-      PREVIEW_STARTUP_TIMEOUT_MS: "1000",
-      PREVIEW_STARTUP_TEST_FIXTURE: "handoff-server",
-    };
-    delete environment.PREVIEW_PUBLIC_URL;
-    delete environment.REPLIT_EXPO_DEV_DOMAIN;
-    environment[setting] = value;
-
-    const result = spawnSync(process.execPath, [validatorPath], {
+  const result = spawnSync(
+    process.execPath,
+    [validatorPath, "--validate-configuration"],
+    {
       env: environment,
       stdio: ["ignore", "pipe", "pipe"],
-      timeout: 5_000,
-    });
-    const output =
-      result.stdout.toString() + result.stderr.toString();
+      timeout: 1_000,
+    },
+  );
+  const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
 
-    assert.notEqual(
-      result.error?.code,
-      "ETIMEDOUT",
-      `${setting} left the preview validation command running indefinitely`,
-    );
-    assert.notEqual(result.status, 0, output);
-    assert.match(
-      output,
-      new RegExp(
-        `Public Expo preview manifest URL configuration from ${setting} is invalid`,
-      ),
-    );
-    assert.match(output, new RegExp(`\\b${setting}\\b`));
-    assert.equal(
-      existsSync(markerPath),
-      false,
-      `${setting} attempted a public request before reporting its malformed configuration`,
-    );
-  } finally {
-    rmSync(directory, { recursive: true, force: true });
-  }
+  assert.notEqual(
+    result.error?.code,
+    "ETIMEDOUT",
+    `${setting} left configuration validation running indefinitely`,
+  );
+  assert.notEqual(result.status, 0, output);
+  assert.match(
+    output,
+    new RegExp(
+      `Public Expo preview manifest URL configuration from ${setting} is invalid`,
+    ),
+  );
+  assert.match(output, new RegExp(`\\b${setting}\\b`));
+}
+
+function runEmptyPreviewConfigurationCli() {
+  const result = spawnSync(
+    process.execPath,
+    [validatorPath, "--validate-configuration"],
+    {
+      env: {
+        ...process.env,
+        PREVIEW_PUBLIC_URL: "",
+        REPLIT_EXPO_DEV_DOMAIN: "preview.example.test/expo",
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+      timeout: 1_000,
+    },
+  );
+  const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
+
+  assert.notEqual(
+    result.error?.code,
+    "ETIMEDOUT",
+    "an empty PREVIEW_PUBLIC_URL left configuration validation running indefinitely",
+  );
+  assert.notEqual(result.status, 0, output);
+  assert.match(
+    output,
+    /Public Expo preview manifest URL is not configured.*REPLIT_EXPO_DEV_DOMAIN or PREVIEW_PUBLIC_URL/,
+  );
+  assert.match(output, /\bPREVIEW_PUBLIC_URL\b/);
 }
 
 test("accepts a public HTTP 200 manifest and sends the Android Expo header", async () => {
@@ -280,31 +576,70 @@ test("accepts a public HTTP 200 manifest and sends the iOS Expo header", async (
   );
 
   try {
-    await requestPublicPreviewManifest(1_000, previewEnvironment, "ios");
+    const result = await requestPublicPreviewManifest(
+      1_000,
+      previewEnvironment,
+      "ios",
+    );
 
     assert.equal(fetchMock.request.options.headers["expo-platform"], "ios");
+    assert.equal(result.signedInDeveloper, false);
   } finally {
     fetchMock.restore();
   }
 });
 
-test("local iOS handoff probe requests both manifest and bundle with the iOS header", async () => {
+test("public manifest probe reports a signed-in dev server without echoing the account", async () => {
+  const fetchMock = mockFetch(
+    new Response(
+      JSON.stringify({
+        extra: {
+          scopeKey: "@anonymous/chat-app-00000000-0000-0000-0000-000000000000",
+          expoGo: { username: SIGNED_IN_ACCOUNT },
+        },
+        launchAsset: {
+          url: "https://preview.example.test/_expo/static/js/bundle",
+        },
+      }),
+      { status: 200 },
+    ),
+  );
+
+  try {
+    const result = await requestPublicPreviewManifest(
+      1_000,
+      previewEnvironment,
+      "ios",
+    );
+
+    assert.equal(result.signedInDeveloper, true);
+    assert.doesNotMatch(JSON.stringify(result), new RegExp(SIGNED_IN_ACCOUNT));
+  } finally {
+    fetchMock.restore();
+  }
+});
+
+async function withLocalManifestServer(manifest, run, options = {}) {
   const observedPlatforms = [];
+  const observedRequests = [];
   const server = createServer((request, response) => {
     observedPlatforms.push(request.headers["expo-platform"]);
-    response.setHeader("content-type", "application/json");
+    observedRequests.push({
+      path: request.url,
+      platform: request.headers["expo-platform"],
+    });
     if (request.url === "/") {
+      response.statusCode = options.manifestStatus ?? 200;
+      response.setHeader("content-type", "application/json");
       response.end(
-        JSON.stringify({
-          launchAsset: {
-            url: "https://preview.example.test/_expo/static/js/ios-bundle",
-          },
-        }),
+        options.manifestBody ??
+          (manifest === undefined ? "" : JSON.stringify(manifest)),
       );
       return;
     }
+    response.statusCode = options.bundleStatus ?? 200;
     response.setHeader("content-type", "application/javascript");
-    response.end("console.log('ios');");
+    response.end(options.bundleBody ?? "console.log('ios');");
   });
 
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -312,14 +647,273 @@ test("local iOS handoff probe requests both manifest and bundle with the iOS hea
   assert.notEqual(typeof address, "string");
 
   try {
-    const result = await requestLocalHandoffProbe(address.port, 1_000, "ios");
-    assert.match(result.manifest, /^manifest HTTP 200/);
-    assert.match(result.bundle, /^bundle HTTP 200/);
-    assert.deepEqual(observedPlatforms, ["ios", "ios"]);
+    return await run(address.port, observedPlatforms, observedRequests);
   } finally {
     await new Promise((resolve, reject) =>
       server.close((error) => (error ? reject(error) : resolve())),
     );
+  }
+}
+
+test("local iOS handoff probe requests the manifest launch asset path", async () => {
+  await withLocalManifestServer(
+    {
+      launchAsset: {
+        url: "https://preview.example.test/_expo/static/js/ios-bundle",
+      },
+    },
+    async (port, observedPlatforms, observedRequests) => {
+      const result = await requestLocalHandoffProbe(port, 1_000, "ios");
+      assert.match(result.manifest, /^manifest HTTP 200/);
+      assert.match(result.bundle, /^bundle HTTP 200/);
+      assert.deepEqual(observedPlatforms, ["ios", "ios"]);
+      assert.deepEqual(
+        observedRequests.map(({ path }) => path),
+        ["/", "/_expo/static/js/ios-bundle"],
+      );
+      assert.equal(result.signedInDeveloper, false);
+    },
+  );
+});
+
+test("local handoff probe keeps missing launch assets in the Expo Go handoff failure", async () => {
+  await withLocalManifestServer({}, async (port, _observedPlatforms, observedRequests) => {
+    await assert.rejects(
+      requestLocalHandoffProbe(port, 50, "ios"),
+      (error) => {
+        assert.match(
+          error.message,
+          /Local Expo Go manifest\/bundle probe failed:/,
+        );
+        assert.match(error.message, /manifest HTTP 200/);
+        assert.match(error.message, /bundle request did not complete/);
+        assert.match(error.message, /manifest did not provide a launch asset URL/);
+        assert.match(
+          error.message,
+          /Restart or repair the managed Chat App\/Expo workflow/,
+        );
+        assert.doesNotMatch(error.message, /Expo preview startup error:/);
+        return true;
+      },
+    );
+    assert.ok(observedRequests.length > 0);
+    assert.ok(observedRequests.every(({ path }) => path === "/"));
+  });
+});
+
+test("local handoff probe keeps invalid manifest JSON in the Expo Go handoff failure", async () => {
+  await withLocalManifestServer(
+    undefined,
+    async (port, _observedPlatforms, observedRequests) => {
+      await assert.rejects(
+        requestLocalHandoffProbe(port, 50, "ios"),
+        (error) => {
+          assert.match(
+            error.message,
+            /Local Expo Go manifest\/bundle probe failed:/,
+          );
+          assert.match(error.message, /manifest HTTP 200/);
+          assert.match(error.message, /manifest returned invalid JSON/);
+          assert.match(error.message, /bundle request did not complete/);
+          assert.match(
+            error.message,
+            /Restart or repair the managed Chat App\/Expo workflow/,
+          );
+          assert.doesNotMatch(error.message, /Expo preview startup error:/);
+          return true;
+        },
+      );
+      assert.ok(observedRequests.length > 0);
+      assert.ok(observedRequests.every(({ path }) => path === "/"));
+    },
+    { manifestBody: '{"launchAsset":' },
+  );
+});
+
+test("local handoff probe keeps a non-2xx bundle response in the Expo Go handoff failure", async () => {
+  await withLocalManifestServer(
+    {
+      launchAsset: {
+        url: "https://preview.example.test/_expo/static/js/ios-bundle",
+      },
+    },
+    async (port, _observedPlatforms, observedRequests) => {
+      await assert.rejects(
+        requestLocalHandoffProbe(port, 50, "ios"),
+        (error) => {
+          assert.match(
+            error.message,
+            /Local Expo Go manifest\/bundle probe failed:/,
+          );
+          assert.match(error.message, /manifest HTTP 200/);
+          assert.match(error.message, /bundle HTTP 503/);
+          assert.match(
+            error.message,
+            /Restart or repair the managed Chat App\/Expo workflow/,
+          );
+          assert.doesNotMatch(error.message, /Expo preview startup error:/);
+          return true;
+        },
+      );
+      const paths = observedRequests.map(({ path }) => path);
+      assert.ok(paths.length >= 2);
+      for (let index = 0; index < paths.length; index += 2) {
+        assert.equal(paths[index], "/");
+        assert.equal(paths[index + 1], "/_expo/static/js/ios-bundle");
+      }
+    },
+    { bundleStatus: 503, bundleBody: "bundle unavailable" },
+  );
+});
+
+test("local handoff probe detects the signed-in account field without echoing it", async () => {
+  await withLocalManifestServer(
+    {
+      extra: { expoGo: { username: SIGNED_IN_ACCOUNT } },
+      launchAsset: {
+        url: "https://preview.example.test/_expo/static/js/ios-bundle",
+      },
+    },
+    async (port) => {
+      const result = await requestLocalHandoffProbe(port, 1_000, "ios");
+      assert.equal(result.signedInDeveloper, true);
+      assert.doesNotMatch(
+        JSON.stringify(result),
+        new RegExp(SIGNED_IN_ACCOUNT),
+      );
+    },
+  );
+});
+
+test("manifest sign-in detection keys on the Expo Go username field only", () => {
+  assert.equal(
+    manifestHasSignedInDeveloper({
+      extra: { expoGo: { username: SIGNED_IN_ACCOUNT } },
+    }),
+    true,
+  );
+  // Expo CLI omits the field for anonymous servers; the scope key stays
+  // anonymous without an EAS project even when the CLI is signed in.
+  assert.equal(
+    manifestHasSignedInDeveloper({
+      extra: {
+        scopeKey: "@anonymous/chat-app-00000000-0000-0000-0000-000000000000",
+        expoGo: { developer: { tool: "expo-cli" } },
+      },
+    }),
+    false,
+  );
+  assert.equal(
+    manifestHasSignedInDeveloper({ extra: { expoGo: { username: "" } } }),
+    false,
+  );
+  assert.equal(
+    manifestHasSignedInDeveloper({
+      extra: { expoGo: { username: "anonymous" } },
+    }),
+    false,
+  );
+  assert.equal(manifestHasSignedInDeveloper(null), false);
+  assert.equal(manifestHasSignedInDeveloper({}), false);
+});
+
+test("dev server sign-in passes when both served manifests carry a signed-in account", () => {
+  for (const environment of [
+    { REPLIT_EXPO_SESSION_SECRET: SESSION_SECRET_SENTINEL },
+    {},
+  ]) {
+    const signIn = classifyDevServerSignIn(
+      { localSignedIn: true, publicSignedIn: true },
+      environment,
+    );
+    assert.equal(signIn.status, "SIGNED_IN");
+    assert.equal(signIn.severity, "pass");
+    assert.equal(
+      formatDevServerSignIn(signIn),
+      "dev_server_sign_in=SIGNED_IN; evidence=public and local Expo Go manifests both carry a signed-in Expo account (extra.expoGo.username present)",
+    );
+  }
+});
+
+test("dev server sign-in fails when the session secret is set but a manifest is anonymous", () => {
+  const environment = { REPLIT_EXPO_SESSION_SECRET: SESSION_SECRET_SENTINEL };
+
+  const localOnly = classifyDevServerSignIn(
+    { localSignedIn: false, publicSignedIn: true },
+    environment,
+  );
+  assert.equal(localOnly.status, "ANONYMOUS");
+  assert.equal(localOnly.severity, "fail");
+  assert.match(
+    localOnly.evidence,
+    /^REPLIT_EXPO_SESSION_SECRET is set but the local Expo Go manifest is anonymous \(no extra\.expoGo\.username\)\./,
+  );
+  assert.match(localOnly.evidence, /create-launch login step is missing or failed/);
+  assert.match(localOnly.evidence, /"Logged in as"/);
+  assert.match(localOnly.evidence, /restart the managed Chat App\/Expo workflow/);
+
+  const publicOnly = classifyDevServerSignIn(
+    { localSignedIn: true, publicSignedIn: false },
+    environment,
+  );
+  assert.equal(publicOnly.severity, "fail");
+  assert.match(publicOnly.evidence, /the public Expo Go manifest is anonymous/);
+
+  const both = classifyDevServerSignIn(
+    { localSignedIn: false, publicSignedIn: false },
+    environment,
+  );
+  assert.equal(both.severity, "fail");
+  assert.match(
+    both.evidence,
+    /the public and local Expo Go manifest is anonymous/,
+  );
+
+  // A probe that never reported sign-in state must not pass the gate.
+  const missing = classifyDevServerSignIn({}, environment);
+  assert.equal(missing.severity, "fail");
+  assert.match(
+    missing.evidence,
+    /the public and local Expo Go manifest is anonymous/,
+  );
+
+  for (const signIn of [localOnly, publicOnly, both, missing]) {
+    const line = formatDevServerSignIn(signIn);
+    assert.match(line, /^dev_server_sign_in=ANONYMOUS; evidence=/);
+    assert.doesNotMatch(line, new RegExp(SESSION_SECRET_SENTINEL));
+  }
+});
+
+test("dev server sign-in only warns when no session secret is configured", () => {
+  for (const environment of [{}, { REPLIT_EXPO_SESSION_SECRET: "" }]) {
+    const signIn = classifyDevServerSignIn(
+      { localSignedIn: false, publicSignedIn: false },
+      environment,
+    );
+    assert.equal(signIn.status, "ANONYMOUS");
+    assert.equal(signIn.severity, "warn");
+    assert.match(
+      signIn.evidence,
+      /^REPLIT_EXPO_SESSION_SECRET is unset, so the public and local Expo Go manifest is anonymous/,
+    );
+    assert.match(signIn.evidence, /iOS Expo Go 57 cannot load the app/);
+  }
+});
+
+test("dev server sign-in output never contains the session secret", () => {
+  const environment = { REPLIT_EXPO_SESSION_SECRET: SESSION_SECRET_SENTINEL };
+  const combinations = [
+    { localSignedIn: true, publicSignedIn: true },
+    { localSignedIn: false, publicSignedIn: true },
+    { localSignedIn: true, publicSignedIn: false },
+    { localSignedIn: false, publicSignedIn: false },
+  ];
+
+  for (const combination of combinations) {
+    const signIn = classifyDevServerSignIn(combination, environment);
+    const serialized = `${formatDevServerSignIn(signIn)} ${JSON.stringify(signIn)}`;
+    assert.doesNotMatch(serialized, new RegExp(SESSION_SECRET_SENTINEL));
+    assert.doesNotMatch(serialized, /sessionSecret/);
   }
 });
 
@@ -508,7 +1102,26 @@ globalThis.fetch = async (url, options = {}) => {
         record.boundaries.serverNativeRequestEvidence.status,
         "NOT_ASSESSED",
       );
+      assert.equal(
+        record.boundaries.publicManifestReachability.evidence,
+        "Public manifest probe failed — no successful probe result was recorded",
+      );
+      assert.equal(
+        record.boundaries.localHandoffProbe.evidence,
+        "Local manifest/bundle probe not run — no successful probe result was recorded",
+      );
+      assert.equal(
+        record.boundaries.expoGoLaunch.evidence,
+        "Requires a physical Android phone running stock Expo Go.",
+      );
+      assert.equal(
+        record.boundaries.serverNativeRequestEvidence.evidence,
+        "Requires filtered Metro or API evidence from that physical Expo Go session.",
+      );
       assert.match(output, /public_manifest_reachability=FAIL/);
+      assert.match(output, /local_handoff_probe=NOT_RUN/);
+      assert.match(output, /expo_go_launch=NOT_ASSESSED/);
+      assert.match(output, /server_native_request_evidence=NOT_ASSESSED/);
       assert.match(
         output,
         /Restart or repair the managed Chat App\/Expo workflow/,
@@ -516,6 +1129,102 @@ globalThis.fetch = async (url, options = {}) => {
       assert.doesNotMatch(
         output,
         /public-preview\.test|private-path|private-secret|token=/i,
+      );
+      assert.doesNotMatch(
+        JSON.stringify(record),
+        /public-preview\.test|private-path|private-secret|token=/i,
+      );
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
+  "CLI keeps a failed public boundary and record-save recovery clear when output is unwritable",
+  { timeout: 5_000 },
+  () => {
+    const directory = mkdtempSync(
+      join(tmpdir(), "preview-handoff-unwritable-record-cli-"),
+    );
+    const stdoutPath = join(directory, "validator.stdout.log");
+    const stderrPath = join(directory, "validator.stderr.log");
+    const preloadPath = join(directory, "stall-public-fetch.mjs");
+    writeFileSync(
+      preloadPath,
+      `globalThis.fetch = async (url, options = {}) => {
+  if (String(url).startsWith("https://public-preview.test/")) {
+    await new Promise((resolve, reject) => {
+      const signal = options.signal;
+      if (!signal) {
+        reject(new Error("test fetch requires an abort signal"));
+        return;
+      }
+      signal.addEventListener(
+        "abort",
+        () => reject(new Error("response body contains private-secret")),
+        { once: true },
+      );
+    });
+  }
+  throw new Error("unexpected request URL https://private.example.test/path");
+};
+`,
+      "utf8",
+    );
+
+    try {
+      const stdout = openSync(stdoutPath, "w");
+      const stderr = openSync(stderrPath, "w");
+      let result;
+      try {
+        result = spawnSync(
+          process.execPath,
+          [
+            validatorPath,
+            "--platform",
+            "android",
+            "--record-output",
+            "/dev/null/unwritable-preview-handoff.json",
+          ],
+          {
+            env: {
+              ...process.env,
+              NODE_OPTIONS: [
+                process.env.NODE_OPTIONS,
+                `--import ${preloadPath}`,
+              ]
+                .filter(Boolean)
+                .join(" "),
+              PREVIEW_PUBLIC_URL:
+                "https://public-preview.test/private-path?token=private-secret",
+              PREVIEW_PUBLIC_TIMEOUT_MS: "25",
+              PREVIEW_STARTUP_TIMEOUT_MS: "2000",
+              PREVIEW_STARTUP_TEST_FIXTURE: "handoff-server",
+            },
+            stdio: ["ignore", stdout, stderr],
+          },
+        );
+      } finally {
+        closeSync(stdout);
+        closeSync(stderr);
+      }
+      const output =
+        readFileSync(stdoutPath, "utf8") + readFileSync(stderrPath, "utf8");
+
+      assert.notEqual(result.status, 0, output);
+      assert.match(output, /public_manifest_reachability=FAIL/);
+      assert.match(
+        output,
+        /Preview handoff preflight failed at the public manifest probe/,
+      );
+      assert.match(
+        output,
+        /Recovery: rerun with --record-output set to a writable JSON file, or omit --record-output/,
+      );
+      assert.doesNotMatch(
+        output,
+        /\/dev\/null|public-preview\.test|private-path|private-secret|token=|private\.example\.test|response body contains private-secret/i,
       );
     } finally {
       rmSync(directory, { recursive: true, force: true });
@@ -650,6 +1359,150 @@ globalThis.fetch = async (url, options = {}) => {
 );
 
 test(
+  "CLI saves a redacted failed iOS local boundary when the local bundle probe times out",
+  { timeout: 5_000 },
+  () => {
+    const directory = mkdtempSync(
+      join(tmpdir(), "ios-preview-handoff-local-timeout-cli-"),
+    );
+    const outputPath = join(directory, "ios-preview-preflight.json");
+    const stdoutPath = join(directory, "validator.stdout.log");
+    const stderrPath = join(directory, "validator.stderr.log");
+    const preloadPath = join(directory, "stall-local-bundle-fetch.mjs");
+    writeFileSync(
+      preloadPath,
+      `const originalFetch = globalThis.fetch;
+globalThis.fetch = async (url, options = {}) => {
+  const requestUrl = new URL(String(url));
+  if (requestUrl.origin === "https://public-preview.test") {
+    return new Response(
+      JSON.stringify({
+        launchAsset: {
+          url: "https://public-preview.test/_expo/static/js/bundle",
+        },
+      }),
+      { status: 200 },
+    );
+  }
+  if (
+    requestUrl.hostname === "127.0.0.1" &&
+    requestUrl.pathname === "/_expo/static/js/bundle"
+  ) {
+    await new Promise((resolve, reject) => {
+      const signal = options.signal;
+      if (!signal) {
+        reject(new Error("test fetch requires an abort signal"));
+        return;
+      }
+      if (signal.aborted) {
+        reject(new Error("request aborted by deadline"));
+        return;
+      }
+      signal.addEventListener(
+        "abort",
+        () => reject(new Error("request aborted by deadline")),
+        { once: true },
+      );
+    });
+  }
+  return originalFetch(url, options);
+};
+`,
+      "utf8",
+    );
+
+    try {
+      const stdout = openSync(stdoutPath, "w");
+      const stderr = openSync(stderrPath, "w");
+      let result;
+      try {
+        result = spawnSync(
+          process.execPath,
+          [
+            validatorPath,
+            "--platform",
+            "ios",
+            "--record-output",
+            outputPath,
+          ],
+          {
+            env: {
+              ...process.env,
+              NODE_OPTIONS: [
+                process.env.NODE_OPTIONS,
+                `--import ${preloadPath}`,
+              ]
+                .filter(Boolean)
+                .join(" "),
+              PREVIEW_PUBLIC_URL:
+                "https://public-preview.test/private-path?token=private-secret",
+              PREVIEW_PUBLIC_TIMEOUT_MS: "200",
+              PREVIEW_HANDOFF_TIMEOUT_MS: "100",
+              PREVIEW_STARTUP_TIMEOUT_MS: "2000",
+              PREVIEW_STARTUP_EXPECTED_EXPO_PLATFORM: "ios",
+              PREVIEW_STARTUP_TEST_FIXTURE: "handoff-server",
+            },
+            stdio: ["ignore", stdout, stderr],
+          },
+        );
+      } finally {
+        closeSync(stdout);
+        closeSync(stderr);
+      }
+      const output =
+        readFileSync(stdoutPath, "utf8") + readFileSync(stderrPath, "utf8");
+
+      assert.notEqual(result.status, 0, output);
+      const record = JSON.parse(readFileSync(outputPath, "utf8"));
+      assert.doesNotThrow(() => validateHandoffPreflightRecord(record));
+      assert.equal(record.schema, "ios-preview-handoff-preflight/v1");
+      assert.equal(record.platform, "ios");
+      assert.equal(
+        record.boundaries.publicManifestReachability.status,
+        "PASS",
+      );
+      assert.equal(record.boundaries.localHandoffProbe.status, "FAIL");
+      assert.equal(record.boundaries.expoGoLaunch.status, "NOT_ASSESSED");
+      assert.equal(
+        record.boundaries.serverNativeRequestEvidence.status,
+        "NOT_ASSESSED",
+      );
+      assert.equal(
+        record.boundaries.expoGoLaunch.evidence,
+        "Requires a physical iPhone running stock Expo Go.",
+      );
+      assert.equal(
+        record.boundaries.serverNativeRequestEvidence.evidence,
+        "Requires filtered Metro or API evidence from that physical Expo Go session.",
+      );
+      assert.equal(
+        record.boundaries.localHandoffProbe.evidence,
+        "Local manifest/bundle probe failed — no successful probe result was recorded",
+      );
+      assert.match(output, /iOS preview handoff preflight/);
+      assert.match(output, /public_manifest_reachability=PASS/);
+      assert.match(output, /local_handoff_probe=FAIL/);
+      assert.match(output, /expo_go_launch=NOT_ASSESSED/);
+      assert.match(output, /server_native_request_evidence=NOT_ASSESSED/);
+      assert.match(
+        output,
+        /Restart or repair the managed Chat App\/Expo workflow/,
+      );
+      assert.doesNotMatch(
+        output,
+        /127\.0\.0\.1|public-preview\.test|private-path|private-secret|token=|_expo\/static\/js\/bundle/i,
+      );
+      assert.doesNotMatch(
+        JSON.stringify(record),
+        /127\.0\.0\.1|public-preview\.test|private-path|private-secret|token=|_expo\/static\/js\/bundle/i,
+      );
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
   "aborts a stalled local manifest request at its deadline with recovery guidance",
   { timeout: 1_000 },
   async () => {
@@ -743,7 +1596,7 @@ test(
   () =>
     runLiveMetroTimeoutFixture(
       "handoff-server-stall-manifest",
-      /manifest request did not complete/,
+      /manifest response headers received but body did not complete/,
     ),
 );
 
@@ -753,7 +1606,20 @@ test(
   () =>
     runLiveMetroTimeoutFixture(
       "handoff-server-stall-bundle",
+      /bundle response headers received but body did not complete/,
+      "android",
+      1_000,
+    ),
+);
+
+test(
+  "live Metro iOS bundle timeout exits with the timed-out resource and recovery guidance",
+  { timeout: 5_000 },
+  () =>
+    runLiveMetroTimeoutFixture(
+      "handoff-server-stall-bundle",
       /bundle request did not complete/,
+      "ios",
     ),
 );
 
@@ -884,6 +1750,10 @@ test("CLI rejects malformed PREVIEW_PUBLIC_URL before making a public request", 
   );
 });
 
+test("CLI reports missing configuration for an empty PREVIEW_PUBLIC_URL before making a public request", () => {
+  runEmptyPreviewConfigurationCli();
+});
+
 test("CLI rejects malformed REPLIT_EXPO_DEV_DOMAIN before making a public request", () => {
   runMalformedPreviewConfigurationCli(
     "REPLIT_EXPO_DEV_DOMAIN",
@@ -909,7 +1779,10 @@ test("reports the malformed higher-precedence preview setting when both are conf
 });
 
 test("rejects malformed public manifests with actionable recovery guidance", async () => {
-  const fetchMock = mockFetch(new Response("{not-json", { status: 200 }));
+  const parserMarker = "preview-parser-marker-private";
+  const fetchMock = mockFetch(
+    new Response(`{"launchAsset":{"url":"${parserMarker}",`, { status: 200 }),
+  );
 
   try {
     await assert.rejects(
@@ -921,7 +1794,12 @@ test("rejects malformed public manifests with actionable recovery guidance", asy
         );
         assert.match(
           error.message,
-          /invalid JSON|Unexpected token|Expected property name/i,
+          /manifest returned invalid JSON/,
+        );
+        assert.doesNotMatch(error.message, new RegExp(parserMarker));
+        assert.doesNotMatch(
+          error.message,
+          /Unexpected token|Expected property name|position/i,
         );
         assert.match(
           error.message,
@@ -932,6 +1810,34 @@ test("rejects malformed public manifests with actionable recovery guidance", asy
     );
   } finally {
     fetchMock.restore();
+  }
+});
+
+test("rejects malformed preflight JSON with a fixed reason", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "malformed-preflight-"));
+  const outputPath = join(directory, "android-preview-preflight.json");
+  const parserMarker = "preflight-parser-marker-private";
+  writeFileSync(
+    outputPath,
+    `{"schema":"android-preview-handoff-preflight/v1","marker":"${parserMarker}",`,
+    "utf8",
+  );
+
+  try {
+    await assert.rejects(
+      () => readAndValidateHandoffPreflight(outputPath),
+      (error) => {
+        assert.equal(
+          error.message,
+          "Preview handoff preflight JSON is not valid JSON.",
+        );
+        assert.doesNotMatch(error.message, new RegExp(parserMarker));
+        assert.doesNotMatch(error.message, /Unexpected token|position/i);
+        return true;
+      },
+    );
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
   }
 });
 
@@ -1176,6 +2082,31 @@ test("rejects duplicate top-level, boundary, and status fields before schema val
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }
+  }
+});
+
+test("rejects oversized handoff evidence with a fixed diagnostic", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "oversized-preview-handoff-"));
+  const outputPath = join(directory, "android-preview-preflight.json");
+  const privateIdentifier = "oversized-preview-private-id";
+  writeFileSync(
+    outputPath,
+    `{"private":"${privateIdentifier}","padding":"${"x".repeat(262_144)}"}`,
+  );
+  try {
+    await assert.rejects(
+      () => readAndValidateHandoffPreflight(outputPath),
+      (error) => {
+        assert.equal(
+          error.message,
+          "Preview handoff preflight JSON exceeds the release evidence size limit.",
+        );
+        assert.doesNotMatch(error.message, new RegExp(privateIdentifier));
+        return true;
+      },
+    );
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
   }
 });
 

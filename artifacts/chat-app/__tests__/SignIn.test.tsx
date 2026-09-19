@@ -9,8 +9,13 @@ const mockAttemptFirstFactor = jest.fn();
 const mockResetPassword = jest.fn();
 const mockSetActive = jest.fn();
 
+const mockStartAppleOAuthFlow = jest.fn();
+
 jest.mock("@clerk/expo", () => ({
-  useOAuth: () => ({ startOAuthFlow: jest.fn() }),
+  useOAuth: ({ strategy }: { strategy: string }) => ({
+    startOAuthFlow:
+      strategy === "oauth_apple" ? mockStartAppleOAuthFlow : jest.fn(),
+  }),
 }));
 
 jest.mock("@clerk/expo/legacy", () => ({
@@ -189,6 +194,52 @@ describe("password reset", () => {
   });
 });
 
+describe("Continue with Apple", () => {
+  beforeEach(() => {
+    mockStartAppleOAuthFlow.mockReset().mockResolvedValue({
+      createdSessionId: "session-apple",
+      setActive: mockSetActive,
+    });
+    mockSetActive.mockReset().mockResolvedValue(undefined);
+  });
+
+  it("activates the created Clerk session", async () => {
+    const { getByLabelText } = render(<SignInScreen />);
+
+    fireEvent.press(getByLabelText("Continue with Apple"));
+
+    await waitFor(() => {
+      expect(mockStartAppleOAuthFlow).toHaveBeenCalledTimes(1);
+      expect(mockSetActive).toHaveBeenCalledWith({ session: "session-apple" });
+    });
+  });
+
+  it("surfaces the Clerk error when the Apple flow fails", async () => {
+    mockStartAppleOAuthFlow.mockRejectedValue({
+      errors: [{ longMessage: "Apple sign-in was cancelled." }],
+    });
+    const { getByLabelText, findByText } = render(<SignInScreen />);
+
+    fireEvent.press(getByLabelText("Continue with Apple"));
+
+    expect(await findByText("Apple sign-in was cancelled.")).toBeTruthy();
+    expect(mockSetActive).not.toHaveBeenCalled();
+  });
+
+  it("reports an incomplete flow instead of activating nothing", async () => {
+    mockStartAppleOAuthFlow.mockResolvedValue({
+      createdSessionId: null,
+      setActive: mockSetActive,
+    });
+    const { getByLabelText, findByText } = render(<SignInScreen />);
+
+    fireEvent.press(getByLabelText("Continue with Apple"));
+
+    expect(await findByText("Unable to sign in. Please try again.")).toBeTruthy();
+    expect(mockSetActive).not.toHaveBeenCalled();
+  });
+});
+
 describe("default sign in", () => {
   beforeEach(() => {
     mockCreate.mockReset().mockResolvedValue(undefined);
@@ -204,8 +255,8 @@ describe("default sign in", () => {
   });
 
   it("uses an accessible workspace heading and lower-case greeting", () => {
-    const { getByTestId, getByText } = render(<SignInScreen />);
-    const title = getByText("Sign in to your RealtimeAlgoChatApp Studio Workspace");
+    const { getByTestId, getByLabelText, getByText } = render(<SignInScreen />);
+    const title = getByText("Sign in to your RealtimeAlgoChatApp Workspace");
     const greeting = getByText("welcome back");
 
     expect(title.props.accessibilityRole).toBe("header");
@@ -214,13 +265,21 @@ describe("default sign in", () => {
     expect(greeting.props.accessibilityRole).toBe("header");
     expect(greeting.props.role).toBe("heading");
     expect(greeting.props["aria-level"]).toBe(2);
-    expect(getByText("Sign in to your RealtimeAlgoChatApp Studio workspace.")).toBeTruthy();
+    expect(getByText("Sign in to your RealtimeAlgoChatApp workspace.")).toBeTruthy();
     expect(title.props.style.fontSize).toBeCloseTo(39.2);
 
     const scroll = getByTestId("sign-in-scroll");
     expect(scroll.props.keyboardShouldPersistTaps).toBe("handled");
     expect(StyleSheet.flatten(scroll.props.contentContainerStyle).flexGrow).toBe(1);
     expect(getByText("Continue with Google").props.style.fontSize).toBeCloseTo(21);
+    // App Review guideline 4.8 plus Apple's Human Interface Guidelines: the
+    // Apple button must sit alongside the other social providers carrying the
+    // Apple mark on Apple's black with white lettering.
+    const appleButton = getByLabelText("Continue with Apple");
+    expect(StyleSheet.flatten(appleButton.props.style).backgroundColor).toBe("#000000");
+    const appleText = getByText("Continue with Apple");
+    expect(StyleSheet.flatten(appleText.props.style).color).toBe("#FFFFFF");
+    expect(StyleSheet.flatten(appleText.props.style).fontSize).toBeCloseTo(21);
   });
 
   it("pads the form by the device's safe-area insets rather than the web constants", () => {
@@ -266,7 +325,7 @@ describe("default sign in", () => {
     fireEvent.press(getByLabelText("Verify reset code"));
 
     await waitFor(() => {
-      expect(getByText("Choose a new password for your RealtimeAlgoChatApp Studio account.")).toBeTruthy();
+      expect(getByText("Choose a new password for your RealtimeAlgoChatApp account.")).toBeTruthy();
     });
   });
 });

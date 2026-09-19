@@ -19,6 +19,12 @@ NODE_BINARY="${NATIVE_EVIDENCE_NODE_BINARY:-node}"
 UTC_TIMESTAMP_PATTERN='^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$'
 TEMPLATE_PLACEHOLDER_PATTERN='^<.*>$'
 NATIVE_EVIDENCE_REPORT_NAME="native-branding-check.md"
+SHA256_PATTERN='^[0-9a-f]{64}$'
+TRUSTED_EVIDENCE_PATH_PATTERN='^(candidate-build-id\.txt|runner-metadata\.txt|pass-fail-record\.txt|review-record\.template\.txt|native-info\.json|native-branding-check\.md|ios-readiness\.md|android-badging\.txt|maestro-results\.xml|sentry-maestro-results\.xml|sentry-trigger\.txt|sentry-source-map-evidence\.json|screenshots/[A-Za-z0-9._-]+\.png|call-surface/[A-Za-z0-9._-]+\.png)$'
+
+# The recovery wording is also consumed by the release workflow's contract
+# checks. Keep reviewer-facing guidance identical across both boundaries.
+source "$ROOT_DIR/scripts/native-release-recovery-contract.sh"
 
 if [[ "$REQUIRE_APPROVAL" != "0" && "$REQUIRE_APPROVAL" != "1" ]]; then
   echo "NATIVE_EVIDENCE_REQUIRE_APPROVAL must be 0 or 1." >&2
@@ -39,7 +45,7 @@ record_summary_notice() {
 
 summary_safe_text() {
   local value="$1"
-  value="$(printf '%s' "$value" | LC_ALL=C tr '\000-\011\013-\037\177' ' ' | tr '\140' "'")"
+  value="$(printf '%s' "$value" | LC_ALL=C tr '\000-\011\013-\037\177' ' ' | tr '\140' "'" | sed 's/::/\&#58;\&#58;/g')"
   printf '%s' "$value"
 }
 
@@ -94,7 +100,101 @@ record_download_status() {
   fi
 
   SUMMARY_DOWNLOAD_STATUS["$platform"]="FAIL"
-  issue "$platform" "The ${label} native evidence artifact download did not complete. The downloaded ${label} evidence is unavailable; rerun the release gate after the artifact is available."
+  issue "$platform" "The ${label} native evidence artifact download did not complete. The artifact may have expired; the downloaded ${label} evidence is unavailable; rerun the release gate after the artifact is available."
+}
+
+trusted_digest_manifest() {
+  if [[ "$1" == "ios" ]]; then
+    printf '%s' "${NATIVE_IOS_EVIDENCE_DIGEST_MANIFEST:-}"
+  else
+    printf '%s' "${NATIVE_ANDROID_EVIDENCE_DIGEST_MANIFEST:-}"
+  fi
+}
+
+file_sha256() {
+  local path="$1"
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$path" | awk '{ print $1 }'
+  elif command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$path" | awk '{ print $1 }'
+  else
+    return 1
+  fi
+}
+
+validate_trusted_digest_manifest() {
+  local platform="$1"
+  local run_dir="$2"
+  local manifest
+  local line
+  local digest
+  local relative_path
+  local actual_path
+  local actual_digest
+  local manifest_error=0
+  local manifest_entry_count=0
+  local actual_file_count=0
+  local -a manifest_paths=()
+  declare -A manifest_digests=()
+  declare -A actual_files=()
+
+  # The native jobs calculate this manifest before upload and expose it as a
+  # job output. It is intentionally not stored beside the downloaded files:
+  # changing the artifact must not let a publisher change the expected hashes.
+  manifest="$(trusted_digest_manifest "$platform")"
+  if [[ -z "$manifest" ]]; then
+    issue "$platform" "Strict evidence validation is missing the trusted digest manifest for the downloaded native evidence. Regenerate the release evidence from the native job before submission."
+    return
+  fi
+
+  while IFS= read -r line; do
+    [[ -n "$line" ]] || continue
+    if [[ "$line" =~ ^([0-9a-f]{64})[[:space:]][[:space:]](.+)$ ]]; then
+      digest="${BASH_REMATCH[1]}"
+      relative_path="${BASH_REMATCH[2]}"
+    else
+      manifest_error=1
+      continue
+    fi
+    if [[ ! "$relative_path" =~ $TRUSTED_EVIDENCE_PATH_PATTERN ]] ||
+      [[ -v "manifest_digests[$relative_path]" ]]; then
+      manifest_error=1
+      continue
+    fi
+    manifest_paths+=("$relative_path")
+    manifest_digests["$relative_path"]="$digest"
+    manifest_entry_count=$((manifest_entry_count + 1))
+  done <<< "$manifest"
+
+  while IFS= read -r -d '' actual_path; do
+    relative_path="${actual_path#"$run_dir"/}"
+    [[ "$relative_path" == "review-record.txt" ]] && continue
+    if [[ ! "$relative_path" =~ $TRUSTED_EVIDENCE_PATH_PATTERN ]]; then
+      manifest_error=1
+      continue
+    fi
+    actual_files["$relative_path"]=1
+    actual_file_count=$((actual_file_count + 1))
+    if [[ -z "${manifest_digests[$relative_path]+set}" ]]; then
+      manifest_error=1
+      continue
+    fi
+    actual_digest="$(file_sha256 "$actual_path" || true)"
+    if [[ ! "$actual_digest" =~ $SHA256_PATTERN ]] ||
+      [[ "$actual_digest" != "${manifest_digests[$relative_path]}" ]]; then
+      manifest_error=1
+    fi
+  done < <(find "$run_dir" -type f -print0 | sort -z)
+
+  for relative_path in "${manifest_paths[@]}"; do
+    if [[ -z "${actual_files[$relative_path]+set}" ]]; then
+      manifest_error=1
+    fi
+  done
+
+  if ((manifest_error)) || ((manifest_entry_count != actual_file_count)); then
+    issue "$platform" "A downloaded native evidence file does not match the trusted digest manifest for ${run_dir}. Redownload the evidence from the release gate; do not edit or merge evidence files before submission."
+  fi
 }
 
 issue() {
@@ -427,6 +527,9 @@ validate_platform() {
   check_required_file "$platform" "$run_dir" "sentry-maestro-results.xml" "controlled Sentry probe JUnit result"
   check_required_file "$platform" "$run_dir" "sentry-trigger.txt" "controlled Sentry probe metadata"
   check_required_file "$platform" "$run_dir" "sentry-source-map-evidence.json" "Sentry source-map evidence"
+  if [[ "$REQUIRE_APPROVAL" == "1" ]]; then
+    validate_trusted_digest_manifest "$platform" "$run_dir"
+  fi
 
   local candidate_build_id_path="$run_dir/candidate-build-id.txt"
   local candidate_build_id_is_valid=0
@@ -529,7 +632,8 @@ validate_platform() {
         "$sentry_trigger_path" \
         "$platform" \
         "$candidate_build_id" \
-        "$ROOT_DIR/scripts/find-duplicate-json-object-keys.mjs" <<'NODE'
+        "$ROOT_DIR/scripts/find-duplicate-json-object-keys.mjs" \
+        "$ROOT_DIR/scripts/read-bounded-text.mjs" 2>&1 <<'NODE'
 import { readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 
@@ -541,15 +645,38 @@ const [
   platform,
   candidateBuildId,
   duplicateKeysModulePath,
+  boundedTextModulePath,
 ] = process.argv;
 const { findDuplicateJsonObjectKeys } = await import(
   pathToFileURL(duplicateKeysModulePath).href
 );
-const rawEvidence = readFileSync(evidencePath, "utf8");
+const { readBoundedTextFileSync } = await import(
+  pathToFileURL(boundedTextModulePath).href
+);
+let rawEvidence;
+try {
+  rawEvidence = readBoundedTextFileSync(evidencePath);
+} catch (error) {
+  if (error?.code === "JSON_EVIDENCE_TOO_LARGE") {
+    throw new Error("evidence exceeds the release evidence size limit");
+  }
+  throw error;
+}
 if (/(?:auth(?:orization)?[_-]?token|sentry_auth_token|bearer\s+[A-Za-z0-9._-]+)/i.test(rawEvidence)) {
   throw new Error("evidence contains credential-like content");
 }
-const duplicateFields = findDuplicateJsonObjectKeys(rawEvidence);
+let duplicateFields;
+try {
+  duplicateFields = findDuplicateJsonObjectKeys(rawEvidence);
+} catch (error) {
+  if (error?.code === "JSON_EVIDENCE_TOO_LARGE") {
+    throw new Error("evidence exceeds the release evidence size limit");
+  }
+  if (error?.code === "JSON_EVIDENCE_TOO_DEEP") {
+    throw new Error("evidence exceeds the release evidence nesting limit");
+  }
+  throw error;
+}
 if (duplicateFields.length > 0) {
   throw new Error("duplicate JSON field(s)");
 }
@@ -823,6 +950,9 @@ write_evidence_summary() {
       echo "- Status: **${status}**"
       if [[ -n "$download_status" ]]; then
         echo "- Artifact download: **${download_status}**"
+        if [[ "$download_status" == "FAIL" ]]; then
+          echo "- Artifact link check: **EXPIRED OR UNAVAILABLE**"
+        fi
       fi
       if [[ -n "$run_dir" ]]; then
         echo "- Validated run directory: \`${safe_run_dir}\`"
@@ -838,11 +968,7 @@ write_evidence_summary() {
         echo "- Detailed evidence report: **Unavailable**"
       fi
       if [[ "$download_status" == "FAIL" ]]; then
-        if [[ "$platform" == "ios" ]]; then
-          echo "- Recovery: **Rerun the iOS native large-text job, or make the existing iOS artifact available, then rerun the mobile release gate.**"
-        else
-          echo "- Recovery: **Rerun the Android native large-text job, or make the existing Android artifact available, then rerun the mobile release gate.**"
-        fi
+        native_release_recovery_line "$platform"
       fi
       if [[ -n "${SUMMARY_ISSUES[$platform]}" ]]; then
         echo

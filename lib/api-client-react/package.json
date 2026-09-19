@@ -6,10 +6,16 @@
   "exports": {
     ".": "./src/index.ts"
   },
+  "scripts": {
+    "test": "vitest run"
+  },
   "dependencies": {
     "@tanstack/react-query": "catalog:"
   },
   "peerDependencies": {
     "react": ">=18"
+  },
+  "devDependencies": {
+    "vitest": "^4.1.11"
   }
 }

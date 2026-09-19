@@ -4,8 +4,24 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 CHECKER="$ROOT_DIR/scripts/check-ios-preview-evidence.sh"
-TEST_ROOT="$(mktemp -d)"
-trap 'rm -rf "$TEST_ROOT"' EXIT
+HANDOFF_DOC="$ROOT_DIR/artifacts/chat-app/docs/native-room-key-persistence-device-check.md"
+VALIDATOR="$ROOT_DIR/artifacts/chat-app/scripts/validate-preview-startup.mjs"
+TEST_PARENT="$(mktemp -d)"
+TEST_ROOT="$TEST_PARENT/fixtures"
+CLEANUP_GUARD="$TEST_PARENT/cleanup-must-not-escape-fixtures"
+mkdir -p "$TEST_ROOT"
+printf 'keep\n' >"$CLEANUP_GUARD"
+
+cleanup_test_fixtures() {
+  rm -rf "$TEST_ROOT"
+  if [[ ! -f "$CLEANUP_GUARD" ]]; then
+    echo "iOS preview evidence test cleanup escaped its fixture directory" >&2
+    return 1
+  fi
+  rm -rf "$TEST_PARENT"
+}
+
+trap cleanup_test_fixtures EXIT
 
 assert_contains() {
   local output="$1"
@@ -24,6 +40,23 @@ assert_not_contains() {
     exit 1
   fi
 }
+
+handoff_doc="$(cat "$HANDOFF_DOC")"
+assert_contains "$handoff_doc" 'artifacts/chat-app/.expo/dev-request-evidence.log'
+assert_contains "$handoff_doc" 'The command reads the retained `.expo/dev-request-evidence.log` by default'
+assert_contains "$handoff_doc" 'EXPO_DEV_REQUEST_EVIDENCE_FILE'
+assert_contains "$handoff_doc" '--source <path>'
+assert_contains "$handoff_doc" '--timestamp "$(date -u +%Y%m%dT%H%M%SZ)"'
+assert_contains "$handoff_doc" 'artifacts/chat-app/test-results/encrypted-room-recovery/ios/<UTC timestamp>'
+assert_contains "$handoff_doc" 'platform=ios client=Expo Go'
+assert_contains "$handoff_doc" 'excluding `OPTIONS`'
+assert_contains "$handoff_doc" 'logs/native-ios-request-evidence.txt'
+assert_contains "$handoff_doc" 'never contain a host, URL, query string,'
+assert_contains "$handoff_doc" 'credentials, account data, or message content'
+assert_contains "$handoff_doc" 'do not retain the full host, URL, credentials, account identifiers, or'
+assert_contains "$handoff_doc" 'message content'
+assert_contains "$handoff_doc" 'Browser and curl probes retain their own client classes and'
+assert_contains "$handoff_doc" 'do not qualify as native iPhone evidence.'
 
 write_record() {
   local path="$1"
@@ -114,6 +147,15 @@ if truncated_json_output="$(bash "$CHECKER" "$json_contract_record" 2>&1)"; then
 fi
 assert_contains "$truncated_json_output" "does not satisfy the redacted schema"
 assert_not_contains "$truncated_json_output" "$truncated_json_sentinel"
+if truncated_json_direct_output="$(
+  node "$VALIDATOR" --validate-record "$json_contract_path" 2>&1
+)"; then
+  printf 'Truncated iOS preflight JSON unexpectedly passed direct validation.\n' >&2
+  exit 1
+fi
+assert_contains "$truncated_json_direct_output" \
+  "Preview handoff preflight JSON is not valid JSON."
+assert_not_contains "$truncated_json_direct_output" "$truncated_json_sentinel"
 
 non_json_sentinel="ios-preview-non-json-preflight-sentinel"
 cat >"$json_contract_path" <<EOF
@@ -126,6 +168,15 @@ if non_json_output="$(bash "$CHECKER" "$json_contract_record" 2>&1)"; then
 fi
 assert_contains "$non_json_output" "does not satisfy the redacted schema"
 assert_not_contains "$non_json_output" "$non_json_sentinel"
+if non_json_direct_output="$(
+  node "$VALIDATOR" --validate-record "$json_contract_path" 2>&1
+)"; then
+  printf 'Non-JSON iOS preflight content unexpectedly passed direct validation.\n' >&2
+  exit 1
+fi
+assert_contains "$non_json_direct_output" \
+  "Preview handoff preflight JSON is not valid JSON."
+assert_not_contains "$non_json_direct_output" "$non_json_sentinel"
 
 cat >"$json_contract_path" <<'EOF'
 {"schema":"ios-preview-handoff-preflight/v1","platform":"ios","boundaries":{"publicManifestReachability":{"status":"GARBAGE","evidence":"public manifest HTTP 200 (128 bytes)"},"localHandoffProbe":{"status":"NOT_RUN","evidence":"Local manifest/bundle probe not run — no successful probe result was recorded"},"expoGoLaunch":{"status":"NOT_ASSESSED","evidence":"Requires a physical iPhone running stock Expo Go."},"serverNativeRequestEvidence":{"status":"NOT_ASSESSED","evidence":"Requires filtered Metro or API evidence from that physical Expo Go session."}}}
@@ -256,5 +307,8 @@ if missing_output="$(bash "$empty_root/scripts/check-ios-preview-evidence.sh" 2>
   exit 1
 fi
 assert_contains "$missing_output" "No iOS preview evidence record was found under"
+
+cleanup_test_fixtures
+trap - EXIT
 
 printf 'iOS preview evidence regression tests passed.\n'

@@ -12,14 +12,18 @@ import {
   validateNativeArtifactMetadata,
   formatNativeBrandingSummary,
 } from "./validate-branding.mjs";
+import {
+  MAX_JSON_EVIDENCE_BYTES,
+  MAX_JSON_EVIDENCE_DEPTH,
+} from "../../../scripts/find-duplicate-json-object-keys.mjs";
 
 const brandingPath = new URL("../constants/branding.ts", import.meta.url);
 const appMetadataPath = new URL("../app.json", import.meta.url);
 
 const approvedPermissionDescriptions = {
-  camera: "RealtimeAlgoChatApp Studio uses your camera for video calls.",
+  camera: "RealtimeAlgoChatApp uses your camera for video calls.",
   microphone:
-    "RealtimeAlgoChatApp Studio uses your microphone for voice and video calls.",
+    "RealtimeAlgoChatApp uses your microphone for voice and video calls.",
 };
 
 /** Asserts the summary properties every failed native check must keep. */
@@ -38,14 +42,14 @@ test("runtime product name matches Expo app metadata", async () => {
     appMetadataSource: await readFile(appMetadataPath, "utf8"),
   });
 
-  assert.equal(productName, "RealtimeAlgoChatApp Studio");
+  assert.equal(productName, "RealtimeAlgoChatApp");
 });
 
 test("reports both canonical sources when names diverge", () => {
   assert.throws(
     () =>
       validateBrandingValues({
-        productName: "RealtimeAlgoChatApp Studio",
+        productName: "RealtimeAlgoChatApp",
         appName: "A Different App",
       }),
     /artifacts\/chat-app\/constants\/branding\.ts.*artifacts\/chat-app\/app\.json/,
@@ -56,7 +60,7 @@ test("rejects a missing Expo app name", () => {
   assert.throws(
     () =>
       validateBrandingValues({
-        productName: "RealtimeAlgoChatApp Studio",
+        productName: "RealtimeAlgoChatApp",
         appName: undefined,
       }),
     /expo\.name in artifacts\/chat-app\/app\.json/,
@@ -67,10 +71,10 @@ test("reports the camera permission key when its branding drifts", () => {
   assert.throws(
     () =>
       validatePermissionDescriptions({
-        productName: "RealtimeAlgoChatApp Studio",
+        productName: "RealtimeAlgoChatApp",
         cameraUsageDescription: "The app uses your camera for video calls.",
         microphoneUsageDescription:
-          "RealtimeAlgoChatApp Studio uses your microphone for video calls.",
+          "RealtimeAlgoChatApp uses your microphone for video calls.",
       }),
     /app\.json ios\.infoPlist\.NSCameraUsageDescription.*branding\.ts/,
   );
@@ -80,9 +84,9 @@ test("reports the microphone permission key when its branding drifts", () => {
   assert.throws(
     () =>
       validatePermissionDescriptions({
-        productName: "RealtimeAlgoChatApp Studio",
+        productName: "RealtimeAlgoChatApp",
         cameraUsageDescription:
-          "RealtimeAlgoChatApp Studio uses your camera for video calls.",
+          "RealtimeAlgoChatApp uses your camera for video calls.",
         microphoneUsageDescription:
           "The app uses your microphone for video calls.",
       }),
@@ -93,9 +97,9 @@ test("reports the microphone permission key when its branding drifts", () => {
 test("extracts only the PRODUCT_NAME constant", () => {
   assert.equal(
     extractProductName(
-      'const OTHER_NAME = "Compatibility value";\nexport const PRODUCT_NAME = "RealtimeAlgoChatApp Studio";',
+      'const OTHER_NAME = "Compatibility value";\nexport const PRODUCT_NAME = "RealtimeAlgoChatApp";',
     ),
-    "RealtimeAlgoChatApp Studio",
+    "RealtimeAlgoChatApp",
   );
 });
 
@@ -103,23 +107,23 @@ test("accepts native iOS labels and permission copy from built metadata", () => 
   assert.deepEqual(
     validateNativeArtifactMetadata({
       platform: "ios",
-      productName: "RealtimeAlgoChatApp Studio",
+      productName: "RealtimeAlgoChatApp",
       metadata: {
-        CFBundleDisplayName: "RealtimeAlgoChatApp Studio",
-        CFBundleName: "RealtimeAlgoChatApp Studio",
+        CFBundleDisplayName: "RealtimeAlgoChatApp",
+        CFBundleName: "RealtimeAlgoChatApp",
         NSCameraUsageDescription:
-          "RealtimeAlgoChatApp Studio uses your camera for video calls.",
+          "RealtimeAlgoChatApp uses your camera for video calls.",
         NSMicrophoneUsageDescription:
-          "RealtimeAlgoChatApp Studio uses your microphone for voice and video calls.",
+          "RealtimeAlgoChatApp uses your microphone for voice and video calls.",
       },
     }),
     {
-      label: "RealtimeAlgoChatApp Studio",
-      bundleName: "RealtimeAlgoChatApp Studio",
+      label: "RealtimeAlgoChatApp",
+      bundleName: "RealtimeAlgoChatApp",
       cameraUsageDescription:
-        "RealtimeAlgoChatApp Studio uses your camera for video calls.",
+        "RealtimeAlgoChatApp uses your camera for video calls.",
       microphoneUsageDescription:
-        "RealtimeAlgoChatApp Studio uses your microphone for voice and video calls.",
+        "RealtimeAlgoChatApp uses your microphone for voice and video calls.",
     },
   );
 });
@@ -128,9 +132,9 @@ test("accepts the Android application label and required permissions", () => {
   assert.deepEqual(
     validateNativeArtifactMetadata({
       platform: "android",
-      productName: "RealtimeAlgoChatApp Studio",
+      productName: "RealtimeAlgoChatApp",
       metadata: {
-        applicationLabel: "RealtimeAlgoChatApp Studio",
+        applicationLabel: "RealtimeAlgoChatApp",
         permissions: [
           "android.permission.CAMERA",
           "android.permission.RECORD_AUDIO",
@@ -139,7 +143,7 @@ test("accepts the Android application label and required permissions", () => {
       },
     }),
     {
-      label: "RealtimeAlgoChatApp Studio",
+      label: "RealtimeAlgoChatApp",
       permissions: [
         "android.permission.CAMERA",
         "android.permission.RECORD_AUDIO",
@@ -154,7 +158,7 @@ test("rejects native label drift", () => {
     () =>
       validateNativeArtifactMetadata({
         platform: "ios",
-        productName: "RealtimeAlgoChatApp Studio",
+        productName: "RealtimeAlgoChatApp",
         metadata: {
           CFBundleDisplayName: "Old App",
           CFBundleName: "Old App",
@@ -171,20 +175,20 @@ test("rejects native iOS permission-copy drift", () => {
     () =>
       validateNativeArtifactMetadata({
         platform: "ios",
-        productName: "RealtimeAlgoChatApp Studio",
+        productName: "RealtimeAlgoChatApp",
         expectedPermissionDescriptions: {
           camera:
-            "RealtimeAlgoChatApp Studio uses your camera for video calls.",
+            "RealtimeAlgoChatApp uses your camera for video calls.",
           microphone:
-            "RealtimeAlgoChatApp Studio uses your microphone for voice and video calls.",
+            "RealtimeAlgoChatApp uses your microphone for voice and video calls.",
         },
         metadata: {
-          CFBundleDisplayName: "RealtimeAlgoChatApp Studio",
+          CFBundleDisplayName: "RealtimeAlgoChatApp",
           CFBundleName: "chat-app",
           NSCameraUsageDescription:
-            "RealtimeAlgoChatApp Studio uses your camera for a different reason.",
+            "RealtimeAlgoChatApp uses your camera for a different reason.",
           NSMicrophoneUsageDescription:
-            "RealtimeAlgoChatApp Studio uses your microphone for voice and video calls.",
+            "RealtimeAlgoChatApp uses your microphone for voice and video calls.",
         },
       }),
     /Native iOS permission copy mismatch/,
@@ -196,9 +200,9 @@ test("rejects missing Android permission declarations", () => {
     () =>
       validateNativeArtifactMetadata({
         platform: "android",
-        productName: "RealtimeAlgoChatApp Studio",
+        productName: "RealtimeAlgoChatApp",
         metadata: {
-          applicationLabel: "RealtimeAlgoChatApp Studio",
+          applicationLabel: "RealtimeAlgoChatApp",
           permissions: ["android.permission.CAMERA"],
         },
       }),
@@ -211,10 +215,10 @@ test("names the missing iOS label field before comparing branding", () => {
     () =>
       validateNativeArtifactMetadata({
         platform: "ios",
-        productName: "RealtimeAlgoChatApp Studio",
+        productName: "RealtimeAlgoChatApp",
         expectedPermissionDescriptions: approvedPermissionDescriptions,
         metadata: {
-          CFBundleName: "RealtimeAlgoChatApp Studio",
+          CFBundleName: "RealtimeAlgoChatApp",
           NSCameraUsageDescription: approvedPermissionDescriptions.camera,
           NSMicrophoneUsageDescription:
             approvedPermissionDescriptions.microphone,
@@ -230,8 +234,8 @@ test("names each missing iOS permission field", () => {
     "NSMicrophoneUsageDescription",
   ]) {
     const metadata = {
-      CFBundleDisplayName: "RealtimeAlgoChatApp Studio",
-      CFBundleName: "RealtimeAlgoChatApp Studio",
+      CFBundleDisplayName: "RealtimeAlgoChatApp",
+      CFBundleName: "RealtimeAlgoChatApp",
       NSCameraUsageDescription: approvedPermissionDescriptions.camera,
       NSMicrophoneUsageDescription: approvedPermissionDescriptions.microphone,
     };
@@ -240,7 +244,7 @@ test("names each missing iOS permission field", () => {
       () =>
         validateNativeArtifactMetadata({
           platform: "ios",
-          productName: "RealtimeAlgoChatApp Studio",
+          productName: "RealtimeAlgoChatApp",
           expectedPermissionDescriptions: approvedPermissionDescriptions,
           metadata,
         }),
@@ -254,9 +258,9 @@ test("names the absent Android permission declarations", () => {
     () =>
       validateNativeArtifactMetadata({
         platform: "android",
-        productName: "RealtimeAlgoChatApp Studio",
+        productName: "RealtimeAlgoChatApp",
         expectedPermissions: ["android.permission.CAMERA"],
-        metadata: { applicationLabel: "RealtimeAlgoChatApp Studio" },
+        metadata: { applicationLabel: "RealtimeAlgoChatApp" },
       }),
     /Native Android metadata is missing permissions/,
   );
@@ -307,7 +311,7 @@ test("rejects duplicate nested native metadata fields with a fixed reason", () =
     () =>
       parseNativeMetadata({
         platform: "android",
-        source: `{"applicationLabel":"RealtimeAlgoChatApp Studio","permissions":{"name":"android.permission.CAMERA","name":"${privateIdentifier}"}}`,
+        source: `{"applicationLabel":"RealtimeAlgoChatApp","permissions":{"name":"android.permission.CAMERA","name":"${privateIdentifier}"}}`,
       }),
     (error) => {
       assert.match(
@@ -321,23 +325,47 @@ test("rejects duplicate nested native metadata fields with a fixed reason", () =
   );
 });
 
+test("rejects oversized native metadata without exposing its contents", () => {
+  const privateIdentifier = "oversized-native-metadata-private-id";
+  assert.throws(
+    () =>
+      parseNativeMetadata({
+        platform: "ios",
+        source: `{"private":"${privateIdentifier}","padding":"${"x".repeat(MAX_JSON_EVIDENCE_BYTES)}"}`,
+      }),
+    (error) => {
+      assert.match(error.message, /exceeds the release evidence size or nesting limit/);
+      assert.doesNotMatch(error.message, new RegExp(privateIdentifier));
+      return true;
+    },
+  );
+});
+
+test("rejects deeply nested native metadata before JSON parsing", () => {
+  const source = `${"[".repeat(MAX_JSON_EVIDENCE_DEPTH + 1)}0${"]".repeat(MAX_JSON_EVIDENCE_DEPTH + 1)}`;
+  assert.throws(
+    () => parseNativeMetadata({ platform: "android", source }),
+    /exceeds the release evidence size or nesting limit/,
+  );
+});
+
 test("formats an iOS native branding summary with permission-copy status", () => {
   const summary = formatNativeBrandingSummary({
     platform: "ios",
     buildId: "ios-candidate-build-id",
-    productName: "RealtimeAlgoChatApp Studio",
+    productName: "RealtimeAlgoChatApp",
     status: "PASS",
     metadata: {
-      CFBundleDisplayName: "RealtimeAlgoChatApp Studio",
+      CFBundleDisplayName: "RealtimeAlgoChatApp",
       NSCameraUsageDescription:
-        "RealtimeAlgoChatApp Studio uses your camera for video calls.",
+        "RealtimeAlgoChatApp uses your camera for video calls.",
       NSMicrophoneUsageDescription:
-        "RealtimeAlgoChatApp Studio uses your microphone for voice and video calls.",
+        "RealtimeAlgoChatApp uses your microphone for voice and video calls.",
     },
     expectedPermissionDescriptions: {
-      camera: "RealtimeAlgoChatApp Studio uses your camera for video calls.",
+      camera: "RealtimeAlgoChatApp uses your camera for video calls.",
       microphone:
-        "RealtimeAlgoChatApp Studio uses your microphone for voice and video calls.",
+        "RealtimeAlgoChatApp uses your microphone for voice and video calls.",
     },
   });
 
@@ -352,14 +380,14 @@ test("formats an iOS native branding summary with permission-copy status", () =>
       `Candidate build fingerprint \\(SHA-256\\): \`${candidateBuildFingerprint("ios-candidate-build-id")}\``,
     ),
   );
-  assert.match(summary, /Native label: `RealtimeAlgoChatApp Studio`/);
+  assert.match(summary, /Native label: `RealtimeAlgoChatApp`/);
   assert.match(summary, /Permission copy: \*\*PASS\*\*/);
 });
 
 test("shows the non-secret candidate build ID in the step-summary fragment", () => {
   const summary = formatNativeBrandingSummary({
     platform: "ios",
-    productName: "RealtimeAlgoChatApp Studio",
+    productName: "RealtimeAlgoChatApp",
     status: "FAIL",
     metadata: { CFBundleDisplayName: "Old App" },
     expectedPermissionDescriptions: {},
@@ -374,7 +402,7 @@ test("formats a failed Android summary with the mismatched declaration", () => {
   const summary = formatNativeBrandingSummary({
     platform: "android",
     buildId: "android-candidate-build-id",
-    productName: "RealtimeAlgoChatApp Studio",
+    productName: "RealtimeAlgoChatApp",
     status: "FAIL",
     metadata: {
       applicationLabel: "Old App",
@@ -385,7 +413,7 @@ test("formats a failed Android summary with the mismatched declaration", () => {
       "android.permission.RECORD_AUDIO",
     ],
     error: new Error(
-      'Native Android label mismatch: expected applicationLabel to be "RealtimeAlgoChatApp Studio", received "Old App".',
+      'Native Android label mismatch: expected applicationLabel to be "RealtimeAlgoChatApp", received "Old App".',
     ),
   });
 
@@ -402,10 +430,10 @@ test("summarizes a missing iOS label as unavailable while keeping permission res
   const summary = formatNativeBrandingSummary({
     platform: "ios",
     buildId: "ios-no-label-build",
-    productName: "RealtimeAlgoChatApp Studio",
+    productName: "RealtimeAlgoChatApp",
     status: "FAIL",
     metadata: {
-      CFBundleName: "RealtimeAlgoChatApp Studio",
+      CFBundleName: "RealtimeAlgoChatApp",
       NSCameraUsageDescription: approvedPermissionDescriptions.camera,
       NSMicrophoneUsageDescription: approvedPermissionDescriptions.microphone,
     },
@@ -425,11 +453,11 @@ test("separates unavailable iOS permission fields from mismatched copy", () => {
   const summary = formatNativeBrandingSummary({
     platform: "ios",
     buildId: "ios-no-permission-build",
-    productName: "RealtimeAlgoChatApp Studio",
+    productName: "RealtimeAlgoChatApp",
     status: "FAIL",
     metadata: {
-      CFBundleDisplayName: "RealtimeAlgoChatApp Studio",
-      CFBundleName: "RealtimeAlgoChatApp Studio",
+      CFBundleDisplayName: "RealtimeAlgoChatApp",
+      CFBundleName: "RealtimeAlgoChatApp",
       NSMicrophoneUsageDescription: "Old copy for the microphone.",
     },
     expectedPermissionDescriptions: approvedPermissionDescriptions,
@@ -439,7 +467,7 @@ test("separates unavailable iOS permission fields from mismatched copy", () => {
   });
 
   assertActionableFailure(summary, "ios-no-permission-build");
-  assert.match(summary, /Native label: `RealtimeAlgoChatApp Studio`/);
+  assert.match(summary, /Native label: `RealtimeAlgoChatApp`/);
   assert.match(
     summary,
     /Permission copy: \*\*FAIL\*\* \(unavailable field: NSCameraUsageDescription; mismatched field: NSMicrophoneUsageDescription\)/,
@@ -455,7 +483,7 @@ test("summarizes unparsed native metadata as unavailable rather than mismatched"
     const summary = formatNativeBrandingSummary({
       platform,
       buildId: `${platform}-malformed-build`,
-      productName: "RealtimeAlgoChatApp Studio",
+      productName: "RealtimeAlgoChatApp",
       status: "FAIL",
       metadata: null,
       expectedPermissionDescriptions: approvedPermissionDescriptions,
@@ -485,9 +513,9 @@ test("summarizes absent Android declarations as an unavailable field", () => {
   const summary = formatNativeBrandingSummary({
     platform: "android",
     buildId: "android-no-declarations-build",
-    productName: "RealtimeAlgoChatApp Studio",
+    productName: "RealtimeAlgoChatApp",
     status: "FAIL",
-    metadata: { applicationLabel: "RealtimeAlgoChatApp Studio" },
+    metadata: { applicationLabel: "RealtimeAlgoChatApp" },
     expectedPermissions: [
       "android.permission.CAMERA",
       "android.permission.RECORD_AUDIO",
@@ -498,7 +526,7 @@ test("summarizes absent Android declarations as an unavailable field", () => {
   });
 
   assertActionableFailure(summary, "android-no-declarations-build");
-  assert.match(summary, /Native label: `RealtimeAlgoChatApp Studio`/);
+  assert.match(summary, /Native label: `RealtimeAlgoChatApp`/);
   assert.match(
     summary,
     /Permission declarations: \*\*FAIL\*\* \(unavailable field: permissions\)/,

@@ -3,16 +3,18 @@ import { and, desc, eq, lt } from "drizzle-orm";
 import { logger } from "./logger";
 import { getAccountSnapshot } from "./accountProfile";
 
-export type ModerationActionKind = "ban" | "restore";
+export type ModerationActionKind = "ban" | "restore" | "message_delete";
 
 export interface ModerationHistoryEntry {
   id: number;
   action: ModerationActionKind;
   actorUserId: string;
   actorUsername: string;
-  targetUserId: string;
-  targetUsername: string;
+  targetUserId: string | null;
+  targetUsername: string | null;
   targetEmail: string | null;
+  roomId: string | null;
+  messageId: string | null;
   createdAt: string;
 }
 
@@ -71,6 +73,32 @@ export async function recordModerationAction(
 }
 
 /**
+ * Records a successful message deletion without storing plaintext or
+ * ciphertext from the deleted message.
+ */
+export async function recordMessageDeletion(
+  actorUserId: string,
+  roomId: string,
+  messageId: string,
+): Promise<void> {
+  try {
+    const actor = await getAccountSnapshot(actorUserId);
+    await db.insert(moderationActionsTable).values({
+      action: "message_delete",
+      actorUserId,
+      actorUsername: actor.username,
+      roomId,
+      messageId,
+    });
+  } catch (error) {
+    logger.error(
+      { err: error, action: "message_delete", actorUserId, roomId, messageId },
+      "failed to record moderation action",
+    );
+  }
+}
+
+/**
  * Lists ban/restore history, newest first, with cursor-based paging and
  * optional filtering by target account or acting administrator.
  *
@@ -118,6 +146,8 @@ export async function listModerationActions(
       targetUserId: row.targetUserId,
       targetUsername: row.targetUsername,
       targetEmail: row.targetEmail,
+      roomId: row.roomId,
+      messageId: row.messageId,
       createdAt: row.createdAt.toISOString(),
     })),
     nextCursor: hasMore ? (page[page.length - 1]?.id ?? null) : null,

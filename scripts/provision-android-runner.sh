@@ -18,8 +18,16 @@
 
 set -euo pipefail
 
+SCRIPT_PATH="${BASH_SOURCE[0]}"
+SCRIPT_DIR="${SCRIPT_PATH%/*}"
+if [[ "$SCRIPT_DIR" == "$SCRIPT_PATH" ]]; then
+  SCRIPT_DIR="."
+fi
+SCRIPT_DIR="$(cd -- "$SCRIPT_DIR" && pwd)"
+# shellcheck source=android-runner-pins.sh
+source "$SCRIPT_DIR/android-runner-pins.sh"
+
 SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-$HOME/android-sdk}}"
-ANDROID_BUILD_TOOLS_VERSION="${ANDROID_BUILD_TOOLS_VERSION:-35.0.0}"
 export ANDROID_SDK_ROOT="$SDK_ROOT"
 export ANDROID_HOME="$SDK_ROOT"
 export PATH="$HOME/.maestro/bin:$SDK_ROOT/platform-tools:$SDK_ROOT/emulator:$SDK_ROOT/cmdline-tools/latest/bin:$SDK_ROOT/build-tools/$ANDROID_BUILD_TOOLS_VERSION:$PATH"

@@ -41,11 +41,66 @@ on:
 
   # Allows you to run this workflow manually from the Actions tab
   workflow_dispatch:
+    inputs:
+      run_live_assistant:
+        description: Run the managed sandbox assistant health check
+        required: true
+        default: false
+        type: boolean
 
 permissions:
   contents: read
 
 jobs:
+  managed-assistant-health:
+    name: Managed sandbox assistant health
+    if: ${{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.run_live_assistant == true) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
+        with:
+          version: 10.26.1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install workspace dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run managed sandbox assistant health check
+        env:
+          AI_INTEGRATIONS_ANTHROPIC_API_KEY: ${{ secrets.AI_INTEGRATIONS_ANTHROPIC_API_KEY }}
+          AI_INTEGRATIONS_ANTHROPIC_BASE_URL: ${{ secrets.AI_INTEGRATIONS_ANTHROPIC_BASE_URL }}
+          LIVE_ASSISTANT_CHECK: "1"
+        run: |
+          set -euo pipefail
+          output_path="$RUNNER_TEMP/managed-assistant-health.log"
+          status=0
+
+          # Keep provider diagnostics out of the workflow log. The test itself
+          # uses a fixed prompt, but SDK failures can contain request details.
+          timeout --signal=TERM 120s \
+            pnpm --filter @workspace/api-server run test:live-assistant \
+            >"$output_path" 2>&1 || status=$?
+
+          if [[ "$status" -ne 0 ]]; then
+            echo "::error::Managed sandbox assistant health check failed."
+            echo "The managed assistant did not complete a healthy response within 120 seconds or reported an unavailable response."
+            exit "$status"
+          fi
+
+          echo "Managed sandbox assistant health check passed."
+
   Trigger_EthicalCheck:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false
     permissions:
@@ -55,17 +110,17 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-       - name: EthicalCheck  Free & Automated API Security Testing Service
-         uses: apisec-inc/ethicalcheck-action@005fac321dd843682b1af6b72f30caaf9952c641
-         with:
-           # The OpenAPI Specification URL or Swagger Path or Public Postman collection URL.
-           oas-url: ${{ vars.ETHICALCHECK_OAS_URL }}
-           # The email address to which the penetration test report will be sent.
-           email: ${{ secrets.ETHICALCHECK_REPORT_EMAIL }}
-           sarif-result-file: ethicalcheck-results.sarif
+      - name: EthicalCheck  Free & Automated API Security Testing Service
+        uses: apisec-inc/ethicalcheck-action@005fac321dd843682b1af6b72f30caaf9952c641
+        with:
+          # The OpenAPI Specification URL or Swagger Path or Public Postman collection URL.
+          oas-url: ${{ vars.ETHICALCHECK_OAS_URL }}
+          # The email address to which the penetration test report will be sent.
+          email: ${{ secrets.ETHICALCHECK_REPORT_EMAIL }}
+          sarif-result-file: ethicalcheck-results.sarif
 
-        - name: Upload sarif file to repository
-          uses: github/codeql-action/upload-sarif@6f5948dfacef28e207b48d0905cf90c03365536d
-         with:
+      - name: Upload sarif file to repository
+        uses: github/codeql-action/upload-sarif@6f5948dfacef28e207b48d0905cf90c03365536d
+        with:
           sarif_file: ./ethicalcheck-results.sarif
 

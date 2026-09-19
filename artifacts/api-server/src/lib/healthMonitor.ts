@@ -7,6 +7,7 @@ import { logger } from "./logger";
 // alert rule — a "dead man's switch" that catches full outages, not just
 // errors reported from within a live process.
 const MONITOR_SLUG = "api-server-healthz";
+const LIVENESS_PATH = "/api/livez";
 const CHECK_INTERVAL_MINUTES = 5;
 const CHECK_INTERVAL_MS = CHECK_INTERVAL_MINUTES * 60 * 1000;
 const CHECK_TIMEOUT_MS = 10_000;
@@ -15,11 +16,11 @@ async function pingHealthz(port: number): Promise<void> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), CHECK_TIMEOUT_MS);
   try {
-    const res = await fetch(`http://127.0.0.1:${port}/api/healthz`, {
+    const res = await fetch(`http://127.0.0.1:${port}${LIVENESS_PATH}`, {
       signal: controller.signal,
     });
     if (!res.ok) {
-      throw new Error(`/api/healthz responded with status ${res.status}`);
+      throw new Error(`${LIVENESS_PATH} responded with status ${res.status}`);
     }
   } finally {
     clearTimeout(timeout);
@@ -27,15 +28,15 @@ async function pingHealthz(port: number): Promise<void> {
 }
 
 /**
- * Starts a recurring uptime check against this server's own /api/healthz
- * endpoint, reported to Sentry as a Cron Monitor check-in. Requires
- * SENTRY_DSN — without it there is nowhere to send the alert, so the check
- * is skipped entirely rather than silently doing nothing useful.
+ * Starts a recurring uptime check against this server's own liveness endpoint,
+ * reported to Sentry as a Cron Monitor check-in. Requires SENTRY_DSN — without
+ * it there is nowhere to send the alert, so the check is skipped entirely
+ * rather than silently doing nothing useful.
  */
 export function startHealthMonitor(port: number): void {
   if (!sentryEnabled) {
     logger.warn(
-      "Sentry is disabled; skipping the /api/healthz uptime monitor",
+      `Sentry is disabled; skipping the ${LIVENESS_PATH} uptime monitor`,
     );
     return;
   }
@@ -57,7 +58,7 @@ export function startHealthMonitor(port: number): void {
         timezone: "Etc/UTC",
       },
     ).catch((err: unknown) => {
-      logger.error({ err }, "/api/healthz uptime check failed");
+      logger.error({ err }, `${LIVENESS_PATH} uptime check failed`);
     });
   };
 

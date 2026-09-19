@@ -6,6 +6,26 @@ after `synchronize`, `reopened`, and `edited` pull-request events.**
 This record retains the hosted run and job links after the temporary probes were
 cleaned up. Neither probe was merged.
 
+## Repeatable probe
+
+Run the repository probe when the hosted event behavior needs to be checked
+again. It creates a stale generated-client commit from `development`, opens a
+temporary pull request, creates a second stale commit for `synchronize`, closes
+and reopens the pull request, then edits its description for `edited`. It
+records the required failure and job URL for each event before cleanup:
+
+```sh
+GITHUB_TOKEN="$TOKEN" \
+GITHUB_REPOSITORY="lisagorewitdecker/RealtimeAlgoChatApp" \
+node scripts/probe-api-codegen-events.mjs \
+  --output artifacts/chat-app/docs/api-codegen-event-probe-result.json
+```
+
+The command exits unsuccessfully unless the pull request is confirmed closed
+without merging and a follow-up branch lookup confirms that the temporary branch
+was deleted. Keep the token in the environment; do not pass it as a command-line
+argument. Use `--help` for timeout and branch options.
+
 ## Metadata
 
 | Field | Result |

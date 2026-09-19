@@ -1,10 +1,18 @@
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
-import { readFileSync, writeFileSync, mkdtempSync, rmSync } from "node:fs";
+import {
+  mkdirSync,
+  existsSync,
+  readFileSync,
+  writeFileSync,
+  mkdtempSync,
+  rmSync,
+} from "node:fs";
 import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { pathToFileURL } from "node:url";
 
 import {
   CAPTURED_EXPO_TOOLING,
@@ -19,12 +27,19 @@ const fixturePath = join(
   scriptsDirectory,
   "preview-startup-runtime-library-fixture.mjs",
 );
+const refreshPath = join(
+  scriptsDirectory,
+  "refresh-preview-startup-runtime-library-fixture.mjs",
+);
 const packageRequire = createRequire(join(packageRoot, "package.json"));
 
 function runNodeScript(args, env = {}) {
   const childEnvironment = { ...process.env, ...env };
   if (!Object.hasOwn(env, "GITHUB_STEP_SUMMARY")) {
     delete childEnvironment.GITHUB_STEP_SUMMARY;
+  }
+  if (!Object.hasOwn(env, "PREVIEW_STARTUP_LIVE_START_MARKER")) {
+    delete childEnvironment.PREVIEW_STARTUP_LIVE_START_MARKER;
   }
   const result = spawnSync(process.execPath, args, {
     encoding: "utf8",
@@ -49,9 +64,41 @@ function containsControlCharacters(value) {
   });
 }
 
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 function installedPackageVersion(packageName) {
   const packageJsonPath = packageRequire.resolve(`${packageName}/package.json`);
   return JSON.parse(readFileSync(packageJsonPath, "utf8")).version;
+}
+
+function writeIndependentCaptureArtifacts(directory, suffix = "") {
+  mkdirSync(directory, { recursive: true });
+  for (const platform of ["linux", "macos", "windows"]) {
+    const samples = Object.fromEntries(
+      CAPTURED_LOADER_SAMPLES.filter(
+        (sample) => sample.platform === platform,
+      ).map((sample) => [
+        sample.fixture,
+        `${fixtureOutput[sample.fixture]}${suffix}${platform}\n`,
+      ]),
+    );
+    writeFileSync(
+      join(directory, `${platform}.json`),
+      JSON.stringify(
+        {
+          platform,
+          expoCli: installedPackageVersion("@expo/cli"),
+          reactNative: installedPackageVersion("react-native"),
+          samples,
+        },
+        null,
+        2,
+      ) + "\n",
+      "utf8",
+    );
+  }
 }
 
 const capturedLoaderSampleNames = CAPTURED_LOADER_SAMPLES.map(
@@ -215,17 +262,95 @@ test("live and captured preview validation report the same diagnosis for every l
   }
 });
 
+test("real-platform capture records macOS and Windows loader output safely", () => {
+  const temporaryDirectory = mkdtempSync(
+    join(tmpdir(), "chat-preview-real-platform-capture-"),
+  );
+  const cases = [
+    {
+      name: "macOS",
+      fixture: "missing-runtime-library-dyld",
+      output:
+        "dyld[12345]: Library not loaded: /Users/reviewer/Library/" +
+        "Application Support/Expo/react native devtools/libgtk-3.dylib\n" +
+        "  Reason: Authorization: Bearer TOP_SECRET_VALUE\n",
+      libraryIdentifier: "libgtk-3.dylib",
+    },
+    {
+      name: "Windows",
+      fixture: "missing-runtime-library-windows",
+      output:
+        "Error: The code execution cannot proceed because " +
+        "C:\\Users\\reviewer\\AppData\\Local\\Expo\\libgtk-3-0.dll " +
+        "was not found. password=TOP_SECRET_VALUE\n",
+      libraryIdentifier: "libgtk-3-0.dll",
+    },
+  ];
+
+  try {
+    for (const fixtureCase of cases) {
+      const recordPath = join(
+        temporaryDirectory,
+        `${fixtureCase.name.toLowerCase()}.log`,
+      );
+      const live = runNodeScript(
+        [validatorPath, "--record-log", recordPath],
+        {
+          PREVIEW_STARTUP_TEST_FIXTURE: fixtureCase.fixture,
+          PREVIEW_STARTUP_TEST_OUTPUT: fixtureCase.output,
+        },
+      );
+
+      assert.equal(live.status, 1, fixtureCase.name);
+      const recordedOutput = readFileSync(recordPath, "utf8");
+      assert.doesNotMatch(recordedOutput, /\/Users\/reviewer|C:\\Users\\reviewer/);
+      assert.doesNotMatch(recordedOutput, /TOP_SECRET_VALUE/);
+      assert.match(recordedOutput, new RegExp(fixtureCase.libraryIdentifier));
+
+      const captured = runNodeScript([
+        validatorPath,
+        "--log-file",
+        recordPath,
+      ]);
+      assert.equal(captured.status, 1, fixtureCase.name);
+      const liveDiagnostic = findDiagnostic(live.output);
+      const capturedDiagnostic = findDiagnostic(captured.output);
+      assert.ok(liveDiagnostic, fixtureCase.name);
+      assert.ok(capturedDiagnostic, fixtureCase.name);
+      assert.match(liveDiagnostic, new RegExp(fixtureCase.libraryIdentifier));
+      assert.match(
+        capturedDiagnostic,
+        new RegExp(fixtureCase.libraryIdentifier),
+        fixtureCase.name,
+      );
+      assert.match(
+        capturedDiagnostic,
+        /Expo preview startup error:/,
+        fixtureCase.name,
+      );
+    }
+  } finally {
+    rmSync(temporaryDirectory, { recursive: true, force: true });
+  }
+});
+
 test("versioned loader samples match the installed Expo tooling", () => {
+  const capturedExpoCliVersion =
+    process.env.PREVIEW_STARTUP_TEST_CAPTURED_EXPO_CLI_VERSION ??
+    CAPTURED_EXPO_TOOLING.expoCli;
+  const capturedReactNativeVersion =
+    process.env.PREVIEW_STARTUP_TEST_CAPTURED_REACT_NATIVE_VERSION ??
+    CAPTURED_EXPO_TOOLING.reactNative;
   const mismatches = [
     capturedToolingVersionMismatch({
       displayName: "Expo CLI",
       packageName: "@expo/cli",
-      capturedVersion: CAPTURED_EXPO_TOOLING.expoCli,
+      capturedVersion: capturedExpoCliVersion,
     }),
     capturedToolingVersionMismatch({
       displayName: "React Native",
       packageName: "react-native",
-      capturedVersion: CAPTURED_EXPO_TOOLING.reactNative,
+      capturedVersion: capturedReactNativeVersion,
     }),
   ].filter(Boolean);
   if (mismatches.length > 0) {
@@ -244,6 +369,236 @@ test("versioned loader samples match the installed Expo tooling", () => {
     );
   }
 });
+
+test("loader evidence includes every required platform and a captured output", () => {
+  const requiredPlatforms = ["linux", "macos", "windows"];
+  const platforms = new Set(
+    CAPTURED_LOADER_SAMPLES.map(({ platform }) => platform),
+  );
+  assert.deepEqual(
+    [...platforms].sort(),
+    [...requiredPlatforms].sort(),
+    "refresh evidence must include Linux, macOS, and Windows samples",
+  );
+
+  for (const sample of CAPTURED_LOADER_SAMPLES) {
+    assert.equal(
+      typeof fixtureOutput[sample.fixture],
+      "string",
+      `${sample.name} is missing captured loader output`,
+    );
+    assert.ok(
+      fixtureOutput[sample.fixture].length > 0,
+      `${sample.name} has empty captured loader output`,
+    );
+  }
+});
+
+test("refresh command updates tooling metadata, inventory, and outputs together", async () => {
+  const temporaryDirectory = mkdtempSync(
+    join(tmpdir(), "chat-preview-loader-refresh-"),
+  );
+  const captureDirectory = join(temporaryDirectory, "captures");
+  const refreshedFixturePath = join(
+    temporaryDirectory,
+    "preview-startup-runtime-library-fixture.mjs",
+  );
+
+  try {
+    writeIndependentCaptureArtifacts(captureDirectory, "independent-");
+    const result = runNodeScript(
+      [
+        refreshPath,
+        "--capture-dir",
+        captureDirectory,
+        "--output",
+        refreshedFixturePath,
+      ],
+    );
+    assert.equal(result.status, 0, result.output);
+
+    const refreshedSource = readFileSync(refreshedFixturePath, "utf8");
+    assert.match(
+      refreshedSource,
+      /BEGIN GENERATED PREVIEW LOADER EVIDENCE[\s\S]+END GENERATED PREVIEW LOADER EVIDENCE/,
+    );
+    assert.match(
+      refreshedSource,
+      /BEGIN GENERATED PREVIEW LOADER OUTPUT[\s\S]+END GENERATED PREVIEW LOADER OUTPUT/,
+    );
+
+    const refreshed = await import(
+      `${pathToFileURL(refreshedFixturePath).href}?refresh-test`
+    );
+    assert.deepEqual(refreshed.CAPTURED_EXPO_TOOLING, {
+      expoCli: installedPackageVersion("@expo/cli"),
+      reactNative: installedPackageVersion("react-native"),
+    });
+    assert.deepEqual(
+      refreshed.CAPTURED_LOADER_SAMPLES,
+      CAPTURED_LOADER_SAMPLES,
+    );
+    for (const sample of refreshed.CAPTURED_LOADER_SAMPLES) {
+      assert.equal(
+        refreshed.fixtureOutput[sample.fixture],
+        `${fixtureOutput[sample.fixture]}independent-${sample.platform}\n`,
+        sample.name,
+      );
+      assert.notEqual(
+        refreshed.fixtureOutput[sample.fixture],
+        fixtureOutput[sample.fixture],
+        `${sample.name} was not replaced by independent capture output`,
+      );
+    }
+  } finally {
+    rmSync(temporaryDirectory, { recursive: true, force: true });
+  }
+});
+
+test("refresh command leaves the existing fixture untouched when a platform capture is missing", () => {
+  const temporaryDirectory = mkdtempSync(
+    join(tmpdir(), "chat-preview-loader-refresh-incomplete-"),
+  );
+  const captureDirectory = join(temporaryDirectory, "captures");
+  const outputPath = join(
+    temporaryDirectory,
+    "preview-startup-runtime-library-fixture.mjs",
+  );
+  const existingFixture = readFileSync(fixturePath, "utf8");
+
+  try {
+    mkdirSync(captureDirectory);
+    const completeDirectory = join(temporaryDirectory, "complete");
+    writeIndependentCaptureArtifacts(completeDirectory);
+    for (const platform of ["linux", "macos"]) {
+      const sourcePath = join(completeDirectory, `${platform}.json`);
+      writeFileSync(
+        join(captureDirectory, `${platform}.json`),
+        readFileSync(sourcePath),
+      );
+    }
+    writeFileSync(outputPath, existingFixture, "utf8");
+
+    const result = runNodeScript([
+      refreshPath,
+      "--capture-dir",
+      captureDirectory,
+      "--output",
+      outputPath,
+    ]);
+
+    assert.equal(result.status, 1);
+    assert.match(result.output, /Could not read windows capture/);
+    assert.equal(readFileSync(outputPath, "utf8"), existingFixture);
+  } finally {
+    rmSync(temporaryDirectory, { recursive: true, force: true });
+  }
+});
+
+test(
+  "normal preview validation stops before live startup for stale tooling",
+  { skip: Boolean(process.env.PREVIEW_STARTUP_TOOLING_MISMATCH) },
+  () => {
+    const temporaryDirectory = mkdtempSync(
+      join(tmpdir(), "chat-preview-tooling-mismatch-"),
+    );
+
+    try {
+      const scenarios = [
+        {
+          displayName: "Expo CLI",
+          environmentName:
+            "PREVIEW_STARTUP_TEST_CAPTURED_EXPO_CLI_VERSION",
+          installedVersion: installedPackageVersion("@expo/cli"),
+        },
+        {
+          displayName: "React Native",
+          environmentName:
+            "PREVIEW_STARTUP_TEST_CAPTURED_REACT_NATIVE_VERSION",
+          installedVersion: installedPackageVersion("react-native"),
+        },
+      ];
+
+      for (const scenario of scenarios) {
+        const capturedVersion = "0.0.0";
+        assert.notEqual(
+          scenario.installedVersion,
+          capturedVersion,
+          `${scenario.displayName} fixture version must be stale`,
+        );
+        const markerPath = join(
+          temporaryDirectory,
+          `${scenario.displayName.toLowerCase().replaceAll(" ", "-")}.marker`,
+        );
+        const childEnvironment = {
+          ...process.env,
+          [scenario.environmentName]: capturedVersion,
+          PREVIEW_STARTUP_TOOLING_MISMATCH: scenario.displayName,
+          PREVIEW_STARTUP_LIVE_START_MARKER: markerPath,
+          PREVIEW_STARTUP_TEST_FIXTURE: "handoff-server",
+        };
+        delete childEnvironment.NODE_TEST_CONTEXT;
+        const result = spawnSync(
+          "pnpm",
+          ["run", "validate:preview-startup"],
+          {
+            cwd: packageRoot,
+            encoding: "utf8",
+            env: childEnvironment,
+            timeout: 60_000,
+          },
+        );
+        const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
+
+        assert.notEqual(
+          result.error?.code,
+          "ETIMEDOUT",
+          `${scenario.displayName} mismatch validation did not terminate`,
+        );
+        assert.notEqual(result.status, 0, output);
+        assert.match(
+          output,
+          new RegExp(
+            `${scenario.displayName} changed: loader samples were captured with ` +
+              escapeRegExp(capturedVersion),
+          ),
+        );
+        assert.match(
+          output,
+          new RegExp(
+            `but the installed version is ${escapeRegExp(
+              scenario.installedVersion,
+            )}`,
+          ),
+        );
+        assert.match(output, /Affected captured loader samples:/);
+        assert.match(output, /Linux shared-library loader/);
+        assert.match(output, /Windows loader with a quoted long path/);
+        assert.match(
+          output,
+          /preview-startup-runtime-library-fixture\.mjs/,
+        );
+        assert.match(output, /validate-preview-startup\.mjs/);
+        assert.equal(
+          existsSync(markerPath),
+          false,
+          `${scenario.displayName} mismatch continued into live preview startup`,
+        );
+        assert.equal(
+          installedPackageVersion(
+            scenario.displayName === "Expo CLI"
+              ? "@expo/cli"
+              : "react-native",
+          ),
+          scenario.installedVersion,
+          `${scenario.displayName} mismatch test changed installed dependencies`,
+        );
+      }
+    } finally {
+      rmSync(temporaryDirectory, { recursive: true, force: true });
+    }
+  },
+);
 
 test("unsupported loader wording fails with a maintenance message", () => {
   const temporaryDirectory = mkdtempSync(
@@ -383,30 +738,182 @@ test("CI summaries retain bounded long-path loader diagnostics and library ident
   }
 });
 
-test("CI summaries name the malformed selected preview setting without its value", () => {
+test("CI summaries redact secrets from long loader diagnostics without losing library identifiers", () => {
   const temporaryDirectory = mkdtempSync(
-    join(tmpdir(), "chat-preview-malformed-setting-summary-"),
+    join(tmpdir(), "chat-preview-long-private-loader-summary-"),
   );
-  const summaryPath = join(temporaryDirectory, "summary.md");
-  const malformedValue = "https://[preview-setting-secret";
+  const longLinuxLibraryPath =
+    `/opt/expo/${"react-native-devtools-cache/".repeat(16)}` +
+    "libgtk-3.so.0";
+  const longDyldLibraryPath =
+    `/opt/homebrew/Library/Application Support/Expo/` +
+    `${"react native devtools cache/".repeat(12)}` +
+    "libgtk-3.dylib";
+  const longWindowsLibraryPath =
+    `C:\\Program Files\\Expo\\${"react native devtools cache\\".repeat(12)}` +
+    "libgtk-3-0.dll";
+  const cases = [
+    {
+      fixture: "missing-runtime-library",
+      output:
+        `Error: Authorization: Bearer LONG_LINUX_PRIVATE_TOKEN ` +
+        `/opt/expo/react-native-devtools: error while loading shared libraries: ` +
+        `${longLinuxLibraryPath}: cannot open shared object file: No such file or directory\n`,
+      libraryIdentifier: "libgtk-3.so.0",
+      privateValues: ["LONG_LINUX_PRIVATE_TOKEN"],
+    },
+    {
+      fixture: "missing-runtime-library",
+      output:
+        `Error: Authorization: AWS4-HMAC-SHA256 ` +
+        `Credential=LONG_AWS_ACCESS_KEY/20260918/us-east-1/expo/aws4_request, ` +
+        `SignedHeaders=host;x-amz-date, Signature=VERY_SECRET_AWS_SIGNATURE ` +
+        `/opt/expo/react-native-devtools: error while loading shared libraries: ` +
+        `${longLinuxLibraryPath}: cannot open shared object file: No such file or directory\n`,
+      libraryIdentifier: "libgtk-3.so.0",
+      privateValues: ["LONG_AWS_ACCESS_KEY", "VERY_SECRET_AWS_SIGNATURE"],
+    },
+    {
+      fixture: "missing-runtime-library-dyld",
+      output:
+        `dyld[12345]: Authorization: Bearer LONG_DYLD_PRIVATE_TOKEN; ` +
+        `Library not loaded: ${longDyldLibraryPath}\n`,
+      libraryIdentifier: "libgtk-3.dylib",
+      privateValues: ["LONG_DYLD_PRIVATE_TOKEN"],
+    },
+    {
+      fixture: "missing-runtime-library-dyld",
+      output:
+        `dyld[12345]: Proxy-Authorization: Digest ` +
+        `username="preview-user", realm="private-preview", ` +
+        `nonce="PRIVATE_NONCE", uri="/expo", ` +
+        `response="VERY_SECRET_DIGEST_RESPONSE"; ` +
+        `Library not loaded: ${longDyldLibraryPath}\n`,
+      libraryIdentifier: "libgtk-3.dylib",
+      privateValues: [
+        "preview-user",
+        "PRIVATE_NONCE",
+        "VERY_SECRET_DIGEST_RESPONSE",
+      ],
+    },
+    {
+      fixture: "missing-runtime-library-windows",
+      output:
+        `Error: Authorization: Bearer LONG_WINDOWS_PRIVATE_TOKEN ` +
+        `The code execution cannot proceed because ${longWindowsLibraryPath} ` +
+        `was not found. Reinstalling the program may fix this problem.\n`,
+      libraryIdentifier: "libgtk-3-0.dll",
+      privateValues: ["LONG_WINDOWS_PRIVATE_TOKEN"],
+    },
+  ];
 
   try {
-    const result = runNodeScript([validatorPath], {
-      GITHUB_STEP_SUMMARY: summaryPath,
-      PREVIEW_PUBLIC_URL: malformedValue,
-      REPLIT_EXPO_DEV_DOMAIN: "fallback-preview.example.test",
-      PREVIEW_PUBLIC_TIMEOUT_MS: "25",
-      PREVIEW_STARTUP_TIMEOUT_MS: "2000",
-      PREVIEW_STARTUP_TEST_FIXTURE: "handoff-server",
-    });
+    for (const fixtureCase of cases) {
+      const logPath = join(temporaryDirectory, `${fixtureCase.fixture}.log`);
+      const summaryPath = join(temporaryDirectory, `${fixtureCase.fixture}.md`);
+      const fixture = runNodeScript([fixturePath], {
+        PREVIEW_STARTUP_TEST_FIXTURE: fixtureCase.fixture,
+        PREVIEW_STARTUP_TEST_OUTPUT: fixtureCase.output,
+      });
 
-    assert.equal(result.status, 1);
-    const summary = readFileSync(summaryPath, "utf8");
-    assert.match(
-      summary,
-      /Public Expo preview manifest URL configuration from PREVIEW_PUBLIC_URL is invalid/,
-    );
-    assert.ok(!summary.includes(malformedValue));
+      assert.equal(fixture.status, 1, fixtureCase.fixture);
+      assert.ok(
+        fixture.output.length > 384,
+        `${fixtureCase.fixture} fixture did not cross the long-path boundary`,
+      );
+      writeFileSync(logPath, fixture.output, "utf8");
+
+      const result = runNodeScript(
+        [validatorPath, "--log-file", logPath],
+        { GITHUB_STEP_SUMMARY: summaryPath },
+      );
+
+      assert.equal(result.status, 1, fixtureCase.fixture);
+      const summary = readFileSync(summaryPath, "utf8");
+      const diagnostic = summary.match(/\*\*Diagnosis:\*\* ([^\n]+)/)?.[1];
+      assert.ok(diagnostic, `${fixtureCase.fixture} summary omitted its diagnosis`);
+      assert.ok(
+        diagnostic.length <= 512,
+        `${fixtureCase.fixture} summary diagnostic exceeded the 512-character limit`,
+      );
+      for (const privateValue of fixtureCase.privateValues) {
+        assert.doesNotMatch(
+          summary,
+          new RegExp(escapeRegExp(privateValue)),
+          `${fixtureCase.fixture} leaked ${privateValue}`,
+        );
+      }
+      assert.match(
+        diagnostic,
+        new RegExp(escapeRegExp(fixtureCase.libraryIdentifier)),
+        `${fixtureCase.fixture} lost its library identifier`,
+      );
+      assert.match(
+        summary,
+        /\[redacted authorization\]/,
+        `${fixtureCase.fixture} omitted the authorization redaction`,
+      );
+    }
+  } finally {
+    rmSync(temporaryDirectory, { recursive: true, force: true });
+  }
+});
+
+test("CI summaries preserve direct preview-setting rejection reasons without values", () => {
+  const temporaryDirectory = mkdtempSync(
+    join(tmpdir(), "chat-preview-setting-rejection-summary-"),
+  );
+  const cases = [
+    {
+      name: "malformed selected setting",
+      value: "https://[preview-setting-secret",
+      expectedReason:
+        /Public Expo preview manifest URL configuration from PREVIEW_PUBLIC_URL is invalid/,
+    },
+    {
+      name: "non-HTTPS selected setting",
+      value: "http://preview-setting-secret.example.test/expo",
+      expectedReason: /Public Expo preview manifest URL must use HTTPS/,
+    },
+    {
+      name: "credential-bearing selected setting",
+      value:
+        "https://preview-user:preview-password@credential-preview.example.test/expo",
+      expectedReason:
+        /Public Expo preview manifest URL must not contain credentials/,
+    },
+  ];
+
+  try {
+    for (const [index, previewValue] of cases.entries()) {
+      const summaryPath = join(
+        temporaryDirectory,
+        `summary-${index}.md`,
+      );
+      const result = runNodeScript([validatorPath], {
+        GITHUB_STEP_SUMMARY: summaryPath,
+        PREVIEW_PUBLIC_URL: previewValue.value,
+        REPLIT_EXPO_DEV_DOMAIN: "fallback-preview.example.test",
+        PREVIEW_PUBLIC_TIMEOUT_MS: "25",
+        PREVIEW_STARTUP_TIMEOUT_MS: "2000",
+        PREVIEW_STARTUP_TEST_FIXTURE: "handoff-server",
+      });
+
+      assert.equal(result.status, 1, previewValue.name);
+      const summary = readFileSync(summaryPath, "utf8");
+      assert.match(summary, previewValue.expectedReason, previewValue.name);
+      assert.ok(
+        !summary.includes(previewValue.value),
+        `${previewValue.name} leaked its configured value`,
+      );
+      if (previewValue.name === "malformed selected setting") {
+        assert.doesNotMatch(
+          summary,
+          /https?:\/\/|authorization|proxy-authorization|password|passwd|secret|token/i,
+          `${previewValue.name} leaked credential-like text`,
+        );
+      }
+    }
   } finally {
     rmSync(temporaryDirectory, { recursive: true, force: true });
   }

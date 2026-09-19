@@ -53,6 +53,11 @@ vi.mock("@workspace/db", () => ({
         onConflictDoUpdate: () => Promise.resolve(),
       }),
     })),
+    update: vi.fn(() => ({
+      set: () => ({
+        where: () => Promise.resolve(),
+      }),
+    })),
   },
   roomBansTable: {
     id: "id",
@@ -65,6 +70,8 @@ vi.mock("@workspace/db", () => ({
     name: "name",
     createdBy: "createdBy",
     createdAt: "createdAt",
+    lastAccessedAt: "lastAccessedAt",
+    isActive: "isActive",
   },
   roomKickCooldownsTable: {
     roomId: "roomId",
@@ -155,6 +162,8 @@ describe("Socket.IO handler crash reporting", () => {
           name: "room-retry",
           createdBy: "user-ada",
           createdAt: new Date(),
+          lastAccessedAt: new Date(),
+          isActive: true,
         },
       ]);
 
@@ -184,6 +193,8 @@ describe("Socket.IO handler crash reporting", () => {
           name: "room-retry",
           createdBy: "user-ada",
           createdAt: new Date(),
+          lastAccessedAt: new Date(),
+          isActive: true,
         },
       ]);
 

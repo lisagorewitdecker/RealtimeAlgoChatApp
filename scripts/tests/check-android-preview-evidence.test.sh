@@ -4,8 +4,32 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 CHECKER="$ROOT_DIR/scripts/check-android-preview-evidence.sh"
-TEST_ROOT="$(mktemp -d)"
-trap 'rm -rf "$TEST_ROOT"' EXIT
+VALIDATOR="$ROOT_DIR/artifacts/chat-app/scripts/validate-preview-startup.mjs"
+TEST_PARENT="$(mktemp -d)"
+TEST_ROOT="$TEST_PARENT/fixtures"
+CLEANUP_GUARD="$TEST_PARENT/cleanup-must-not-escape-fixtures"
+mkdir -p "$TEST_ROOT"
+printf 'keep\n' >"$CLEANUP_GUARD"
+
+# ImageMagick 7 installs `magick`; Debian and Ubuntu (GitHub's hosted runners)
+# still package ImageMagick 6, whose `convert` accepts the same fixture-drawing
+# arguments.
+if ! command -v magick >/dev/null 2>&1 && command -v convert >/dev/null 2>&1; then
+  magick() {
+    convert "$@"
+  }
+fi
+
+cleanup_test_fixtures() {
+  rm -rf "$TEST_ROOT"
+  if [[ ! -f "$CLEANUP_GUARD" ]]; then
+    echo "Android preview evidence test cleanup escaped its fixture directory" >&2
+    return 1
+  fi
+  rm -rf "$TEST_PARENT"
+}
+
+trap cleanup_test_fixtures EXIT
 
 assert_contains() {
   local haystack="$1"
@@ -21,6 +45,14 @@ assert_not_contains() {
   local needle="$2"
   if [[ "$haystack" == *"$needle"* ]]; then
     printf 'Expected output not to contain %s.\n%s\n' "$needle" "$haystack" >&2
+    exit 1
+  fi
+}
+
+assert_file_not_exists() {
+  local path="$1"
+  if [[ -e "$path" ]]; then
+    printf 'Expected %s not to exist.\n' "$path" >&2
     exit 1
   fi
 }
@@ -54,8 +86,8 @@ write_record "$blocked_record" <<'EOF'
 
 | Boundary | Status | Evidence |
 | --- | --- | --- |
-| Public manifest reachability | PASS | Workspace curl returned HTTP 200. |
-| Local handoff probe (manifest and bundle) | NOT_RUN | The local probe was not run. |
+| Public manifest reachability | PASS | public manifest HTTP 200 (128 bytes) |
+| Local handoff probe (manifest and bundle) | NOT_RUN | Local manifest/bundle probe not run — no successful probe result was recorded |
 | Expo Go launch on physical Android | **BLOCKED** | No physical phone was available. |
 | Server-side native request evidence | **BLOCKED** | No native Android request was available. |
 EOF
@@ -102,6 +134,114 @@ if invalid_json_output="$(bash "$CHECKER" "$json_contract_record" 2>&1)"; then
 fi
 assert_contains "$invalid_json_output" "does not satisfy the redacted schema"
 assert_not_contains "$invalid_json_output" "GARBAGE"
+
+missing_validator_root="$TEST_ROOT/missing-validator"
+missing_validator_checker="$missing_validator_root/scripts/check-android-preview-evidence.sh"
+missing_validator_record="$missing_validator_root/validation-record.md"
+missing_validator_preflight="$missing_validator_root/android-preview-preflight.json"
+missing_validator_node_marker="$missing_validator_root/node-invoked"
+missing_validator_bin="$missing_validator_root/bin"
+missing_validator_sentinel="android-preview-missing-validator-evidence-sentinel"
+mkdir -p "$(dirname "$missing_validator_checker")" "$missing_validator_bin"
+cp "$CHECKER" "$missing_validator_checker"
+sed "s/No physical Android device was available/No physical Android device was available; $missing_validator_sentinel/g" \
+  "$blocked_record" >"$missing_validator_record"
+cp "$blocked_preflight" "$missing_validator_preflight"
+cat >"$missing_validator_bin/node" <<EOF
+#!/usr/bin/env bash
+printf '%s\n' invoked >"$missing_validator_node_marker"
+exit 0
+EOF
+chmod +x "$missing_validator_bin/node"
+if missing_validator_output="$(
+  PATH="$missing_validator_bin:$PATH" \
+    bash "$missing_validator_checker" "$missing_validator_record" "$missing_validator_preflight" 2>&1
+)"; then
+  printf 'Android evidence validation unexpectedly passed without its delegated validator.\n' >&2
+  exit 1
+fi
+assert_contains "$missing_validator_output" \
+  "The Android preview evidence check is missing its delegated validator dependency boundary: artifacts/chat-app/scripts/validate-preview-startup.mjs is not present in the checked-out commit. Restore that validator before changing the evidence record."
+assert_not_contains "$missing_validator_output" "$missing_validator_sentinel"
+assert_not_contains "$missing_validator_output" "No physical Android device was available"
+assert_file_not_exists "$missing_validator_node_marker"
+
+truncated_json_sentinel="android-preview-truncated-preflight-sentinel"
+cat >"$json_contract_path" <<EOF
+{"schema":"android-preview-handoff-preflight/v1","platform":"android","boundaries":{"publicManifestReachability":{"status":"PASS","evidence":"public manifest HTTP 200 (128 bytes)"},"localHandoffProbe":{"status":"NOT_RUN","evidence":"$truncated_json_sentinel"
+EOF
+if truncated_json_output="$(bash "$CHECKER" "$json_contract_record" 2>&1)"; then
+  printf 'Truncated Android preflight JSON unexpectedly passed.\n' >&2
+  exit 1
+fi
+assert_contains "$truncated_json_output" "does not satisfy the redacted schema"
+assert_not_contains "$truncated_json_output" "$truncated_json_sentinel"
+if truncated_json_direct_output="$(
+  node "$VALIDATOR" --validate-record "$json_contract_path" 2>&1
+)"; then
+  printf 'Truncated Android preflight JSON unexpectedly passed direct validation.\n' >&2
+  exit 1
+fi
+assert_contains "$truncated_json_direct_output" \
+  "Preview handoff preflight JSON is not valid JSON."
+assert_not_contains "$truncated_json_direct_output" "$truncated_json_sentinel"
+
+non_json_sentinel="android-preview-non-json-preflight-sentinel"
+cat >"$json_contract_path" <<EOF
+$non_json_sentinel
+This is not a JSON preflight record.
+EOF
+if non_json_output="$(bash "$CHECKER" "$json_contract_record" 2>&1)"; then
+  printf 'Non-JSON Android preflight content unexpectedly passed.\n' >&2
+  exit 1
+fi
+assert_contains "$non_json_output" "does not satisfy the redacted schema"
+assert_not_contains "$non_json_output" "$non_json_sentinel"
+if non_json_direct_output="$(
+  node "$VALIDATOR" --validate-record "$json_contract_path" 2>&1
+)"; then
+  printf 'Non-JSON Android preflight content unexpectedly passed direct validation.\n' >&2
+  exit 1
+fi
+assert_contains "$non_json_direct_output" \
+  "Preview handoff preflight JSON is not valid JSON."
+assert_not_contains "$non_json_direct_output" "$non_json_sentinel"
+
+unreadable_json_sentinel="android-preview-unreadable-preflight-sentinel"
+unreadable_root="$TEST_ROOT/unreadable-json"
+unreadable_record="$unreadable_root/validation-record.md"
+unreadable_json_path="$unreadable_root/android-preview-preflight.json"
+mkdir -p "$unreadable_root"
+cp "$blocked_record" "$unreadable_record"
+cat >"$unreadable_json_path" <<EOF
+{"schema":"android-preview-handoff-preflight/v1","platform":"android","sentinel":"$unreadable_json_sentinel"}
+EOF
+chmod 000 "$unreadable_json_path"
+
+if ((EUID == 0)); then
+  if ! command -v runuser >/dev/null 2>&1; then
+    printf 'Unreadable Android preflight fixture requires runuser when tests run as root.\n' >&2
+    exit 1
+  fi
+  # Root can bypass mode bits, so run the checker as an unprivileged account.
+  chmod 755 "$TEST_ROOT" "$unreadable_root"
+  unreadable_command=(
+    runuser --user nobody -- bash "$CHECKER" "$unreadable_record"
+    "$unreadable_json_path"
+  )
+else
+  unreadable_command=(
+    bash "$CHECKER" "$unreadable_record" "$unreadable_json_path"
+  )
+fi
+if unreadable_output="$("${unreadable_command[@]}" 2>&1)"; then
+  printf 'Unreadable Android preflight JSON unexpectedly passed.\n' >&2
+  exit 1
+fi
+assert_contains "$unreadable_output" "does not satisfy the redacted schema"
+assert_not_contains "$unreadable_output" "$unreadable_json_sentinel"
+assert_not_contains "$unreadable_output" "$unreadable_json_path"
+assert_not_contains "$unreadable_output" "EACCES"
 
 duplicate_json_sentinel="duplicate-preflight-secret"
 cat >"$json_contract_path" <<EOF
@@ -163,7 +303,10 @@ mkdir -p "$discovery_root/scripts" \
 cp "$CHECKER" "$discovery_root/scripts/"
 cp "$ROOT_DIR/scripts/find-duplicate-json-object-keys.mjs" \
   "$discovery_root/scripts/"
+cp "$ROOT_DIR/scripts/read-bounded-text.mjs" \
+  "$discovery_root/scripts/"
 cp "$ROOT_DIR/artifacts/chat-app/scripts/validate-preview-startup.mjs" \
+  "$ROOT_DIR/artifacts/chat-app/scripts/preview-startup-shared.mjs" \
   "$discovery_root/artifacts/chat-app/scripts/"
 write_record "$discovery_android_root/20260101T000000Z/validation-record.md" <<'EOF'
 # Older Android preview validation record
@@ -323,8 +466,70 @@ write_record "$pass_record" <<'EOF'
 | Redacted screenshot or exact phone error captured | PASS | Redacted screenshot: screenshots/preview-launch.png |
 | Screenshot redaction review | PASS | Redaction review: PASS — account identifiers, message content, tokens, and host details are absent. |
 EOF
-pass_output="$(bash "$CHECKER" "$pass_record" 2>&1)"
+pass_preflight="$(dirname "$pass_record")/android-preview-preflight.json"
+write_preflight "$pass_preflight" <<'EOF'
+{
+  "schema": "android-preview-handoff-preflight/v1",
+  "platform": "android",
+  "boundaries": {
+    "publicManifestReachability": {
+      "status": "PASS",
+      "evidence": "public manifest HTTP 200 (128 bytes)"
+    },
+    "localHandoffProbe": {
+      "status": "PASS",
+      "evidence": "manifest HTTP 200 (64 bytes); bundle HTTP 200 (4096 bytes)"
+    },
+    "expoGoLaunch": {
+      "status": "NOT_ASSESSED",
+      "evidence": "Requires a physical Android phone running stock Expo Go."
+    },
+    "serverNativeRequestEvidence": {
+      "status": "NOT_ASSESSED",
+      "evidence": "Requires filtered Metro or API evidence from that physical Expo Go session."
+    }
+  }
+}
+EOF
+sed -i \
+  -e 's#Workspace curl returned HTTP 200\.\|Public manifest returned HTTP 200\.\|public manifest HTTP 200 (128 bytes)#public manifest HTTP 200 (128 bytes)#' \
+  -e 's#Manifest and bundle returned HTTP 200\.\|The local probe was not run\.\|Local manifest/bundle probe not run — no successful probe result was recorded#manifest HTTP 200 (64 bytes); bundle HTTP 200 (4096 bytes)#' \
+  "$pass_record"
+pass_output="$(bash "$CHECKER" "$pass_record" "$pass_preflight" 2>&1)"
 assert_contains "$pass_output" "validation passed"
+assert_contains "$pass_output" \
+  "Screenshot inspection status: path=screenshots/preview-launch.png; metadata=COMPLETED; pixels=COMPLETED"
+assert_not_contains "$pass_output" "account identifiers, message content, tokens, and host details are absent"
+
+missing_ocr_bin="$TEST_PARENT/missing-ocr-bin"
+mkdir -p "$missing_ocr_bin"
+cat >"$missing_ocr_bin/tesseract" <<'EOF'
+#!/usr/bin/env bash
+exit 127
+EOF
+chmod +x "$missing_ocr_bin/tesseract"
+if missing_ocr_output="$(
+  PATH="$missing_ocr_bin:$PATH" bash "$CHECKER" "$pass_record" "$pass_preflight" 2>&1
+)"; then
+  printf 'PASS record unexpectedly passed without a working OCR runtime.\n' >&2
+  exit 1
+fi
+assert_contains "$missing_ocr_output" \
+  "Screenshot inspection status: path=screenshots/preview-launch.png; metadata=COMPLETED; pixels=NOT_COMPLETED"
+assert_contains "$missing_ocr_output" \
+  "The PASS record's screenshot pixel inspection could not run for screenshots/preview-launch.png."
+assert_not_contains "$missing_ocr_output" "preview-fixture"
+
+tampered_pass_preflight="$TEST_ROOT/pass-tampered-sidecar/android-preview-preflight.json"
+mkdir -p "$(dirname "$tampered_pass_preflight")"
+sed 's/public manifest HTTP 200 (128 bytes)/public manifest HTTP 200 (999 bytes)/' \
+  "$pass_preflight" >"$tampered_pass_preflight"
+if tampered_output="$(bash "$CHECKER" "$pass_record" "$tampered_pass_preflight" 2>&1)"; then
+  printf 'PASS record with unrelated sidecar byte count unexpectedly passed.\n' >&2
+  exit 1
+fi
+assert_contains "$tampered_output" \
+  "preflight JSON public manifest evidence does not match the Markdown record"
 
 phone_error_record="$TEST_ROOT/phone-error/validation-record.md"
 mkdir -p "$(dirname "$phone_error_record")"
@@ -333,6 +538,7 @@ sed \
   "$pass_record" >"$phone_error_record"
 phone_error_output="$(bash "$CHECKER" "$phone_error_record" 2>&1)"
 assert_contains "$phone_error_output" "validation passed"
+assert_not_contains "$phone_error_output" "Screenshot inspection status:"
 
 for field in "Device model" "Android version" "Expo Go version"; do
   for placeholder in TODO unknown none - placeholder pending blocked; do
@@ -462,6 +668,38 @@ write_png_with_text() {
     "$output_path"
 }
 
+write_android_text_fixture() {
+  local output_path="$1"
+  local text="$2"
+  magick \
+    -size 1440x2560 \
+    xc:white \
+    -background white \
+    -fill '#101828' \
+    -font DejaVu-Sans \
+    -pointsize 48 \
+    -gravity NorthWest \
+    -annotate +96+160 "$text" \
+    -resize 75% \
+    -strip \
+    -quality 72 \
+    "$output_path"
+}
+
+write_android_safe_fixture() {
+  local output_path="$1"
+  magick \
+    -size 1440x2560 \
+    xc:white \
+    -background white \
+    -fill white \
+    -gravity NorthWest \
+    -resize 75% \
+    -strip \
+    -quality 72 \
+    "$output_path"
+}
+
 declare -A forbidden_fixtures=(
   [account]='account_email=preview-fixture@example.test'
   [message]='message_body=preview-fixture-message'
@@ -487,6 +725,42 @@ for category in account message token host; do
   fi
   assert_contains "$forbidden_output" "forbidden ${category}"
   assert_not_contains "$forbidden_output" "${forbidden_fixtures[$category]}"
+done
+
+for image_format in jpg webp; do
+  safe_record="$TEST_ROOT/safe-${image_format}/validation-record.md"
+  safe_screenshot="$(dirname "$safe_record")/screenshots/safe.${image_format}"
+  mkdir -p "$(dirname "$safe_screenshot")"
+  write_android_safe_fixture "$safe_screenshot"
+  sed "s#screenshots/preview-launch.png#screenshots/safe.${image_format}#" \
+    "$pass_record" >"$safe_record"
+  safe_output="$(bash "$CHECKER" "$safe_record" 2>&1)"
+  assert_contains "$safe_output" "validation passed"
+  assert_not_contains "$safe_output" "forbidden"
+
+  for category in account message token host; do
+    formatted_forbidden_record="$TEST_ROOT/forbidden-${category}-${image_format}/validation-record.md"
+    formatted_forbidden_screenshot="$(dirname "$formatted_forbidden_record")/screenshots/forbidden-${category}.${image_format}"
+    mkdir -p "$(dirname "$formatted_forbidden_screenshot")"
+    write_android_text_fixture "$formatted_forbidden_screenshot" "${forbidden_fixtures[$category]}"
+    if strings -a "$formatted_forbidden_screenshot" 2>/dev/null |
+      grep -Fq -- "${forbidden_fixtures[$category]}"; then
+      printf 'Forbidden %s %s fixture unexpectedly retained the sensitive text in metadata.\n' \
+        "$category" "$image_format" >&2
+      exit 1
+    fi
+    sed "s#screenshots/preview-launch.png#screenshots/forbidden-${category}.${image_format}#" \
+      "$pass_record" >"$formatted_forbidden_record"
+    if formatted_forbidden_output="$(bash "$CHECKER" "$formatted_forbidden_record" 2>&1)"; then
+      printf 'PASS record with forbidden %s %s screenshot content unexpectedly passed.\n' \
+        "$category" "$image_format" >&2
+      exit 1
+    fi
+    assert_contains "$formatted_forbidden_output" "forbidden ${category}"
+    assert_contains "$formatted_forbidden_output" \
+      "screenshots/forbidden-${category}.${image_format}"
+    assert_not_contains "$formatted_forbidden_output" "${forbidden_fixtures[$category]}"
+  done
 done
 
 for placeholder in "" TODO pending blocked placeholder -; do
@@ -535,5 +809,8 @@ if unrelated_output="$(bash "$CHECKER" "$unrelated_blocked" 2>&1)"; then
   exit 1
 fi
 assert_contains "$unrelated_output" "required Android preview row"
+
+cleanup_test_fixtures
+trap - EXIT
 
 echo "Android preview evidence regression tests passed."

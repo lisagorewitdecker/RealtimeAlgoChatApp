@@ -5,7 +5,9 @@
   "type": "module",
   "scripts": {
     "hello": "tsx ./src/hello.ts",
-    "test:android-preflight": "bash ./tests/check-android-release-prerequisites.test.sh && bash ./tests/check-android-runner-procedure.test.sh",
+    "test:android-preflight": "bash ./tests/check-android-release-prerequisites.test.sh && bash ./tests/check-android-runner-procedure.test.sh && bash ./tests/check-android-release-runner-health.test.sh",
+    "test:ios-preflight": "bash ./tests/check-ios-release-prerequisites.test.sh",
+    "test:ios-runner": "bash ./tests/provision-ios-runner.test.sh",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "devDependencies": {

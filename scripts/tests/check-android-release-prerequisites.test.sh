@@ -5,6 +5,9 @@ set -euo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 WORKSPACE_ROOT="$(cd -- "$SCRIPT_DIR/../.." && pwd)"
 PREFLIGHT="$WORKSPACE_ROOT/scripts/check-android-release-prerequisites.sh"
+PINS="$WORKSPACE_ROOT/scripts/android-runner-pins.sh"
+PROVISION="$WORKSPACE_ROOT/scripts/provision-android-runner.sh"
+PROCEDURE="$WORKSPACE_ROOT/artifacts/chat-app/docs/native-large-text-device-check.md"
 BASH_BIN="$(command -v bash)"
 ENV_BIN="$(command -v env)"
 MKDIR_BIN="$(command -v mkdir)"
@@ -13,15 +16,81 @@ MKTEMP_BIN="$(command -v mktemp)"
 RM_BIN="$(command -v rm)"
 GREP_BIN="$(command -v grep)"
 
-test_root="$("$MKTEMP_BIN" -d)"
-trap '"$RM_BIN" -rf "$test_root"' EXIT
-"$MKDIR_BIN" -p "$test_root/sdk" "$test_root/home"
+source "$PINS"
+
+fail() {
+  printf '%s\n' "$1" >&2
+  exit 1
+}
+
+[[ "$ANDROID_RUNNER_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] ||
+  fail "Android runner version pin is not a semantic version."
+[[ "$ANDROID_RUNNER_SHA256" =~ ^[0-9a-f]{64}$ ]] ||
+  fail "Android runner SHA-256 pin is not a 64-character lowercase digest."
+[[ "$ANDROID_BUILD_TOOLS_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] ||
+  fail "Android build-tools version pin is not a semantic version."
+
+grep -Fq -- 'source "$SCRIPT_DIR/android-runner-pins.sh"' "$PROVISION" ||
+  fail "Android runner bootstrap does not source the shared pin contract."
+grep -Fq -- 'build-tools/$ANDROID_BUILD_TOOLS_VERSION:$PATH' "$PROVISION" ||
+  fail "Android runner bootstrap does not put the pinned build-tools version on PATH."
+grep -Fq -- '"build-tools;${ANDROID_BUILD_TOOLS_VERSION}"' "$PROVISION" ||
+  fail "Android runner bootstrap does not install the pinned build-tools version."
+grep -Fq -- 'source "$SCRIPT_DIR/android-runner-pins.sh"' "$PREFLIGHT" ||
+  fail "Android release preflight does not source the shared pin contract."
+grep -Fq -- \
+  '"$SDK_ROOT/build-tools/$ANDROID_BUILD_TOOLS_VERSION/aapt2"' \
+  "$PREFLIGHT" ||
+  fail "Android release preflight does not check the pinned build-tools path."
+
+runner_procedure="$(
+  sed -n \
+    '/^Install the pinned GitHub runner release/,/^Put the Android paths/p' \
+    "$PROCEDURE"
+)"
+documented_runner_version="$(
+  sed -nE 's/^RUNNER_VERSION=([0-9]+\.[0-9]+\.[0-9]+)$/\1/p' \
+    <<<"$runner_procedure"
+)"
+documented_runner_digest="$(
+  grep -Eo '[0-9a-f]{64}' <<<"$runner_procedure" | sort -u
+)"
+documented_build_tools_version="$(
+  grep -Eo 'build-tools/[0-9]+\.[0-9]+\.[0-9]+' "$PROCEDURE" |
+    sed 's|.*/||' | sort -u
+)"
+[[ "$documented_runner_version" == "$ANDROID_RUNNER_VERSION" ]] ||
+  fail "Procedure runner version disagrees with the shared pin contract."
+[[ "$documented_runner_digest" == "$ANDROID_RUNNER_SHA256" ]] ||
+  fail "Procedure runner digest disagrees with the shared pin contract."
+[[ "$documented_build_tools_version" == "$ANDROID_BUILD_TOOLS_VERSION" ]] ||
+  fail "Procedure build-tools version disagrees with the shared pin contract."
+
+test_parent="$("$MKTEMP_BIN" -d)"
+test_root="$test_parent/fixtures"
+cleanup_guard="$test_parent/cleanup-must-not-escape-fixtures"
+"$MKDIR_BIN" -p "$test_root"
+printf 'keep\n' >"$cleanup_guard"
+
+cleanup_test_fixtures() {
+  "$RM_BIN" -rf "$test_root"
+  if [[ ! -f "$cleanup_guard" ]]; then
+    echo "Android preflight test cleanup escaped its fixture directory" >&2
+    return 1
+  fi
+  "$RM_BIN" -rf "$test_parent"
+}
+
+trap cleanup_test_fixtures EXIT
+"$MKDIR_BIN" -p \
+  "$test_root/sdk/build-tools/$ANDROID_BUILD_TOOLS_VERSION" \
+  "$test_root/home"
 
 make_utilities() {
   local directory="$1"
   local include_timeout="$2"
   "$MKDIR_BIN" -p "$directory"
-  for command in uname tr tail sed head; do
+  for command in dirname uname tr tail sed head; do
     "$LN_BIN" -s "$(command -v "$command")" "$directory/$command"
   done
   if [[ "$include_timeout" == "yes" ]]; then
@@ -115,6 +184,9 @@ ready_path="$test_root/ready"
 ready_commands="$test_root/ready-commands"
 make_utilities "$ready_path" yes
 make_runner_commands "$ready_commands" "17.0.13"
+"$LN_BIN" -s \
+  "$ready_commands/aapt2" \
+  "$test_root/sdk/build-tools/$ANDROID_BUILD_TOOLS_VERSION/aapt2"
 ready_path="$ready_commands:$ready_path"
 
 ready_output="$(
@@ -262,5 +334,8 @@ assert_contains "$missing_output" "Required command is missing: sdkmanager"
 assert_contains "$missing_output" "Required Android SDK tool is missing: aapt2."
 assert_contains "$missing_output" "Required release value is missing: NATIVE_SMOKE_APP_ID"
 assert_not_contains "$missing_output" "secret-value-must-not-print"
+
+cleanup_test_fixtures
+trap - EXIT
 
 echo "Android preflight regression tests passed."

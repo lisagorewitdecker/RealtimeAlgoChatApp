@@ -6,6 +6,7 @@ import React, { useCallback, useState } from "react";
 import { ActivityIndicator, Platform, StyleSheet, TouchableOpacity } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { PRODUCT_NAME } from "@/constants/branding";
+import { AppleSignInButton } from "@/components/AppleSignInButton";
 import { KeyboardAwareScrollViewCompat } from "@/components/KeyboardAwareScrollViewCompat";
 import { ScaledText as Text } from "@/components/ScaledText";
 import { ScaledTextInput as TextInput } from "@/components/ScaledTextInput";
@@ -27,6 +28,7 @@ export default function SignInScreen() {
   const { signIn, setActive, isLoaded } = useSignIn();
   const { startOAuthFlow } = useOAuth({ strategy: "oauth_google" });
   const { startOAuthFlow: startXOAuthFlow } = useOAuth({ strategy: "oauth_x" });
+  const { startOAuthFlow: startAppleOAuthFlow } = useOAuth({ strategy: "oauth_apple" });
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [resetCode, setResetCode] = useState("");
@@ -63,6 +65,19 @@ export default function SignInScreen() {
       setLoading(false);
     }
   }, [startXOAuthFlow]);
+  const signInWithApple = useCallback(async () => {
+    try {
+      setLoading(true); setError("");
+      const { createdSessionId, setActive: activate } = await startAppleOAuthFlow();
+      if (!createdSessionId || !activate) throw new Error("Apple sign-in did not complete.");
+      await activate({ session: createdSessionId });
+      trackEvent("auth_completed", { flow: "sign_in", method: "apple" });
+    } catch (cause) {
+      setError(clerkError(cause));
+    } finally {
+      setLoading(false);
+    }
+  }, [startAppleOAuthFlow]);
 
   function clearReset() {
     setResetStep("signIn");
@@ -265,6 +280,7 @@ export default function SignInScreen() {
             <TouchableOpacity accessibilityRole="button" accessibilityLabel="Continue with X" disabled={loading} onPress={signInWithX} style={[styles.oauth, { borderColor: colors.border, borderRadius: colors.radius }]}>
               <Text style={[styles.oauthText, { color: colors.foreground }]}>Continue with X</Text>
             </TouchableOpacity>
+            <AppleSignInButton disabled={loading} onPress={signInWithApple} />
             <Text style={[styles.linkText, { color: colors.mutedForeground }]}>New here? <Link href={"/(auth)/sign-up" as never} style={{ color: colors.primary }}>Create an account</Link></Text>
           </>
         ) : (

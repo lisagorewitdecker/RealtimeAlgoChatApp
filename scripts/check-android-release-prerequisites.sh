@@ -8,6 +8,16 @@
 
 set -uo pipefail
 
+SCRIPT_PATH="${BASH_SOURCE[0]}"
+SCRIPT_DIR="${SCRIPT_PATH%/*}"
+if [[ "$SCRIPT_DIR" == "$SCRIPT_PATH" ]]; then
+  SCRIPT_DIR="."
+fi
+SCRIPT_DIR="$(cd -- "$SCRIPT_DIR" && pwd)"
+source "$SCRIPT_DIR/workflow-output-safety.sh"
+# shellcheck source=android-runner-pins.sh
+source "$SCRIPT_DIR/android-runner-pins.sh"
+
 failures=()
 
 record_failure() {
@@ -37,7 +47,9 @@ write_summary() {
     if ((${#failures[@]})); then
       echo
       echo "### Blocking prerequisites"
-      printf -- '- %s\n' "${failures[@]}"
+      for failure in "${failures[@]}"; do
+        printf -- '- %s\n' "$(sanitize_workflow_text "$failure")"
+      done
     fi
   } >&2
 
@@ -49,7 +61,9 @@ write_summary() {
       if ((${#failures[@]})); then
         echo
         echo "### Blocking prerequisites"
-        printf -- '- %s\n' "${failures[@]}"
+        for failure in "${failures[@]}"; do
+          printf -- '- %s\n' "$(sanitize_workflow_text "$failure")"
+        done
       fi
     } >>"$GITHUB_STEP_SUMMARY"
   fi
@@ -92,18 +106,11 @@ elif [[ ! -d "$SDK_ROOT" ]]; then
   record_failure "Android SDK directory does not exist: ${SDK_ROOT}"
 fi
 
-aapt2_ready=0
-if command -v aapt2 >/dev/null 2>&1; then
-  aapt2_ready=1
-elif [[ -n "$SDK_ROOT" && -d "$SDK_ROOT/build-tools" ]]; then
-  for aapt2_candidate in "$SDK_ROOT"/build-tools/*/aapt2; do
-    if [[ -x "$aapt2_candidate" ]]; then
-      aapt2_ready=1
-      break
-    fi
-  done
+aapt2_path=""
+if [[ -n "$SDK_ROOT" ]]; then
+  aapt2_path="$SDK_ROOT/build-tools/$ANDROID_BUILD_TOOLS_VERSION/aapt2"
 fi
-if ((aapt2_ready == 0)); then
+if [[ ! -x "$aapt2_path" ]]; then
   record_failure "Required Android SDK tool is missing: aapt2."
 fi
 

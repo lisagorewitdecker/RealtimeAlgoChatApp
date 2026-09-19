@@ -31,6 +31,7 @@ const androidLayoutSuites = [
   "AiPanelLayout",
   "EntryBranding",
   "ForgotPassword",
+  "KeyboardAwareScrollViewCompat",
   "NewRoom",
   "ProfileModeration",
   "Room",

@@ -14,3 +14,9 @@ For subprocess fetch stubs that distinguish public and local probes, match local
 **Why:** A full-origin match omitted the ephemeral local port, so a supposed bundle stall passed through and the CLI regression test falsely reported a successful local probe.
 
 **How to apply:** Keep public URL matching exact for redaction coverage, and use `requestUrl.hostname === "127.0.0.1"` plus the expected path for local timeout fixtures.
+
+Live child-process fixtures need more deadline headroom than direct fetch-unit stubs.
+
+**Why:** Process startup and the first local request can consume a very small handoff budget before the fixture flushes response headers, making a body-stall assertion fail before the intended resource is reached.
+
+**How to apply:** Give live Metro stall fixtures a startup-safe local deadline while keeping direct request tests tight enough to exercise the abort path.
