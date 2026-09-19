@@ -72,11 +72,11 @@ if ! command -v maestro >/dev/null 2>&1 && [[ -d "$HOME/.maestro/bin" ]]; then
 fi
 require_command maestro
 
-booted_devices="$(xcrun simctl list devices booted)"
-device_udid="$(
-  grep -F "$IOS_DEVICE_NAME (" <<<"$booted_devices" |
-    sed -n 's/.*(\([0-9A-Fa-f-]\{8,\}\)) (Booted).*/\1/p' |
-    head -n 1
+device_udid="$({
+  grep -F "$IOS_DEVICE_NAME (" <<<"$booted_devices" || true
+} |
+  sed -n 's/.*(\([0-9A-Fa-f-]\{8,\}\)) (Booted).*/\1/p' |
+  head -n 1
 )"
 
 if [[ -z "$device_udid" ]]; then
