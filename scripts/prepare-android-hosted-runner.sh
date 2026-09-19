@@ -17,7 +17,7 @@ AVD_NAME="${ANDROID_NATIVE_AVD_NAME:-native-small-api35}"
 SYSTEM_IMAGE="system-images;android-${ANDROID_API_LEVEL};google_apis;x86_64"
 RUNNER_TEMP="${RUNNER_TEMP:-/tmp}"
 SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
-MAESTRO_INSTALLER_URL="${MAESTRO_INSTALLER_URL:-https://get.maestro.mobile.dev}"
+MAESTRO_INSTALLER_URL="https://get.maestro.mobile.dev"
 MAESTRO_INSTALLER_SHA256="${MAESTRO_INSTALLER_SHA256:?MAESTRO_INSTALLER_SHA256 is required for verified Maestro installation.}"
 
 if [[ -z "$SDK_ROOT" || ! -d "$SDK_ROOT" ]]; then
@@ -45,7 +45,7 @@ if ! command -v maestro >/dev/null 2>&1; then
   trap 'rm -f "$maestro_installer"' EXIT
   curl --fail --location --silent --show-error "$MAESTRO_INSTALLER_URL" --output "$maestro_installer"
   printf '%s  %s\n' "$MAESTRO_INSTALLER_SHA256" "$maestro_installer" | sha256sum -c -
-  bash "$maestro_installer"
+  env -u EAS_TOKEN bash "$maestro_installer"
   rm -f "$maestro_installer"
   trap - EXIT
 fi
