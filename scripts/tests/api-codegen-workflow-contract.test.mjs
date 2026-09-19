@@ -3,6 +3,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import {
   appendFileSync,
   copyFileSync,
+  existsSync,
   lstatSync,
   mkdtempSync,
   mkdirSync,
@@ -302,6 +303,9 @@ function createGeneratedClientFixture() {
 
     const mirrorNodeModules = (relativePath) => {
       const source = path.join(workspaceRoot, relativePath, "node_modules");
+      if (!existsSync(source)) {
+        return;
+      }
       const destination = path.join(fixtureRoot, relativePath, "node_modules");
       mkdirSync(destination, { recursive: true });
 
