@@ -77,6 +77,7 @@
 - [GitHub connection workflow scope](github-connection-workflow-scope.md) — cannot touch workflow files or logs; pushes need a valid Git Providers grant or owner PAT; check redactions first.
 - [Merging GitHub main](github-main-merge-policy.md) — Copilot autofix commits on GitHub can be syntactically broken duplicates; syntax-check origin/main's side and validate in a `.local/` worktree.
 - [Open merges vs task merges](open-merges-vs-task-merges.md) — platform task merges hard-reset the main checkout and destroy any in-progress merge; merge in a git worktree, then fast-forward.
+- [GitHub branch sync](github-branch-sync.md) — development/production mirror GitHub main by fast-forward push (validate in a `.local/` worktree, workflow token); the archived stale local development lineage is never merged.
 - [Android preflight JSON contract](android-preflight-json-contract.md) — validate optional redacted sidecars and compare public/local statuses with the Markdown handoff record.
 - [GitHub ruleset status checks](github-ruleset-status-checks.md) — required checks accept an omitted integration ID; sending JSON null is rejected by the ruleset API.
 - [Publish failure messages can be stale](publish-failure-card-staleness.md) — repeated "build failed" messages may reference one old build; confirm a newer build exists before re-diagnosing.

@@ -1,0 +1,15 @@
+---
+name: GitHub development/production branch sync
+description: How the GitHub development and production branches relate to main, how to bring them up to date safely, what a branch push triggers on GitHub, and why the workspace's old local development lineage was archived instead of merged.
+---
+
+GitHub `development` and `production` are kept as plain mirrors of GitHub `main`: when they fall behind, fast-forward them with a normal push of main's commit (`git push origin <main-sha>:refs/heads/development <main-sha>:refs/heads/production`), never a force-push or rebase. On 2026-09-19 both were pure ancestors of main (no branch-only commits), so the sync was a fast-forward and all three branches ended on the same commit.
+
+**Why:** production had been left on an older tip without the current release workflow, so anything deployed or reviewed from it diverged from what main had validated, and the API compatibility check's pull-request baseline is `origin/development:lib/api-spec/openapi.yaml` (push runs skip enforcement by design), so a stale development branch skews every contract comparison.
+
+**How to apply:**
+- Validate the exact commit first in a `.local/` worktree: `pnpm install --frozen-lockfile --offline` (~15 s), `pnpm run typecheck`, `pnpm test:unit --run` (copy `artifacts/api-server/test-results/.last-run.json` in first), and `pnpm validate:api-codegen`; scan the tree for conflict markers and uploaded build outputs (`dist/`, `.tsbuildinfo`). `artifacts/chat-app/plugins/withSentryNativeUpload (copy).js` is a deliberate tracked fixture, not a stray upload.
+- Prove write access with `git push --dry-run` through the throwaway `GIT_ASKPASS` recipe (workflow-scoped token) — the range contains workflow files. Ruleset1 is active but applied to none of main/development/production (`/rules/branches/<name>` returns `[]`), so direct pushes are accepted; re-check before assuming.
+- Know what fires: a development push runs "API generated clients" and Codacy; a production push runs ESLint, EthicalCheck, and SonarCloud. `mobile-release.yml` is `workflow_dispatch` only, so a branch push never publishes. ESLint runs *only* on production, so main's tree accumulates lint errors that surface only at sync time (18 errors in 5 files on 2026-09-19). EthicalCheck fails at "Set up job" on every branch since at least 2026-09-18; that is not caused by the sync.
+- Confirm the result through the GitHub API (`/compare/main...development` should report `identical`) rather than trusting the push output alone.
+- The workspace's local `development` carried 17 commits dated 2026-09-14 that were never on GitHub: task merges that landed on the checked-out branch and whose content main later superseded (every changed blob was found in main's history or identical). They live under `archive/development-stale-2026-09-14`; do not merge that lineage back into development or main — repoint the local branch at `origin/development` instead. Local `production` was a plain ancestor and fast-forwarded with `git fetch origin production:production`.
