@@ -554,7 +554,22 @@ if ignored_collection_output="$(
   exit 1
 fi
 assert_contains "$ignored_collection_output" \
-  "Native evidence collection contains an untrusted non-image file: untracked/oversized.txt."
+  "Native evidence collection contains an untrusted file: untracked/oversized.txt."
+
+ignored_png_collection_root="$TEST_ROOT/ignored-png-collection-size"
+write_valid_run "$ignored_png_collection_root" ios
+mkdir -p "$ignored_png_collection_root/ios/20260909T120000Z/untracked"
+printf 'png sentinel\n' > \
+  "$ignored_png_collection_root/ios/20260909T120000Z/untracked/private.png"
+if ignored_png_collection_output="$(
+  bash "$CHECKER" --check-collection-size \
+    "$ignored_png_collection_root/ios/20260909T120000Z" 2>&1
+)"; then
+  echo "untrusted png collection file unexpectedly passed" >&2
+  exit 1
+fi
+assert_contains "$ignored_png_collection_output" \
+  "Native evidence collection contains an untrusted file: untracked/private.png."
 
 valid_root="$TEST_ROOT/valid"
 write_valid_run "$valid_root" ios
