@@ -315,7 +315,7 @@ function getCompatibilityResult(run, jobsResponse, expectedConclusion) {
   );
   if (!step || step.conclusion !== expectedConclusion) {
     throw new Error(
-      `workflow run did not report API compatibility as ${expectedConclusion}`,
+      `workflow run ${run.id} did not report API compatibility as ${expectedConclusion}`,
     );
   }
   return {
