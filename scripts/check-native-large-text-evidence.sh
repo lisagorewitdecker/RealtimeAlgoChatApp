@@ -31,7 +31,6 @@ source "$ROOT_DIR/scripts/native-release-recovery-contract.sh"
 check_native_text_evidence_sizes() {
   local results_dir="$1"
   local path
-  local -a evidence_paths=()
   local -a sorted_evidence_paths=()
   local relative_path
   local file_size
@@ -42,15 +41,20 @@ check_native_text_evidence_sizes() {
     return 0
   fi
 
-  while IFS= read -r -d '' path; do
-    evidence_paths+=("$path")
-  done < <(find "$results_dir" -type f -print0)
-
-  if ((${#evidence_paths[@]} > 0)); then
-    mapfile -t sorted_evidence_paths < <(
-      printf '%s\n' "${evidence_paths[@]}" | LC_ALL=C sort
-    )
-  fi
+  mapfile -d '' -t sorted_evidence_paths < <(
+    find "$results_dir" -type f -print0 |
+      perl -0e '
+        my @paths;
+        while (defined(my $path = <>)) {
+          chomp $path;
+          push @paths, $path;
+        }
+        if (@paths) {
+          print join "\0", sort @paths;
+          print "\0";
+        }
+      '
+  )
 
   for path in "${sorted_evidence_paths[@]}"; do
     relative_path="${path#"$results_dir"/}"
