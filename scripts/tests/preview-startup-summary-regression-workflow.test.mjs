@@ -81,15 +81,19 @@ function runWorkflowVerificationStep() {
   const githubStepSummaryPath = path.join(temporaryDirectory, "summary.md");
   writeFileSync(scriptPath, workflow.jobs["verify-hosted-summary"].steps[1].run);
 
-  const result = spawnSync("bash", ["-euo", "pipefail", scriptPath], {
-    cwd: workspaceRoot,
-    env: {
-      ...process.env,
-      GITHUB_STEP_SUMMARY: githubStepSummaryPath,
-      REVIEWED_REF: "preview-startup-summary-regression-test-ref",
+  const result = spawnSync(
+    "bash",
+    ["-euo", "pipefail", "-c", ". \"$1\"", "bash", scriptPath],
+    {
+      cwd: workspaceRoot,
+      env: {
+        ...process.env,
+        GITHUB_STEP_SUMMARY: githubStepSummaryPath,
+        REVIEWED_REF: "preview-startup-summary-regression-test-ref",
+      },
+      encoding: "utf8",
     },
-    encoding: "utf8",
-  });
+  );
 
   try {
     const summary = existsSync(githubStepSummaryPath)
