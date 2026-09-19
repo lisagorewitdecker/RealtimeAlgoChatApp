@@ -3499,10 +3499,11 @@ test("iOS preview evidence covers renamed records and blocks malformed changes",
     }).stdout.trim();
 
     const checkerInvokedPath = path.join(fixtureRoot, "checker-invoked");
+    const checkerArgsLogPath = path.join(fixtureRoot, "checker-args.log");
     writeStub(
       binDirectory,
       "pnpm",
-      `set -euo pipefail\ntouch ${shellQuote(checkerInvokedPath)}\nshift 3\nexec bash "$IOS_PREVIEW_CHECKER" "$@"`,
+      `set -euo pipefail\ntouch ${shellQuote(checkerInvokedPath)}\nchecker_args=()\nfound_separator=0\nfor arg in "$@"; do\n  if [[ "$arg" == "--" ]]; then\n    found_separator=1\n    continue\n  fi\n  if ((found_separator)); then\n    checker_args+=("$arg")\n  fi\ndone\nprintf '%s\\t%s\\n' "\${checker_args[0]}" "\${checker_args[1]:-}" >> "$IOS_PREVIEW_ARGS_LOG"\nexec bash "$IOS_PREVIEW_CHECKER" "\${checker_args[@]}"`,
     );
     mkdirSync(path.join(fixtureRoot, "scripts"), { recursive: true });
     writeFileSync(
@@ -3535,6 +3536,7 @@ test("iOS preview evidence covers renamed records and blocks malformed changes",
         REVIEWED_REF: "refs/heads/mobile-v0.0.0",
         GITHUB_SHA: headSha,
         GITHUB_STEP_SUMMARY: summaryPath,
+        IOS_PREVIEW_ARGS_LOG: checkerArgsLogPath,
       },
     });
     return {
@@ -3547,8 +3549,17 @@ test("iOS preview evidence covers renamed records and blocks malformed changes",
       recordPaths: recordPaths.map((record) =>
         path.relative(fixtureRoot, record),
       ),
+      preflightPaths: preflightPaths.map((preflight) =>
+        path.relative(fixtureRoot, preflight),
+      ),
       summary: readFileSync(summaryPath, "utf8"),
       checkerInvoked: existsSync(checkerInvokedPath),
+      checkerArgs: existsSync(checkerArgsLogPath)
+        ? readFileSync(checkerArgsLogPath, "utf8")
+            .trim()
+            .split("\n")
+            .map((line) => line.split("\t"))
+        : [],
     };
   }
 
@@ -4011,6 +4022,77 @@ PRIVATE_IOS_EVIDENCE_MARKER
     /- Changed records checked: \*\*1\*\*/,
     "a preflight-only iOS change must still count its paired validation record",
   );
+
+  const changedIosPreflight = iosBlockedPreflight.replace(
+    "public manifest HTTP 200 (128 bytes)",
+    "public manifest HTTP 200 (256 bytes)",
+  );
+  const pairedAlongsideRecord = runIosPreviewJob("paired-alongside-record", {
+    recordText: [
+      {
+        timestamp: "20260915T120000Z",
+        baseText: blockedRecord,
+        text: blockedRecord.replace(
+          "Public edge was reachable.",
+          "Public edge remained reachable.",
+        ),
+        basePreflight: iosBlockedPreflight,
+        preflight: changedIosPreflight,
+      },
+      {
+        timestamp: "20260915T120500Z",
+        baseText: blockedRecord,
+        text: blockedRecord.replace(
+          "Public edge was reachable.",
+          "Public edge was reachable after a second record change.",
+        ),
+      },
+    ],
+  });
+  assert.equal(
+    pairedAlongsideRecord.result.status,
+    0,
+    "a changed iOS record and sibling preflight alongside another record must pass",
+  );
+  assert.equal(
+    pairedAlongsideRecord.summary.match(
+      /- Changed records checked: \*\*2\*\*/g,
+    )?.length ?? 0,
+    1,
+    "a paired iOS change must count its record once alongside another changed record",
+  );
+  assert.deepEqual(
+    pairedAlongsideRecord.checkerArgs,
+    [
+      [
+        pairedAlongsideRecord.recordPaths[0],
+        pairedAlongsideRecord.preflightPaths[0],
+      ],
+      [pairedAlongsideRecord.recordPaths[1]],
+    ],
+    "the iOS checker must receive the changed sidecar with its record without duplicating the record",
+  );
+  for (const recordPath of pairedAlongsideRecord.recordPaths) {
+    const escapedPath = recordPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const recordLinkPattern = new RegExp(
+      `\\[${escapedPath}\\]\\(https://github\\.example/example/chat-app/blob/[^)]+/${escapedPath}\\)`,
+      "g",
+    );
+    const recordSectionPattern = new RegExp(
+      `### \\[${escapedPath}\\]\\(https://github\\.example/example/chat-app/blob/[^)]+/${escapedPath}\\)[\\s\\S]*?(?=\\n### |$)`,
+      "g",
+    );
+    assert.equal(
+      pairedAlongsideRecord.summary.match(recordLinkPattern)?.length ?? 0,
+      1,
+      `each changed iOS record must have one stable link: ${recordPath}`,
+    );
+    assert.equal(
+      pairedAlongsideRecord.summary.match(recordSectionPattern)?.length ?? 0,
+      1,
+      `each changed iOS record must have one validation section: ${recordPath}`,
+    );
+  }
 });
 
 // ---------------------------------------------------------------------------
