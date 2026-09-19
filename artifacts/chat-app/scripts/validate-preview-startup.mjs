@@ -343,6 +343,12 @@ function sanitizeRecordedStartupOutput(value) {
     const suffix = path.slice(path.indexOf(libraryName) + libraryName.length);
     return `${path.slice(0, 3)}[redacted]\\${libraryName}${suffix}`;
   };
+  const sanitizeWindowsProjectPath = (path) => {
+    const pathSegments = path.split("\\");
+    const preservedSegments = pathSegments.slice(-2).join("\\");
+    if (!preservedSegments) return `${path.slice(0, 3)}[redacted]`;
+    return `${path.slice(0, 3)}[redacted]\\${preservedSegments}`;
+  };
   const sanitizedLines = value
     .split(/\r?\n/)
     .map((line) =>
@@ -361,7 +367,7 @@ function sanitizeRecordedStartupOutput(value) {
           sanitizeWindowsPath,
         )
         .replace(/Starting project at ([A-Za-z]:\\[^"\r\n]+)/g, (_, path) => {
-          return `Starting project at ${sanitizeWindowsPath(path)}`;
+          return `Starting project at ${sanitizeWindowsProjectPath(path)}`;
         })
         .slice(0, MAX_RECORDED_STARTUP_LINE_LENGTH),
     )
