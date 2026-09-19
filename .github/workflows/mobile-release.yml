@@ -1517,6 +1517,12 @@ jobs:
           SENTRY_EVIDENCE_PATH: ${{ env.NATIVE_SMOKE_RESULTS_DIR }}/sentry-source-map-evidence.json
         run: bash scripts/run-untrusted-checker.sh node scripts/verify-sentry-native-event.mjs
 
+      - name: Check iOS native evidence text sizes before upload
+        id: ios-native-evidence-size
+        if: ${{ always() }}
+        run: bash scripts/run-untrusted-checker.sh bash scripts/check-native-large-text-evidence.sh \
+          --check-collection-size "$NATIVE_SMOKE_RESULTS_DIR"
+
       - name: Summarize iOS readiness
         if: always()
         env:
@@ -1530,6 +1536,7 @@ jobs:
           IOS_NATIVE_BRANDING_RESULT: ${{ steps.ios-native-branding.outcome }}
           IOS_MAESTRO_RESULT: ${{ steps.ios-maestro.outcome }}
           IOS_NATIVE_EVIDENCE_RESULT: ${{ steps.ios-native-evidence.outcome }}
+          IOS_NATIVE_EVIDENCE_SIZE_RESULT: ${{ steps.ios-native-evidence-size.outcome }}
           IOS_SENTRY_TRIGGER_RESULT: ${{ steps.ios-sentry-trigger.outcome }}
           IOS_SENTRY_VERIFICATION_RESULT: ${{ steps.ios-sentry-verification.outcome }}
         run: |
@@ -1560,6 +1567,7 @@ jobs:
           add_check "Installed native candidate" "$IOS_NATIVE_BRANDING_RESULT"
           add_check "Maestro" "$IOS_MAESTRO_RESULT"
           add_check "Native large-text evidence" "$IOS_NATIVE_EVIDENCE_RESULT"
+          add_check "Native evidence text-size safety gate" "$IOS_NATIVE_EVIDENCE_SIZE_RESULT"
           add_check "Controlled Sentry error" "$IOS_SENTRY_TRIGGER_RESULT"
           add_check "Readable Sentry source maps" "$IOS_SENTRY_VERIFICATION_RESULT"
 
@@ -1593,6 +1601,7 @@ jobs:
 
       - name: Create trusted iOS native evidence digest manifest
         id: ios-native-evidence-digest
+        if: ${{ always() && steps.ios-native-evidence-size.outcome == 'success' }}
         run: |
           set -euo pipefail
           manifest="$(
@@ -1615,7 +1624,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Upload iOS native smoke artifacts
-        if: always()
+        if: ${{ always() && steps.ios-native-evidence-size.outcome == 'success' }}
         id: upload-ios-native-smoke
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
@@ -1864,8 +1873,15 @@ jobs:
           SENTRY_EVIDENCE_PATH: ${{ env.NATIVE_SMOKE_RESULTS_DIR }}/sentry-source-map-evidence.json
         run: bash scripts/run-untrusted-checker.sh node scripts/verify-sentry-native-event.mjs
 
+      - name: Check Android native evidence text sizes before upload
+        id: android-native-evidence-size
+        if: ${{ always() }}
+        run: bash scripts/run-untrusted-checker.sh bash scripts/check-native-large-text-evidence.sh \
+          --check-collection-size "$NATIVE_SMOKE_RESULTS_DIR"
+
       - name: Create trusted Android native evidence digest manifest
         id: android-native-evidence-digest
+        if: ${{ always() && steps.android-native-evidence-size.outcome == 'success' }}
         run: |
           set -euo pipefail
           manifest="$(
@@ -1888,7 +1904,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Upload Android native smoke artifacts
-        if: always()
+        if: ${{ always() && steps.android-native-evidence-size.outcome == 'success' }}
         id: upload-android-native-smoke
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:

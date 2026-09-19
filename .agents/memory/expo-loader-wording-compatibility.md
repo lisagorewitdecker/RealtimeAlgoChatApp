@@ -27,3 +27,14 @@ not be uploaded as raw logs.
 **How to apply:** Use the real-platform workflow after Expo or React Native
 upgrades; compare loader identifiers and failure categories after redaction,
 not private absolute paths.
+
+Real-platform evidence must separate runner smoke/preflight failures from
+launcher capture and validator revalidation results. A platform job that stops
+before capture is not evidence that launcher wording changed.
+
+**Why:** A hosted Windows smoke check can fail before the Expo launcher starts,
+while another platform completes capture and revalidation successfully.
+
+**How to apply:** Record each platform's capture and comparison status
+independently; retain no raw runner output, and do not refresh samples or parser
+patterns unless a redacted launcher capture actually shows new wording.

@@ -9,6 +9,7 @@ fi
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
 CHAT_APP_DIR="$ROOT_DIR/artifacts/chat-app"
+# shellcheck source=scripts/workflow-output-safety.sh
 source "$ROOT_DIR/scripts/workflow-output-safety.sh"
 WRITE_REVIEW_RECORD_TEMPLATE="$CHAT_APP_DIR/e2e/native-large-text/write-review-record-template.sh"
 RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)"
@@ -155,6 +156,7 @@ export NATIVE_SMOKE_CALL_SCREENSHOT_DIR="$RESULTS_DIR/call-surface"
 mkdir -p "$NATIVE_SMOKE_SCREENSHOT_DIR" "$NATIVE_SMOKE_CALL_SCREENSHOT_DIR"
 if [[ -n "${NATIVE_SMOKE_BUILD_ID:-}" ]]; then
   printf '%s\n' "$NATIVE_SMOKE_BUILD_ID" > "$RESULTS_DIR/candidate-build-id.txt"
+  # shellcheck source=artifacts/chat-app/e2e/native-large-text/write-review-record-template.sh
   source "$WRITE_REVIEW_RECORD_TEMPLATE" \
     "$RESULTS_DIR/review-record.template.txt" \
     "$PLATFORM" \
@@ -326,6 +328,11 @@ fi
 CALL_SCREENSHOT_COUNT="$(find "$NATIVE_SMOKE_CALL_SCREENSHOT_DIR" -type f -name '*.png' | wc -l | tr -d ' ')"
 if [[ "$CALL_SCREENSHOT_COUNT" -ne 2 ]]; then
   echo "Expected 2 independent call screenshots, found $CALL_SCREENSHOT_COUNT." >&2
+  exit 1
+fi
+
+if ! bash "$ROOT_DIR/scripts/check-native-large-text-evidence.sh" \
+  --check-collection-size "$RESULTS_DIR"; then
   exit 1
 fi
 

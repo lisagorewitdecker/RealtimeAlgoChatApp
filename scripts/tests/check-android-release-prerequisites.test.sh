@@ -16,6 +16,7 @@ MKTEMP_BIN="$(command -v mktemp)"
 RM_BIN="$(command -v rm)"
 GREP_BIN="$(command -v grep)"
 
+# shellcheck source=scripts/android-runner-pins.sh
 source "$PINS"
 
 fail() {
