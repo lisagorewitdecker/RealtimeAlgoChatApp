@@ -31,6 +31,8 @@ source "$ROOT_DIR/scripts/native-release-recovery-contract.sh"
 check_native_text_evidence_sizes() {
   local results_dir="$1"
   local path
+  local -a evidence_paths=()
+  local -a sorted_evidence_paths=()
   local relative_path
   local file_size
   local oversized=0
@@ -41,6 +43,16 @@ check_native_text_evidence_sizes() {
   fi
 
   while IFS= read -r -d '' path; do
+    evidence_paths+=("$path")
+  done < <(find "$results_dir" -type f -print0)
+
+  if ((${#evidence_paths[@]} > 0)); then
+    mapfile -t sorted_evidence_paths < <(
+      printf '%s\n' "${evidence_paths[@]}" | LC_ALL=C sort
+    )
+  fi
+
+  for path in "${sorted_evidence_paths[@]}"; do
     relative_path="${path#"$results_dir"/}"
     if [[ ! "$relative_path" =~ $TRUSTED_EVIDENCE_PATH_PATTERN ]]; then
       echo "Native evidence collection contains an untrusted file: ${relative_path}." >&2
@@ -60,7 +72,7 @@ check_native_text_evidence_sizes() {
       echo "Native evidence text file exceeds the ${MAX_NATIVE_TEXT_EVIDENCE_LABEL} release evidence limit: ${relative_path}." >&2
       oversized=1
     fi
-  done < <(find "$results_dir" -type f -print0 | LC_ALL=C sort -z)
+  done
 
   if ((oversized)); then
     echo "Native evidence collection failed its bounded text-file size check; no artifact will be uploaded." >&2
