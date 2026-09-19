@@ -34,10 +34,21 @@ assert_file_contains() {
   fi
 }
 
+assert_file_not_contains() {
+  local path="$1"
+  local unexpected="$2"
+  if grep -Fq -- "$unexpected" "$path"; then
+    printf 'Expected output file not to contain: %s\n' "$unexpected" >&2
+    cat "$path" >&2
+    exit 1
+  fi
+}
+
 run_case() {
   local case_name="$1"
   local mode="$2"
   local expected_fragment="$3"
+  local expect_skip_message="$4"
   local fixture_root="$TEST_ROOT/$case_name"
   local stop_file="$TEST_PARENT/$case_name.stop"
   local output_path="$fixture_root/suite-output.txt"
@@ -70,8 +81,15 @@ run_case() {
       exit 0
     fi
 
+    if [[ "$mode" == "stable" ]]; then
+       while [[ ! -f "$stop_file" ]]; do
+         sleep 0.01
+       done
+       exit 0
+    fi
+
     while [[ ! -f "$stop_file" ]]; do
-      printf '{"status":"during","tick":%s}\n' "$iteration" > "$saved_status"
+       printf '{"status":"during","tick":%s}\n' "$iteration" > "$saved_status"
       iteration=$((iteration + 1))
       sleep 0.01
     done
@@ -108,13 +126,19 @@ run_case() {
     exit 1
   fi
 
-  assert_file_contains "$output_path" \
-    "Skipping the saved API test status cleanup guard: $saved_status $expected_fragment"
+  if [[ "$expect_skip_message" == "yes" ]]; then
+    assert_file_contains "$output_path" \
+      "Skipping the saved API test status cleanup guard: $saved_status $expected_fragment"
+  else
+    assert_file_not_contains "$output_path" \
+      "Skipping the saved API test status cleanup guard:"
+  fi
   assert_file_contains "$output_path" \
     "Native large-text evidence completeness regression tests passed."
 }
 
-run_case "concurrent-status-rewrite" "rewrite" "changed during the test"
-run_case "concurrent-status-delete" "delete" "disappeared during the test"
+run_case "concurrent-status-stable" "stable" "" "no"
+run_case "concurrent-status-rewrite" "rewrite" "changed during the test" "yes"
+run_case "concurrent-status-delete" "delete" "disappeared during the test" "yes"
 
 echo "Concurrent saved-status native evidence regression tests passed."
