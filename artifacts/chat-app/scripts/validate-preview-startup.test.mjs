@@ -231,6 +231,19 @@ test("keeps the primary startup failure when a later loader line is present", ()
   const output = [
     "\u001b[31mReact Native DevTools launcher failed to start: primary failure detail\u001b[0m",
     "\u001b[31mError while loading shared libraries: libgtk-3.so.0: cannot open shared object file\u001b[0m",
+  ].join("\n");
+
+  assert.throws(
+    () => validatePreviewOutput(output),
+    (error) => {
+      assert.match(error.message, /Expo preview startup error: .*primary failure detail/);
+      assert.doesNotMatch(error.message, /missing runtime library/i);
+      assert.doesNotMatch(error.message, /loader wording changed/i);
+      return true;
+    },
+  );
+});
+
 test("prefers the real startup failure over unrelated loader-like output", () => {
   const output = [
     "React Native DevTools launcher failed to start: preview bundle crashed",
@@ -240,9 +253,6 @@ test("prefers the real startup failure over unrelated loader-like output", () =>
   assert.throws(
     () => validatePreviewOutput(output),
     (error) => {
-      assert.match(error.message, /Expo preview startup error: .*primary failure detail/);
-      assert.doesNotMatch(error.message, /missing runtime library/i);
-      assert.doesNotMatch(error.message, /loader wording changed/i);
       assert.match(error.message, /Expo preview startup error: .*preview bundle crashed/);
       assert.doesNotMatch(error.message, /loader wording changed/i);
       assert.doesNotMatch(error.message, /missing runtime library/i);
