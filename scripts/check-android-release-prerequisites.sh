@@ -14,6 +14,7 @@ if [[ "$SCRIPT_DIR" == "$SCRIPT_PATH" ]]; then
   SCRIPT_DIR="."
 fi
 SCRIPT_DIR="$(cd -- "$SCRIPT_DIR" && pwd)"
+source "$SCRIPT_DIR/workflow-output-safety.sh"
 # shellcheck source=android-runner-pins.sh
 source "$SCRIPT_DIR/android-runner-pins.sh"
 
@@ -46,7 +47,9 @@ write_summary() {
     if ((${#failures[@]})); then
       echo
       echo "### Blocking prerequisites"
-      printf -- '- %s\n' "${failures[@]}"
+      for failure in "${failures[@]}"; do
+        printf -- '- %s\n' "$(sanitize_workflow_text "$failure")"
+      done
     fi
   } >&2
 
@@ -58,7 +61,9 @@ write_summary() {
       if ((${#failures[@]})); then
         echo
         echo "### Blocking prerequisites"
-        printf -- '- %s\n' "${failures[@]}"
+        for failure in "${failures[@]}"; do
+          printf -- '- %s\n' "$(sanitize_workflow_text "$failure")"
+        done
       fi
     } >>"$GITHUB_STEP_SUMMARY"
   fi

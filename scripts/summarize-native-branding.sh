@@ -2,6 +2,9 @@
 # Appends one platform's native branding section to the GitHub job summary.
 set -euo pipefail
 
+SCRIPT_DIR="$(cd -- "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/workflow-output-safety.sh"
+
 PLATFORM="${1:?Usage: summarize-native-branding.sh <ios|android>}"
 report_error() {
   echo "$*" >&2
@@ -48,19 +51,49 @@ candidate_fingerprint() {
 }
 
 if [[ -n "${NATIVE_SMOKE_BUILD_ID:-}" ]]; then
-  FALLBACK_BUILD_LINE="- Candidate build ID: \`${NATIVE_SMOKE_BUILD_ID}\` (fingerprint \`$(candidate_fingerprint "$NATIVE_SMOKE_BUILD_ID")\`)"
+  safe_build_id="$(sanitize_workflow_text "$NATIVE_SMOKE_BUILD_ID")"
+  FALLBACK_BUILD_LINE="- Candidate build ID: \`${safe_build_id}\` (fingerprint \`$(candidate_fingerprint "$NATIVE_SMOKE_BUILD_ID")\`)"
 else
   FALLBACK_BUILD_LINE="- Candidate build ID: \`Unavailable\`"
 fi
 
-sed_replacement="${REPORT_URL//\\/\\\\}"
+SAFE_REPORT_URL="$(sanitize_workflow_text "$REPORT_URL")"
+sed_replacement="${SAFE_REPORT_URL//\\/\\\\}"
 sed_replacement="${sed_replacement//&/\\&}"
 sed_replacement="${sed_replacement//|/\\|}"
+
+render_summary_source() {
+  sed "s|__NATIVE_BRANDING_REPORT_URL__|${sed_replacement}|g" "$SUMMARY_SOURCE" |
+    sanitize_workflow_stream
+}
+
+write_archived_snapshot() {
+  echo "- Archived report snapshot: [available in this summary](#archived-native-branding-report-snapshot)"
+  echo
+  echo "### Archived native branding report snapshot"
+  echo
+
+  if [[ -s "$SUMMARY_SOURCE" ]]; then
+    # The concise branding fragment is safe for reviewer-visible output. Keep
+    # its result, fingerprint, and permission finding in the durable summary,
+    # but replace the expiring artifact link with a local snapshot note.
+    render_summary_source |
+      sed -e '1d' \
+        -e 's|^- Detailed report:.*|- Detailed report: preserved in this release summary; the artifact copy is linked above while retained.|'
+  else
+    echo "- Status: **FAIL**"
+    echo "$FALLBACK_BUILD_LINE"
+    echo "- Native label: \`Unavailable\`"
+    echo "- ${PERMISSION_LABEL}: **UNAVAILABLE** (native metadata was not inspected)"
+    echo "- Detailed report: preserved in this release summary; the artifact copy was not generated."
+  fi
+  echo
+}
 
 write_summary() {
   {
     if [[ -s "$SUMMARY_SOURCE" ]]; then
-      sed "s|__NATIVE_BRANDING_REPORT_URL__|${sed_replacement}|g" "$SUMMARY_SOURCE"
+      render_summary_source
     else
       echo "## ${PLATFORM_LABEL} native branding"
       echo
@@ -68,9 +101,11 @@ write_summary() {
       echo "$FALLBACK_BUILD_LINE"
       echo "- Native label: \`Unavailable\`"
       echo "- ${PERMISSION_LABEL}: **UNAVAILABLE** (native metadata was not inspected)"
-      echo "- Detailed report: \`native-branding-check.md\` was not generated; open the [${ARTIFACT_NAME} output](${REPORT_URL}) to find the failing step"
+      echo "- Detailed report: \`native-branding-check.md\` was not generated; open the [${ARTIFACT_NAME} output](${SAFE_REPORT_URL}) to find the failing step"
       echo
     fi
+
+    write_archived_snapshot
 
     if [[ -z "$ARTIFACT_URL" ]]; then
       echo "The \`${ARTIFACT_NAME}\` artifact was not uploaded, so the report link above opens the workflow run instead of the artifact download."

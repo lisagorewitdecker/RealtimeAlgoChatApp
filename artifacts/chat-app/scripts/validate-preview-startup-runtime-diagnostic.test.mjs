@@ -738,6 +738,127 @@ test("CI summaries retain bounded long-path loader diagnostics and library ident
   }
 });
 
+test("CI summaries redact secrets from long loader diagnostics without losing library identifiers", () => {
+  const temporaryDirectory = mkdtempSync(
+    join(tmpdir(), "chat-preview-long-private-loader-summary-"),
+  );
+  const longLinuxLibraryPath =
+    `/opt/expo/${"react-native-devtools-cache/".repeat(16)}` +
+    "libgtk-3.so.0";
+  const longDyldLibraryPath =
+    `/opt/homebrew/Library/Application Support/Expo/` +
+    `${"react native devtools cache/".repeat(12)}` +
+    "libgtk-3.dylib";
+  const longWindowsLibraryPath =
+    `C:\\Program Files\\Expo\\${"react native devtools cache\\".repeat(12)}` +
+    "libgtk-3-0.dll";
+  const cases = [
+    {
+      fixture: "missing-runtime-library",
+      output:
+        `Error: Authorization: Bearer LONG_LINUX_PRIVATE_TOKEN ` +
+        `/opt/expo/react-native-devtools: error while loading shared libraries: ` +
+        `${longLinuxLibraryPath}: cannot open shared object file: No such file or directory\n`,
+      libraryIdentifier: "libgtk-3.so.0",
+      privateValues: ["LONG_LINUX_PRIVATE_TOKEN"],
+    },
+    {
+      fixture: "missing-runtime-library",
+      output:
+        `Error: Authorization: AWS4-HMAC-SHA256 ` +
+        `Credential=LONG_AWS_ACCESS_KEY/20260918/us-east-1/expo/aws4_request, ` +
+        `SignedHeaders=host;x-amz-date, Signature=VERY_SECRET_AWS_SIGNATURE ` +
+        `/opt/expo/react-native-devtools: error while loading shared libraries: ` +
+        `${longLinuxLibraryPath}: cannot open shared object file: No such file or directory\n`,
+      libraryIdentifier: "libgtk-3.so.0",
+      privateValues: ["LONG_AWS_ACCESS_KEY", "VERY_SECRET_AWS_SIGNATURE"],
+    },
+    {
+      fixture: "missing-runtime-library-dyld",
+      output:
+        `dyld[12345]: Authorization: Bearer LONG_DYLD_PRIVATE_TOKEN; ` +
+        `Library not loaded: ${longDyldLibraryPath}\n`,
+      libraryIdentifier: "libgtk-3.dylib",
+      privateValues: ["LONG_DYLD_PRIVATE_TOKEN"],
+    },
+    {
+      fixture: "missing-runtime-library-dyld",
+      output:
+        `dyld[12345]: Proxy-Authorization: Digest ` +
+        `username="preview-user", realm="private-preview", ` +
+        `nonce="PRIVATE_NONCE", uri="/expo", ` +
+        `response="VERY_SECRET_DIGEST_RESPONSE"; ` +
+        `Library not loaded: ${longDyldLibraryPath}\n`,
+      libraryIdentifier: "libgtk-3.dylib",
+      privateValues: [
+        "preview-user",
+        "PRIVATE_NONCE",
+        "VERY_SECRET_DIGEST_RESPONSE",
+      ],
+    },
+    {
+      fixture: "missing-runtime-library-windows",
+      output:
+        `Error: Authorization: Bearer LONG_WINDOWS_PRIVATE_TOKEN ` +
+        `The code execution cannot proceed because ${longWindowsLibraryPath} ` +
+        `was not found. Reinstalling the program may fix this problem.\n`,
+      libraryIdentifier: "libgtk-3-0.dll",
+      privateValues: ["LONG_WINDOWS_PRIVATE_TOKEN"],
+    },
+  ];
+
+  try {
+    for (const fixtureCase of cases) {
+      const logPath = join(temporaryDirectory, `${fixtureCase.fixture}.log`);
+      const summaryPath = join(temporaryDirectory, `${fixtureCase.fixture}.md`);
+      const fixture = runNodeScript([fixturePath], {
+        PREVIEW_STARTUP_TEST_FIXTURE: fixtureCase.fixture,
+        PREVIEW_STARTUP_TEST_OUTPUT: fixtureCase.output,
+      });
+
+      assert.equal(fixture.status, 1, fixtureCase.fixture);
+      assert.ok(
+        fixture.output.length > 384,
+        `${fixtureCase.fixture} fixture did not cross the long-path boundary`,
+      );
+      writeFileSync(logPath, fixture.output, "utf8");
+
+      const result = runNodeScript(
+        [validatorPath, "--log-file", logPath],
+        { GITHUB_STEP_SUMMARY: summaryPath },
+      );
+
+      assert.equal(result.status, 1, fixtureCase.fixture);
+      const summary = readFileSync(summaryPath, "utf8");
+      const diagnostic = summary.match(/\*\*Diagnosis:\*\* ([^\n]+)/)?.[1];
+      assert.ok(diagnostic, `${fixtureCase.fixture} summary omitted its diagnosis`);
+      assert.ok(
+        diagnostic.length <= 512,
+        `${fixtureCase.fixture} summary diagnostic exceeded the 512-character limit`,
+      );
+      for (const privateValue of fixtureCase.privateValues) {
+        assert.doesNotMatch(
+          summary,
+          new RegExp(escapeRegExp(privateValue)),
+          `${fixtureCase.fixture} leaked ${privateValue}`,
+        );
+      }
+      assert.match(
+        diagnostic,
+        new RegExp(escapeRegExp(fixtureCase.libraryIdentifier)),
+        `${fixtureCase.fixture} lost its library identifier`,
+      );
+      assert.match(
+        summary,
+        /\[redacted authorization\]/,
+        `${fixtureCase.fixture} omitted the authorization redaction`,
+      );
+    }
+  } finally {
+    rmSync(temporaryDirectory, { recursive: true, force: true });
+  }
+});
+
 test("CI summaries preserve direct preview-setting rejection reasons without values", () => {
   const temporaryDirectory = mkdtempSync(
     join(tmpdir(), "chat-preview-setting-rejection-summary-"),

@@ -28,6 +28,22 @@ const MAX_STARTUP_LIBRARY_DETAIL_LENGTH = 192;
 const MAX_RECORDED_STARTUP_OUTPUT_LENGTH = 16_384;
 const MAX_RECORDED_STARTUP_LINE_LENGTH = 1_024;
 const STARTUP_DIAGNOSTIC_PREFIX = "Expo preview startup error: ";
+const HANDOFF_FAILURE_PHASES = Object.freeze([
+  {
+    label: "public manifest",
+    matches: [
+      "Public Expo preview manifest check failed",
+      "Preview handoff preflight failed at the public manifest probe.",
+    ],
+  },
+  {
+    label: "local handoff",
+    matches: [
+      "Local Expo Go manifest/bundle probe failed",
+      "Preview handoff preflight failed at the local manifest/bundle probe.",
+    ],
+  },
+]);
 const HANDOFF_PLATFORM_CONFIG = {
   android: {
     schema: "android-preview-handoff-preflight/v1",
@@ -164,6 +180,13 @@ function sanitizeStartupDiagnostic(value, maxLength) {
     .slice(0, maxLength);
 }
 
+function redactStartupAuthorization(value) {
+  return value.replace(
+    /(?<!redacted )\b(?:authorization|proxy-authorization)\s*:?.*$/gi,
+    "[redacted authorization]",
+  );
+}
+
 function findMissingLibrary(output) {
   for (const line of output.split(/\r?\n/)) {
     for (const pattern of MISSING_LIBRARY_PATTERNS) {
@@ -204,6 +227,7 @@ function formatStartupFailure(output) {
       failure,
       MAX_STARTUP_FAILURE_LINE_LENGTH,
     );
+    const redactedFailureDetail = redactStartupAuthorization(fullFailureDetail);
     const missingLibrary = findMissingLibrary(output);
     const libraryDetail =
       missingLibrary &&
@@ -213,7 +237,7 @@ function formatStartupFailure(output) {
         : "";
 
     const failureLength = Math.min(
-      fullFailureDetail.length,
+      redactedFailureDetail.length,
       Math.max(
         0,
         MAX_STARTUP_DIAGNOSTIC_LENGTH -
@@ -221,7 +245,7 @@ function formatStartupFailure(output) {
           libraryDetail.length,
       ),
     );
-    const failureDetail = fullFailureDetail.slice(0, failureLength);
+    const failureDetail = redactedFailureDetail.slice(0, failureLength);
 
     return `${STARTUP_DIAGNOSTIC_PREFIX}${sanitizeStartupDiagnostic(
       `${failureDetail}${libraryDetail}`,
@@ -242,12 +266,12 @@ function formatStartupFailure(output) {
 }
 
 function sanitizeStartupSummaryDiagnostic(value) {
-  return sanitizeStartupDiagnostic(value, MAX_STARTUP_SUMMARY_LENGTH)
-    .replace(/https?:\/\/\S+/gi, "[redacted URL]")
-    .replace(
-      /\b(?:authorization|proxy-authorization)\s*:?.*$/gi,
-      "[redacted authorization]",
-    )
+  return redactStartupAuthorization(
+    sanitizeStartupDiagnostic(value, MAX_STARTUP_SUMMARY_LENGTH).replace(
+      /https?:\/\/\S+/gi,
+      "[redacted URL]",
+    ),
+  )
     .replace(
       /\b(?:api[_-]?key|credential|password|passwd|secret|token)\s*(?:[=:]\s*|\s+)\S+/gi,
       "[redacted credential]",
@@ -293,8 +317,25 @@ function recordStartupOutput(recordLog, output) {
   writeFileSync(resolve(recordLog), sanitizeRecordedStartupOutput(output), "utf8");
 }
 
-function formatStartupFailureSummary(error) {
+function getHandoffFailurePhase(message) {
+  return (
+    HANDOFF_FAILURE_PHASES.find(({ matches }) =>
+      matches.some((prefix) => message.startsWith(prefix)),
+    )?.label ?? null
+  );
+}
+
+export function formatStartupFailureSummary(error) {
   const message = error instanceof Error ? error.message : String(error);
+  const handoffFailurePhase = getHandoffFailurePhase(message);
+  if (handoffFailurePhase) {
+    return (
+      "### Expo preview startup\n\n" +
+      "**Status:** FAIL\n\n" +
+      `**Failed phase:** ${handoffFailurePhase}\n\n`
+    );
+  }
+
   const startupFailure =
     message.startsWith("Expo preview startup error:") ||
     message.startsWith("Public Expo preview manifest URL ")
@@ -663,6 +704,10 @@ export function getPublicPreviewManifestUrl(environment = process.env) {
   return url;
 }
 
+export function validatePreviewConfiguration(environment = process.env) {
+  getPublicPreviewManifestUrl(environment);
+}
+
 export async function requestPublicPreviewManifest(
   timeoutMs,
   environment = process.env,
@@ -809,6 +854,8 @@ async function requestWithDeadline(
   }
 }
 
+const LOCAL_HANDOFF_RETRY_PAUSE_MS = 250;
+
 export async function requestLocalHandoffProbe(
   port,
   timeoutMs,
@@ -901,8 +948,22 @@ export async function requestLocalHandoffProbe(
           publicPreviewRecoveryMessage(),
         ].join(" "),
       );
-      if (Date.now() >= deadline) break;
-      await delay(Math.min(250, Math.max(1, deadline - Date.now())));
+      const remainingMs = deadline - Date.now();
+      if (remainingMs <= 0) break;
+      if (remainingMs <= LOCAL_HANDOFF_RETRY_PAUSE_MS) {
+        // The deadline falls inside the next pause. Wait it out instead of
+        // starting an attempt that has no time to complete: a timer can wake
+        // a fraction of a millisecond before Date.now() reaches the deadline,
+        // and such an attempt would replace the last real outcome with
+        // "request aborted by deadline" while leaving a half-finished
+        // manifest request behind.
+        await delay(remainingMs);
+        while (Date.now() < deadline) {
+          await delay(1);
+        }
+        break;
+      }
+      await delay(LOCAL_HANDOFF_RETRY_PAUSE_MS);
     }
   }
 
@@ -1266,6 +1327,11 @@ async function validateLivePreview(
 }
 
 async function main() {
+  if (process.argv.includes("--validate-configuration")) {
+    validatePreviewConfiguration();
+    return;
+  }
+
   if (process.argv.includes("--validate-timeouts")) {
     parsePreviewTimeouts();
     return;

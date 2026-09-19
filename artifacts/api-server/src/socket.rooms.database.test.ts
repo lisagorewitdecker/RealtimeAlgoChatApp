@@ -29,7 +29,10 @@ import {
   roomBansTable,
   roomsTable,
 } from "@workspace/db";
-import { loadEncryptedMessagesAfter } from "./lib/e2eePersistence.js";
+import {
+  loadDeletedMessageIdsAfter,
+  loadEncryptedMessagesAfter,
+} from "./lib/e2eePersistence.js";
 import {
   resetSocketRoomStateForTest,
   ROOM_INACTIVITY_TIMEOUT_MS,
@@ -148,6 +151,142 @@ afterAll(async () => {
 });
 
 describe("database-backed Socket.IO message recovery", () => {
+  it("pages room-scoped deletion tombstones on the deleted cursor index", async () => {
+    const suffix = `${Date.now()}-${process.pid}`;
+    const roomId = `db-deletion-cursor-${suffix}`;
+    const otherRoomId = `db-deletion-other-${suffix}`;
+    roomIds.add(roomId);
+    roomIds.add(otherRoomId);
+    await db.insert(roomsTable).values([
+      {
+        id: roomId,
+        name: "Deletion cursor room",
+        createdBy: "user-ada",
+      },
+      {
+        id: otherRoomId,
+        name: "Other deletion cursor room",
+        createdBy: "user-grace",
+      },
+    ]);
+
+    const baselineDeletedAt = new Date("2026-01-01T00:00:00.000Z");
+    const sharedDeletedAt = new Date("2026-01-01T00:00:01.000Z");
+    const laterDeletedAt = new Date("2026-01-01T00:00:02.000Z");
+    const targetDeleted = Array.from({ length: 165 }, (_, index) => ({
+      id: `${roomId}-deleted-${String(index + 1).padStart(3, "0")}`,
+      roomId,
+      userId: "user-ada",
+      username: "Ada",
+      ciphertext: `ciphertext-deleted-${index + 1}`,
+      nonce: `nonce-deleted-${index + 1}`,
+      type: "text" as const,
+      timestampMs: index + 1,
+      deletedAt: index < 164 ? sharedDeletedAt : laterDeletedAt,
+    }));
+    const plannerRows = Array.from({ length: 12_000 }, (_, index) => ({
+      id: `${roomId}-planner-${String(index + 1).padStart(5, "0")}`,
+      roomId,
+      userId: "user-ada",
+      username: "Ada",
+      ciphertext: `ciphertext-planner-${index + 1}`,
+      nonce: `nonce-planner-${index + 1}`,
+      type: "text" as const,
+      timestampMs: 1_000 + index,
+      deletedAt: new Date(sharedDeletedAt.getTime() + 10_000 + index),
+    }));
+    const excludedRows = [
+      {
+        id: `${roomId}-active`,
+        roomId,
+        userId: "user-ada",
+        username: "Ada",
+        ciphertext: "ciphertext-active",
+        nonce: "nonce-active",
+        type: "text" as const,
+        timestampMs: 999_999,
+        deletedAt: null,
+      },
+      {
+        id: `${otherRoomId}-deleted`,
+        roomId: otherRoomId,
+        userId: "user-grace",
+        username: "Grace",
+        ciphertext: "ciphertext-other-room",
+        nonce: "nonce-other-room",
+        type: "text" as const,
+        timestampMs: 999_999,
+        deletedAt: sharedDeletedAt,
+      },
+    ];
+    const stored = [...targetDeleted, ...plannerRows, ...excludedRows];
+    const insertBatchSize = 1_000;
+    for (let start = 0; start < stored.length; start += insertBatchSize) {
+      await db
+        .insert(messagesTable)
+        .values(stored.slice(start, start + insertBatchSize));
+    }
+    await pool.query("ANALYZE messages");
+
+    const explained = await pool.query<{ "QUERY PLAN": Array<{ Plan: ExplainPlan }> }>(
+      `EXPLAIN (FORMAT JSON)
+       SELECT id, deleted_at
+       FROM messages
+       WHERE room_id = $1
+         AND deleted_at IS NOT NULL
+         AND (deleted_at > $2 OR (deleted_at = $2 AND id > $3))
+       ORDER BY deleted_at ASC, id ASC
+       LIMIT 81`,
+      [
+        roomId,
+        plannerRows[11_899]!.deletedAt,
+        plannerRows[11_899]!.id,
+      ],
+    );
+    const plan = explained.rows[0]?.["QUERY PLAN"][0]?.Plan;
+    expect(plan).toBeDefined();
+    expect(collectIndexNames(plan!)).toContain(
+      "messages_deleted_room_cursor_idx",
+    );
+
+    const baseline = { id: "", deletedAt: baselineDeletedAt.getTime() };
+    const cappedPage = await loadDeletedMessageIdsAfter(roomId, baseline, 1_000);
+    expect(cappedPage.tombstones).toHaveLength(80);
+    expect(cappedPage.hasMore).toBe(true);
+
+    const recovered: Array<{ id: string; deletedAt: number }> = [];
+    let cursor = baseline;
+    for (;;) {
+      const page = await loadDeletedMessageIdsAfter(roomId, cursor, 80);
+      recovered.push(...page.tombstones);
+      if (!page.hasMore) break;
+      cursor = page.tombstones.at(-1)!;
+    }
+
+    const expected = [...targetDeleted, ...plannerRows]
+      .sort(
+        (left, right) =>
+          left.deletedAt.getTime() - right.deletedAt.getTime() ||
+          left.id.localeCompare(right.id),
+      )
+      .map((message) => ({
+        id: message.id,
+        deletedAt: message.deletedAt.getTime(),
+      }));
+    expect(recovered).toEqual(expected);
+    expect(new Set(recovered.map((item) => item.id)).size).toBe(recovered.length);
+    expect(recovered).not.toContainEqual(
+      expect.objectContaining({ id: excludedRows[0]!.id }),
+    );
+    expect(recovered).not.toContainEqual(
+      expect.objectContaining({ id: excludedRows[1]!.id }),
+    );
+
+    const minimumPage = await loadDeletedMessageIdsAfter(roomId, baseline, 0);
+    expect(minimumPage.tombstones).toEqual([expected[0]]);
+    expect(minimumPage.hasMore).toBe(true);
+  });
+
   it("keeps large-room recovery on the active cursor index", async () => {
     const roomId = `db-recovery-plan-${Date.now()}-${process.pid}`;
     roomIds.add(roomId);

@@ -63,12 +63,18 @@ function resolveEvidencePath(configuredPath, packageRoot) {
     : path.join(packageRoot, ".expo", "dev-request-evidence.log");
 }
 
-function createEvidenceAppender(writeContents, maxLines = MAX_REQUEST_EVIDENCE_LINES) {
+function createEvidenceAppender(
+  writeContents,
+  maxLines = MAX_REQUEST_EVIDENCE_LINES,
+  onPersistenceFailure = () => {},
+) {
   if (!Number.isInteger(maxLines) || maxLines < 2) {
     throw new RangeError("maxLines must be an integer greater than one");
   }
 
   const retainedRequestLines = [];
+  let persistenceEnabled = true;
+  let pendingWrite = Promise.resolve();
   let truncated = false;
   const truncationNotice =
     maxLines === MAX_REQUEST_EVIDENCE_LINES
@@ -77,7 +83,7 @@ function createEvidenceAppender(writeContents, maxLines = MAX_REQUEST_EVIDENCE_L
           maxLines - 1
         } request lines; console output continues.`;
 
-  return (evidence) => {
+  const appendEvidence = (evidence) => {
     if (retainedRequestLines.length === maxLines - 1) {
       truncated = true;
     }
@@ -90,10 +96,36 @@ function createEvidenceAppender(writeContents, maxLines = MAX_REQUEST_EVIDENCE_L
     const contents =
       (truncated ? `${truncationNotice}\n` : "") +
       retainedRequestLines.map((line) => `${line}\n`).join("");
-    if (!writeContents(contents)) return false;
 
-    return true;
+    if (!persistenceEnabled) return Promise.resolve(false);
+
+    pendingWrite = pendingWrite
+      .then(() => {
+        if (!persistenceEnabled) return false;
+        return writeContents(contents);
+      })
+      .then((result) => {
+        if (result === false) {
+          persistenceEnabled = false;
+        }
+        return result !== false;
+      })
+      .catch((error) => {
+        persistenceEnabled = false;
+        try {
+          onPersistenceFailure(error);
+        } catch {
+          // Persistence diagnostics must never become an unhandled rejection.
+        }
+        return false;
+      });
+
+    return pendingWrite;
   };
+
+  appendEvidence.flush = () => pendingWrite;
+
+  return appendEvidence;
 }
 
 module.exports = {

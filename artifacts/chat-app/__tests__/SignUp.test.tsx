@@ -8,8 +8,13 @@ const mockPrepareEmailVerification = jest.fn();
 const mockAttemptEmailVerification = jest.fn();
 const mockSetActive = jest.fn();
 
+const mockStartAppleOAuthFlow = jest.fn();
+
 jest.mock("@clerk/expo", () => ({
-  useOAuth: () => ({ startOAuthFlow: jest.fn() }),
+  useOAuth: ({ strategy }: { strategy: string }) => ({
+    startOAuthFlow:
+      strategy === "oauth_apple" ? mockStartAppleOAuthFlow : jest.fn(),
+  }),
 }));
 
 jest.mock("@clerk/expo/legacy", () => ({
@@ -68,6 +73,62 @@ jest.mock("@/hooks/useColors", () => ({
     radius: 10,
   }),
 }));
+
+describe("Continue with Apple", () => {
+  beforeEach(() => {
+    mockStartAppleOAuthFlow.mockReset().mockResolvedValue({
+      createdSessionId: "session-apple",
+      setActive: mockSetActive,
+    });
+    mockSetActive.mockReset().mockResolvedValue(undefined);
+  });
+
+  it("activates the created Clerk session", async () => {
+    const { getByLabelText } = render(<SignUpScreen />);
+
+    fireEvent.press(getByLabelText("Continue with Apple"));
+
+    await waitFor(() => {
+      expect(mockStartAppleOAuthFlow).toHaveBeenCalledTimes(1);
+      expect(mockSetActive).toHaveBeenCalledWith({ session: "session-apple" });
+    });
+  });
+
+  it("uses the Apple-branded button alongside the other social providers", () => {
+    const { getByLabelText, getByText } = render(<SignUpScreen />);
+
+    const appleButton = getByLabelText("Continue with Apple");
+    expect(StyleSheet.flatten(appleButton.props.style).backgroundColor).toBe("#000000");
+    expect(StyleSheet.flatten(getByText("Continue with Apple").props.style).color).toBe("#FFFFFF");
+    expect(getByLabelText("Continue with Google")).toBeTruthy();
+    expect(getByLabelText("Continue with X")).toBeTruthy();
+  });
+
+  it("surfaces the Clerk error when the Apple flow fails", async () => {
+    mockStartAppleOAuthFlow.mockRejectedValue({
+      errors: [{ longMessage: "Apple sign-up was cancelled." }],
+    });
+    const { getByLabelText, findByText } = render(<SignUpScreen />);
+
+    fireEvent.press(getByLabelText("Continue with Apple"));
+
+    expect(await findByText("Apple sign-up was cancelled.")).toBeTruthy();
+    expect(mockSetActive).not.toHaveBeenCalled();
+  });
+
+  it("reports an incomplete flow instead of activating nothing", async () => {
+    mockStartAppleOAuthFlow.mockResolvedValue({
+      createdSessionId: null,
+      setActive: mockSetActive,
+    });
+    const { getByLabelText, findByText } = render(<SignUpScreen />);
+
+    fireEvent.press(getByLabelText("Continue with Apple"));
+
+    expect(await findByText("Unable to create your account. Please try again.")).toBeTruthy();
+    expect(mockSetActive).not.toHaveBeenCalled();
+  });
+});
 
 describe("email account signup", () => {
   beforeEach(() => {

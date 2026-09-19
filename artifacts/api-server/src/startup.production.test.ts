@@ -1,9 +1,14 @@
 import { execFile } from "node:child_process";
+import { createHmac, randomUUID } from "node:crypto";
 import { createServer, type Server, type Socket } from "node:net";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { afterEach, beforeAll, describe, expect, it } from "vitest";
+import { createClerkClient } from "@clerk/backend";
+import { db, messagesTable, pool, roomsTable } from "@workspace/db";
+import { eq } from "drizzle-orm";
+import { io as createClient, type Socket as ClientSocket } from "socket.io-client";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 
 const execFileAsync = promisify(execFile);
 const runningProcesses = new Set<ReturnType<typeof execFile>>();
@@ -47,6 +52,85 @@ function validEnvironment(port: number): NodeJS.ProcessEnv {
     CLERK_SECRET_KEY: "sk_test_startup-regression-placeholder",
     SENTRY_DSN: "",
   };
+}
+
+function recoveryEnvironment(port: number): NodeJS.ProcessEnv {
+  const required = [
+    "DATABASE_URL",
+    "CLERK_PUBLISHABLE_KEY",
+    "CLERK_SECRET_KEY",
+    "SESSION_SECRET",
+  ] as const;
+  for (const name of required) {
+    if (!process.env[name]) {
+      throw new Error(`${name} is required for production restart recovery.`);
+    }
+  }
+  return {
+    ...process.env,
+    NODE_ENV: "production",
+    PORT: String(port),
+    SENTRY_DSN: "",
+  };
+}
+
+function createRoomCapability(roomId: string, userId: string): string {
+  const encoded = Buffer.from(
+    JSON.stringify({
+      roomId,
+      userId,
+      username: "Restart",
+      avatarEmoji: "🔁",
+      purpose: "sandbox",
+      expiresAt: Date.now() + 120_000,
+    }),
+  ).toString("base64url");
+  const signature = createHmac("sha256", process.env["SESSION_SECRET"]!)
+    .update(encoded)
+    .digest("base64url");
+  return `${encoded}.${signature}`;
+}
+
+function waitForEvent<T>(
+  socket: ClientSocket,
+  event: string,
+  timeoutMs = 15_000,
+): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      socket.off("connect_error", onConnectError);
+      reject(new Error(`Timed out waiting for Socket.IO event ${event}.`));
+    }, timeoutMs);
+    const onConnectError = (error: Error) => {
+      clearTimeout(timeout);
+      reject(error);
+    };
+    socket.once("connect_error", onConnectError);
+    socket.once(event, (payload: T) => {
+      clearTimeout(timeout);
+      socket.off("connect_error", onConnectError);
+      resolve(payload);
+    });
+  });
+}
+
+function connectRoomClient(
+  port: number,
+  capability: string,
+): ClientSocket {
+  return createClient(`http://127.0.0.1:${port}`, {
+    auth: { token: capability },
+    path: "/api/socket.io",
+    reconnection: false,
+    transports: ["websocket"],
+  });
+}
+
+async function terminateChild(child: ReturnType<typeof execFile>): Promise<void> {
+  if (child.exitCode !== null) return;
+  const exited = new Promise<void>((resolve) => child.once("exit", () => resolve()));
+  child.kill("SIGTERM");
+  await exited;
 }
 
 async function startStalledDatabase(): Promise<StalledDatabase> {
@@ -174,7 +258,135 @@ afterEach(async () => {
   runningProcesses.clear();
 });
 
+afterAll(async () => {
+  await pool.end();
+});
+
 describe("built production server startup", () => {
+  it(
+    "recovers encrypted history across pages after a real process restart",
+    async () => {
+      const suffix = randomUUID().replaceAll("-", "");
+      const roomId = `restart-${suffix.slice(0, 20)}`;
+      const email = `restart-${suffix}+clerk_test@example.com`;
+      const clerk = createClerkClient({
+        publishableKey: process.env["CLERK_PUBLISHABLE_KEY"]!,
+        secretKey: process.env["CLERK_SECRET_KEY"]!,
+      });
+      const user = await clerk.users.createUser({
+        emailAddress: [email],
+        password: `Restart-${suffix.slice(0, 16)}!9`,
+        firstName: "Restart",
+        lastName: "Recovery",
+        skipLegalChecks: true,
+        privateMetadata: { purpose: "api-process-restart-test" },
+      });
+      const clients: ClientSocket[] = [];
+
+      try {
+        await db.insert(roomsTable).values({
+          id: roomId,
+          name: "Production restart recovery",
+          createdBy: user.id,
+        });
+        const stored = Array.from({ length: 165 }, (_, index) => {
+          const sequence = index + 1;
+          return {
+            id: `restart-message-${String(sequence).padStart(3, "0")}`,
+            roomId,
+            userId: user.id,
+            username: "Restart",
+            ciphertext: `ciphertext-${sequence}`,
+            nonce: `nonce-${sequence}`,
+            type: "text" as const,
+            timestampMs: 10_001 + Math.floor(index / 3),
+          };
+        });
+        await db.insert(messagesTable).values(stored);
+        const capability = createRoomCapability(roomId, user.id);
+
+        const firstPort = await availablePort();
+        const firstChild = execFile(process.execPath, productionArgs, {
+          cwd: workspaceRoot,
+          env: recoveryEnvironment(firstPort),
+        });
+        runningProcesses.add(firstChild);
+        await waitForResponse(
+          firstChild,
+          `http://127.0.0.1:${firstPort}/api/healthz`,
+        );
+        const firstClient = connectRoomClient(firstPort, capability);
+        clients.push(firstClient);
+        await waitForEvent(firstClient, "connect");
+        const firstJoin = waitForEvent<{ roomId: string }>(
+          firstClient,
+          "room-joined",
+        );
+        firstClient.emit("join-room", { roomId, createIfMissing: false });
+        await expect(firstJoin).resolves.toMatchObject({ roomId });
+        firstClient.close();
+        await terminateChild(firstChild);
+        runningProcesses.delete(firstChild);
+
+        const secondPort = await availablePort();
+        const secondChild = execFile(process.execPath, productionArgs, {
+          cwd: workspaceRoot,
+          env: recoveryEnvironment(secondPort),
+        });
+        runningProcesses.add(secondChild);
+        expect(secondChild.pid).toBeDefined();
+        expect(secondChild.pid).not.toBe(firstChild.pid);
+        await waitForResponse(
+          secondChild,
+          `http://127.0.0.1:${secondPort}/api/healthz`,
+        );
+
+        const secondClient = connectRoomClient(secondPort, capability);
+        clients.push(secondClient);
+        await waitForEvent(secondClient, "connect");
+        const joined = waitForEvent<{ replayGap: boolean }>(
+          secondClient,
+          "room-joined",
+        );
+        secondClient.emit("join-room", {
+          roomId,
+          createIfMissing: false,
+          lastSeenMessageId: "restart-baseline",
+        });
+        await expect(joined).resolves.toMatchObject({ replayGap: true });
+
+        const recovered: string[] = [];
+        let cursor = { id: "restart-baseline", timestamp: 10_000 };
+        for (let pageNumber = 1; ; pageNumber += 1) {
+          const pagePromise = waitForEvent<{
+            requestId: string;
+            messages: Array<{ id: string; timestamp: number }>;
+            hasMore: boolean;
+            nextCursor: { id: string; timestamp: number };
+          }>(secondClient, "message-recovery-page");
+          secondClient.emit("recover-messages", {
+            requestId: `restart-page-${pageNumber}`,
+            roomId,
+            afterMessageId: cursor.id,
+            afterTimestamp: cursor.timestamp,
+          });
+          const page = await pagePromise;
+          recovered.push(...page.messages.map((message) => message.id));
+          cursor = page.nextCursor;
+          if (!page.hasMore) break;
+        }
+
+        expect(recovered).toEqual(stored.map((message) => message.id));
+        expect(recovered).toHaveLength(165);
+      } finally {
+        clients.forEach((client) => client.close());
+        await db.delete(roomsTable).where(eq(roomsTable.id, roomId));
+        await clerk.users.deleteUser(user.id);
+      }
+    },
+    120_000,
+  );
+
   it(
     "serves the public liveness and readiness routes with valid configuration",
     async () => {

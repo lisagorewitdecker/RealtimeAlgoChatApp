@@ -50,6 +50,7 @@ jobs:
           PREVIEW_PUBLIC_TIMEOUT_MS: "2000"
         run: |
           set -euo pipefail
+          source scripts/workflow-output-safety.sh
           log_path="$RUNNER_TEMP/expo-startup-${{ matrix.os }}.log"
           console_path="$RUNNER_TEMP/expo-startup-${{ matrix.os }}.console.log"
           record_status=0
@@ -143,7 +144,7 @@ jobs:
 
           {
             echo "## Real platform launcher capture"
-            echo "- Runner: \`${{ matrix.os }}\`"
+            echo "- Runner: \`$(sanitize_workflow_text "${{ matrix.os }}")\`"
             echo "- Captured output: **PASS** (redacted before persistence)"
             if [[ "$loader_failure" -eq 1 ]]; then
               echo "- Launcher result: diagnosed loader failure (matched in both runs)"
