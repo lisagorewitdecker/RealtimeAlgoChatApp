@@ -823,6 +823,26 @@ test("invalid Node range guard blocks release jobs before setup or publish work"
     /NODE_RANGE/,
     "the failure must include the offending range",
   );
+  assert.match(
+    rejectStep?.run,
+    /printf '::error title=Invalid Node range::package\.json engines\.node: %s\\n' "\$annotation_node_range"/,
+    "the failed guard must publish the package.json engines.node range as an API-readable check annotation",
+  );
+  assert.match(
+    rejectStep?.run,
+    /if \(\(\$\{#safe_node_range\} > 256\)\); then[\s\S]*safe_node_range="\$\{safe_node_range:0:253\}\.\.\."/,
+    "the API-readable Node range annotation must be bounded",
+  );
+  assert.match(
+    rejectStep?.run,
+    /annotation_node_range="\$\{safe_node_range\/\/%\/%25\}"[\s\S]*annotation_node_range="\$\{annotation_node_range\/\/\$\x27\\r\x27\/%0D\}"[\s\S]*annotation_node_range="\$\{annotation_node_range\/\/\$\x27\\n\x27\/%0A\}"/,
+    "the API-readable Node range annotation must escape percent, CR, and LF workflow command data",
+  );
+  assert.ok(
+    rejectStep.run.indexOf("printf '::error title=Invalid Node range") <
+      rejectStep.run.indexOf('echo "## Mobile release Node range"'),
+    "the API-readable annotation must be emitted before the step summary is written",
+  );
   for (const [jobId, job] of Object.entries(workflow.jobs ?? {})) {
     if (
       jobId === "mobile-release-node-range" ||
@@ -868,6 +888,78 @@ test("invalid Node range guard blocks release jobs before setup or publish work"
     rejectStep?.run,
     /secrets\./,
     "the invalid-range diagnostic must not read or expose release secrets",
+  );
+});
+
+test("invalid Node range annotation safely encodes multiline workflow input", () => {
+  const guard = workflow.jobs?.["mobile-release-node-range"];
+  const rejectStep = guard?.steps?.find(
+    (step) => step.name === "Reject invalid Node range before release checks",
+  );
+  assert.ok(rejectStep, "the invalid-range rejection step must exist");
+
+  const fixtureRoot = mkdtempSync(
+    path.join(tmpdir(), "mobile-release-node-range-annotation-"),
+  );
+  const summaryPath = path.join(fixtureRoot, "summary.md");
+  const outputPath = path.join(fixtureRoot, "output");
+  const fixtureRange = "bad%range\nnext::range\rfinal";
+  try {
+    const result = spawnSync("bash", ["-c", rejectStep.run], {
+      cwd: workspaceRoot,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        GITHUB_OUTPUT: outputPath,
+        GITHUB_STEP_SUMMARY: summaryPath,
+        NODE_RANGE: fixtureRange,
+        RESOLVE_RESULT: "failure",
+        REVIEWED_REF: "refs/heads/fixture",
+      },
+    });
+    assert.equal(
+      result.status,
+      1,
+      "the rejection step must fail after emitting the invalid-range evidence",
+    );
+    const annotation = result.stdout
+      .split("\n")
+      .find((line) => line.startsWith("::error title=Invalid Node range::"));
+    assert.equal(
+      annotation,
+      "::error title=Invalid Node range::package.json engines.node: bad%25range%0Anext&#58;&#58;range final",
+      "the check annotation must remain one command line while preserving safe evidence",
+    );
+    assert.doesNotMatch(
+      annotation,
+      /bad%range|next::range/,
+      "the annotation must not contain raw percent or workflow-command delimiters",
+    );
+  } finally {
+    rmSync(fixtureRoot, { recursive: true, force: true });
+  }
+});
+
+test("hosted invalid Node range record links the API-readable guard evidence", () => {
+  assert.match(
+    invalidNodeRangeHostedDocumentation,
+    /\[Validate mobile release Node range\]\(https:\/\/github\.com\/lisagorewitdecker\/RealtimeAlgoChatApp\/actions\/runs\/35282160003\/job\/105406330915\)/,
+    "the hosted record must link the guard job where reviewers can inspect its annotations",
+  );
+  assert.match(
+    invalidNodeRangeHostedDocumentation,
+    /API-readable check annotation/,
+    "the hosted record must identify the API-readable annotation evidence",
+  );
+  assert.match(
+    invalidNodeRangeHostedDocumentation,
+    /\[guard workflow annotation source\]\(\.\.\/\.\.\/\.\.\/\.github\/workflows\/mobile-release\.yml\)/,
+    "the hosted record must link the workflow source that emits the annotation",
+  );
+  assert.match(
+    invalidNodeRangeHostedDocumentation,
+    /package\.json engines\.node: not-a-valid-node-range/,
+    "the hosted record must preserve the label and offending range in its evidence description",
   );
 });
 

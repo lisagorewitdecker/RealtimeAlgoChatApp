@@ -176,6 +176,13 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
           if [[ "$RESOLVE_RESULT" != "success" ]]; then
             safe_node_range="$(sanitize_workflow_text "$NODE_RANGE")"
+            if ((${#safe_node_range} > 256)); then
+              safe_node_range="${safe_node_range:0:253}..."
+            fi
+            annotation_node_range="${safe_node_range//%/%25}"
+            annotation_node_range="${annotation_node_range//$'\r'/%0D}"
+            annotation_node_range="${annotation_node_range//$'\n'/%0A}"
+            printf '::error title=Invalid Node range::package.json engines.node: %s\n' "$annotation_node_range"
             {
               echo "## Mobile release Node range"
               echo

@@ -1,7 +1,8 @@
 # Mobile release invalid Node range hosted check — 2026-09-17
 
-**Result: PASS — the hosted Node range guard failed before release work and
-prevented all downstream release jobs from starting**
+**Result: PARTIAL — the recorded hosted Node range guard failed before release
+work and prevented all downstream release jobs from starting; a fresh hosted
+rerun is still required to capture the new API-readable annotation**
 
 This record captures a temporary `workflow_dispatch` run against the hosted
 repository. The run used the secret-free `node_range_override` fixture and
@@ -91,6 +92,8 @@ cleanly and must not be hidden by the original error.
 | Hosted workflow dispatch accepted the invalid-range fixture | PASS | Run `#35282160003`, event `workflow_dispatch`, `publish=false` |
 | Node range guard ran before release checks | PASS | Guard job completed checkout and range read, then failed in `Reject invalid Node range before release checks` |
 | Offending range was rejected | PASS | GitHub check-run annotation: `Unable to find Node version 'not-a-valid-node-range' for platform linux and architecture x64.` |
+| API-readable guard evidence identifies the configured field and offending range | PASS (local contract) | The [guard workflow annotation source](../../../.github/workflows/mobile-release.yml) emits a bounded, sanitized check annotation: `package.json engines.node: <offending range>`. |
+| Updated hosted run captures the new API-readable annotation | BLOCKED | The recorded run predates this implementation. The connected GitHub identity could read existing checks but could not publish a temporary workflow commit: workflow-file writes returned `403 Forbidden` and the commit mutation was denied. No newer hosted run is claimed. |
 | Guard reported a failed release-blocking check | PASS | Guard job conclusion `failure`; the setup-node resolution step failed and the rejection step failed |
 | iOS/Android preview evidence jobs started | PASS | `iOS preview evidence` and `Android preview evidence` both concluded `skipped` with no steps |
 | Browser/idle-profile release work started | PASS | `Idle profile registration` concluded `skipped` with no steps |
@@ -114,12 +117,25 @@ GitHub check-run annotation:
   Unable to find Node version 'not-a-valid-node-range' for platform linux and architecture x64.
 ```
 
-The workflow's rejection step is the final guard step and emits the
-`package.json engines.node` summary line before exiting. GitHub's connected API
-exposes the check-run annotation and job graph but returns `403 Forbidden` for
+The workflow's rejection step now also emits the same bounded, sanitized value
+as an API-readable check annotation before writing the step summary:
+
+```text
+package.json engines.node: not-a-valid-node-range
+```
+
+The workflow source above is the implementation link for this evidence path.
+The linked guard job remains the reviewer-visible target for the older hosted
+run, which predates the custom annotation.
+
+GitHub's connected API exposes the check-run annotation and job graph but
+returns `403 Forbidden` for
 the raw Actions job-log download, so this record does not claim to reproduce
 the rendered step-summary bytes. The hosted failure and the exact offending
-range are independently visible in the linked run and check-run annotation.
+range are independently visible in the linked run and its setup-node
+check-run annotation. A fresh hosted dispatch is required before the custom
+`package.json engines.node` annotation can be independently confirmed through
+the API.
 
 ## Cleanup
 
