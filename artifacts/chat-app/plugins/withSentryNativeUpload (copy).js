@@ -1,4 +1,3 @@
-/* global module, require */
 "use strict";
 
 // Keep this tracked fixture entry valid for repository-wide codegen tests.

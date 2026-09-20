@@ -29,6 +29,10 @@ const MAX_STARTUP_LIBRARY_DETAIL_LENGTH = 192;
 const MAX_RECORDED_STARTUP_OUTPUT_LENGTH = 16_384;
 const MAX_RECORDED_STARTUP_LINE_LENGTH = 1_024;
 const STARTUP_DIAGNOSTIC_PREFIX = "Expo preview startup error: ";
+const ANSI_ESCAPE = String.fromCharCode(27);
+const BELL = String.fromCharCode(7);
+const ANSI_PATTERN = new RegExp(`${ANSI_ESCAPE}\\[[0-?]*[ -/]*[@-~]`, "g");
+const TRAILING_BELL_PATTERN = new RegExp(`${BELL}\\s*$`, "g");
 const HANDOFF_FAILURE_PHASES = Object.freeze([
   {
     label: "public manifest",
@@ -190,11 +194,13 @@ function findUnrecognizedLoaderFailure(output) {
 }
 
 function sanitizeStartupDiagnostic(value, maxLength) {
-  return value
-    // eslint-disable-next-line no-control-regex
-    .replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, "")
-    // eslint-disable-next-line no-control-regex
-    .replace(/[\u0000-\u001f\u007f]/g, " ")
+  return [...value]
+    .map((char) => {
+      const code = char.charCodeAt(0);
+      return code <= 0x1f || code === 0x7f ? " " : char;
+    })
+    .join("")
+    .replace(ANSI_PATTERN, "")
     .replace(/\s+/g, " ")
     .trim()
     .slice(0, maxLength);
@@ -225,10 +231,8 @@ function redactKnownStartupFailureSecrets(value) {
 
 function normalizeLoaderFailureForMatching(value) {
   return value
-    // eslint-disable-next-line no-control-regex
-    .replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, "")
-    // eslint-disable-next-line no-control-regex
-    .replace(/\u0007\s*$/g, "");
+    .replace(ANSI_PATTERN, "")
+    .replace(TRAILING_BELL_PATTERN, "");
 }
 
 function findMissingLibrary(output) {
@@ -366,7 +370,7 @@ function sanitizeRecordedStartupOutput(value) {
   };
   const stripTrailingStartupProjectFlags = (path) => {
     let trimmedPath = path;
-    while (true) {
+    for (;;) {
       if (/\s+--localhost$/.test(trimmedPath)) {
         trimmedPath = trimmedPath.replace(/\s+--localhost$/, "");
         continue;
