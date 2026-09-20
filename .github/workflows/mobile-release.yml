@@ -669,8 +669,6 @@ jobs:
     if: ${{ github.event_name != 'pull_request' && inputs.android_runner_health_only != true }}
     needs:
       - mobile-release-node-range
-      - mobile-release-credentials
-      - android-release-runner-health
     permissions:
       actions: write
       contents: read
@@ -1248,6 +1246,110 @@ jobs:
           grep -Fq -- "- Status: **FAIL**" "$failed_retry_summary_path"
           grep -Fq -- "- Artifact download: **FAIL**" "$failed_retry_summary_path"
           cat "$pass_summary_path" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Prepare stale iOS evidence before forced cleanup failure
+        if: ${{ always() }}
+        env:
+          STALE_IOS_EVIDENCE_ROOT: ${{ runner.temp }}/native-retry-cleanup-failure/ios
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf -- "${STALE_IOS_EVIDENCE_ROOT%/ios}"
+          mkdir -p -- "$STALE_IOS_EVIDENCE_ROOT"
+          printf 'cleanup-failure-evidence-must-not-appear\n' > "$STALE_IOS_EVIDENCE_ROOT/stale-marker.txt"
+
+      - name: Force iOS retry cleanup failure
+        if: ${{ always() }}
+        continue-on-error: true
+        id: cleanup-forced-ios
+        env:
+          STALE_IOS_EVIDENCE_ROOT: ${{ runner.temp }}/native-retry-cleanup-failure/ios
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f "$STALE_IOS_EVIDENCE_ROOT/stale-marker.txt"
+          echo "Controlled iOS retry cleanup failure injected before the retry." >&2
+          false
+
+      - name: Retry iOS native evidence download after failed cleanup
+        if: ${{ always() && steps.cleanup-forced-ios.outcome == 'success' }}
+        continue-on-error: true
+        id: retry-forced-ios
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: native-retry-cleanup-failure-ios
+          path: ${{ runner.temp }}/native-retry-cleanup-failure/ios
+
+      - name: Run checker after forced retry cleanup failure
+        if: ${{ always() }}
+        continue-on-error: true
+        id: forced-cleanup-check
+        env:
+          REVIEWED_REF: ${{ github.ref }}
+          SUMMARY_PATH: ${{ runner.temp }}/native-retry-cleanup-failure/summary.md
+          NATIVE_IOS_EVIDENCE_DOWNLOAD_RESULT: ${{ steps.retry-forced-ios.outcome }}
+          NATIVE_ANDROID_EVIDENCE_DOWNLOAD_RESULT: failure
+        shell: bash
+        run: |
+          set -euo pipefail
+          source scripts/workflow-output-safety.sh
+          rm -f -- "$SUMMARY_PATH"
+          resolved_commit_sha="$(git rev-parse --verify HEAD)"
+          safe_reviewed_ref="$(sanitize_workflow_text "$REVIEWED_REF")"
+          {
+            echo "## Reviewed release revision"
+            printf -- '- Checked ref: `%s`\n' "$safe_reviewed_ref"
+            printf -- '- Resolved commit SHA: `%s`\n' "$resolved_commit_sha"
+          } >> "$GITHUB_STEP_SUMMARY"
+          GITHUB_STEP_SUMMARY="$SUMMARY_PATH" bash scripts/run-untrusted-checker.sh bash scripts/check-native-large-text-evidence.sh "${SUMMARY_PATH%/summary.md}"
+
+      - name: Verify forced retry cleanup failure remains visible and redacted
+        if: ${{ always() }}
+        env:
+          CHECK_RESULT: ${{ steps.forced-cleanup-check.outcome }}
+          CLEANUP_RESULT: ${{ steps.cleanup-forced-ios.outcome }}
+          RETRY_RESULT: ${{ steps.retry-forced-ios.outcome }}
+          SUMMARY_PATH: ${{ runner.temp }}/native-retry-cleanup-failure/summary.md
+          STALE_IOS_EVIDENCE_ROOT: ${{ runner.temp }}/native-retry-cleanup-failure/ios
+        shell: bash
+        run: |
+          set -euo pipefail
+          source scripts/native-release-recovery-contract.sh
+          if [[ "$CLEANUP_RESULT" != "failure" ]]; then
+            echo "The controlled iOS cleanup failure did not fail as expected." >&2
+            exit 1
+          fi
+          if [[ "$RETRY_RESULT" != "skipped" ]]; then
+            echo "The iOS retry was not skipped after cleanup failed." >&2
+            exit 1
+          fi
+          if [[ ! -f "$STALE_IOS_EVIDENCE_ROOT/stale-marker.txt" ]]; then
+            echo "The controlled stale iOS evidence marker was unexpectedly removed." >&2
+            exit 1
+          fi
+          if find "$STALE_IOS_EVIDENCE_ROOT" -mindepth 1 -maxdepth 1 -type d -print -quit | grep -q .; then
+            echo "The skipped iOS retry extracted a timestamped evidence directory." >&2
+            exit 1
+          fi
+          if [[ "$CHECK_RESULT" != "failure" ]]; then
+            echo "The native evidence checker did not block after cleanup failure." >&2
+            exit 1
+          fi
+          ios_section="$(
+            awk '
+              /^## iOS native large-text evidence$/ { collecting=1 }
+              /^## Android native large-text evidence$/ { collecting=0 }
+              collecting { print }
+            ' "$SUMMARY_PATH"
+          )"
+          grep -Fq -- "- Status: **FAIL**" <<< "$ios_section"
+          grep -Fq -- "- Artifact download: **FAIL**" <<< "$ios_section"
+          grep -Fq -- "$NATIVE_IOS_RECOVERY_LINE" <<< "$ios_section"
+          if grep -Fq -- "cleanup-failure-evidence-must-not-appear" "$SUMMARY_PATH"; then
+            echo "The forced cleanup failure summary exposed stale evidence text." >&2
+            exit 1
+          fi
+          cat "$SUMMARY_PATH" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Run controlled failed mobile publish privacy check
         id: native-evidence-privacy

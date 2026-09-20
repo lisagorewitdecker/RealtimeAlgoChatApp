@@ -735,6 +735,7 @@ test("credential preflight reports every missing required caller key together wi
       jobId === "mobile-release-credentials" ||
       jobId === "android-preview-evidence" ||
       jobId === "ios-preview-evidence" ||
+      jobId === "native-evidence-summary-regression" ||
       jobId === "mobile-publish"
     ) {
       continue;

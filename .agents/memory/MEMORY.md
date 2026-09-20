@@ -94,6 +94,7 @@
 - [macOS scripts on bash 3.2](macos-script-bash-compat.md) — avoid bash 4+ constructs; build real bash 3.2.57 (recipe inside), run the iOS-runner suites under it, and keep them Mac-safe (uname stub, shasum).
 - [Self-hosted runner provisioning](self-hosted-runner-provisioning.md) — digest short-circuits, token via ACTIONS_RUNNER_INPUT_TOKEN, verify .runner before svc.sh; macOS svc.sh/simctl facts inside.
 - [Hosted redaction probes](hosted-redaction-probes.md) — Actions echoes env and run scripts; assemble hostile values from encoded literals before capturing checker streams.
+- [Hosted regression independence](hosted-regression-independence.md) — controlled hosted release checks should run without protected credentials or native-runner health; keep those requirements at promotion.
 - [GitHub release browser evidence](github-release-browser-evidence.md) — missing release-environment targets make idle-profile evidence skip before Playwright runs.
 - [Reviewer-visible CI evidence](reviewer-visible-ci-evidence.md) — step summaries are sign-in-only and API-invisible; publish failure evidence as a bounded check-run summary and verify it unauthenticated.
 - [Hosted summary byte capture](hosted-summary-byte-capture.md) — exact validated bytes can use a successful-run artifact with ref/SHA metadata; keep raw checker streams out.

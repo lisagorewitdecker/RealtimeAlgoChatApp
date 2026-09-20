@@ -40,7 +40,9 @@
  *  12. Native report artifacts use the maximum bounded retention window, and
  *      an expired artifact download never leaves a dead report link in the
  *      release summary.
- *  13. A failed native privacy check still writes a BLOCKED publish summary
+ *  13. A hosted cleanup failure skips the native retry, preserves stale output,
+ *      and still publishes the fixed redacted platform recovery summary.
+ *  14. A failed native privacy check still writes a BLOCKED publish summary
  *      without reaching the simulated store submission boundary.
  *
  * The static rules catch code paths no scenario exercises; the behavioral runs
@@ -1789,6 +1791,101 @@ test("hosted native evidence regression proves a transient download recovers", (
     recoveryStep.run,
     /cat\s+.*(?:candidate-build-id|runner-metadata|pass-fail-record|sentry-source-map)/,
     "the hosted recovery scenario must not print downloaded evidence contents",
+  );
+});
+
+test("hosted native evidence regression keeps cleanup failures visible", () => {
+  const regressionJob = workflow.jobs["native-evidence-summary-regression"];
+  assert.deepEqual(
+    regressionJob.needs,
+    ["mobile-release-node-range"],
+    "the hosted cleanup regression must run independently of credential and native-runner availability",
+  );
+  const prepareStep = regressionJob.steps.find(
+    (step) => step.name === "Prepare stale iOS evidence before forced cleanup failure",
+  );
+  const cleanupStep = regressionJob.steps.find(
+    (step) => step.name === "Force iOS retry cleanup failure",
+  );
+  const retryStep = regressionJob.steps.find(
+    (step) => step.name === "Retry iOS native evidence download after failed cleanup",
+  );
+  const checkerStep = regressionJob.steps.find(
+    (step) => step.name === "Run checker after forced retry cleanup failure",
+  );
+  const verifyStep = regressionJob.steps.find(
+    (step) => step.name === "Verify forced retry cleanup failure remains visible and redacted",
+  );
+
+  assert.ok(prepareStep, "the hosted cleanup scenario must create stale iOS output");
+  assert.ok(cleanupStep, "the hosted cleanup scenario must force cleanup to fail");
+  assert.equal(cleanupStep.id, "cleanup-forced-ios");
+  assert.equal(cleanupStep["continue-on-error"], true);
+  assert.match(
+    cleanupStep.run,
+    /stale-marker\.txt[\s\S]*Controlled iOS retry cleanup failure injected[\s\S]*false/,
+    "the hosted cleanup scenario must fail after confirming stale output exists",
+  );
+
+  assert.ok(retryStep, "the hosted cleanup scenario must retain the real retry action");
+  assert.equal(retryStep.id, "retry-forced-ios");
+  assert.equal(retryStep.uses, pinnedDownloadArtifactAction);
+  assert.equal(retryStep["continue-on-error"], true);
+  assert.equal(
+    retryStep.if,
+    "${{ always() && steps.cleanup-forced-ios.outcome == 'success' }}",
+    "the retry must be gated on successful cleanup",
+  );
+  assert.equal(
+    retryStep.with.path,
+    "${{ runner.temp }}/native-retry-cleanup-failure/ios",
+  );
+
+  assert.ok(checkerStep, "the hosted cleanup scenario must run the production checker");
+  assert.equal(checkerStep.id, "forced-cleanup-check");
+  assert.equal(checkerStep["continue-on-error"], true);
+  assert.equal(
+    checkerStep.env.NATIVE_IOS_EVIDENCE_DOWNLOAD_RESULT,
+    "${{ steps.retry-forced-ios.outcome }}",
+  );
+  assert.match(
+    checkerStep.run,
+    /check-native-large-text-evidence\.sh[\s\S]*SUMMARY_PATH%\/summary\.md/,
+    "the hosted cleanup scenario must validate the stale extraction root",
+  );
+
+  assert.ok(
+    verifyStep,
+    "the hosted cleanup scenario must verify its fixed redacted summary",
+  );
+  assert.equal(verifyStep.if, "${{ always() }}");
+  assert.equal(
+    verifyStep.env.CLEANUP_RESULT,
+    "${{ steps.cleanup-forced-ios.outcome }}",
+  );
+  assert.equal(
+    verifyStep.env.RETRY_RESULT,
+    "${{ steps.retry-forced-ios.outcome }}",
+  );
+  assert.match(
+    verifyStep.run,
+    /"\$RETRY_RESULT" != "skipped"/,
+    "the hosted cleanup scenario must require the retry to be skipped",
+  );
+  assert.match(
+    verifyStep.run,
+    /NATIVE_IOS_RECOVERY_LINE/,
+    "the hosted cleanup scenario must assert the shared iOS recovery line",
+  );
+  assert.match(
+    verifyStep.run,
+    /cleanup-failure-evidence-must-not-appear/,
+    "the hosted cleanup scenario must reject stale evidence text in the summary",
+  );
+  assert.match(
+    verifyStep.run,
+    /cat "\$SUMMARY_PATH" >> "\$GITHUB_STEP_SUMMARY"/,
+    "the hosted cleanup scenario must publish the validated summary",
   );
 });
 
@@ -6898,7 +6995,7 @@ test("native evidence checker output is isolated from workflow commands", () => 
 
   assert.equal(
     checkerCallers.length,
-    9,
+    10,
     "every native evidence checker caller must be inventoried by this contract",
   );
   assert.equal(
@@ -7043,7 +7140,7 @@ test("hosted native evidence summaries record the checked revision before untrus
 
   assert.equal(
     summaryCheckerCallers.length,
-    7,
+    8,
     "every hosted native evidence summary caller must be covered",
   );
 
