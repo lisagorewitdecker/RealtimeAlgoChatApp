@@ -4,7 +4,6 @@ import { writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { spawn } from "node:child_process";
 import { setTimeout as delay } from "node:timers/promises";
-import { stripVTControlCharacters } from "node:util";
 import { fileURLToPath } from "node:url";
 import {
   findDuplicateJsonObjectKeys,
@@ -190,8 +189,33 @@ function findUnrecognizedLoaderFailure(output) {
   );
 }
 
+function stripAnsiEscapeSequences(value) {
+  const escapeCharacter = String.fromCharCode(0x1b);
+  let cursor = 0;
+  let normalized = "";
+
+  while (cursor < value.length) {
+    if (value[cursor] === escapeCharacter && value[cursor + 1] === "[") {
+      cursor += 2;
+      while (cursor < value.length) {
+        const codePoint = value.charCodeAt(cursor);
+        cursor += 1;
+        if (codePoint >= 0x40 && codePoint <= 0x7e) {
+          break;
+        }
+      }
+      continue;
+    }
+
+    normalized += value[cursor];
+    cursor += 1;
+  }
+
+  return normalized;
+}
+
 function sanitizeStartupDiagnostic(value, maxLength) {
-  const withoutAnsiSequences = stripVTControlCharacters(value);
+  const withoutAnsiSequences = stripAnsiEscapeSequences(value);
   const withoutControlChars = Array.from(withoutAnsiSequences, (character) => {
     const codePoint = character.codePointAt(0) ?? 0;
     return codePoint <= 0x1f || codePoint === 0x7f ? " " : character;
@@ -227,19 +251,18 @@ function redactKnownStartupFailureSecrets(value) {
 }
 
 function normalizeLoaderFailureForMatching(value) {
+  const withoutAnsiSequences = stripAnsiEscapeSequences(value);
   const trailingBell = String.fromCharCode(0x07);
-  let trailingWhitespaceStart = value.length;
+  let trailingWhitespaceStart = withoutAnsiSequences.length;
   while (
     trailingWhitespaceStart > 0 &&
-    /\s/.test(value[trailingWhitespaceStart - 1] ?? "")
+    /\s/.test(withoutAnsiSequences[trailingWhitespaceStart - 1] ?? "")
   ) {
     trailingWhitespaceStart -= 1;
   }
-  const withoutTrailingBell =
-    value[trailingWhitespaceStart - 1] === trailingBell
-      ? value.slice(0, trailingWhitespaceStart - 1)
-      : value;
-  return stripVTControlCharacters(withoutTrailingBell);
+  return withoutAnsiSequences[trailingWhitespaceStart - 1] === trailingBell
+    ? withoutAnsiSequences.slice(0, trailingWhitespaceStart - 1)
+    : withoutAnsiSequences;
 }
 
 function findMissingLibrary(output) {
