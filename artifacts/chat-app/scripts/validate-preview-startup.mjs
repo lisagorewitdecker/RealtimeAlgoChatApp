@@ -227,7 +227,19 @@ function redactKnownStartupFailureSecrets(value) {
 }
 
 function normalizeLoaderFailureForMatching(value) {
-  return stripVTControlCharacters(value);
+  const withoutAnsiSequences = stripVTControlCharacters(value);
+  const trailingBell = String.fromCharCode(0x07);
+  let trailingWhitespaceStart = withoutAnsiSequences.length;
+  while (
+    trailingWhitespaceStart > 0 &&
+    /\s/.test(withoutAnsiSequences[trailingWhitespaceStart - 1] ?? "")
+  ) {
+    trailingWhitespaceStart -= 1;
+  }
+  if (withoutAnsiSequences[trailingWhitespaceStart - 1] === trailingBell) {
+    return withoutAnsiSequences.slice(0, trailingWhitespaceStart - 1);
+  }
+  return withoutAnsiSequences;
 }
 
 function findMissingLibrary(output) {
