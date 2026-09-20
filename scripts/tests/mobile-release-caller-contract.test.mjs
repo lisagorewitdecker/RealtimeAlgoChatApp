@@ -660,7 +660,7 @@ test("invalid Node range guard blocks release jobs before setup or publish work"
   );
   assert.match(
     String(workflow.jobs?.["mobile-release-gate"]?.if),
-    /needs\.mobile-release-configuration\.result == 'success'/,
+    /needs\.native-release-configuration\.result == 'success'/,
     "the release gate must not start before mobile release configuration is evaluated",
   );
   assert.match(
@@ -964,6 +964,11 @@ test("blocked release diagnostics identify the supported Node range safely", () 
     blockStep.run,
     /configuration=\$RELEASE_CONFIGURATION_RESULT/,
     "blocked release output must include the centralized configuration result",
+  );
+  assert.match(
+    blockStep.run,
+    /idle-profile=\$IDLE_PROFILE_RESULT/,
+    "blocked release output must include the idle-profile registration result",
   );
   assert.match(
     blockStep.run,
