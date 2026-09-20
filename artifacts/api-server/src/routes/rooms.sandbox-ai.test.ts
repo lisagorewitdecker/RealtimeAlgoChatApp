@@ -463,55 +463,83 @@ describe("sandbox AI tab in a browser", () => {
     await page.close();
   });
 
-  it("offers a guarded retry after an interrupted reply reconnects", async () => {
+  it("keeps a guarded retry through repeated interrupted-reply reconnects", async () => {
     const page = await openSandbox();
     await acceptDisclosure(page);
 
     const interrupted = await ask(page, "Explain this after reconnecting.");
-    await page.evaluate(() => {
-      (globalThis as unknown as SandboxBrowserWindow).__socket.disconnect();
-    });
-    expect(await status(page)).toBe(
-      "Connection lost — the reply was interrupted. Retry when the room reconnects.",
-    );
-    expect(await page.locator("#aiRetryBtn").isVisible()).toBe(true);
-    expect(await page.locator("#aiRetryBtn").isDisabled()).toBe(true);
-    expect(await emitsOf(page, "assistant-request")).toHaveLength(1);
+    for (const cycle of [1, 2]) {
+      await page.evaluate(() => {
+        (globalThis as unknown as SandboxBrowserWindow).__socket.disconnect();
+      });
+      expect(await status(page)).toBe(
+        "Connection lost — the reply was interrupted. Retry when the room reconnects.",
+      );
+      expect(await page.locator("#aiRetryBtn").isVisible()).toBe(true);
+      expect(await page.locator("#aiRetryBtn").isDisabled()).toBe(true);
+      expect(await emitsOf(page, "assistant-request")).toHaveLength(1);
 
-    await page.evaluate(() => {
-      (globalThis as unknown as SandboxBrowserWindow).__socket.connect();
-    });
-    expect(await page.locator("#aiRetryBtn").isDisabled()).toBe(true);
-    await fire(page, "room-joined", {});
-    expect(await status(page)).toBe(
-      "Connection restored — you can retry your question.",
-    );
-    expect(await page.locator("#aiRetryBtn").isDisabled()).toBe(false);
+      // Delayed events can arrive while this reconnect is still in progress.
+      // They must not consume the retry or change its disconnected status.
+      await fire(page, "assistant-chunk", {
+        requestId: interrupted,
+        text: `stale answer during cycle ${cycle}`,
+      });
+      await fire(page, "assistant-done", {
+        requestId: interrupted,
+        cancelled: false,
+      });
+      await fire(page, "assistant-error", {
+        requestId: interrupted,
+        code: "SERVICE_ERROR",
+        message: `Stale failure during cycle ${cycle}.`,
+      });
+      expect(await page.locator("#aiOutput").textContent()).toBe("");
+      expect(await status(page)).toBe(
+        "Connection lost — the reply was interrupted. Retry when the room reconnects.",
+      );
+      expect(await page.locator("#aiRetryBtn").isVisible()).toBe(true);
+      expect(await page.locator("#aiRetryBtn").isDisabled()).toBe(true);
 
-    // Events from the interrupted request can arrive after the room has
-    // rejoined. None of them may replace the restored retry state.
-    await fire(page, "assistant-chunk", {
-      requestId: interrupted,
-      text: "stale answer",
-    });
-    await fire(page, "assistant-done", {
-      requestId: interrupted,
-      cancelled: false,
-    });
-    await fire(page, "assistant-error", {
-      requestId: interrupted,
-      code: "SERVICE_ERROR",
-      message: "Stale failure from the interrupted request.",
-    });
-    expect(await page.locator("#aiOutput").textContent()).toBe("");
-    expect(await status(page)).toBe(
-      "Connection restored — you can retry your question.",
-    );
-    expect(await page.locator("#aiRetryBtn").isVisible()).toBe(true);
-    expect(await page.locator("#aiRetryBtn").isDisabled()).toBe(false);
+      await page.evaluate(() => {
+        (globalThis as unknown as SandboxBrowserWindow).__socket.connect();
+      });
+      expect(await page.locator("#aiRetryBtn").isDisabled()).toBe(true);
+      await fire(page, "room-joined", {});
+      expect(await status(page)).toBe(
+        "Connection restored — you can retry your question.",
+      );
+      expect(await page.locator("#aiRetryBtn").isDisabled()).toBe(false);
+
+      // The interrupted request may also finish after this reconnect. None
+      // of its events may replace the restored retry state.
+      await fire(page, "assistant-chunk", {
+        requestId: interrupted,
+        text: `stale answer after cycle ${cycle}`,
+      });
+      await fire(page, "assistant-done", {
+        requestId: interrupted,
+        cancelled: false,
+      });
+      await fire(page, "assistant-error", {
+        requestId: interrupted,
+        code: "SERVICE_ERROR",
+        message: `Stale failure after cycle ${cycle}.`,
+      });
+      expect(await page.locator("#aiOutput").textContent()).toBe("");
+      expect(await status(page)).toBe(
+        "Connection restored — you can retry your question.",
+      );
+      expect(await page.locator("#aiRetryBtn").isVisible()).toBe(true);
+      expect(await page.locator("#aiRetryBtn").isDisabled()).toBe(false);
+    }
 
     await page.click('.tab[data-tab="html"]');
-    await page.fill("#htmlEditor", "<main>after reconnect</main>");
+    await page.fill("#htmlEditor", "<main>latest HTML after reconnect</main>");
+    await page.click('.tab[data-tab="css"]');
+    await page.fill("#cssEditor", "main { color: tomato; }");
+    await page.click('.tab[data-tab="js"]');
+    await page.fill("#jsEditor", "document.body.dataset.retried = 'yes';");
     await page.click('.tab[data-tab="ai"]');
     await page.click("#aiRetryBtn");
 
@@ -519,7 +547,11 @@ describe("sandbox AI tab in a browser", () => {
     expect(requests).toHaveLength(2);
     expect(requests[1]!.payload).toMatchObject({
       prompt: "Explain this after reconnecting.",
-      files: { html: "<main>after reconnect</main>" },
+      files: {
+        html: "<main>latest HTML after reconnect</main>",
+        css: "main { color: tomato; }",
+        js: "document.body.dataset.retried = 'yes';",
+      },
       disclosureAcknowledged: true,
     });
     expect((requests[1]!.payload as { requestId: string }).requestId).not.toBe(
