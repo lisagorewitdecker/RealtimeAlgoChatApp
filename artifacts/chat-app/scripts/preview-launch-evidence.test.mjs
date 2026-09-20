@@ -18,6 +18,7 @@ import {
   createLaunchEvidenceClassifier,
   formatLaunchEvidenceSummary,
   mergeDebugNamespaces,
+  stripAnsi,
 } from "./preview-launch-evidence.mjs";
 
 const SCRIPT = resolve(import.meta.dirname, "preview-launch-evidence.mjs");
@@ -59,6 +60,11 @@ const SENTINEL_PATTERN = /SENTINEL|sentinel-host|Logged in as/;
 function log(...lines) {
   return `${lines.join("\n")}\n`;
 }
+
+test("stripAnsi removes ANSI escape sequences from device log lines", () => {
+  assert.equal(stripAnsi("\u001b[31miOS  LOG  hello\u001b[0m"), "iOS  LOG  hello");
+  assert.equal(stripAnsi("plain text"), "plain text");
+});
 
 function assertRedacted(result) {
   const serialized = JSON.stringify(result);

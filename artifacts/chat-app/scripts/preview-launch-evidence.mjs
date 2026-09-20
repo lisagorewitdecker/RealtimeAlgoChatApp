@@ -55,15 +55,12 @@ const PACKAGE_ROOT = resolve(import.meta.dirname, "..");
 const DEFAULT_STATE_DIRECTORY = resolve(PACKAGE_ROOT, ".expo");
 const EVALUATION_INTERVAL_MS = 250;
 const FORWARDED_SIGNALS = ["SIGTERM", "SIGINT", "SIGHUP"];
-const ANSI_ESCAPE = String.fromCharCode(0x1b);
-const ANSI_PATTERN_SUFFIX = String.raw`\[[0-9;?]*[ -/]*[@-~]`;
+const ANSI_PATTERN_SOURCE = String.raw`\u001b\[[0-9;?]*[ -/]*[@-~]`;
 // RFC 6455: 1000 = normal closure, 1001 = going away (reload/app backgrounded
 // by choice). Everything else, including 1006 (no close frame), is abnormal.
 const NORMAL_CLOSE_CODES = new Set([1000, 1001]);
 
-// Keep the ANSI matcher visually close to the original regex literal while
-// avoiding a literal control character that triggers no-control-regex.
-const ANSI_PATTERN = new RegExp(`${ANSI_ESCAPE}${ANSI_PATTERN_SUFFIX}`, "g");
+const ANSI_PATTERN = new RegExp(ANSI_PATTERN_SOURCE, "g");
 const ISO_TIMESTAMP = String.raw`\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z`;
 const LEADING_TIMESTAMP_PATTERN = new RegExp(`^\\s*(${ISO_TIMESTAMP}) `);
 // @react-native/dev-middleware InspectorProxy debug lines. The device name and
@@ -81,7 +78,7 @@ const IOS_CLIENT_LOG_PATTERN =
   /^\s*iOS\s{1,2}(LOG|INFO|WARN|ERROR|DEBUG|TRACE|GROUP|TABLE|DIR|ASSERT)\s/;
 const ERROR_CLIENT_LOG_LEVELS = new Set(["ERROR"]);
 
-function stripAnsi(text) {
+export function stripAnsi(text) {
   return text.replace(ANSI_PATTERN, "");
 }
 
