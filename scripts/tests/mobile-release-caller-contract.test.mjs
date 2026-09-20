@@ -1381,6 +1381,58 @@ test("publish job runs the evidence privacy and submission-boundary regression b
     },
     "the native evidence privacy summary must use the privacy step outcome",
   );
+  const privacySummaryFixtureRoot = mkdtempSync(
+    path.join(tmpdir(), "mobile-release-privacy-summary-"),
+  );
+  try {
+    for (const [outcome, expectedStatus] of [
+      ["success", "PASS"],
+      ["skipped", "BLOCKED"],
+      ["cancelled", "BLOCKED"],
+    ]) {
+      const summaryPath = path.join(privacySummaryFixtureRoot, `${outcome}.md`);
+      const summaryResult = spawnSync("bash", ["-c", privacySummaryStep.run], {
+        cwd: workspaceRoot,
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          GITHUB_STEP_SUMMARY: summaryPath,
+          PRIVACY_RESULT: outcome,
+        },
+      });
+      assert.equal(
+        summaryResult.status,
+        0,
+        `privacy summary must render for ${outcome}: ${summaryResult.stderr}`,
+      );
+      const summary = readFileSync(summaryPath, "utf8");
+      assert.match(
+        summary,
+        new RegExp(`- Status: \\*\\*${expectedStatus}\\*\\*`),
+        `privacy summary must report ${expectedStatus} for ${outcome}`,
+      );
+      if (expectedStatus === "BLOCKED") {
+        assert.match(
+          summary,
+          /Run native large-text evidence privacy and submission-boundary regression" step log/,
+          `blocked privacy summary must point to the checker log for ${outcome}`,
+        );
+      } else {
+        assert.doesNotMatch(
+          summary,
+          /Status: \*\*BLOCKED\*\*/,
+          "a successful privacy check must not be reported as blocked",
+        );
+      }
+      assert.doesNotMatch(
+        summary,
+        /test-results\/native-large-text|candidate-build-id|runner-metadata|pass-fail-record|sentry-source-map/,
+        `privacy summary must not embed fixture output for ${outcome}`,
+      );
+    }
+  } finally {
+    rmSync(privacySummaryFixtureRoot, { recursive: true, force: true });
+  }
   assert.match(
     privacySummaryStep.run,
     /Status: \*\*PASS\*\*/,
