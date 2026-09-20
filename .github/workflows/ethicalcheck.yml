@@ -213,12 +213,3 @@ jobs:
               "EthicalCheck response did not confirm scan acceptance via success, code, message, or status fields."
           )
           PY
-          payload="$(jq -cn \
-            --arg openAPISpec "${ETHICALCHECK_OAS_URL}" \
-            --arg email "${ETHICALCHECK_REPORT_EMAIL}" \
-            --arg source "Github-Action" \
-            '{openAPISpec: $openAPISpec, email: $email, source: $source}')"
-
-          curl --fail-with-body --location --request POST 'https://pentest.apisec.ai/api/v1/pentest' \
-            --header 'Content-Type: application/json' \
-            --data-raw "${payload}"
