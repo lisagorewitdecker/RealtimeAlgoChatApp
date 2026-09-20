@@ -40,6 +40,8 @@
  *  12. Native report artifacts use the maximum bounded retention window, and
  *      an expired artifact download never leaves a dead report link in the
  *      release summary.
+ *  13. A failed native privacy check still writes a BLOCKED publish summary
+ *      without reaching the simulated store submission boundary.
  *
  * The static rules catch code paths no scenario exercises; the behavioral runs
  * inject sentinel values for every secret-backed variable and prove the real
@@ -1785,6 +1787,125 @@ test("hosted native evidence regression proves a transient download recovers", (
   );
 });
 
+test("hosted privacy regression blocks the publish boundary and keeps fixture contents out", () => {
+  const regressionJob = workflow.jobs["native-evidence-summary-regression"];
+  const privacyCheckStep = regressionJob.steps.find(
+    (step) =>
+      step.name === "Run controlled failed mobile publish privacy check",
+  );
+  const summaryStep = regressionJob.steps.find(
+    (step) => step.name === "Summarize native evidence privacy regression",
+  );
+  const submitStep = regressionJob.steps.find(
+    (step) => step.name === "Simulate mobile store submission after privacy check",
+  );
+  const verifyStep = regressionJob.steps.find(
+    (step) => step.name === "Verify failed privacy summary blocks simulated store submission",
+  );
+
+  assert.ok(
+    privacyCheckStep,
+    "the hosted regression job must run the real privacy command",
+  );
+  assert.equal(
+    privacyCheckStep.id,
+    "native-evidence-privacy",
+  );
+  assert.equal(
+    privacyCheckStep["continue-on-error"],
+    true,
+    "the hosted regression must retain control after the expected privacy failure",
+  );
+  assert.equal(
+    privacyCheckStep.run,
+    "bash scripts/run-untrusted-checker.sh pnpm run test:native-large-text-evidence",
+    "the hosted regression must execute the production privacy command",
+  );
+  assert.equal(
+    privacyCheckStep.env.NATIVE_EVIDENCE_PRIVACY_FAILURE_FIXTURE_ROOT,
+    "${{ runner.temp }}/native-evidence-privacy-publish",
+  );
+
+  assert.ok(summaryStep, "the hosted regression must write the publish summary");
+  assert.equal(
+    summaryStep.if,
+    "${{ always() }}",
+    "the failed privacy scenario must still write its reviewer-visible summary",
+  );
+  assert.equal(
+    summaryStep.env.PRIVACY_RESULT,
+    "${{ steps.native-evidence-privacy.outcome }}",
+    "the publish summary must use the real privacy step outcome",
+  );
+  const publishSummaryStep = workflow.jobs["mobile-publish"].steps.find(
+    (step) => step.name === "Summarize native evidence privacy regression",
+  );
+  assert.equal(
+    summaryStep.run,
+    publishSummaryStep?.run,
+    "the hosted regression must exercise the same summary branch as mobile-publish",
+  );
+  assert.match(
+    summaryStep.run,
+    /echo "- Status: \*\*BLOCKED\*\*"/,
+    "the publish summary must record a failed privacy check as BLOCKED",
+  );
+  assert.match(
+    summaryStep.run,
+    /privacy checks failed; store submission is blocked\./,
+    "the publish summary must explain why submission is blocked",
+  );
+
+  assert.ok(
+    submitStep,
+    "the hosted regression must include a simulated submission step",
+  );
+  assert.equal(
+    submitStep.if,
+    "${{ steps.native-evidence-privacy.outcome == 'success' }}",
+    "simulated submission must be gated by the real privacy step outcome",
+  );
+  assert.equal(
+    submitStep.env.SUBMISSION_MARKER,
+    "${{ runner.temp }}/native-evidence-privacy-publish/store-submission-command-ran",
+  );
+
+  assert.ok(
+    verifyStep,
+    "the hosted regression must verify the failed summary and submission boundary",
+  );
+  assert.equal(verifyStep.if, "${{ always() }}");
+  assert.equal(
+    verifyStep.env.PRIVACY_RESULT,
+    "${{ steps.native-evidence-privacy.outcome }}",
+  );
+  assert.match(
+    verifyStep.run,
+    /if \[\[ "\$PRIVACY_RESULT" != "failure" \]\]/,
+    "the hosted regression must require the real privacy step to fail",
+  );
+  assert.match(
+    verifyStep.run,
+    /fixture_sentinel[\s\S]*grep -Fq -- "\$fixture_sentinel"/,
+    "the hosted privacy scenario must check that fixture contents stay redacted",
+  );
+  assert.match(
+    verifyStep.run,
+    /grep -Fq -- "- Status: \*\*BLOCKED\*\*" "\$GITHUB_STEP_SUMMARY"/,
+    "the hosted regression must inspect the reviewer-visible BLOCKED summary",
+  );
+  assert.match(
+    verifyStep.run,
+    /if \[\[ -e "\$SUBMISSION_MARKER" \]\]/,
+    "the hosted regression must prove the simulated submission was skipped",
+  );
+  assert.doesNotMatch(
+    verifyStep.run,
+    /cat\s+.*(?:candidate-build-id|runner-metadata|pass-fail-record|sentry-source-map|private-fixture-content)/,
+    "the hosted privacy scenario must not print fixture contents",
+  );
+});
+
 test("successful artifact outcomes cannot approve empty extracted evidence", () => {
   const evidenceRoot = path.join(testRoot, "successful-empty-artifact");
   mkdirSync(path.join(evidenceRoot, "ios"), { recursive: true });
@@ -2182,6 +2303,50 @@ test("publish requires candidate-bound approvals from the current run attempt", 
   }
 
   const publishSteps = workflow.jobs["mobile-publish"].steps;
+  const privacyIndex = publishSteps.findIndex(
+    (step) =>
+      step.name ===
+      "Run native large-text evidence privacy and submission-boundary regression",
+  );
+  const privacyStep = publishSteps[privacyIndex];
+  const privacySummaryStep = publishSteps.find(
+    (step) => step.name === "Summarize native evidence privacy regression",
+  );
+  assert.ok(privacyIndex >= 0, "publish job must run the privacy check");
+  assert.equal(
+    privacyStep.id,
+    "native-evidence-privacy",
+    "publish privacy step must expose its outcome for downstream guards",
+  );
+  assert.notEqual(
+    privacyStep["continue-on-error"],
+    true,
+    "a failed publish privacy check must fail the job instead of continuing",
+  );
+  assert.equal(
+    privacyStep.if,
+    undefined,
+    "the publish privacy check must use normal success gating",
+  );
+  assert.ok(
+    privacySummaryStep,
+    "publish job must retain its reviewer-visible privacy summary",
+  );
+  assert.equal(
+    privacySummaryStep.if,
+    "${{ always() }}",
+    "the publish privacy summary must survive a failed privacy check",
+  );
+  const privacySummaryIndex = publishSteps.indexOf(privacySummaryStep);
+  assert.ok(
+    privacySummaryIndex > privacyIndex,
+    "the publish privacy summary must follow the privacy check",
+  );
+  assert.equal(
+    privacySummaryStep.env.PRIVACY_RESULT,
+    "${{ steps.native-evidence-privacy.outcome }}",
+    "the publish privacy summary must use the real privacy step outcome",
+  );
   assert.equal(
     workflow.jobs["mobile-publish"].environment.name,
     "mobile-store-submission",
@@ -2206,6 +2371,24 @@ test("publish requires candidate-bound approvals from the current run attempt", 
   const submitIndex = publishSteps.findIndex(
     (step) => step.name === "Submit the tested iOS and Android candidates",
   );
+  for (const stepName of [
+    "Attach candidate-bound human approvals",
+    "Require approved iOS and Android evidence",
+    "Verify publishing inputs",
+    "Submit the tested iOS and Android candidates",
+  ]) {
+    const step = publishSteps.find((candidate) => candidate.name === stepName);
+    assert.ok(step, `publish job must define "${stepName}"`);
+    assert.equal(
+      step.if,
+      "${{ steps.native-evidence-privacy.outcome == 'success' }}",
+      `${stepName} must be unreachable after a failed privacy check`,
+    );
+    assert.ok(
+      publishSteps.indexOf(step) > privacySummaryIndex,
+      `${stepName} must follow the privacy summary`,
+    );
+  }
   assert.ok(approvalIndex >= 0, "publish job must attach human approvals");
   assert.ok(
     strictIndex > approvalIndex,

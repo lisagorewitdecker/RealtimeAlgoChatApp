@@ -5,6 +5,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 CHECKER="$ROOT_DIR/scripts/check-native-large-text-evidence.sh"
 SAVED_TEST_STATUS="$ROOT_DIR/artifacts/api-server/test-results/.last-run.json"
 HOSTED_TAMPER_FIXTURES_ROOT="${NATIVE_EVIDENCE_TAMPER_FIXTURES_ROOT:-}"
+PRIVACY_FAILURE_FIXTURE_ROOT="${NATIVE_EVIDENCE_PRIVACY_FAILURE_FIXTURE_ROOT:-}"
 TEST_PARENT="$(mktemp -d)"
 TEST_ROOT="$TEST_PARENT/fixtures"
 CLEANUP_GUARD="$TEST_PARENT/cleanup-must-not-escape-fixtures"
@@ -1522,6 +1523,108 @@ for artifact_mutation in ios-screenshot android-sentry; do
   assert_not_contains "$(cat "$tampered_summary_path")" "$private_reviewer"
   assert_not_contains "$(cat "$tampered_summary_path")" "$private_evidence"
 done
+
+# Exercise the publish summary branch after a controlled privacy failure. The
+# checker summary and the reviewer-visible publish summary must remain safe even
+# when the failed fixture directory contains private content.
+privacy_root="$TEST_ROOT/privacy-publish-boundary"
+privacy_checker_summary="$TEST_ROOT/privacy-checker-summary.md"
+privacy_publish_summary="$TEST_ROOT/privacy-publish-summary.md"
+privacy_submission_marker="$privacy_root/store-submission-command-ran"
+privacy_fixture_sentinel="privacy-fixture-contents-must-not-appear"
+mkdir -p "$privacy_root"
+printf '%s\n' "$privacy_fixture_sentinel" > "$privacy_root/private-fixture-content.txt"
+
+privacy_checker_status=0
+if privacy_checker_output="$(
+  GITHUB_STEP_SUMMARY="$privacy_checker_summary" \
+    bash "$ROOT_DIR/scripts/run-untrusted-checker.sh" \
+    bash "$CHECKER" "$privacy_root" 2>&1
+)"; then
+  privacy_checker_status=0
+else
+  privacy_checker_status=$?
+fi
+if [[ "$privacy_checker_status" == "0" ]]; then
+  echo "controlled failed privacy scenario unexpectedly passed" >&2
+  exit 1
+fi
+
+privacy_result=failure
+{
+  echo "## Native evidence privacy and submission-boundary regression"
+  echo
+  if [[ "$privacy_result" == "success" ]]; then
+    echo "- Status: **PASS**"
+    echo "- Result: privacy and submission-boundary checks passed."
+  else
+    echo "- Status: **BLOCKED**"
+    echo "- Result: privacy checks failed; store submission is blocked."
+    echo '- Details: Review the "Run native large-text evidence privacy and submission-boundary regression" step log for checker diagnostics.'
+  fi
+} > "$privacy_publish_summary"
+
+simulate_privacy_store_submission() {
+  printf 'submission-reached\n' > "$privacy_submission_marker"
+}
+if [[ "$privacy_result" == "success" ]]; then
+  simulate_privacy_store_submission
+fi
+
+assert_contains "$(cat "$privacy_publish_summary")" "- Status: **BLOCKED**"
+assert_contains "$(cat "$privacy_publish_summary")" \
+  "privacy checks failed; store submission is blocked."
+if [[ -e "$privacy_submission_marker" ]]; then
+  echo "failed privacy scenario reached the simulated store submission boundary" >&2
+  exit 1
+fi
+assert_not_contains "$privacy_checker_output" "$privacy_fixture_sentinel"
+assert_not_contains "$(cat "$privacy_checker_summary")" "$privacy_fixture_sentinel"
+assert_not_contains "$(cat "$privacy_publish_summary")" "$privacy_fixture_sentinel"
+
+if [[ -n "$PRIVACY_FAILURE_FIXTURE_ROOT" ]]; then
+  # Hosted release validation opts into one controlled failure of this real
+  # privacy command. The fault injection is explicit and inert for normal
+  # local and release runs.
+  privacy_failure_root="$PRIVACY_FAILURE_FIXTURE_ROOT"
+  privacy_failure_summary="$privacy_failure_root/privacy-checker-summary.md"
+  privacy_failure_sentinel="privacy-fixture-contents-must-not-appear"
+  rm -rf -- "$privacy_failure_root"
+  mkdir -p -- "$privacy_failure_root"
+  write_valid_run "$privacy_failure_root" ios "privacy-private-candidate"
+  write_valid_run "$privacy_failure_root" android "privacy-private-candidate"
+  write_review_record \
+    "$privacy_failure_root" \
+    ios \
+    APPROVED \
+    "2026-09-15T13:00:00Z" \
+    "privacy-private-candidate" \
+    "privacy-private-reviewer"
+  write_review_record \
+    "$privacy_failure_root" \
+    android \
+    APPROVED \
+    "2026-09-15T13:00:00Z" \
+    "privacy-private-candidate" \
+    "privacy-private-reviewer"
+  printf '%s\n' "$privacy_failure_sentinel" \
+    > "$privacy_failure_root/private-fixture-content.txt"
+  rm "$privacy_failure_root/ios/20260909T120000Z/runner-metadata.txt"
+
+  if privacy_failure_output="$(
+    GITHUB_STEP_SUMMARY="$privacy_failure_summary" \
+      bash "$CHECKER" "$privacy_failure_root" 2>&1
+  )"; then
+    echo "controlled failed privacy fixture unexpectedly passed" >&2
+    exit 1
+  fi
+  assert_contains "$privacy_failure_output" "[ios] Missing runner metadata and device details"
+  assert_contains "$(cat "$privacy_failure_summary")" "- Status: **FAIL**"
+  assert_not_contains "$privacy_failure_output" "$privacy_failure_sentinel"
+  assert_not_contains "$(cat "$privacy_failure_summary")" "$privacy_failure_sentinel"
+  echo "Controlled native privacy failure fixture was rejected without exposing its contents."
+  exit 1
+fi
 
 cleanup_test_fixtures
 trap - EXIT

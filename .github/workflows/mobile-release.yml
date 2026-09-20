@@ -679,6 +679,16 @@ jobs:
       - name: Check out release candidate
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
+      - name: Set up pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ env.RELEASE_NODE_VERSION }}
+
       - name: Upload controlled Android artifact for missing iOS scenario
         shell: bash
         run: |
@@ -1238,6 +1248,64 @@ jobs:
           grep -Fq -- "- Status: **FAIL**" "$failed_retry_summary_path"
           grep -Fq -- "- Artifact download: **FAIL**" "$failed_retry_summary_path"
           cat "$pass_summary_path" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Run controlled failed mobile publish privacy check
+        id: native-evidence-privacy
+        continue-on-error: true
+        env:
+          NATIVE_EVIDENCE_PRIVACY_FAILURE_FIXTURE_ROOT: ${{ runner.temp }}/native-evidence-privacy-publish
+        run: bash scripts/run-untrusted-checker.sh pnpm run test:native-large-text-evidence
+
+      - name: Summarize native evidence privacy regression
+        if: ${{ always() }}
+        env:
+          PRIVACY_RESULT: ${{ steps.native-evidence-privacy.outcome }}
+        run: |
+          set -euo pipefail
+          {
+            echo "## Native evidence privacy and submission-boundary regression"
+            echo
+            if [[ "$PRIVACY_RESULT" == "success" ]]; then
+              echo "- Status: **PASS**"
+              echo "- Result: privacy and submission-boundary checks passed."
+            else
+              echo "- Status: **BLOCKED**"
+              echo "- Result: privacy checks failed; store submission is blocked."
+              echo '- Details: Review the "Run native large-text evidence privacy and submission-boundary regression" step log for checker diagnostics.'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Simulate mobile store submission after privacy check
+        if: ${{ steps.native-evidence-privacy.outcome == 'success' }}
+        env:
+          SUBMISSION_MARKER: ${{ runner.temp }}/native-evidence-privacy-publish/store-submission-command-ran
+        run: printf 'submission-reached\n' > "$SUBMISSION_MARKER"
+
+      - name: Verify failed privacy summary blocks simulated store submission
+        if: ${{ always() }}
+        env:
+          PRIVACY_RESULT: ${{ steps.native-evidence-privacy.outcome }}
+          PRIVACY_CHECKER_SUMMARY: ${{ runner.temp }}/native-evidence-privacy-publish/privacy-checker-summary.md
+          SUBMISSION_MARKER: ${{ runner.temp }}/native-evidence-privacy-publish/store-submission-command-ran
+        shell: bash
+        run: |
+          set -euo pipefail
+          fixture_sentinel="privacy-fixture-contents-must-not-appear"
+          if [[ "$PRIVACY_RESULT" != "failure" ]]; then
+            echo "The controlled mobile publish privacy check did not fail as expected." >&2
+            exit 1
+          fi
+          grep -Fq -- "- Status: **BLOCKED**" "$GITHUB_STEP_SUMMARY"
+          grep -Fq -- "privacy checks failed; store submission is blocked." "$GITHUB_STEP_SUMMARY"
+          if [[ -e "$SUBMISSION_MARKER" ]]; then
+            echo "The failed privacy check reached the simulated store submission boundary." >&2
+            exit 1
+          fi
+          if grep -Fq -- "$fixture_sentinel" "$PRIVACY_CHECKER_SUMMARY" ||
+            grep -Fq -- "$fixture_sentinel" "$GITHUB_STEP_SUMMARY"; then
+            echo "The privacy summaries exposed controlled fixture contents." >&2
+            exit 1
+          fi
 
   native-evidence-tamper-regression:
     name: Native evidence tamper regression
@@ -2503,6 +2571,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Attach candidate-bound human approvals
+        if: ${{ steps.native-evidence-privacy.outcome == 'success' }}
         env:
           IOS_REVIEW_BUILD_ID: ${{ inputs.ios_review_candidate_build_id }}
           IOS_SUBMIT_BUILD_ID: ${{ env.NATIVE_SMOKE_IOS_BUILD_ID }}
@@ -2607,6 +2676,7 @@ jobs:
           attach_approval android "$ANDROID_REVIEW_BUILD_ID" "$ANDROID_SUBMIT_BUILD_ID"
 
       - name: Require approved iOS and Android evidence
+        if: ${{ steps.native-evidence-privacy.outcome == 'success' }}
         env:
           REVIEWED_REF: ${{ github.ref }}
           NATIVE_EVIDENCE_REQUIRE_APPROVAL: "1"
@@ -2632,6 +2702,7 @@ jobs:
           bash scripts/run-untrusted-checker.sh bash scripts/check-native-large-text-evidence.sh
 
       - name: Verify publishing inputs
+        if: ${{ steps.native-evidence-privacy.outcome == 'success' }}
         env:
           EAS_TOKEN: ${{ secrets.EAS_TOKEN }}
           IOS_BUILD_ID: ${{ env.NATIVE_SMOKE_IOS_BUILD_ID }}
@@ -2643,6 +2714,7 @@ jobs:
           : "${ANDROID_BUILD_ID:?Set the NATIVE_SMOKE_ANDROID_BUILD_ID repository variable.}"
 
       - name: Submit the tested iOS and Android candidates
+        if: ${{ steps.native-evidence-privacy.outcome == 'success' }}
         env:
           EXPO_TOKEN: ${{ secrets.EAS_TOKEN }}
           IOS_BUILD_ID: ${{ env.NATIVE_SMOKE_IOS_BUILD_ID }}
