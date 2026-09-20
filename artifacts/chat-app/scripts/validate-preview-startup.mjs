@@ -280,7 +280,11 @@ function sanitizeStartupDiagnostic(value, maxLength) {
   for (let index = 0; index < withoutAnsiSequences.length; index += 1) {
     const character = withoutAnsiSequences[index];
     const codeUnit = withoutAnsiSequences.charCodeAt(index);
-    characters.push(codeUnit <= 0x1f || codeUnit === 0x7f ? " " : character);
+    characters.push(
+      codeUnit <= 0x1f || (codeUnit >= 0x7f && codeUnit <= 0x9f)
+        ? " "
+        : character,
+    );
   }
   const withoutControlChars = characters.join("");
 
