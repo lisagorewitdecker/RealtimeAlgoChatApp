@@ -90,8 +90,11 @@ test("compatibility fixture makes a deterministic API operation breaking", () =>
   ].join("\n");
   const breaking = buildBreakingCompatibilityContent(content);
 
-  assert.match(breaking, /\/rooms:\n    post:\n      operationId: createRoomHostedProbe/);
-  assert.match(breaking, /\/other:\n    post:\n      operationId: createRoom/);
+  assert.match(
+    breaking,
+    /\/rooms:\n {4}post:\n {6}operationId: createRoomHostedProbe/,
+  );
+  assert.match(breaking, /\/other:\n {4}post:\n {6}operationId: createRoom/);
 });
 
 test("compatibility fixture rejects malformed YAML before probing for /rooms", () => {
