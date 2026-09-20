@@ -70,7 +70,7 @@
 - [Account-access lookup deadline](account-access-retry-budget.md) — one hard deadline for waits and in-flight Clerk requests, under Socket.IO’s 45 s connect timeout; pass capped hints to clients.
 - [Relocatable Pino bundles](relocatable-pino-bundles.md) — esbuild-plugin-pino can bake the build machine’s absolute output path into workers; rewrite and validate bundle-relative paths.
 - [Browser E2E phase budgets](e2e-phase-budgets.md) — bound and label external setup, navigation, assertions, and teardown separately so stalls identify their real phase.
-- [Chat App source-rule checks](chat-app-source-rule-checks.md) — mocked-away conventions need AST source rules: trace rendered code only, follow one import hop, reject the unresolvable.
+- [Chat App source-rule checks](chat-app-source-rule-checks.md) — conventions hidden by mocked dependencies need fast AST-based source rules: trace rendered code, follow local imports one hop, and reject what cannot be resolved.
 - [Web E2EE key persistence](web-key-persistence.md) — web keys stay in localStorage by owner decision (accepted scan risk); jest-expo has no localStorage, so stub it in tests.
 - [.replit merge regressions](replit-config-merge-regressions.md) — task merges can drop validation workflows and the post-merge timeout; an untracked `.replit` stub in a task env gets committed.
 - [Worktree-local state vs shared Git config](shared-git-config-worktree-records.md) — worktrees share local git config; shared single-valued records let siblings impersonate each other.
