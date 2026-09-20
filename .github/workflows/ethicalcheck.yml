@@ -190,6 +190,14 @@ jobs:
                   and not negative_pattern.search(value)
               )
 
+          def signals_failure(value):
+              return isinstance(value, str) and negative_pattern.search(value)
+
+          if signals_failure(message) or signals_failure(status):
+              raise SystemExit(
+                  "EthicalCheck response reported a failure in its message or status fields."
+              )
+
           if success is True:
               raise SystemExit(0)
           if isinstance(code, int) and 200 <= code < 300:

@@ -70,6 +70,9 @@ test("EthicalCheck workflow inlines the scan trigger instead of referencing the 
   assert.match(scanStep.run, /success\(\?:ful\(\?:ly\)\?\)\?\)/);
   assert.match(scanStep.run, /negative_pattern = re\.compile/);
   assert.match(scanStep.run, /and not negative_pattern\.search\(value\)/);
+  assert.match(scanStep.run, /def signals_failure\(value\):/);
+  assert.match(scanStep.run, /signals_failure\(message\) or signals_failure\(status\)/);
+  assert.match(scanStep.run, /response reported a failure in its message or status fields/);
   assert.match(scanStep.run, /response did not confirm scan acceptance via success, code, message, or status fields/);
   assert.match(scanStep.run, /'https:\/\/pentest\.apisec\.ai\/api\/v1\/pentest'/);
   assert.doesNotMatch(workflowText, /apisec-inc\/ethicalcheck-action/);
