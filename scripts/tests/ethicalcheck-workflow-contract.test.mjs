@@ -15,12 +15,18 @@ const workspaceRoot = path.resolve(
 const workflowPath = path.join(workspaceRoot, ".github/workflows/ethicalcheck.yml");
 const workflowText = readFileSync(workflowPath, "utf8");
 const workflow = YAML.parse(workflowText, { uniqueKeys: true });
-const job = workflow.jobs?.Trigger_EthicalCheck;
-const step = job?.steps?.[0];
+const stepName = "EthicalCheck  Free & Automated API Security Testing Service";
+const jobEntry = Object.entries(workflow.jobs ?? {}).find(([, candidate]) =>
+  Array.isArray(candidate?.steps)
+    ? candidate.steps.some((step) => step?.name === stepName)
+    : false,
+);
+const job = jobEntry?.[1];
+const step = job?.steps?.find((candidate) => candidate?.name === stepName);
 
 function runEthicalCheckStep(env) {
-  assert.ok(job, "expected the EthicalCheck workflow to define Trigger_EthicalCheck");
-  assert.equal(typeof step?.run, "string", "expected Trigger_EthicalCheck to run inline bash");
+  assert.ok(job, "expected the EthicalCheck workflow to define a scan job");
+  assert.equal(typeof step?.run, "string", `expected ${stepName} to run inline bash`);
 
   return spawnSync("bash", ["-euo", "pipefail", "-c", step.run], {
     cwd: workspaceRoot,
@@ -30,9 +36,9 @@ function runEthicalCheckStep(env) {
 }
 
 test("EthicalCheck workflow runs the scan inline instead of depending on a missing third-party action", () => {
-  assert.ok(job, "expected the EthicalCheck workflow to define Trigger_EthicalCheck");
-  assert.ok(step, "expected Trigger_EthicalCheck to define a first step");
-  assert.equal(typeof step.run, "string", "expected Trigger_EthicalCheck to run inline bash");
+  assert.ok(job, "expected the EthicalCheck workflow to define a scan job");
+  assert.ok(step, `expected the EthicalCheck workflow to define the ${stepName} step`);
+  assert.equal(typeof step.run, "string", `expected ${stepName} to run inline bash`);
   assert.equal(step.uses, undefined);
   assert.match(step.run, /\bcurl\b/);
   assert.match(step.run, /\bhttps:\/\/pentest\.apisec\.ai\/api\/v1\/pentest\b/);
