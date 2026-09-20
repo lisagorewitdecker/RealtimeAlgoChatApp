@@ -74,17 +74,6 @@ export const CAPTURED_LOADER_SAMPLES = Object.freeze([
 ]);
 // END GENERATED PREVIEW LOADER EVIDENCE
 
-const longLinuxLibraryPath =
-  `/opt/expo/${"react-native-devtools-cache/".repeat(16)}` +
-  "libgtk-3.so.0";
-const longDyldLibraryPath =
-  `/opt/homebrew/Library/Application Support/Expo/` +
-  `${"react native devtools cache/".repeat(12)}` +
-  "libgtk-3.dylib";
-const longWindowsLibraryPath =
-  `C:\\Program Files\\Expo\\${"react native devtools cache\\".repeat(12)}` +
-  "libgtk-3-0.dll";
-
 // BEGIN GENERATED PREVIEW LOADER OUTPUT
 export const fixtureOutput = Object.freeze({
   "missing-runtime-library": "Error: /opt/expo/react-native-devtools: error while loading shared libraries: libgtk-3.so.0: cannot open shared object file: No such file or directory\n",
