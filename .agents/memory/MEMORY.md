@@ -111,7 +111,7 @@
 - [Native report retention](native-report-retention.md) — durable release summaries keep bounded native review evidence usable after artifact links expire.
 - [Native artifact outage summary](native-artifact-outage-summary.md) — inspect download step outcomes and validate checker sections in a private summary before publishing.
 - [Workflow output safety](workflow-output-safety.md) — summary values need sentinel encoding and untrusted checker logs need a stop-command guard.
-- [Hosted preview dependency diagnostics](hosted-preview-dependency-diagnostics.md) — platform evidence jobs should fail on missing shared validators before invoking record checkers.
+- [Hosted preview dependency diagnostics](hosted-preview-dependency-diagnostics.md) — fail on missing shared validators first; new validator imports go in the fixture cp list and workflow paths too.
 - [setup-node semver contract](setup-node-semver-contract.md) — pin the local Node-range matcher to the semver version bundled by the pinned setup-node action.
 - [Metro evidence persistence](metro-evidence-persistence.md) — queue immutable rolling snapshots FIFO; disable file writes after failure while console diagnostics continue.
 - [Hosted root contract gate](hosted-root-contract-gate.md) — ubuntu-latest lacks ImageMagick/Tesseract and floats Node 24.x; signal-timing flakes and log/rerun recipes via the push token.
@@ -130,3 +130,4 @@
 - [Native privacy publish boundary](native-privacy-publish-boundary.md) — test failed privacy summaries and the unreachable store boundary together, not only the evidence checker.
 - [Tagged wrapper test doubles](tagged-wrapper-test-doubles.md) — a wrapper stand-in must render its own tagged host and suites query through within(); prove it with a typecheck-clean mutant under both Jest projects.
 - [Preview evidence byte pairing](preview-evidence-byte-pairing.md) — when a preview sidecar is present, Markdown evidence must preserve the producer’s exact redacted byte-bearing strings.
+- [Launch-evidence staleness](launch-evidence-staleness.md) — a probe result is current only if decided at/after the launcher’s start record; the preflight’s own dev server runs in pass-through mode.

@@ -220,27 +220,33 @@ const scriptContracts = {
  * below intentionally discovers JSON.parse calls in release-check scripts and
  * their local helper modules rather than trusting this list alone: adding a
  * reader without adding the shared duplicate-key check must fail this
- * contract.
+ * contract. An entry script that reaches several readers (its own and those
+ * of the local helpers it imports) lists one contract per parsed argument.
  */
 const releaseEvidenceReaderContracts = {
-  "artifacts/chat-app/scripts/preview-launch-evidence.mjs": {
-    name: "iOS launch-evidence probe records",
-    argument: "contents",
-    scannerCall: "findDuplicateJsonObjectKeys(contents)",
-    duplicateFailure: /Launch-evidence probe JSON contains duplicate fields \(\$\{fileName\}\)\./,
-  },
   "artifacts/chat-app/scripts/validate-branding.mjs": {
     name: "native branding metadata",
     argument: "source",
     scannerCall: "findDuplicateJsonObjectKeys(source)",
     duplicateFailure: /Native \$\{platformLabel\(platform\)\} metadata contains duplicate fields/,
   },
-  "artifacts/chat-app/scripts/validate-preview-startup.mjs": {
-    name: "preview handoff sidecar",
-    argument: "source",
-    scannerCall: "findDuplicateJsonObjectKeys(source)",
-    duplicateFailure: /Preview handoff preflight JSON contains duplicate fields/,
-  },
+  "artifacts/chat-app/scripts/validate-preview-startup.mjs": [
+    {
+      name: "preview handoff sidecar",
+      argument: "source",
+      scannerCall: "findDuplicateJsonObjectKeys(source)",
+      duplicateFailure: /Preview handoff preflight JSON contains duplicate fields/,
+    },
+    {
+      // The preflight copies the launch-evidence probe result and start
+      // record through preview-launch-evidence.mjs, so that helper's reader
+      // is reached from this entry script.
+      name: "iOS launch-evidence probe records",
+      argument: "contents",
+      scannerCall: "findDuplicateJsonObjectKeys(contents)",
+      duplicateFailure: /Launch-evidence probe JSON contains duplicate fields \(\$\{fileName\}\)\./,
+    },
+  ],
   "scripts/check-native-large-text-evidence.sh": {
     name: "native large-text Sentry evidence",
     argument: "rawEvidence",
@@ -552,9 +558,18 @@ function resolveShellPathToken(filePath, token) {
   return null;
 }
 
+/** Contracts registered for an entry script, one per parsed argument. */
+function releaseEvidenceReaderContractsFor(relativePath) {
+  const contracts = releaseEvidenceReaderContracts[relativePath];
+  if (contracts === undefined) {
+    return [];
+  }
+  return Array.isArray(contracts) ? contracts : [contracts];
+}
+
 function discoverShellEmbeddedLocalModules(filePath) {
   const relativePath = path.relative(workspaceRoot, filePath);
-  const shellContract = releaseEvidenceReaderContracts[relativePath];
+  const [shellContract] = releaseEvidenceReaderContractsFor(relativePath);
   if (!filePath.endsWith(".sh") || !shellContract) {
     return [];
   }
@@ -658,7 +673,7 @@ function jsonParseMatches(filePath) {
   const relativePath = path.relative(workspaceRoot, filePath);
   const ignoredArguments =
     nonEvidenceJsonParseArguments[relativePath] ?? new Set();
-  const shellContract = releaseEvidenceReaderContracts[relativePath];
+  const [shellContract] = releaseEvidenceReaderContractsFor(relativePath);
   const source = readFileSync(filePath, "utf8");
 
   return [...source.matchAll(parsePattern)]
@@ -2813,8 +2828,12 @@ function releaseEvidenceReaderInventory(discovered) {
 }
 
 function assertReleaseEvidenceReaderInventory(discovered) {
-  const inventory = Object.entries(releaseEvidenceReaderContracts)
-    .map(([relativePath, contract]) => `${relativePath}::${contract.argument}`)
+  const inventory = Object.keys(releaseEvidenceReaderContracts)
+    .flatMap((relativePath) =>
+      releaseEvidenceReaderContractsFor(relativePath).map(
+        (contract) => `${relativePath}::${contract.argument}`,
+      ),
+    )
     .sort();
   const discoveredInventory = releaseEvidenceReaderInventory(discovered);
 
@@ -2831,10 +2850,12 @@ function assertReleaseEvidenceReaderInventory(discovered) {
 }
 
 function assertReleaseEvidenceReader({ entryPath, parserPath, argument }) {
-  const contract = releaseEvidenceReaderContracts[entryPath];
+  const contract = releaseEvidenceReaderContractsFor(entryPath).find(
+    (candidate) => candidate.argument === argument,
+  );
   assert.ok(
     contract,
-    `The release evidence JSON reader ${entryPath} must have an inventory contract.`,
+    `The release evidence JSON reader ${entryPath} (JSON.parse(${argument}) in ${parserPath}) must have an inventory contract.`,
   );
   const source = scriptSource(parserPath);
   const scannerCall = contract.scannerCall.replace(

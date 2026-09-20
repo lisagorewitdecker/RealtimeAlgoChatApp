@@ -119,7 +119,14 @@ if (
     fixtureName === "handoff-server-stall-bundle"
   ) {
     if (process.env.PREVIEW_STARTUP_LIVE_START_MARKER) {
-      appendFileSync(process.env.PREVIEW_STARTUP_LIVE_START_MARKER, "started\n");
+      // The launcher pass-through flag is recorded so the preflight tests can
+      // prove the throwaway dev server never counts as a managed start.
+      appendFileSync(
+        process.env.PREVIEW_STARTUP_LIVE_START_MARKER,
+        `started PREVIEW_LAUNCH_PROBE_PASSTHROUGH=${
+          process.env.PREVIEW_LAUNCH_PROBE_PASSTHROUGH ?? ""
+        }\n`,
+      );
     }
     const stallManifest = fixtureName === "handoff-server-stall-manifest";
     const stallBundle = fixtureName === "handoff-server-stall-bundle";

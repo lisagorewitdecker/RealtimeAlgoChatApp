@@ -20,6 +20,13 @@ import {
   CAPTURED_EXPO_TOOLING,
   CAPTURED_LOADER_SAMPLES,
 } from "./preview-startup-runtime-library-fixture.mjs";
+import {
+  LAUNCH_EVIDENCE_STATUSES,
+  PROBE_PASSTHROUGH_ENVIRONMENT_NAME,
+  findLaunchProbeResult,
+  parseProbeTimestamp,
+  readDevServerStart,
+} from "./preview-launch-evidence.mjs";
 
 export { MAX_PREVIEW_TIMEOUT_MS, READY_MARKERS, parsePreviewTimeout };
 
@@ -47,6 +54,8 @@ const PREVIEW_TOOLING_MAINTENANCE_FILES = Object.freeze([
 const packageRequire = createRequire(
   resolve(import.meta.dirname, "..", "package.json"),
 );
+const EXPO_GO_LAUNCH_CRASH_FAILURE_PREFIX =
+  "Expo Go iOS launch evidence is BUNDLE_ONLY_THEN_CLOSED";
 const HANDOFF_FAILURE_PHASES = Object.freeze([
   {
     label: "public manifest",
@@ -62,7 +71,50 @@ const HANDOFF_FAILURE_PHASES = Object.freeze([
       "Preview handoff preflight failed at the local manifest/bundle probe.",
     ],
   },
+  {
+    label: "Expo Go launch evidence",
+    matches: [EXPO_GO_LAUNCH_CRASH_FAILURE_PREFIX],
+  },
 ]);
+// The `expoGoLaunch` boundary copies the latest launch-evidence probe result
+// (scripts/preview-launch-evidence.mjs): its status and counts, never log
+// text. NOT_RUN means no result exists; STALE means the result predates the
+// latest managed dev server start. NOT_ASSESSED is accepted only when
+// validating records written before the boundary was automated.
+const EXPO_GO_LAUNCH_NOT_RUN = "NOT_RUN";
+const EXPO_GO_LAUNCH_STALE = "STALE";
+const EXPO_GO_LAUNCH_LEGACY_NOT_ASSESSED = "NOT_ASSESSED";
+const EXPO_GO_LAUNCH_PROBE_STATUSES = Object.freeze(
+  Object.values(LAUNCH_EVIDENCE_STATUSES),
+);
+const EXPO_GO_LAUNCH_NOT_RUN_EVIDENCE =
+  "Launch-evidence probe not run — no result was recorded; arm it with " +
+  "probe:preview-launch -- --arm and restart the artifacts/chat-app: expo workflow once";
+const EXPO_GO_LAUNCH_RECOVERY_HINT =
+  "Recovery: run `pnpm --filter @workspace/chat-app run probe:preview-launch -- --arm`, " +
+  "restart the artifacts/chat-app: expo workflow once, and rerun the preflight.";
+const EXPO_GO_LAUNCH_TIMESTAMP_PATTERN = String.raw`\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z`;
+const EXPO_GO_LAUNCH_AGE_PATTERN = String.raw`(?:\d+s|\d+m \d+s|\d+h \d+m|\d+d \d+h)`;
+const EXPO_GO_LAUNCH_STATUS_PATTERN = `(?:${EXPO_GO_LAUNCH_PROBE_STATUSES.join("|")})`;
+const EXPO_GO_LAUNCH_RESULT_EVIDENCE_PATTERN = new RegExp(
+  "^Expo Go iOS launch-evidence probe: " +
+    `decided_at=${EXPO_GO_LAUNCH_TIMESTAMP_PATTERN}; age=${EXPO_GO_LAUNCH_AGE_PATTERN}; ` +
+    String.raw`metro_ready=(?:yes|no); expo_go_ios_connections=\d+; other_inspector_connections=\d+; ` +
+    String.raw`ios_bundle_http_200=\d+; inspector_close_code=(?:none|\d+); ` +
+    String.raw`bundle_to_close_seconds=(?:n\/a|unknown|\d+(?:\.\d+)?); ios_client_log_lines=\d+; ` +
+    String.raw`ios_client_error_lines=\d+; expo_go_asset_requests=\d+; ios_lines_before_bundle=\d+; ` +
+    String.raw`request_log_lines=\d+; dev_server_exit=(?:none|code:\d+|signal:SIG[A-Z0-9]+)$`,
+);
+const EXPO_GO_LAUNCH_STALE_EVIDENCE_PATTERN = new RegExp(
+  `^Launch-evidence probe result is stale — ${EXPO_GO_LAUNCH_STATUS_PATTERN} ` +
+    `decided_at=${EXPO_GO_LAUNCH_TIMESTAMP_PATTERN}; age=${EXPO_GO_LAUNCH_AGE_PATTERN}; ` +
+    `dev_server_started_at=(?:${EXPO_GO_LAUNCH_TIMESTAMP_PATTERN}|unrecorded); ` +
+    "rerun the probe against the current dev server$",
+);
+
+function escapeRegExp(text) {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
 const HANDOFF_PLATFORM_CONFIG = {
   android: {
     schema: "android-preview-handoff-preflight/v1",
@@ -86,7 +138,12 @@ const HANDOFF_BOUNDARIES = Object.freeze([
 const HANDOFF_ALLOWED_STATUSES = Object.freeze({
   publicManifestReachability: new Set(["PASS", "FAIL", "NOT_RUN"]),
   localHandoffProbe: new Set(["PASS", "FAIL", "NOT_RUN"]),
-  expoGoLaunch: new Set(["NOT_ASSESSED"]),
+  expoGoLaunch: new Set([
+    ...EXPO_GO_LAUNCH_PROBE_STATUSES,
+    EXPO_GO_LAUNCH_NOT_RUN,
+    EXPO_GO_LAUNCH_STALE,
+    EXPO_GO_LAUNCH_LEGACY_NOT_ASSESSED,
+  ]),
   serverNativeRequestEvidence: new Set(["NOT_ASSESSED"]),
 });
 const HANDOFF_EVIDENCE_PATTERNS = Object.freeze({
@@ -105,7 +162,17 @@ const HANDOFF_EVIDENCE_PATTERNS = Object.freeze({
       /^Local manifest\/bundle probe not run — no successful probe result was recorded$/,
   },
   expoGoLaunch: {
-    NOT_ASSESSED: (platformConfig) =>
+    ...Object.fromEntries(
+      EXPO_GO_LAUNCH_PROBE_STATUSES.map((status) => [
+        status,
+        EXPO_GO_LAUNCH_RESULT_EVIDENCE_PATTERN,
+      ]),
+    ),
+    [EXPO_GO_LAUNCH_NOT_RUN]: new RegExp(
+      `^${escapeRegExp(EXPO_GO_LAUNCH_NOT_RUN_EVIDENCE)}$`,
+    ),
+    [EXPO_GO_LAUNCH_STALE]: EXPO_GO_LAUNCH_STALE_EVIDENCE_PATTERN,
+    [EXPO_GO_LAUNCH_LEGACY_NOT_ASSESSED]: (platformConfig) =>
       new RegExp(
         `^Requires ${platformConfig.phoneDescription} running stock Expo Go\\.$`,
       ),
@@ -712,12 +779,134 @@ export async function readAndValidateHandoffPreflight(outputPath) {
   return validateHandoffPreflightRecord(record);
 }
 
+function formatEvidenceAge(ageMs) {
+  const totalSeconds = Math.max(0, Math.floor(ageMs / 1000));
+  if (totalSeconds < 60) return `${totalSeconds}s`;
+  const totalMinutes = Math.floor(totalSeconds / 60);
+  if (totalMinutes < 60) return `${totalMinutes}m ${totalSeconds % 60}s`;
+  const totalHours = Math.floor(totalMinutes / 60);
+  if (totalHours < 24) return `${totalHours}h ${totalMinutes % 60}m`;
+  return `${Math.floor(totalHours / 24)}d ${totalHours % 24}h`;
+}
+
+function invalidLaunchEvidence(field) {
+  // Name the field, never its value: the file may be corrupted.
+  throw new Error(
+    `Launch-evidence probe result has an invalid ${field} value.`,
+  );
+}
+
+function launchEvidenceCount(observation, field) {
+  const value = observation[field];
+  if (!Number.isSafeInteger(value) || value < 0) invalidLaunchEvidence(field);
+  return String(value);
+}
+
+// Copies the probe's counts-only observation into one evidence line. The
+// probe's `reason` sentence and any log text are deliberately left behind.
+function formatLaunchProbeEvidence(result, decidedAt, age) {
+  const observation = result.observation;
+  if (!isPlainObject(observation)) invalidLaunchEvidence("observation");
+  if (typeof observation.metroReady !== "boolean") {
+    invalidLaunchEvidence("metroReady");
+  }
+  const closeCode = observation.inspectorCloseCode;
+  if (closeCode != null && (!Number.isSafeInteger(closeCode) || closeCode < 0)) {
+    invalidLaunchEvidence("inspectorCloseCode");
+  }
+  const bundleToClose = observation.bundleToCloseSeconds;
+  if (
+    bundleToClose != null &&
+    (typeof bundleToClose !== "number" ||
+      !Number.isFinite(bundleToClose) ||
+      bundleToClose < 0)
+  ) {
+    invalidLaunchEvidence("bundleToCloseSeconds");
+  }
+  const devServerExit = result.devServerExit;
+  if (
+    devServerExit !== undefined &&
+    !/^(?:code:\d+|signal:SIG[A-Z0-9]+)$/.test(String(devServerExit))
+  ) {
+    invalidLaunchEvidence("devServerExit");
+  }
+
+  return [
+    `Expo Go iOS launch-evidence probe: decided_at=${decidedAt}`,
+    `age=${age}`,
+    `metro_ready=${observation.metroReady ? "yes" : "no"}`,
+    `expo_go_ios_connections=${launchEvidenceCount(observation, "expoGoIosConnections")}`,
+    `other_inspector_connections=${launchEvidenceCount(observation, "otherInspectorConnections")}`,
+    `ios_bundle_http_200=${launchEvidenceCount(observation, "iosBundleHttp200")}`,
+    `inspector_close_code=${closeCode == null ? "none" : closeCode}`,
+    `bundle_to_close_seconds=${
+      closeCode == null ? "n/a" : bundleToClose == null ? "unknown" : bundleToClose
+    }`,
+    `ios_client_log_lines=${launchEvidenceCount(observation, "iosClientLogLines")}`,
+    `ios_client_error_lines=${launchEvidenceCount(observation, "iosClientErrorLines")}`,
+    `expo_go_asset_requests=${launchEvidenceCount(observation, "expoGoAssetRequests")}`,
+    `ios_lines_before_bundle=${launchEvidenceCount(observation, "iosLinesBeforeBundle")}`,
+    `request_log_lines=${launchEvidenceCount(observation, "requestLogLines")}`,
+    `dev_server_exit=${devServerExit === undefined ? "none" : devServerExit}`,
+  ].join("; ");
+}
+
+export function createExpoGoLaunchNotRunBoundary() {
+  return { status: EXPO_GO_LAUNCH_NOT_RUN, evidence: EXPO_GO_LAUNCH_NOT_RUN_EVIDENCE };
+}
+
+// Resolves the `expoGoLaunch` boundary from the launch-evidence probe's state
+// directory: the probe status with its `decidedAt` age and counts when the
+// result belongs to the latest managed dev server start, STALE when it
+// predates that start (or no start was recorded), NOT_RUN when no result
+// exists. Malformed files throw without echoing their contents.
+export async function resolveExpoGoLaunchBoundary({
+  stateDirectory,
+  now = Date.now(),
+} = {}) {
+  const result = await findLaunchProbeResult({ stateDirectory });
+  if (!result) return createExpoGoLaunchNotRunBoundary();
+  const decidedAtMs = parseProbeTimestamp(result.decidedAt);
+  if (decidedAtMs === null) invalidLaunchEvidence("decidedAt");
+  const devServerStart = await readDevServerStart({ stateDirectory });
+  const decidedAt = new Date(decidedAtMs).toISOString();
+  const age = formatEvidenceAge(now - decidedAtMs);
+  if (!devServerStart || decidedAtMs < devServerStart.startedAtMs) {
+    return {
+      status: EXPO_GO_LAUNCH_STALE,
+      evidence:
+        `Launch-evidence probe result is stale — ${result.status} decided_at=${decidedAt}; ` +
+        `age=${age}; dev_server_started_at=${devServerStart?.startedAt ?? "unrecorded"}; ` +
+        "rerun the probe against the current dev server",
+    };
+  }
+  return {
+    status: result.status,
+    evidence: formatLaunchProbeEvidence(result, decidedAt, age),
+  };
+}
+
+// A probed startup crash blocks the handoff; every other launch status is
+// informational because the probe is opt-in and phone rows stay manual.
+export function formatExpoGoLaunchFailure(expoGoLaunch) {
+  if (expoGoLaunch?.status !== LAUNCH_EVIDENCE_STATUSES.bundleOnlyThenClosed) {
+    return null;
+  }
+  return (
+    `${EXPO_GO_LAUNCH_CRASH_FAILURE_PREFIX}: the probed dev server start served the iOS bundle ` +
+    "and Expo Go closed during startup, so the preview must not be handed off. " +
+    "Fix the startup crash (see the Expo Go gotcha in replit.md). " +
+    EXPO_GO_LAUNCH_RECOVERY_HINT
+  );
+}
+
 export function createHandoffPreflightRecord({
   platform = "android",
   publicManifest = null,
   localHandoff = null,
   publicManifestFailed = false,
   localHandoffFailed = false,
+  expoGoLaunch = createExpoGoLaunchNotRunBoundary(),
 } = {}) {
   const platformConfig = HANDOFF_PLATFORM_CONFIG[platform];
   if (!platformConfig) {
@@ -755,8 +944,8 @@ export function createHandoffPreflightRecord({
             ),
       },
       expoGoLaunch: {
-        status: "NOT_ASSESSED",
-        evidence: `Requires ${platformConfig.phoneDescription} running stock Expo Go.`,
+        status: expoGoLaunch.status,
+        evidence: expoGoLaunch.evidence,
       },
       serverNativeRequestEvidence: {
         status: "NOT_ASSESSED",
@@ -777,7 +966,7 @@ export function formatHandoffPreflight(record) {
   }
 
   return [
-    `${platformConfig.displayName} preview handoff preflight (public and local probes only):`,
+    `${platformConfig.displayName} preview handoff preflight (public, local, and launch-evidence probes only):`,
     `public_manifest_reachability=${boundaries.publicManifestReachability.status}; evidence=${boundaries.publicManifestReachability.evidence}`,
     `local_handoff_probe=${boundaries.localHandoffProbe.status}; evidence=${boundaries.localHandoffProbe.evidence}`,
     `expo_go_launch=${boundaries.expoGoLaunch.status}; evidence=${boundaries.expoGoLaunch.evidence}`,
@@ -1279,11 +1468,23 @@ function parseArgs(argv) {
   ) {
     throw new Error("--record-log requires a path to captured startup output.");
   }
+  const launchEvidenceDirIndex = argv.indexOf("--launch-evidence-dir");
+  const launchEvidenceDirectory =
+    launchEvidenceDirIndex === -1 ? null : argv[launchEvidenceDirIndex + 1];
+  if (
+    launchEvidenceDirIndex !== -1 &&
+    (!launchEvidenceDirectory || launchEvidenceDirectory.startsWith("--"))
+  ) {
+    throw new Error(
+      "--launch-evidence-dir requires the launch-evidence probe state directory (default: the package .expo directory).",
+    );
+  }
   return {
     platform,
     logFile: logFileIndex === -1 ? null : argv[logFileIndex + 1],
     recordLog,
     recordOutput,
+    launchEvidenceDirectory,
     timingOutput: process.env.PREVIEW_TIMING_OUTPUT ?? null,
     ...parsePreviewTimeouts(),
   };
@@ -1308,6 +1509,7 @@ async function validateLivePreview(
   recordLog,
   recordOutput,
   timingOutput,
+  launchEvidenceDirectory = null,
 ) {
   const launcherOnly =
     process.env.PREVIEW_STARTUP_REAL_LAUNCHER === "1" &&
@@ -1315,6 +1517,19 @@ async function validateLivePreview(
   const skipPublicPreview = process.env.PREVIEW_STARTUP_SKIP_PUBLIC === "1";
   if (!launcherOnly && !skipPublicPreview) {
     getPublicPreviewManifestUrl(process.env);
+  }
+  // Read the launch-evidence probe result before Metro starts: a corrupted
+  // result fails fast, and the throwaway dev server below never rewrites it.
+  let expoGoLaunch;
+  try {
+    expoGoLaunch = await resolveExpoGoLaunchBoundary({
+      stateDirectory: launchEvidenceDirectory ?? undefined,
+    });
+  } catch (error) {
+    throw new Error(
+      `Preview handoff preflight could not read the Expo Go launch evidence: ${error.message} ` +
+        EXPO_GO_LAUNCH_RECOVERY_HINT,
+    );
   }
   const port = await findFreePort();
   const timing = {
@@ -1371,6 +1586,9 @@ async function validateLivePreview(
     env: {
       ...process.env,
       PORT: String(port),
+      // This dev server is the preflight's own; the launcher must not treat
+      // it as the managed workflow start (see preview-launch-evidence.mjs).
+      [PROBE_PASSTHROUGH_ENVIRONMENT_NAME]: "1",
     },
     detached: process.platform !== "win32",
     shell: process.platform === "win32" && startupCommand.command === pnpmCommand,
@@ -1537,6 +1755,7 @@ async function validateLivePreview(
             platform,
             publicManifest,
             localHandoff,
+            expoGoLaunch,
           });
           if (recordOutput) await writeHandoffPreflight(recordOutput, record);
           // The reachability record above is complete regardless of sign-in
@@ -1558,10 +1777,22 @@ async function validateLivePreview(
             console.log(formatHandoffPreflight(record));
             if (signIn.severity === "pass") {
               console.log(formatDevServerSignIn(signIn));
+            } else {
+              console.warn(formatDevServerSignIn(signIn));
+            }
+            // The record above is complete and saved either way; a probed
+            // startup crash still blocks the handoff.
+            const launchFailure = formatExpoGoLaunchFailure(
+              record.boundaries.expoGoLaunch,
+            );
+            if (launchFailure) {
+              rejectResult(new Error(launchFailure));
+              return;
+            }
+            if (signIn.severity === "pass") {
               resolveResult();
               return;
             }
-            console.warn(formatDevServerSignIn(signIn));
             if (signIn.severity === "fail") {
               rejectResult(
                 new Error(
@@ -1590,6 +1821,7 @@ async function validateLivePreview(
             localHandoff,
             publicManifestFailed: phase === "public",
             localHandoffFailed: phase === "local",
+            expoGoLaunch,
           });
           console.log(formatHandoffPreflight(record));
 
@@ -1697,7 +1929,8 @@ async function main() {
       console.log(`${boundary}=${boundaryRecord.status}`);
       if (
         boundary === "publicManifestReachability" ||
-        boundary === "localHandoffProbe"
+        boundary === "localHandoffProbe" ||
+        boundary === "expoGoLaunch"
       ) {
         console.log(`${boundary}Evidence=${boundaryRecord.evidence}`);
       }
@@ -1714,6 +1947,7 @@ async function main() {
     recordLog,
     recordOutput,
     timingOutput,
+    launchEvidenceDirectory,
   } = parseArgs(process.argv.slice(2));
   if (logFile) {
     await validateCapturedLog(logFile);
@@ -1729,6 +1963,7 @@ async function main() {
     recordLog,
     recordOutput,
     timingOutput,
+    launchEvidenceDirectory,
   );
 }
 

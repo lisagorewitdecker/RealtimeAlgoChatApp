@@ -3,6 +3,7 @@ import { spawnSync } from "node:child_process";
 import {
   closeSync,
   existsSync,
+  mkdirSync,
   mkdtempSync,
   openSync,
   readFileSync,
@@ -18,8 +19,10 @@ import {
   classifyDevServerSignIn,
   createHandoffPreflightRecord,
   formatDevServerSignIn,
+  formatExpoGoLaunchFailure,
   formatHandoffPreflight,
   formatStartupFailureSummary,
+  resolveExpoGoLaunchBoundary,
   getPublicPreviewManifestUrl,
   MAX_PREVIEW_TIMEOUT_MS,
   manifestHasSignedInDeveloper,
@@ -1258,6 +1261,8 @@ globalThis.fetch = async (url, options = {}) => {
             "android",
             "--record-output",
             outputPath,
+            "--launch-evidence-dir",
+            join(directory, "launch-evidence"),
           ],
           {
             env: {
@@ -1292,7 +1297,7 @@ globalThis.fetch = async (url, options = {}) => {
         "FAIL",
       );
       assert.equal(record.boundaries.localHandoffProbe.status, "NOT_RUN");
-      assert.equal(record.boundaries.expoGoLaunch.status, "NOT_ASSESSED");
+      assert.equal(record.boundaries.expoGoLaunch.status, "NOT_RUN");
       assert.equal(
         record.boundaries.serverNativeRequestEvidence.status,
         "NOT_ASSESSED",
@@ -1305,9 +1310,9 @@ globalThis.fetch = async (url, options = {}) => {
         record.boundaries.localHandoffProbe.evidence,
         "Local manifest/bundle probe not run — no successful probe result was recorded",
       );
-      assert.equal(
+      assert.match(
         record.boundaries.expoGoLaunch.evidence,
-        "Requires a physical Android phone running stock Expo Go.",
+        /^Launch-evidence probe not run — no result was recorded/,
       );
       assert.equal(
         record.boundaries.serverNativeRequestEvidence.evidence,
@@ -1315,7 +1320,7 @@ globalThis.fetch = async (url, options = {}) => {
       );
       assert.match(output, /public_manifest_reachability=FAIL/);
       assert.match(output, /local_handoff_probe=NOT_RUN/);
-      assert.match(output, /expo_go_launch=NOT_ASSESSED/);
+      assert.match(output, /expo_go_launch=NOT_RUN/);
       assert.match(output, /server_native_request_evidence=NOT_ASSESSED/);
       assert.match(
         output,
@@ -1637,6 +1642,7 @@ test(
     const stdoutPath = join(directory, "validator.stdout.log");
     const stderrPath = join(directory, "validator.stderr.log");
     const preloadPath = join(directory, "stall-local-bundle-fetch.mjs");
+    const launchEvidenceDirectory = join(directory, "launch-evidence");
     writeFileSync(
       preloadPath,
       `const originalFetch = globalThis.fetch;
@@ -1692,6 +1698,8 @@ globalThis.fetch = async (url, options = {}) => {
             "android",
             "--record-output",
             outputPath,
+            "--launch-evidence-dir",
+            launchEvidenceDirectory,
           ],
           {
             env: {
@@ -1727,7 +1735,7 @@ globalThis.fetch = async (url, options = {}) => {
         "PASS",
       );
       assert.equal(record.boundaries.localHandoffProbe.status, "FAIL");
-      assert.equal(record.boundaries.expoGoLaunch.status, "NOT_ASSESSED");
+      assert.equal(record.boundaries.expoGoLaunch.status, "NOT_RUN");
       assert.equal(
         record.boundaries.serverNativeRequestEvidence.status,
         "NOT_ASSESSED",
@@ -1738,6 +1746,7 @@ globalThis.fetch = async (url, options = {}) => {
       );
       assert.match(output, /public_manifest_reachability=PASS/);
       assert.match(output, /local_handoff_probe=FAIL/);
+      assert.match(output, /expo_go_launch=NOT_RUN/);
       assert.match(
         output,
         /Restart or repair the managed Chat App\/Expo workflow/,
@@ -1763,6 +1772,7 @@ test(
     const stdoutPath = join(directory, "validator.stdout.log");
     const stderrPath = join(directory, "validator.stderr.log");
     const preloadPath = join(directory, "stall-local-bundle-fetch.mjs");
+    const launchEvidenceDirectory = join(directory, "launch-evidence");
     writeFileSync(
       preloadPath,
       `const originalFetch = globalThis.fetch;
@@ -1818,6 +1828,8 @@ globalThis.fetch = async (url, options = {}) => {
             "ios",
             "--record-output",
             outputPath,
+            "--launch-evidence-dir",
+            launchEvidenceDirectory,
           ],
           {
             env: {
@@ -1856,14 +1868,15 @@ globalThis.fetch = async (url, options = {}) => {
         "PASS",
       );
       assert.equal(record.boundaries.localHandoffProbe.status, "FAIL");
-      assert.equal(record.boundaries.expoGoLaunch.status, "NOT_ASSESSED");
+      assert.equal(record.boundaries.expoGoLaunch.status, "NOT_RUN");
       assert.equal(
         record.boundaries.serverNativeRequestEvidence.status,
         "NOT_ASSESSED",
       );
       assert.equal(
         record.boundaries.expoGoLaunch.evidence,
-        "Requires a physical iPhone running stock Expo Go.",
+        "Launch-evidence probe not run — no result was recorded; arm it with " +
+          "probe:preview-launch -- --arm and restart the artifacts/chat-app: expo workflow once",
       );
       assert.equal(
         record.boundaries.serverNativeRequestEvidence.evidence,
@@ -1876,7 +1889,7 @@ globalThis.fetch = async (url, options = {}) => {
       assert.match(output, /iOS preview handoff preflight/);
       assert.match(output, /public_manifest_reachability=PASS/);
       assert.match(output, /local_handoff_probe=FAIL/);
-      assert.match(output, /expo_go_launch=NOT_ASSESSED/);
+      assert.match(output, /expo_go_launch=NOT_RUN/);
       assert.match(output, /server_native_request_evidence=NOT_ASSESSED/);
       assert.match(
         output,
@@ -2388,7 +2401,7 @@ test("preflight record keeps public and local probes separate from phone evidenc
   assert.equal(record.platform, "android");
   assert.equal(record.boundaries.publicManifestReachability.status, "PASS");
   assert.equal(record.boundaries.localHandoffProbe.status, "PASS");
-  assert.equal(record.boundaries.expoGoLaunch.status, "NOT_ASSESSED");
+  assert.equal(record.boundaries.expoGoLaunch.status, "NOT_RUN");
   assert.equal(
     record.boundaries.serverNativeRequestEvidence.status,
     "NOT_ASSESSED",
@@ -2397,7 +2410,7 @@ test("preflight record keeps public and local probes separate from phone evidenc
   const output = formatHandoffPreflight(record);
   assert.match(output, /public_manifest_reachability=PASS/);
   assert.match(output, /local_handoff_probe=PASS/);
-  assert.match(output, /expo_go_launch=NOT_ASSESSED/);
+  assert.match(output, /expo_go_launch=NOT_RUN/);
   assert.match(output, /server_native_request_evidence=NOT_ASSESSED/);
   assert.doesNotMatch(output, /https?:\/\/|qr|token|message/i);
 });
@@ -2410,7 +2423,11 @@ test("iOS preflight records use iOS schema, labels, and phone placeholders", () 
 
   assert.equal(record.schema, "ios-preview-handoff-preflight/v1");
   assert.equal(record.platform, "ios");
-  assert.match(record.boundaries.expoGoLaunch.evidence, /physical iPhone/);
+  assert.equal(record.boundaries.expoGoLaunch.status, "NOT_RUN");
+  assert.match(
+    record.boundaries.expoGoLaunch.evidence,
+    /^Launch-evidence probe not run — no result was recorded; arm it with probe:preview-launch -- --arm/,
+  );
   assert.match(
     record.boundaries.serverNativeRequestEvidence.evidence,
     /physical Expo Go session/,
@@ -2442,9 +2459,10 @@ test("writes and validates an iOS preflight record", async () => {
       validateHandoffPreflightRecord(writtenRecord),
     );
     assert.equal(writtenRecord.platform, "ios");
+    assert.equal(writtenRecord.boundaries.expoGoLaunch.status, "NOT_RUN");
     assert.match(
       writtenRecord.boundaries.expoGoLaunch.evidence,
-      /physical iPhone/,
+      /^Launch-evidence probe not run/,
     );
   } finally {
     rmSync(directory, { recursive: true, force: true });
@@ -2458,7 +2476,7 @@ test("public-edge failure does not become missing-phone evidence", () => {
 
   assert.equal(record.boundaries.publicManifestReachability.status, "FAIL");
   assert.equal(record.boundaries.localHandoffProbe.status, "NOT_RUN");
-  assert.equal(record.boundaries.expoGoLaunch.status, "NOT_ASSESSED");
+  assert.equal(record.boundaries.expoGoLaunch.status, "NOT_RUN");
   assert.equal(
     record.boundaries.serverNativeRequestEvidence.status,
     "NOT_ASSESSED",
@@ -2530,7 +2548,7 @@ test("keeps public-edge, local-probe, and phone evidence boundaries distinct", (
     "FAIL",
   );
   assert.equal(publicFailure.boundaries.localHandoffProbe.status, "NOT_RUN");
-  assert.equal(publicFailure.boundaries.expoGoLaunch.status, "NOT_ASSESSED");
+  assert.equal(publicFailure.boundaries.expoGoLaunch.status, "NOT_RUN");
 
   assert.doesNotThrow(() => validateHandoffPreflightRecord(localFailure));
   assert.equal(
@@ -2538,7 +2556,7 @@ test("keeps public-edge, local-probe, and phone evidence boundaries distinct", (
     "PASS",
   );
   assert.equal(localFailure.boundaries.localHandoffProbe.status, "FAIL");
-  assert.equal(localFailure.boundaries.expoGoLaunch.status, "NOT_ASSESSED");
+  assert.equal(localFailure.boundaries.expoGoLaunch.status, "NOT_RUN");
 });
 
 test("rejects sensitive or non-redacted evidence without echoing it", () => {
@@ -2648,5 +2666,659 @@ test("record output reports unwritable parent paths", async () => {
   await assert.rejects(
     () => writeHandoffPreflight("/dev/null/android-handoff.json", record),
     /ENOTDIR|EEXIST|not a directory/i,
+  );
+});
+
+// --- Expo Go launch-evidence boundary -------------------------------------
+
+const LAUNCH_EVIDENCE_REASON_SENTINEL =
+  "fixture reason text that must never be copied: private-launch-log-sentinel";
+const LAUNCH_EVIDENCE_NOT_RUN =
+  "Launch-evidence probe not run — no result was recorded; arm it with " +
+  "probe:preview-launch -- --arm and restart the artifacts/chat-app: expo workflow once";
+
+function writeLaunchProbeFixture(
+  directory,
+  {
+    status = "RUNNING",
+    decidedAt = "2026-09-20T09:00:00.000Z",
+    startedAt = "2026-09-20T08:59:00.000Z",
+    devServerExit,
+    observation = {},
+    resultText,
+  } = {},
+) {
+  mkdirSync(directory, { recursive: true });
+  writeFileSync(
+    join(directory, "preview-launch-evidence.json"),
+    resultText ??
+      `${JSON.stringify(
+        {
+          schema: "ios-preview-launch-evidence/v1",
+          decidedAt,
+          mode: "live",
+          status,
+          passed: status === "RUNNING",
+          reason: LAUNCH_EVIDENCE_REASON_SENTINEL,
+          observation: {
+            metroReady: true,
+            requestLogLines: 3,
+            expoGoIosConnections: 1,
+            otherInspectorConnections: 0,
+            iosBundleHttp200: 1,
+            inspectorCloseCode: null,
+            bundleToCloseSeconds: null,
+            iosClientLogLines: 2,
+            iosClientErrorLines: 0,
+            expoGoAssetRequests: 4,
+            iosLinesBeforeBundle: 0,
+            deviceTimeoutMs: 90_000,
+            settleTimeoutMs: 45_000,
+            ...observation,
+          },
+          ...(devServerExit ? { devServerExit } : {}),
+        },
+        null,
+        2,
+      )}\n`,
+    "utf8",
+  );
+  if (startedAt) {
+    writeFileSync(
+      join(directory, "preview-dev-server-start.json"),
+      `${JSON.stringify({ schema: "preview-dev-server-start/v1", startedAt })}\n`,
+      "utf8",
+    );
+  }
+}
+
+const RUNNING_LAUNCH_EVIDENCE =
+  "Expo Go iOS launch-evidence probe: decided_at=2026-09-20T09:00:00.000Z; age=2m 30s; " +
+  "metro_ready=yes; expo_go_ios_connections=1; other_inspector_connections=0; " +
+  "ios_bundle_http_200=1; inspector_close_code=none; bundle_to_close_seconds=n/a; " +
+  "ios_client_log_lines=2; ios_client_error_lines=0; expo_go_asset_requests=4; " +
+  "ios_lines_before_bundle=0; request_log_lines=3; dev_server_exit=none";
+
+test("launch boundary copies a current probe result as counts with its decidedAt age", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "launch-evidence-boundary-"));
+  try {
+    writeLaunchProbeFixture(directory);
+    const boundary = await resolveExpoGoLaunchBoundary({
+      stateDirectory: directory,
+      now: Date.parse("2026-09-20T09:02:30.500Z"),
+    });
+
+    assert.deepEqual(boundary, {
+      status: "RUNNING",
+      evidence: RUNNING_LAUNCH_EVIDENCE,
+    });
+    assert.doesNotMatch(boundary.evidence, /sentinel|reason|passed/);
+    for (const platform of ["ios", "android"]) {
+      const record = createHandoffPreflightRecord({
+        platform,
+        expoGoLaunch: boundary,
+      });
+      assert.doesNotThrow(() => validateHandoffPreflightRecord(record));
+      assert.match(
+        formatHandoffPreflight(record),
+        /^expo_go_launch=RUNNING; evidence=Expo Go iOS launch-evidence probe: decided_at=/m,
+      );
+    }
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("launch boundary keeps a crash result's close code, timing, and dev server exit", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "launch-evidence-boundary-"));
+  try {
+    writeLaunchProbeFixture(directory, {
+      status: "BUNDLE_ONLY_THEN_CLOSED",
+      devServerExit: "signal:SIGTERM",
+      observation: { inspectorCloseCode: 1006, bundleToCloseSeconds: 4.1 },
+    });
+    const boundary = await resolveExpoGoLaunchBoundary({
+      stateDirectory: directory,
+      now: Date.parse("2026-09-21T10:00:00.000Z"),
+    });
+
+    assert.equal(boundary.status, "BUNDLE_ONLY_THEN_CLOSED");
+    assert.match(boundary.evidence, /; age=1d 1h; /);
+    assert.match(
+      boundary.evidence,
+      /inspector_close_code=1006; bundle_to_close_seconds=4\.1; /,
+    );
+    assert.match(boundary.evidence, /dev_server_exit=signal:SIGTERM$/);
+    assert.doesNotThrow(() =>
+      validateHandoffPreflightRecord(
+        createHandoffPreflightRecord({ platform: "ios", expoGoLaunch: boundary }),
+      ),
+    );
+    assert.match(
+      formatExpoGoLaunchFailure(boundary),
+      /^Expo Go iOS launch evidence is BUNDLE_ONLY_THEN_CLOSED: .*probe:preview-launch -- --arm/,
+    );
+    assert.equal(formatExpoGoLaunchFailure({ status: "NO_DEVICE" }), null);
+    assert.equal(formatExpoGoLaunchFailure({ status: "STALE" }), null);
+    assert.match(
+      formatStartupFailureSummary(new Error(formatExpoGoLaunchFailure(boundary))),
+      /\*\*Failed phase:\*\* Expo Go launch evidence/,
+    );
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("launch boundary formats ages in the unit pair that fits", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "launch-evidence-boundary-"));
+  try {
+    writeLaunchProbeFixture(directory);
+    const decidedAt = Date.parse("2026-09-20T09:00:00.000Z");
+    for (const [offsetMs, expected] of [
+      [0, "0s"],
+      [-5_000, "0s"],
+      [59_999, "59s"],
+      [60_000, "1m 0s"],
+      [3_599_000, "59m 59s"],
+      [3_600_000, "1h 0m"],
+      [86_399_000, "23h 59m"],
+      [86_400_000, "1d 0h"],
+      [90 * 86_400_000 + 5 * 3_600_000, "90d 5h"],
+    ]) {
+      const boundary = await resolveExpoGoLaunchBoundary({
+        stateDirectory: directory,
+        now: decidedAt + offsetMs,
+      });
+      assert.match(
+        boundary.evidence,
+        new RegExp(`; age=${escapeRegExp(expected)}; `),
+        `offset ${offsetMs}`,
+      );
+      assert.doesNotThrow(() =>
+        validateHandoffPreflightRecord(
+          createHandoffPreflightRecord({ expoGoLaunch: boundary }),
+        ),
+      );
+    }
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("launch boundary reports NOT_RUN when no probe result exists", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "launch-evidence-boundary-"));
+  try {
+    assert.deepEqual(
+      await resolveExpoGoLaunchBoundary({ stateDirectory: directory }),
+      { status: "NOT_RUN", evidence: LAUNCH_EVIDENCE_NOT_RUN },
+    );
+    assert.deepEqual(
+      await resolveExpoGoLaunchBoundary({
+        stateDirectory: join(directory, "never-created"),
+      }),
+      { status: "NOT_RUN", evidence: LAUNCH_EVIDENCE_NOT_RUN },
+    );
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("launch boundary reports STALE when the result predates the latest dev server start", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "launch-evidence-boundary-"));
+  try {
+    writeLaunchProbeFixture(directory, {
+      status: "NO_DEVICE",
+      decidedAt: "2026-09-18T20:44:08.970Z",
+      startedAt: "2026-09-20T08:00:00.000Z",
+    });
+    const boundary = await resolveExpoGoLaunchBoundary({
+      stateDirectory: directory,
+      now: Date.parse("2026-09-20T09:00:00.000Z"),
+    });
+
+    assert.deepEqual(boundary, {
+      status: "STALE",
+      evidence:
+        "Launch-evidence probe result is stale — NO_DEVICE decided_at=2026-09-18T20:44:08.970Z; " +
+        "age=1d 12h; dev_server_started_at=2026-09-20T08:00:00.000Z; " +
+        "rerun the probe against the current dev server",
+    });
+    assert.doesNotMatch(boundary.evidence, /sentinel|connections/);
+    assert.equal(formatExpoGoLaunchFailure(boundary), null);
+    for (const platform of ["ios", "android"]) {
+      assert.doesNotThrow(() =>
+        validateHandoffPreflightRecord(
+          createHandoffPreflightRecord({ platform, expoGoLaunch: boundary }),
+        ),
+      );
+    }
+
+    // A result decided at the very same instant as the start still counts.
+    writeLaunchProbeFixture(directory, {
+      decidedAt: "2026-09-20T08:00:00.000Z",
+      startedAt: "2026-09-20T08:00:00.000Z",
+    });
+    assert.equal(
+      (await resolveExpoGoLaunchBoundary({ stateDirectory: directory })).status,
+      "RUNNING",
+    );
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("launch boundary reports STALE when no dev server start was recorded", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "launch-evidence-boundary-"));
+  try {
+    writeLaunchProbeFixture(directory, { startedAt: null });
+    const boundary = await resolveExpoGoLaunchBoundary({
+      stateDirectory: directory,
+      now: Date.parse("2026-09-20T09:00:45.000Z"),
+    });
+
+    assert.equal(boundary.status, "STALE");
+    assert.match(
+      boundary.evidence,
+      /^Launch-evidence probe result is stale — RUNNING decided_at=2026-09-20T09:00:00\.000Z; age=45s; dev_server_started_at=unrecorded; rerun/,
+    );
+    assert.doesNotThrow(() =>
+      validateHandoffPreflightRecord(
+        createHandoffPreflightRecord({ expoGoLaunch: boundary }),
+      ),
+    );
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("launch boundary fails closed on malformed results without echoing them", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "launch-evidence-boundary-"));
+  const secret = "launch-evidence-private-sentinel";
+  try {
+    const cases = [
+      {
+        name: "invalid JSON",
+        write: () => writeLaunchProbeFixture(directory, { resultText: `{${secret}` }),
+        expected: /Launch-evidence probe JSON is not valid JSON \(preview-launch-evidence\.json\)\./,
+      },
+      {
+        name: "duplicate fields",
+        write: () =>
+          writeLaunchProbeFixture(directory, {
+            resultText: `{"schema":"ios-preview-launch-evidence/v1","schema":"${secret}"}`,
+          }),
+        expected: /Launch-evidence probe JSON contains duplicate fields \(preview-launch-evidence\.json\)\./,
+      },
+      {
+        name: "unexpected schema",
+        write: () =>
+          writeLaunchProbeFixture(directory, {
+            resultText: JSON.stringify({ schema: secret, status: "RUNNING" }),
+          }),
+        expected: /Unexpected launch-evidence result schema/,
+      },
+      {
+        name: "unexpected status",
+        write: () =>
+          writeLaunchProbeFixture(directory, {
+            resultText: JSON.stringify({
+              schema: "ios-preview-launch-evidence/v1",
+              status: secret,
+            }),
+          }),
+        expected: /Unexpected launch-evidence status/,
+      },
+      {
+        name: "invalid decidedAt",
+        write: () =>
+          writeLaunchProbeFixture(directory, { decidedAt: `2026-09-20 ${secret}` }),
+        expected: /Launch-evidence probe result has an invalid decidedAt value\./,
+      },
+      {
+        name: "negative count",
+        write: () =>
+          writeLaunchProbeFixture(directory, {
+            observation: { expoGoIosConnections: -1 },
+          }),
+        expected: /Launch-evidence probe result has an invalid expoGoIosConnections value\./,
+      },
+      {
+        name: "textual count",
+        write: () =>
+          writeLaunchProbeFixture(directory, {
+            observation: { requestLogLines: secret },
+          }),
+        expected: /Launch-evidence probe result has an invalid requestLogLines value\./,
+      },
+      {
+        name: "textual dev server exit",
+        write: () =>
+          writeLaunchProbeFixture(directory, { devServerExit: `code:${secret}` }),
+        expected: /Launch-evidence probe result has an invalid devServerExit value\./,
+      },
+      {
+        name: "malformed start record",
+        write: () => {
+          writeLaunchProbeFixture(directory);
+          writeFileSync(
+            join(directory, "preview-dev-server-start.json"),
+            JSON.stringify({ schema: "preview-dev-server-start/v1", startedAt: secret }),
+          );
+        },
+        expected: /Invalid dev server start timestamp/,
+      },
+    ];
+    for (const { name, write, expected } of cases) {
+      rmSync(directory, { recursive: true, force: true });
+      write();
+      await assert.rejects(
+        resolveExpoGoLaunchBoundary({ stateDirectory: directory }),
+        (error) => {
+          assert.match(error.message, expected, name);
+          assert.doesNotMatch(error.message, new RegExp(secret), name);
+          return true;
+        },
+      );
+    }
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("record validation accepts legacy NOT_ASSESSED launch rows and rejects unsafe launch evidence", () => {
+  for (const [platform, phone] of [
+    ["ios", "a physical iPhone"],
+    ["android", "a physical Android phone"],
+  ]) {
+    const legacy = createHandoffPreflightRecord({ platform });
+    legacy.boundaries.expoGoLaunch = {
+      status: "NOT_ASSESSED",
+      evidence: `Requires ${phone} running stock Expo Go.`,
+    };
+    assert.doesNotThrow(() => validateHandoffPreflightRecord(legacy));
+  }
+
+  const record = createHandoffPreflightRecord({
+    expoGoLaunch: { status: "RUNNING", evidence: RUNNING_LAUNCH_EVIDENCE },
+  });
+  assert.doesNotThrow(() => validateHandoffPreflightRecord(record));
+  for (const evidence of [
+    RUNNING_LAUNCH_EVIDENCE.replace("dev_server_exit=none", "dev_server_exit=none; reason=crashed"),
+    RUNNING_LAUNCH_EVIDENCE.replace("age=2m 30s", "age=2 minutes"),
+    RUNNING_LAUNCH_EVIDENCE.replace("decided_at=2026-09-20T09:00:00.000Z", "decided_at=today"),
+    `${RUNNING_LAUNCH_EVIDENCE} https://private.example.test/log`,
+    LAUNCH_EVIDENCE_NOT_RUN,
+  ]) {
+    const unsafe = structuredClone(record);
+    unsafe.boundaries.expoGoLaunch.evidence = evidence;
+    assert.throws(
+      () => validateHandoffPreflightRecord(unsafe),
+      /has unsafe evidence for the expoGoLaunch boundary/,
+    );
+  }
+  for (const status of ["PASS", "FAIL", "BLOCKED", "running"]) {
+    const invalid = structuredClone(record);
+    invalid.boundaries.expoGoLaunch.status = status;
+    assert.throws(
+      () => validateHandoffPreflightRecord(invalid),
+      /has an invalid expoGoLaunch boundary/,
+    );
+  }
+});
+
+function runLaunchEvidenceCli({ platform = "ios", launchEvidence, env = {} } = {}) {
+  const directory = mkdtempSync(join(tmpdir(), "preview-launch-boundary-cli-"));
+  const preloadPath = join(directory, "mock-public-preview.mjs");
+  const outputPath = join(directory, `${platform}-preview-preflight.json`);
+  const summaryPath = join(directory, "step-summary.md");
+  const metroMarkerPath = join(directory, "metro-started.marker");
+  const launchEvidenceDirectory = join(directory, "launch-evidence");
+  writeFileSync(
+    preloadPath,
+    `const originalFetch = globalThis.fetch;
+globalThis.fetch = async (url, options = {}) => {
+  if (String(url).startsWith("https://public-preview.test/")) {
+    return new Response(
+      JSON.stringify({
+        launchAsset: {
+          url: "https://public-preview.test/_expo/static/js/bundle",
+        },
+      }),
+      { status: 200 },
+    );
+  }
+  return originalFetch(url, options);
+};
+`,
+    "utf8",
+  );
+  if (launchEvidence) writeLaunchProbeFixture(launchEvidenceDirectory, launchEvidence);
+
+  try {
+    const result = spawnSync(
+      process.execPath,
+      [
+        validatorPath,
+        "--platform",
+        platform,
+        "--record-output",
+        outputPath,
+        "--launch-evidence-dir",
+        launchEvidenceDirectory,
+      ],
+      {
+        env: {
+          ...process.env,
+          REPLIT_EXPO_SESSION_SECRET: "",
+          NODE_OPTIONS: [process.env.NODE_OPTIONS, `--import ${preloadPath}`]
+            .filter(Boolean)
+            .join(" "),
+          PREVIEW_PUBLIC_URL: "https://public-preview.test/expo",
+          PREVIEW_PUBLIC_TIMEOUT_MS: "1000",
+          PREVIEW_HANDOFF_TIMEOUT_MS: "1000",
+          PREVIEW_STARTUP_TIMEOUT_MS: "1000",
+          PREVIEW_STARTUP_EXPECTED_EXPO_PLATFORM: platform,
+          PREVIEW_STARTUP_TEST_FIXTURE: "handoff-server",
+          PREVIEW_STARTUP_LIVE_START_MARKER: metroMarkerPath,
+          GITHUB_STEP_SUMMARY: summaryPath,
+          ...env,
+        },
+        encoding: "utf8",
+        timeout: 10_000,
+      },
+    );
+    return {
+      result,
+      output: `${result.stdout ?? ""}${result.stderr ?? ""}`,
+      record: existsSync(outputPath)
+        ? JSON.parse(readFileSync(outputPath, "utf8"))
+        : null,
+      summary: existsSync(summaryPath) ? readFileSync(summaryPath, "utf8") : "",
+      metroStarted: existsSync(metroMarkerPath),
+      metroMarker: existsSync(metroMarkerPath)
+        ? readFileSync(metroMarkerPath, "utf8")
+        : "",
+      launchEvidenceFiles: launchEvidence
+        ? {
+            result: readFileSync(
+              join(launchEvidenceDirectory, "preview-launch-evidence.json"),
+              "utf8",
+            ),
+            start: existsSync(
+              join(launchEvidenceDirectory, "preview-dev-server-start.json"),
+            )
+              ? readFileSync(
+                  join(launchEvidenceDirectory, "preview-dev-server-start.json"),
+                  "utf8",
+                )
+              : null,
+          }
+        : null,
+    };
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+}
+
+test(
+  "CLI records a current RUNNING launch result and passes",
+  { timeout: 15_000 },
+  () => {
+    const decidedAt = new Date(Date.now() - 90_000).toISOString();
+    const startedAt = new Date(Date.now() - 120_000).toISOString();
+    const run = runLaunchEvidenceCli({
+      launchEvidence: { status: "RUNNING", decidedAt, startedAt },
+    });
+
+    assert.equal(run.result.status, 0, run.output);
+    assert.equal(run.record.boundaries.expoGoLaunch.status, "RUNNING");
+    assert.match(
+      run.record.boundaries.expoGoLaunch.evidence,
+      new RegExp(
+        `^Expo Go iOS launch-evidence probe: decided_at=${escapeRegExp(decidedAt)}; age=(?:1m \\d+s|2m \\d+s); metro_ready=yes; expo_go_ios_connections=1; `,
+      ),
+    );
+    assert.doesNotThrow(() => validateHandoffPreflightRecord(run.record));
+    assert.match(run.output, /expo_go_launch=RUNNING; evidence=Expo Go iOS launch-evidence probe: decided_at=/);
+    assert.doesNotMatch(run.output, /private-launch-log-sentinel/);
+    assert.doesNotMatch(JSON.stringify(run.record), /private-launch-log-sentinel/);
+  },
+);
+
+test(
+  "CLI passes on NOT_RUN when the launch-evidence probe was never armed",
+  { timeout: 15_000 },
+  () => {
+    const run = runLaunchEvidenceCli({ platform: "android" });
+
+    assert.equal(run.result.status, 0, run.output);
+    assert.equal(run.record.boundaries.expoGoLaunch.status, "NOT_RUN");
+    assert.equal(run.record.boundaries.expoGoLaunch.evidence, LAUNCH_EVIDENCE_NOT_RUN);
+    assert.doesNotThrow(() => validateHandoffPreflightRecord(run.record));
+    assert.match(run.output, /expo_go_launch=NOT_RUN; evidence=Launch-evidence probe not run/);
+  },
+);
+
+test(
+  "CLI reports STALE and still passes when the result predates the current dev server start",
+  { timeout: 15_000 },
+  () => {
+    const run = runLaunchEvidenceCli({
+      launchEvidence: {
+        status: "BUNDLE_ONLY_THEN_CLOSED",
+        decidedAt: "2026-09-18T20:44:08.970Z",
+        startedAt: new Date(Date.now() - 60_000).toISOString(),
+        observation: { inspectorCloseCode: 1006, bundleToCloseSeconds: 4.1 },
+      },
+    });
+
+    assert.equal(run.result.status, 0, run.output);
+    assert.equal(run.record.boundaries.expoGoLaunch.status, "STALE");
+    assert.match(
+      run.record.boundaries.expoGoLaunch.evidence,
+      /^Launch-evidence probe result is stale — BUNDLE_ONLY_THEN_CLOSED decided_at=2026-09-18T20:44:08\.970Z; age=\d+d \d+h; dev_server_started_at=\d{4}-\d{2}-\d{2}T[0-9:.]+Z; rerun the probe against the current dev server$/,
+    );
+    assert.doesNotThrow(() => validateHandoffPreflightRecord(run.record));
+    assert.match(run.output, /expo_go_launch=STALE; evidence=Launch-evidence probe result is stale/);
+    assert.doesNotMatch(run.output, /launch evidence is BUNDLE_ONLY_THEN_CLOSED/);
+  },
+);
+
+test(
+  "CLI fails on a current BUNDLE_ONLY_THEN_CLOSED result after saving the record",
+  { timeout: 15_000 },
+  () => {
+    const run = runLaunchEvidenceCli({
+      launchEvidence: {
+        status: "BUNDLE_ONLY_THEN_CLOSED",
+        decidedAt: new Date(Date.now() - 30_000).toISOString(),
+        startedAt: new Date(Date.now() - 60_000).toISOString(),
+        devServerExit: "code:0",
+        observation: { inspectorCloseCode: 1006, bundleToCloseSeconds: 4.1 },
+      },
+    });
+
+    assert.notEqual(run.result.status, 0, run.output);
+    assert.equal(run.record.boundaries.expoGoLaunch.status, "BUNDLE_ONLY_THEN_CLOSED");
+    assert.equal(run.record.boundaries.publicManifestReachability.status, "PASS");
+    assert.equal(run.record.boundaries.localHandoffProbe.status, "PASS");
+    assert.doesNotThrow(() => validateHandoffPreflightRecord(run.record));
+    assert.match(run.output, /expo_go_launch=BUNDLE_ONLY_THEN_CLOSED; evidence=Expo Go iOS launch-evidence probe: .*inspector_close_code=1006; bundle_to_close_seconds=4\.1; .*dev_server_exit=code:0/);
+    assert.match(run.output, /dev_server_sign_in=/);
+    assert.match(
+      run.output,
+      /Expo Go iOS launch evidence is BUNDLE_ONLY_THEN_CLOSED: the probed dev server start served the iOS bundle and Expo Go closed during startup/,
+    );
+    assert.match(run.summary, /\*\*Failed phase:\*\* Expo Go launch evidence/);
+    assert.doesNotMatch(run.output, /private-launch-log-sentinel/);
+  },
+);
+
+test(
+  "CLI fails before starting Metro when the launch evidence is malformed",
+  { timeout: 15_000 },
+  () => {
+    const run = runLaunchEvidenceCli({
+      launchEvidence: {
+        resultText: '{"schema":"ios-preview-launch-evidence/v1","status":"RUNNING","status":"private-launch-status-sentinel"}',
+      },
+    });
+
+    assert.notEqual(run.result.status, 0, run.output);
+    assert.equal(run.record, null);
+    assert.equal(run.metroStarted, false, "Metro started despite malformed launch evidence");
+    assert.match(
+      run.output,
+      /Preview handoff preflight could not read the Expo Go launch evidence: Launch-evidence probe JSON contains duplicate fields \(preview-launch-evidence\.json\)\. Recovery: run `pnpm --filter @workspace\/chat-app run probe:preview-launch -- --arm`/,
+    );
+    assert.doesNotMatch(run.output, /private-launch-status-sentinel/);
+  },
+);
+
+test(
+  "CLI starts its throwaway dev server in launcher pass-through mode and leaves the probe records untouched",
+  { timeout: 15_000 },
+  () => {
+    const decidedAt = new Date(Date.now() - 90_000).toISOString();
+    const startedAt = new Date(Date.now() - 120_000).toISOString();
+    const run = runLaunchEvidenceCli({
+      launchEvidence: { status: "NO_DEVICE", decidedAt, startedAt },
+      // A leaked "0" from the parent environment must not win over the
+      // preflight's own setting.
+      env: { PREVIEW_LAUNCH_PROBE_PASSTHROUGH: "0" },
+    });
+
+    assert.equal(run.result.status, 0, run.output);
+    assert.equal(run.record.boundaries.expoGoLaunch.status, "NO_DEVICE");
+    // The real dev script wraps Metro in preview-launch-evidence.mjs --launch;
+    // the fixture stands in for it and records the flag it was started with.
+    assert.match(run.metroMarker, /^started PREVIEW_LAUNCH_PROBE_PASSTHROUGH=1$/m);
+    assert.equal(
+      JSON.parse(run.launchEvidenceFiles.result).decidedAt,
+      decidedAt,
+      "the probe result was rewritten",
+    );
+    assert.equal(
+      JSON.parse(run.launchEvidenceFiles.start).startedAt,
+      startedAt,
+      "the dev server start record was rewritten",
+    );
+  },
+);
+
+test("rejects --launch-evidence-dir without a directory", () => {
+  const result = spawnSync(
+    process.execPath,
+    [validatorPath, "--platform", "ios", "--launch-evidence-dir"],
+    {
+      env: { ...process.env, PREVIEW_PUBLIC_URL: "https://public-preview.test/expo" },
+      encoding: "utf8",
+      timeout: 5_000,
+    },
+  );
+  assert.notEqual(result.status, 0);
+  assert.match(
+    `${result.stdout}${result.stderr}`,
+    /--launch-evidence-dir requires the launch-evidence probe state directory/,
   );
 });

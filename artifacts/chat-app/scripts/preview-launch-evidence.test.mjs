@@ -9,15 +9,21 @@ import { setTimeout as delay } from "node:timers/promises";
 import {
   DEFAULT_DEVICE_TIMEOUT_MS,
   DEFAULT_SETTLE_TIMEOUT_MS,
+  DEV_SERVER_START_FILENAME,
+  DEV_SERVER_START_SCHEMA,
   EXPO_GO_IOS_APP_ID,
   LAUNCH_EVIDENCE_STATUSES,
   PROBE_MARKER_FILENAME,
+  PROBE_PASSTHROUGH_ENVIRONMENT_NAME,
   PROBE_RESULT_FILENAME,
   PROBE_RESULT_SCHEMA,
   classifyLaunchEvidence,
   createLaunchEvidenceClassifier,
+  findLaunchProbeResult,
   formatLaunchEvidenceSummary,
   mergeDebugNamespaces,
+  parseProbeTimestamp,
+  readDevServerStart,
 } from "./preview-launch-evidence.mjs";
 
 const SCRIPT = resolve(import.meta.dirname, "preview-launch-evidence.mjs");
@@ -381,7 +387,12 @@ test("mergeDebugNamespaces adds the inspector namespace once", () => {
 
 function childEnvironment(overrides = {}) {
   const environment = { ...process.env, ...overrides };
-  for (const key of ["EXPO_DEV_REQUEST_LOG", "DEBUG", "NODE_TEST_CONTEXT"]) {
+  for (const key of [
+    "EXPO_DEV_REQUEST_LOG",
+    "DEBUG",
+    "NODE_TEST_CONTEXT",
+    PROBE_PASSTHROUGH_ENVIRONMENT_NAME,
+  ]) {
     if (!(key in overrides)) delete environment[key];
   }
   for (const [key, value] of Object.entries(overrides)) {
@@ -488,8 +499,11 @@ const PROBE_TIMEOUTS = {
   PREVIEW_LAUNCH_SETTLE_TIMEOUT_MS: "400",
 };
 
-test("unarmed launches are a transparent pass-through", { timeout: 60_000 }, async () => {
+test("unarmed launches are a transparent pass-through that records the dev server start", { timeout: 60_000 }, async () => {
   await withStateDir(async (stateDir, launch) => {
+    assert.equal(await readDevServerStart({ stateDirectory: stateDir }), null);
+    assert.equal(await findLaunchProbeResult({ stateDirectory: stateDir }), null);
+    const before = Date.now();
     const launcher = launch("silent");
     await launcher.waitFor(/› Metro:/);
     await delay(300);
@@ -499,7 +513,75 @@ test("unarmed launches are a transparent pass-through", { timeout: 60_000 }, asy
     assert.match(launcher.output.stdout, /fixture-exit SIGTERM/, "SIGTERM must reach the dev server");
     assert.deepEqual(exit, { code: 0, signal: null });
     assert.equal(await exists(join(stateDir, PROBE_RESULT_FILENAME)), false);
+
+    // The start record is what lets the preview preflight tell a current
+    // launch-evidence result from one left over from an earlier dev server.
+    const startRecord = JSON.parse(await readFile(join(stateDir, DEV_SERVER_START_FILENAME), "utf8"));
+    assert.deepEqual(Object.keys(startRecord), ["schema", "startedAt"]);
+    assert.equal(startRecord.schema, DEV_SERVER_START_SCHEMA);
+    const startedAtMs = parseProbeTimestamp(startRecord.startedAt);
+    assert.ok(startedAtMs !== null && startedAtMs >= before && startedAtMs <= Date.now(), startRecord.startedAt);
+    assert.deepEqual(await readDevServerStart({ stateDirectory: stateDir }), {
+      startedAt: startRecord.startedAt,
+      startedAtMs,
+    });
   });
+});
+
+test("a pass-through start leaves an armed marker and the probe records untouched", { timeout: 60_000 }, async () => {
+  await withStateDir(async (stateDir, launch) => {
+    const armed = await runScript(["--arm", "--state-dir", stateDir], {
+      env: childEnvironment(PROBE_TIMEOUTS),
+    });
+    assert.equal(armed.code, 0, armed.stderr);
+    const markerBefore = await readFile(join(stateDir, PROBE_MARKER_FILENAME), "utf8");
+    const staleStart = `${JSON.stringify({ schema: DEV_SERVER_START_SCHEMA, startedAt: "2026-09-18T20:00:00.000Z" })}\n`;
+    await writeFile(join(stateDir, DEV_SERVER_START_FILENAME), staleStart);
+
+    const launcher = launch("crash", {
+      env: childEnvironment({ [PROBE_PASSTHROUGH_ENVIRONMENT_NAME]: "1" }),
+    });
+    await launcher.waitFor(/fixture-exit|› Metro:/);
+    await delay(300);
+    // No diagnostics are added and nothing is classified, even though the
+    // fixture reproduces the startup-crash signature.
+    assert.match(launcher.output.stdout, /fixture-env EXPO_DEV_REQUEST_LOG=- DEBUG=-/);
+    assert.deepEqual(probeLines(launcher.output.stdout), [
+      `[preview-launch-probe] ${PROBE_PASSTHROUGH_ENVIRONMENT_NAME}=1: pass-through start; no armed marker is consumed and no start or launch-evidence record is written.`,
+    ]);
+    await launcher.terminate();
+
+    assert.equal(await readFile(join(stateDir, PROBE_MARKER_FILENAME), "utf8"), markerBefore, "the armed marker must survive");
+    assert.equal(await readFile(join(stateDir, DEV_SERVER_START_FILENAME), "utf8"), staleStart, "the start record must not be rewritten");
+    assert.equal(await exists(join(stateDir, PROBE_RESULT_FILENAME)), false);
+
+    // The next managed start still consumes the marker and runs the probe.
+    const managed = launch("crash", { env: childEnvironment({ DEBUG: "expo:start:*" }) });
+    await managed.waitFor(/result written to/);
+    assert.equal(await exists(join(stateDir, PROBE_MARKER_FILENAME)), false);
+    const result = await findLaunchProbeResult({ stateDirectory: stateDir });
+    assert.equal(result.status, "BUNDLE_ONLY_THEN_CLOSED");
+    const start = await readDevServerStart({ stateDirectory: stateDir });
+    assert.ok(start.startedAtMs > Date.parse("2026-09-18T20:00:00.000Z"));
+    assert.ok(parseProbeTimestamp(result.decidedAt) >= start.startedAtMs, "the armed result must postdate its own start record");
+  });
+});
+
+test("parseProbeTimestamp accepts only canonical UTC millisecond timestamps", () => {
+  assert.equal(parseProbeTimestamp("2026-09-20T09:00:00.000Z"), Date.UTC(2026, 8, 20, 9));
+  for (const value of [
+    "2026-09-20T09:00:00Z",
+    "2026-09-20T09:00:00.000+00:00",
+    "2026-09-20 09:00:00.000Z",
+    "2026-13-20T09:00:00.000Z",
+    "1758358800000",
+    1758358800000,
+    "",
+    null,
+    undefined,
+  ]) {
+    assert.equal(parseProbeTimestamp(value), null, String(value));
+  }
 });
 
 test("an armed launch instruments one restart, classifies a startup crash, and keeps the dev server running", { timeout: 60_000 }, async () => {
