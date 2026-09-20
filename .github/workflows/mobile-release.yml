@@ -1819,15 +1819,14 @@ jobs:
           NATIVE_SMOKE_BUILD_ID: ${{ env.NATIVE_SMOKE_ANDROID_BUILD_ID }}
         run: |
           set -euo pipefail
+          # Keep installed-APK inspection on the same reviewed build-tools
+          # version enforced by the Android runner preflight.
+          source scripts/android-runner-pins.sh
           mkdir -p "$NATIVE_SMOKE_RESULTS_DIR"
           sdk_root="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
-          aapt2_path="$(command -v aapt2 || true)"
-          if [[ -z "$aapt2_path" && -n "$sdk_root" && -d "$sdk_root/build-tools" ]]; then
-            aapt2_path="$(
-              find "$sdk_root/build-tools" -type f -name aapt2 -perm -111 |
-                sort -V |
-                tail -n 1
-            )"
+          aapt2_path=""
+          if [[ -n "$sdk_root" ]]; then
+            aapt2_path="$sdk_root/build-tools/$ANDROID_BUILD_TOOLS_VERSION/aapt2"
           fi
           if [[ -z "$aapt2_path" || ! -x "$aapt2_path" ]]; then
             echo "aapt2 is required to inspect the compiled Android manifest." >&2

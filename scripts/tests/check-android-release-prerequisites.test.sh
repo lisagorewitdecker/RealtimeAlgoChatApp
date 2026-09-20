@@ -7,6 +7,7 @@ WORKSPACE_ROOT="$(cd -- "$SCRIPT_DIR/../.." && pwd)"
 PREFLIGHT="$WORKSPACE_ROOT/scripts/check-android-release-prerequisites.sh"
 PINS="$WORKSPACE_ROOT/scripts/android-runner-pins.sh"
 PROVISION="$WORKSPACE_ROOT/scripts/provision-android-runner.sh"
+WORKFLOW="$WORKSPACE_ROOT/.github/workflows/mobile-release.yml"
 PROCEDURE="$WORKSPACE_ROOT/artifacts/chat-app/docs/native-large-text-device-check.md"
 BASH_BIN="$(command -v bash)"
 ENV_BIN="$(command -v env)"
@@ -42,6 +43,23 @@ grep -Fq -- \
   '"$SDK_ROOT/build-tools/$ANDROID_BUILD_TOOLS_VERSION/aapt2"' \
   "$PREFLIGHT" ||
   fail "Android release preflight does not check the pinned build-tools path."
+
+android_branding_step="$(
+  sed -n \
+    '/^      - name: Inspect installed Android native branding/,/^      - name:/p' \
+    "$WORKFLOW"
+)"
+grep -Fq -- 'source scripts/android-runner-pins.sh' <<<"$android_branding_step" ||
+  fail "Android release branding inspection does not source the shared pin contract."
+grep -Fq -- \
+  'aapt2_path="$sdk_root/build-tools/$ANDROID_BUILD_TOOLS_VERSION/aapt2"' \
+  <<<"$android_branding_step" ||
+  fail "Android release branding inspection does not select the pinned build-tools path."
+if grep -Eq \
+  'command -v aapt2|find "\$sdk_root/build-tools"|sort -V|tail -n 1' \
+  <<<"$android_branding_step"; then
+  fail "Android release branding inspection falls back to an unpinned build-tools directory."
+fi
 
 runner_procedure="$(
   sed -n \
