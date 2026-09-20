@@ -293,7 +293,7 @@ function normalizeLoaderFailureForMatching(value) {
   const trimmedSuffix = withoutAnsiSequences.slice(0, nonWhitespaceEnd);
   return trimmedSuffix.endsWith(trailingBell)
     ? trimmedSuffix.slice(0, -1)
-    : withoutAnsiSequences;
+    : trimmedSuffix;
 }
 
 function findMissingLibrary(output) {
