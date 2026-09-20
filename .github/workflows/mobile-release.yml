@@ -110,6 +110,9 @@ env:
   RELEASE_NODE_VERSION: 24
   PNPM_VERSION: 10.26.1
   EAS_CLI_VERSION: 23.2.0
+  # Pinned from https://get.maestro.mobile.dev; refresh deliberately with:
+  # curl -fsSL https://get.maestro.mobile.dev | shasum -a 256
+  MAESTRO_INSTALLER_SHA256: 40115b628eb491f29d02275bc7e3db5334024ba4fdff7210a334fd3cf4a8f306
   NATIVE_SMOKE_IOS_BUILD_ID: ${{ inputs.native_smoke_ios_build_id || vars.NATIVE_SMOKE_IOS_BUILD_ID }}
   NATIVE_SMOKE_ANDROID_BUILD_ID: ${{ inputs.native_smoke_android_build_id || vars.NATIVE_SMOKE_ANDROID_BUILD_ID }}
 
@@ -1397,10 +1400,11 @@ jobs:
             fi
           done
 
-      - name: Prepare GitHub-hosted iOS runner
+      - name: Prepare self-hosted iOS runner
         id: ios-hosted-runner
         env:
           EAS_TOKEN: ${{ secrets.EAS_TOKEN }}
+          MAESTRO_INSTALLER_SHA256: ${{ env.MAESTRO_INSTALLER_SHA256 }}
           NATIVE_SMOKE_IOS_APP_ID: ${{ secrets.NATIVE_SMOKE_IOS_APP_ID }}
           NATIVE_SMOKE_IOS_BUILD_ID: ${{ env.NATIVE_SMOKE_IOS_BUILD_ID }}
           EAS_CLI_VERSION: ${{ env.EAS_CLI_VERSION }}
@@ -1546,7 +1550,7 @@ jobs:
           add_check "Workspace dependencies" "$WORKSPACE_RESULT"
           add_check "App branding source" "$APP_BRANDING_RESULT"
           add_check "Release configuration" "$IOS_RELEASE_CONFIGURATION_RESULT"
-          add_check "GitHub-hosted iOS runner" "$IOS_HOSTED_RUNNER_RESULT"
+          add_check "Self-hosted iOS runner" "$IOS_HOSTED_RUNNER_RESULT"
           add_check "Xcode simulator tooling" "$IOS_XCRUN_RESULT"
           add_check "Booted iPhone SE (3rd generation)" "$IOS_SIMULATOR_RESULT"
           add_check "Installed native candidate" "$IOS_NATIVE_BRANDING_RESULT"
@@ -1663,6 +1667,7 @@ jobs:
       - name: Prepare GitHub-hosted Android runner
         env:
           EAS_TOKEN: ${{ secrets.EAS_TOKEN }}
+          MAESTRO_INSTALLER_SHA256: ${{ env.MAESTRO_INSTALLER_SHA256 }}
           NATIVE_SMOKE_ANDROID_APP_ID: ${{ secrets.NATIVE_SMOKE_ANDROID_APP_ID }}
           NATIVE_SMOKE_ANDROID_BUILD_ID: ${{ env.NATIVE_SMOKE_ANDROID_BUILD_ID }}
           EAS_CLI_VERSION: ${{ env.EAS_CLI_VERSION }}
@@ -1715,6 +1720,7 @@ jobs:
       - name: Prepare GitHub-hosted Android runner
         env:
           EAS_TOKEN: ${{ secrets.EAS_TOKEN }}
+          MAESTRO_INSTALLER_SHA256: ${{ env.MAESTRO_INSTALLER_SHA256 }}
           NATIVE_SMOKE_ANDROID_APP_ID: ${{ secrets.NATIVE_SMOKE_ANDROID_APP_ID }}
           NATIVE_SMOKE_ANDROID_BUILD_ID: ${{ env.NATIVE_SMOKE_ANDROID_BUILD_ID }}
           EAS_CLI_VERSION: ${{ env.EAS_CLI_VERSION }}

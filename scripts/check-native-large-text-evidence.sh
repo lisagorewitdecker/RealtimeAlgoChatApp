@@ -42,7 +42,9 @@ check_native_text_evidence_sizes() {
     return 0
   fi
 
-  mapfile -d '' -t sorted_evidence_paths < <(find "$results_dir" -type f -print0)
+  while IFS= read -r -d '' path; do
+    sorted_evidence_paths+=("$path")
+  done < <(find "$results_dir" -type f -print0)
   if ((${#sorted_evidence_paths[@]} > 1)); then
     local current_path
     local index

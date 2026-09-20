@@ -97,7 +97,7 @@ elif ! command -v jq >/dev/null 2>&1; then
   record_failure "jq is required to inspect the GitHub runner inventory."
 elif [[ -z "${GITHUB_REPOSITORY:-}" ]]; then
   record_failure "GITHUB_REPOSITORY is required to inspect the repository runner inventory."
-elif [[ ! -v GH_TOKEN ]]; then
+elif [[ -z "${GH_TOKEN:-}" ]]; then
   record_failure "GITHUB_WORKFLOW_PULL_TOKEN_FINAL must be configured with Administration: read access."
 else
   runner_json="$(

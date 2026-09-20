@@ -69,6 +69,11 @@ jobs:
         run: |
           set -euo pipefail
           source scripts/workflow-output-safety.sh
+          emit_sanitized_log() {
+            local log_path="$1"
+            [[ -f "$log_path" ]] || return 0
+            sanitize_workflow_stream <"$log_path" >&2 || true
+          }
           log_path="$RUNNER_TEMP/expo-startup-${{ matrix.os }}.log"
           console_path="$RUNNER_TEMP/expo-startup-${{ matrix.os }}.console.log"
           record_status=0
@@ -82,7 +87,7 @@ jobs:
 
           if [[ ! -s "$log_path" ]]; then
             echo "The real Expo launcher did not produce a captured startup log." >&2
-            cat "$console_path" >&2
+            emit_sanitized_log "$console_path"
             exit 1
           fi
 
@@ -102,7 +107,7 @@ jobs:
 
           if [[ "$record_status" -eq 0 && "$revalidation_status" -ne 0 ]]; then
             echo "Captured healthy launcher output did not remain healthy when revalidated." >&2
-            cat "$RUNNER_TEMP/expo-startup-${{ matrix.os }}.revalidated.log" >&2
+            emit_sanitized_log "$RUNNER_TEMP/expo-startup-${{ matrix.os }}.revalidated.log"
             exit 1
           fi
 
@@ -120,14 +125,14 @@ jobs:
           if [[ "$record_status" -ne 0 && "$loader_failure" -eq 0 ]]; then
             echo "The real Expo launcher failed without a recognized loader diagnosis." >&2
             echo "Initial validator status: $record_status" >&2
-            cat "$console_path" >&2
+            emit_sanitized_log "$console_path"
             exit 1
           fi
 
           if [[ "$revalidation_status" -ne 0 && "$loader_failure" -eq 0 ]]; then
             echo "Revalidating the captured output failed without a recognized loader diagnosis." >&2
             echo "Revalidation status: $revalidation_status" >&2
-            cat "$RUNNER_TEMP/expo-startup-${{ matrix.os }}.revalidated.log" >&2
+            emit_sanitized_log "$RUNNER_TEMP/expo-startup-${{ matrix.os }}.revalidated.log"
             exit 1
           fi
 
@@ -141,8 +146,8 @@ jobs:
             )"
             if [[ -z "$live_diagnostic" || -z "$captured_diagnostic" ]]; then
               echo "The loader failure did not produce a validator diagnosis in both runs." >&2
-              cat "$console_path" >&2
-              cat "$RUNNER_TEMP/expo-startup-${{ matrix.os }}.revalidated.log" >&2
+              emit_sanitized_log "$console_path"
+              emit_sanitized_log "$RUNNER_TEMP/expo-startup-${{ matrix.os }}.revalidated.log"
               exit 1
             fi
             live_library="$(
@@ -155,7 +160,9 @@ jobs:
             )"
             if [[ -z "$live_library" || "$live_library" != "$captured_library" ]]; then
               echo "The recorded loader output produced a different useful diagnosis." >&2
-              printf 'live: %s\ncaptured: %s\n' "$live_diagnostic" "$captured_diagnostic" >&2
+              printf 'live: %s\ncaptured: %s\n' \
+                "$(sanitize_workflow_text "$live_diagnostic")" \
+                "$(sanitize_workflow_text "$captured_diagnostic")" >&2
               exit 1
             fi
           fi

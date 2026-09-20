@@ -1886,6 +1886,43 @@ test("failed native evidence checks remain reviewable before blocking release", 
   }
 });
 
+test("native runner preparation passes the pinned Maestro installer digest and labels iOS correctly", () => {
+  assert.equal(
+    workflow.env.MAESTRO_INSTALLER_SHA256,
+    "40115b628eb491f29d02275bc7e3db5334024ba4fdff7210a334fd3cf4a8f306",
+    "the release workflow must pin the Maestro installer digest centrally",
+  );
+
+  const iosJob = workflow.jobs["native-ios"];
+  assert.deepEqual(iosJob["runs-on"], [
+    "self-hosted",
+    "macos",
+    "ios",
+    "smallest-simulator",
+  ]);
+  const iosPrepareStep = iosJob.steps.find(
+    (step) => step.name === "Prepare self-hosted iOS runner",
+  );
+  assert.ok(iosPrepareStep, "native-ios must describe its runner preparation accurately");
+  assert.equal(
+    iosPrepareStep.env.MAESTRO_INSTALLER_SHA256,
+    "${{ env.MAESTRO_INSTALLER_SHA256 }}",
+    "native-ios must pass the pinned Maestro installer digest into runner preparation",
+  );
+
+  for (const jobId of ["android-prerequisite-preflight", "native-android"]) {
+    const step = workflow.jobs[jobId].steps.find(
+      (candidate) => candidate.name === "Prepare GitHub-hosted Android runner",
+    );
+    assert.ok(step, `${jobId} must prepare the Android runner before native checks`);
+    assert.equal(
+      step.env.MAESTRO_INSTALLER_SHA256,
+      "${{ env.MAESTRO_INSTALLER_SHA256 }}",
+      `${jobId} must pass the pinned Maestro installer digest into runner preparation`,
+    );
+  }
+});
+
 test("publish requires candidate-bound approvals from the current run attempt", () => {
   const attemptSuffix = "${{ github.run_id }}-${{ github.run_attempt }}";
   for (const [jobId, platform] of [

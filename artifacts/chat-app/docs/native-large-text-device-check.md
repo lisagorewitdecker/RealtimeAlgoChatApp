@@ -513,15 +513,18 @@ together before native runners or release regressions start. It names keys only,
 never values. GitHub's reusable-workflow declarations leave the secrets
 syntactically optional so this aggregate diagnostic can run; the preflight list
 below is the blocking required contract. `NATIVE_SMOKE_DISPLAY_NAME` remains
-optional and is not included in that failure. The publish-only `EAS_TOKEN` also
-stays out of this preflight and remains available only after approval from the
+optional and is not included in that failure. `EAS_TOKEN` is required earlier in
+the `mobile-release` environment so native runner preparation can download the
+exact tested candidates, and the publish job also needs the same secret in the
 protected `mobile-store-submission` environment.
 
 Store the runner-read token below as a repository Actions **secret** so manual
 dispatches can use it, and pass it through the reusable-workflow secret contract.
 Store the release credentials in the GitHub Actions `mobile-release` environment.
-Authentication values are injected only into the process that needs them and
-are never written to the repository or printed by the workflow.
+If the workflow will publish after approval, also store `EAS_TOKEN` in the
+protected `mobile-store-submission` environment. Authentication values are
+injected only into the process that needs them and are never written to the
+repository or printed by the workflow.
 The candidate build IDs are recorded in each smoke result directory so the
 tested candidate can be audited by the publish job:
 
@@ -555,10 +558,12 @@ tested candidate can be audited by the publish job:
 - `NATIVE_SMOKE_DISPLAY_NAME` — reusable display name for the smoke account; the
   test flow can register the account without a preconfigured value
 
-#### Publish-only secret
+#### Required reusable-workflow secret and publish secret
 
-- `EAS_TOKEN` — EAS authentication token used only by the publish job; store it
-  in the protected `mobile-store-submission` environment, not `mobile-release`
+- `EAS_TOKEN` — EAS authentication token used by native release configuration,
+  the iOS and Android runner-preparation jobs that download the tested
+  candidates, and the final publish job; store it in `mobile-release`, and also
+  in the protected `mobile-store-submission` environment when publish is enabled
 
 Build each candidate with `SENTRY_DSN`, `SENTRY_AUTH_TOKEN`, `SENTRY_RELEASE`,
 and `SENTRY_DIST` in its EAS release environment. EAS supplies `EAS_BUILD_ID`;

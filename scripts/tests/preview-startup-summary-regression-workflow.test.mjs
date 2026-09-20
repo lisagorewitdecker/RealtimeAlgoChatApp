@@ -23,6 +23,13 @@ const workflowPath = path.join(
 );
 const workflow = YAML.parse(readFileSync(workflowPath, "utf8"));
 const workflowText = readFileSync(workflowPath, "utf8");
+const realPlatformWorkflowText = readFileSync(
+  path.join(
+    workspaceRoot,
+    ".github/workflows/preview-startup-real-platform.yml",
+  ),
+  "utf8",
+);
 const validatorPath = path.join(
   workspaceRoot,
   "artifacts/chat-app/scripts/validate-preview-startup.mjs",
@@ -199,6 +206,18 @@ test("hosted preview startup summary regression is a read-only Linux check", () 
   assert.doesNotMatch(workflowText, /self-hosted/);
   assert.doesNotMatch(workflowText, /runs-on:\s*.*(?:macos|windows)/i);
   assert.doesNotMatch(workflowText, /\b(publish|deploy|submit)\b/i);
+});
+
+test("real platform launcher workflow sanitizes captured launcher output before logging it", () => {
+  assert.match(
+    realPlatformWorkflowText,
+    /emit_sanitized_log\(\) \{[\s\S]*sanitize_workflow_stream <"\$log_path" >&2/,
+  );
+  assert.doesNotMatch(realPlatformWorkflowText, /cat "\$console_path" >&2/);
+  assert.doesNotMatch(
+    realPlatformWorkflowText,
+    /cat "\$RUNNER_TEMP\/expo-startup-\$\{\{ matrix\.os \}\}\.revalidated\.log" >&2/,
+  );
 });
 
 test("hosted preview startup workflow summary matches validator output exactly", () => {

@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 #
-# Prepare an ephemeral GitHub-hosted macOS runner for the native release gate.
+# Prepare the self-hosted macOS runner for the native release gate.
 #
-# GitHub-hosted runners do not retain a booted simulator, installed candidate,
-# or Maestro between jobs. Keep that setup here so the release workflow has the
-# same explicit prerequisites on every run.
+# The native-ios workflow job still runs on the long-lived self-hosted macOS
+# machine, so keep the simulator, candidate-install, and Maestro setup here to
+# re-establish the same explicit prerequisites on every run.
 
 set -euo pipefail
 
@@ -19,7 +19,7 @@ RUNNER_TEMP="${RUNNER_TEMP:-${TMPDIR:-/tmp}}"
 
 require_command() {
   if ! command -v "$1" >/dev/null 2>&1; then
-    echo "Required command not found on the GitHub-hosted macOS runner: $1" >&2
+    echo "Required command not found on the self-hosted macOS runner: $1" >&2
     exit 2
   fi
 }
@@ -118,4 +118,4 @@ if ! xcrun simctl get_app_container "$device_udid" "$NATIVE_SMOKE_IOS_APP_ID" ap
   exit 2
 fi
 
-echo "Prepared the GitHub-hosted iOS runner with the required simulator and candidate."
+echo "Prepared the self-hosted iOS runner with the required simulator and candidate."

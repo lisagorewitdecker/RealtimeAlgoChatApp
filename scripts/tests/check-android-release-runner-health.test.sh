@@ -95,6 +95,22 @@ missing_token_output="$(
 assert_contains "$missing_token_output" \
   "GITHUB_WORKFLOW_PULL_TOKEN_FINAL must be configured with Administration: read access."
 
+empty_token_output="$(
+  if "$ENV_BIN" \
+    PATH="$stub_bin:$PATH" \
+    GITHUB_REPOSITORY=example/project \
+    GH_TOKEN= \
+    GH_STUB_JSON="$ready_fixture" \
+    "$BASH_BIN" "$CHECKER" 2>&1; then
+    exit 1
+  else
+    status=$?
+    [[ "$status" -eq 2 ]]
+  fi
+)"
+assert_contains "$empty_token_output" \
+  "GITHUB_WORKFLOW_PULL_TOKEN_FINAL must be configured with Administration: read access."
+
 missing_label_fixture='[{"runners":[{"name":"android-release-linux","status":"online","labels":[{"name":"self-hosted"},{"name":"linux"},{"name":"android"}]}]}]'
 missing_label_output="$(run_case missing-label 2 "$missing_label_fixture")"
 assert_contains "$missing_label_output" "ANDROID_RELEASE_RUNNER_HEALTH=BLOCKED"
