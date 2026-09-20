@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   ApiError,
   customFetch,
+  ResponseParseError,
   setAuthTokenGetter,
   setBaseUrl,
 } from "./custom-fetch";
@@ -49,7 +50,7 @@ afterEach(() => {
 describe("customFetch URL handling", () => {
   it("accepts URL-like React Native polyfill values and joins relative paths", async () => {
     setBaseUrl("https://api.example.test/root///");
-    const fetchMock = installFetch(reactNativeResponse("ok"));
+      const fetchMock = installFetch(reactNativeResponse(""));
     const polyfilledUrl = {
       href: "/rooms",
       toString: () => "/rooms",
@@ -67,7 +68,7 @@ describe("customFetch URL handling", () => {
 
   it("does not prepend the base URL to an explicit absolute URL", async () => {
     setBaseUrl("https://api.example.test/root");
-    const fetchMock = installFetch(reactNativeResponse("ok"));
+      const fetchMock = installFetch(reactNativeResponse(""));
 
     await expect(
       customFetch("https://other.example.test/rooms", {
@@ -84,10 +85,13 @@ describe("customFetch URL handling", () => {
 
 describe("customFetch authentication", () => {
   it("adds a bearer token when no Authorization header is supplied", async () => {
-    const fetchMock = installFetch(reactNativeResponse("ok"));
-    setAuthTokenGetter(() => "clerk-token");
+      const fetchMock = installFetch(reactNativeResponse(""));
+    setAuthTokenGetter(() => "ignored-token");
 
-    await customFetch("/profile", { responseType: "text" });
+    await customFetch("/profile", {
+      responseType: "text",
+      headers: { Authorization: "Basic explicit-credentials" },
+    });
 
     const requestInit = fetchMock.mock.calls[0]?.[1];
     expect(requestInit?.headers).toBeInstanceOf(Headers);
@@ -97,7 +101,7 @@ describe("customFetch authentication", () => {
   });
 
   it("preserves an explicit Authorization header", async () => {
-    const fetchMock = installFetch(reactNativeResponse("ok"));
+      const fetchMock = installFetch(reactNativeResponse(""));
     setAuthTokenGetter(() => "ignored-token");
 
     await customFetch("/profile", {
@@ -139,6 +143,8 @@ describe("customFetch response parsing", () => {
 
     const error = await customFetch("/profile").catch((caught) => caught);
 
+    const rawBody = '{"profile":';
+
     expect(error).toBeInstanceOf(ApiError);
     expect(error).toMatchObject({
       status: 422,
@@ -170,9 +176,11 @@ describe("customFetch response parsing", () => {
     const blob = new Blob(["file contents"], {
       type: "application/octet-stream",
     });
-    const response = reactNativeResponse("file contents", {
-      headers: { "content-type": "application/octet-stream" },
-    });
+    const response = responseWithoutBlob(
+      reactNativeResponse("file contents", {
+        headers: { "content-type": "application/octet-stream" },
+      }),
+    );
     const blobMock = vi.fn<() => Promise<Blob>>().mockResolvedValue(blob);
     Object.defineProperty(response, "blob", {
       configurable: true,
@@ -216,3 +224,5 @@ describe("customFetch request body guard", () => {
     },
   );
 });
+
+    let originalCause: unknown;
