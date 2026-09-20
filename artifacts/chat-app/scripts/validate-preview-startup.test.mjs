@@ -33,6 +33,13 @@ import {
   writeHandoffPreflight,
 } from "./validate-preview-startup.mjs";
 
+function hasControlCharacters(value) {
+  return Array.from(value).some((character) => {
+    const codePoint = character.codePointAt(0);
+    return codePoint !== undefined && (codePoint <= 0x1f || codePoint === 0x7f);
+  });
+}
+
 const previewEnvironment = {
   PREVIEW_PUBLIC_URL: "https://preview.example.test/expo",
 };
@@ -219,6 +226,7 @@ test("validates captured startup logs with a bounded, sanitized library diagnost
       diagnostic.length <= 512,
       "captured startup diagnostic exceeded its bounded length",
     );
+    assert.equal(hasControlCharacters(diagnostic), false);
     assertHasNoControlCharacters(diagnostic);
     assertHasNoAnsiSequences(diagnostic);
     assert.doesNotMatch(diagnostic, /unrelated captured output/);

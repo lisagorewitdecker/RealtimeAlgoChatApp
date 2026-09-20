@@ -89,7 +89,10 @@ test("compatibility fixture makes a deterministic API operation breaking", () =>
     "",
   ].join("\n");
   const breaking = buildBreakingCompatibilityContent(content);
-
+  assert.match(
+    breaking,
+    /\/rooms:\n {4}post:\n {6}operationId: createRoomHostedProbe/,
+  );
   assert.match(breaking, /\/rooms:\n {4}post:\n {6}operationId: createRoomHostedProbe/);
   assert.match(breaking, /\/other:\n {4}post:\n {6}operationId: createRoom/);
 });

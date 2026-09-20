@@ -371,21 +371,25 @@ function sanitizeRecordedStartupOutput(value) {
   };
   const stripTrailingStartupProjectFlags = (path) => {
     let trimmedPath = path;
-    for (;;) {
+    let removedFlag = true;
+    while (removedFlag) {
+      removedFlag = false;
       if (/\s+--localhost$/.test(trimmedPath)) {
         trimmedPath = trimmedPath.replace(/\s+--localhost$/, "");
+        removedFlag = true;
         continue;
       }
       if (/\s+--host\s+[^\s\\]+$/.test(trimmedPath)) {
         trimmedPath = trimmedPath.replace(/\s+--host\s+[^\s\\]+$/, "");
+        removedFlag = true;
         continue;
       }
       if (/\s+--port\s+\d+$/.test(trimmedPath)) {
         trimmedPath = trimmedPath.replace(/\s+--port\s+\d+$/, "");
-        continue;
+        removedFlag = true;
       }
-      return trimmedPath;
     }
+    return trimmedPath;
   };
   const sanitizedLines = value
     .split(/\r?\n/)
