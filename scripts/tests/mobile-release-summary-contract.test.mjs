@@ -6342,11 +6342,21 @@ test("unsafe download metadata cannot alter fixed platform recovery actions", ()
 test("cleanup-gated skipped retries preserve fixed blocking summaries", () => {
   const evidenceRoot = path.join(testRoot, "cleanup-failure-stale-output");
   const iosRunDir = path.join(evidenceRoot, "ios", "stale-run");
-  mkdirSync(iosRunDir, { recursive: true });
-  writeFileSync(
-    path.join(iosRunDir, brandingReportFile),
-    "private-evidence-marker must not appear in the release summary\n",
-  );
+  const androidRunDir = path.join(evidenceRoot, "android", "stale-run");
+  const staleEvidenceMarkers = {
+    ios: "private-ios-evidence-marker",
+    android: "private-android-evidence-marker",
+  };
+  for (const [platform, runDir] of Object.entries({
+    ios: iosRunDir,
+    android: androidRunDir,
+  })) {
+    mkdirSync(runDir, { recursive: true });
+    writeFileSync(
+      path.join(runDir, brandingReportFile),
+      `${staleEvidenceMarkers[platform]} must not appear in the release summary\n`,
+    );
+  }
   const summaryPath = path.join(
     testRoot,
     "cleanup-failure-stale-output-summary.md",
@@ -6368,7 +6378,7 @@ test("cleanup-gated skipped retries preserve fixed blocking summaries", () => {
         NATIVE_IOS_EVIDENCE_ARTIFACT_URL: iosArtifactUrl,
         NATIVE_ANDROID_EVIDENCE_ARTIFACT_URL: androidArtifactUrl,
         NATIVE_IOS_EVIDENCE_DOWNLOAD_RESULT: "skipped",
-        NATIVE_ANDROID_EVIDENCE_DOWNLOAD_RESULT: "success",
+        NATIVE_ANDROID_EVIDENCE_DOWNLOAD_RESULT: "skipped",
       },
     },
   );
@@ -6379,21 +6389,39 @@ test("cleanup-gated skipped retries preserve fixed blocking summaries", () => {
   );
 
   const summary = readFileSync(summaryPath, "utf8");
-  assert.match(
-    summary,
-    /## iOS native large-text evidence[\s\S]*- Status: \*\*FAIL\*\*[\s\S]*- Artifact download: \*\*FAIL\*\*/,
-    "the affected platform must retain a fixed blocking summary",
-  );
-  assert.match(
-    summary,
-    /- Recovery: \*\*Rerun the iOS native large-text job, or make the existing iOS artifact available, then rerun the mobile release gate\.\*\*/,
-    "the affected platform must retain fixed iOS recovery guidance",
-  );
-  assert.doesNotMatch(
-    summary,
-    /private-evidence-marker|github\.example/,
-    "stale evidence text and artifact metadata must not reach the summary",
-  );
+  for (const [platform, label, recoveryLine] of [
+    ["ios", "iOS", iosRecoveryLine],
+    ["android", "Android", androidRecoveryLine],
+  ]) {
+    const section = summary.match(
+      new RegExp(`## ${label} native large-text evidence[\\s\\S]*?(?=## |$)`),
+    )?.[0];
+    assert.ok(
+      section,
+      `${platform}: the cleanup-failure summary must include its platform section`,
+    );
+    assert.match(
+      section,
+      /- Status: \*\*FAIL\*\*[\s\S]*- Artifact download: \*\*FAIL\*\*/,
+      `${platform}: the affected platform must retain a fixed blocking summary`,
+    );
+    assert.match(
+      section,
+      new RegExp(recoveryLine.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
+      `${platform}: the affected platform must retain fixed recovery guidance`,
+    );
+  }
+  for (const value of [
+    ...Object.values(staleEvidenceMarkers),
+    iosArtifactUrl,
+    androidArtifactUrl,
+  ]) {
+    assert.equal(
+      summary.includes(value),
+      false,
+      "stale evidence text and artifact metadata must not reach the summary",
+    );
+  }
 });
 
 test("partial native reruns keep each platform linked to its own artifact", () => {
