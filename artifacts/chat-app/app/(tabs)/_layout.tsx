@@ -1,7 +1,7 @@
 import { BlurView } from "expo-blur";
 import { isLiquidGlassAvailable } from "expo-glass-effect";
 import { Tabs } from "expo-router";
-import { NativeTabs } from "expo-router/unstable-native-tabs";
+import { NativeTabs, type NativeTabsProps } from "expo-router/unstable-native-tabs";
 import { SymbolView } from "expo-symbols";
 import { Feather } from "@expo/vector-icons";
 import React from "react";
@@ -11,37 +11,99 @@ import { useAccessibilityOptional } from "@/contexts/AccessibilityContext";
 import { useColors } from "@/hooks/useColors";
 
 /**
+ * The NativeTabs props the accessibility preferences control. Everything else
+ * about the native bar (layout, minimize behaviour, item roles) stays with
+ * UIKit.
+ */
+type NativeTabBarAppearance = Pick<
+  NativeTabsProps,
+  | "backgroundColor"
+  | "blurEffect"
+  | "disableTransparentOnScrollEdge"
+  | "shadowColor"
+  | "tintColor"
+  | "iconColor"
+  | "labelStyle"
+>;
+
+/**
  * iOS 26 draws the native tab bar with Liquid Glass, and expo-router's
- * NativeTabs leaves the bar's background to the system unless told otherwise.
- * iOS's own Reduce Transparency setting solidifies that glass at the OS
- * level, but the in-app toggle is a separate preference the system never
- * sees, so the layout has to ask for the opaque bar itself:
+ * NativeTabs leaves the bar's background and item tints to the system unless
+ * told otherwise. iOS's own Reduce Transparency setting solidifies that glass
+ * at the OS level, but the in-app toggles are preferences the system never
+ * sees, so the layout has to ask for the same two changes the classic bar
+ * makes:
  *
- * - `backgroundColor` fills the bar with the opaque palette background.
+ * - Reduce transparency fills the bar with the opaque palette `background`.
+ * - High contrast alone fills it with the palette's denser `tabBarBackground`
+ *   panel instead — the surface the classic iOS bar swaps in for its blur —
+ *   which stays faintly see-through (high contrast never makes a surface
+ *   opaque; that is Reduce transparency's job, and it wins when both are on).
+ *   High contrast also colors the tab items with the high-contrast palette
+ *   (`primary` when selected, `mutedForeground` otherwise), the tints every
+ *   other screen already uses, in place of UIKit's system blue and gray.
+ *
+ * Either surface is requested with the same four props, because UIKit only
+ * leaves Liquid Glass behind when the bar gets a custom background:
+ *
+ * - `backgroundColor` fills the bar with the chosen palette surface.
  * - `blurEffect="none"` removes the material behind it (UITabBarAppearance's
- *   `backgroundEffect = nil`) so nothing shows through.
+ *   `backgroundEffect = nil`) so only that surface shows.
  * - `disableTransparentOnScrollEdge` applies the same background at the scroll
  *   edge, where expo-router otherwise clears the bar entirely.
- * - `shadowColor` keeps the classic bar's top border on the solid bar.
+ * - `shadowColor` keeps the classic bar's top border on the bar.
  *
- * With the toggle off none of these are passed, so the tabs keep their default
- * Liquid Glass look (and the system setting still solidifies it on its own).
+ * With both toggles off none of these are passed, so the tabs keep their
+ * default Liquid Glass look and system tints (and the system setting still
+ * solidifies the glass on its own). The mapping was checked against
+ * expo-router's iOS appearance builders (`__tests__/NativeTabBarAppearance.test.tsx`
+ * runs the real ones) and react-native-screens' appearance coordinator; no
+ * iOS 26 device is reachable from this workspace, so how UIKit draws the
+ * resulting bar is still owed an on-device look. Two things in particular:
+ * whether the custom background is drawn full-width or as a filled capsule,
+ * and whether unselected icons take `iconColor.default` once the bar has left
+ * Liquid Glass (react-native-screens documents that on the glass bar iOS 26
+ * applies the item icon color to the selected item only; the label color is
+ * an unconditional override either way).
  */
+function nativeTabBarAppearance(
+  colors: ReturnType<typeof useColors>,
+  { highContrast, reduceTransparency }: { highContrast: boolean; reduceTransparency: boolean },
+): NativeTabBarAppearance {
+  const surface = reduceTransparency
+    ? colors.background
+    : highContrast
+      ? colors.tabBarBackground
+      : undefined;
+
+  return {
+    ...(surface !== undefined
+      ? {
+          backgroundColor: surface,
+          blurEffect: "none" as const,
+          disableTransparentOnScrollEdge: true,
+          shadowColor: colors.border,
+        }
+      : {}),
+    ...(highContrast
+      ? {
+          tintColor: colors.primary,
+          iconColor: { default: colors.mutedForeground, selected: colors.primary },
+          labelStyle: {
+            default: { color: colors.mutedForeground },
+            selected: { color: colors.primary },
+          },
+        }
+      : {}),
+  };
+}
+
 function NativeTabLayout() {
   const colors = useColors();
-  const { reduceTransparency } = useAccessibilityOptional();
+  const { highContrast, reduceTransparency } = useAccessibilityOptional();
 
   return (
-    <NativeTabs
-      {...(reduceTransparency
-        ? {
-            backgroundColor: colors.background,
-            blurEffect: "none" as const,
-            disableTransparentOnScrollEdge: true,
-            shadowColor: colors.border,
-          }
-        : {})}
-    >
+    <NativeTabs {...nativeTabBarAppearance(colors, { highContrast, reduceTransparency })}>
       <NativeTabs.Trigger name="index">
         <NativeTabs.Trigger.Icon
           sf={{ default: "message.circle", selected: "message.circle.fill" }}

@@ -84,7 +84,7 @@
 - [Publish failure messages can be stale](publish-failure-card-staleness.md) — repeated "build failed" messages may reference one old build; confirm a newer build exists before re-diagnosing.
 - [expo-router vendored react-navigation](expo-router-vendored-navigation.md) — read tab-bar height from `expo-router/js-tabs`; never add `@react-navigation/*`; vendored views run in Jest.
 - [expo-blur Android blur prerequisites](expo-blur-android.md) — Android blur needs a `BlurTargetView` ref or it silently becomes a ~0.69-alpha tint; Android ships an opaque bar by owner decision.
-- [NativeTabs opaque appearance](native-tabs-opaque-appearance.md) — iOS 26 glass bar goes solid only with backgroundColor + blurEffect none + disableTransparentOnScrollEdge together; not device-confirmed.
+- [NativeTabs opaque appearance](native-tabs-opaque-appearance.md) — the iOS 26 glass bar needs three props together to go solid; verify with expo-router's real appearance builders; not device-confirmed.
 - [Clerk Expo iOS builds](clerk-expo-ios-build.md) — keep the `@clerk/expo` plugin in app.json: it lifts iOS to 17.0 so the ClerkExpo pod links; otherwise pod install dies on a nil SPM target.
 - [GitHub edited-event evidence](github-edited-event-evidence.md) — REST timelines may omit PR body edits; retain the edit timestamp, unchanged head SHA, and subsequent run creation time.
 - [jest-expo platform projects](jest-expo-platform-projects.md) — the default preset also matches `*.test.android.tsx`; list testMatch per project and guard the Android project's `Platform.OS`.

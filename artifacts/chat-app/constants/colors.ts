@@ -87,11 +87,13 @@ const colors = {
     systemMsg: "#BBBBBB",
     online: "#00EE88",
     // The panel web draws and iOS swaps in for its native blur while high
-    // contrast is on. Denser than the default palettes on purpose: still
-    // see-through, but low-vision users get less visual noise behind the tab
-    // controls (the same idea as the system "Reduce Transparency" setting,
-    // which the app's Reduce transparency toggle follows to a fully opaque
-    // bar). `__tests__/TabLayout.test.tsx` checks it stays denser.
+    // contrast is on — on iOS 26 the native Liquid Glass bar takes the same
+    // panel as its `backgroundColor`. Denser than the default palettes on
+    // purpose: still see-through, but low-vision users get less visual noise
+    // behind the tab controls (the same idea as the system "Reduce
+    // Transparency" setting, which the app's Reduce transparency toggle
+    // follows to a fully opaque bar). `__tests__/TabLayout.test.tsx` checks
+    // it stays denser.
     tabBarBackground: "rgba(0, 0, 0, 0.9)",
   },
   radius: 12,
