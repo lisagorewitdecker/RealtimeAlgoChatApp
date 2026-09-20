@@ -190,12 +190,21 @@ function findUnrecognizedLoaderFailure(output) {
 }
 
 function stripAnsiEscapeSequences(value) {
-  const escapeCharacter = String.fromCharCode(0x1b);
+  const escapeCodePoint = 0x1b;
+  const bellCodePoint = 0x07;
   let cursor = 0;
   const characters = [];
 
   while (cursor < value.length) {
-    if (value[cursor] === escapeCharacter && value[cursor + 1] === "[") {
+    const currentCodePoint = value.charCodeAt(cursor);
+    if (currentCodePoint !== escapeCodePoint) {
+      characters.push(value[cursor]);
+      cursor += 1;
+      continue;
+    }
+
+    const nextCodePoint = value.charCodeAt(cursor + 1);
+    if (nextCodePoint === 0x5b) {
       cursor += 2;
       while (cursor < value.length) {
         const codePoint = value.charCodeAt(cursor);
@@ -207,8 +216,27 @@ function stripAnsiEscapeSequences(value) {
       continue;
     }
 
-    characters.push(value[cursor]);
-    cursor += 1;
+    if (nextCodePoint === 0x5d) {
+      cursor += 2;
+      while (cursor < value.length) {
+        const codePoint = value.charCodeAt(cursor);
+        if (codePoint === bellCodePoint) {
+          cursor += 1;
+          break;
+        }
+        if (
+          codePoint === escapeCodePoint &&
+          value.charCodeAt(cursor + 1) === 0x5c
+        ) {
+          cursor += 2;
+          break;
+        }
+        cursor += 1;
+      }
+      continue;
+    }
+
+    cursor += nextCodePoint ? 2 : 1;
   }
 
   return characters.join("");
@@ -216,10 +244,12 @@ function stripAnsiEscapeSequences(value) {
 
 function sanitizeStartupDiagnostic(value, maxLength) {
   const withoutAnsiSequences = stripAnsiEscapeSequences(value);
-  const withoutControlChars = Array.from(withoutAnsiSequences, (character) => {
+  const characters = [];
+  for (const character of withoutAnsiSequences) {
     const codePoint = character.codePointAt(0) ?? 0;
-    return codePoint <= 0x1f || codePoint === 0x7f ? " " : character;
-  }).join("");
+    characters.push(codePoint <= 0x1f || codePoint === 0x7f ? " " : character);
+  }
+  const withoutControlChars = characters.join("");
 
   return withoutControlChars
     .replace(/\s+/g, " ")
