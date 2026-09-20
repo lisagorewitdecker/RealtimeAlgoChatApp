@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync, statSync } from "node:fs";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -10,12 +10,15 @@ import { promisify } from "node:util";
 import {
   COMPAT_COMPONENT_PATH,
   KEYBOARD_STRATEGY_RULES,
+  NON_SOURCE_DIRECTORIES,
+  REQUIRED_DIRECTORIES,
   ROOT_LAYOUT_PATH,
   ROUTER_NAVIGATOR_EXPORTS,
-  SCANNED_DIRECTORIES,
   assertKeyboardStrategy,
   createModuleLoader,
   formatKeyboardStrategyFailure,
+  formatKeyboardStrategyPass,
+  listSourceDirectories,
   scanKeyboardStrategy,
   scanKeyboardStrategySource,
   scanRootLayoutKeyboardProvider,
@@ -48,12 +51,15 @@ export default function RootLayout() {
 
 /**
  * Writes a throwaway package root with the given `{ relativePath: source }`
- * files. A compliant root layout is included unless `files` supplies one, so
- * fixtures for the per-file rules are not tripped by the whole-tree rule.
+ * files. The required directories (app/, components/) always exist; any other
+ * directory exists only when a fixture file lives in it, which is how a real
+ * tree grows a new folder. A compliant root layout is included unless `files`
+ * supplies one, so fixtures for the per-file rules are not tripped by the
+ * whole-tree rule.
  */
 async function writeFixtureRoot(files) {
   const root = await mkdtemp(path.join(os.tmpdir(), "keyboard-strategy-"));
-  for (const directory of SCANNED_DIRECTORIES) {
+  for (const directory of REQUIRED_DIRECTORIES) {
     await mkdir(path.join(root, directory), { recursive: true });
   }
   for (const [relativePath, source] of Object.entries({ [ROOT_LAYOUT_PATH]: compliantRootLayout, ...files })) {
@@ -79,30 +85,71 @@ export default function Screen() {
 `;
 
 test("the Chat App's source trees follow the keyboard strategy", () => {
-  const { findings, scannedFiles, scannedDirectories, rootLayoutFile } = scanKeyboardStrategy({ packageRoot });
+  const { findings, scannedFiles, scannedDirectories, skippedDirectories, packagePath, rootLayoutFile } =
+    scanKeyboardStrategy({ packageRoot });
 
   assert.deepEqual(findings, [], formatKeyboardStrategyFailure(findings));
+  assert.equal(packagePath, "artifacts/chat-app");
   // The whole-tree rule read the real root layout, not a fallback path.
   assert.equal(rootLayoutFile, `artifacts/chat-app/${ROOT_LAYOUT_PATH}`);
+  // The non-source list is pinned: a change to it is a change to the check's
+  // scope and belongs in the replit.md note as well.
+  assert.deepEqual(REQUIRED_DIRECTORIES, ["app", "components"]);
+  assert.deepEqual(NON_SOURCE_DIRECTORIES, [
+    "node_modules",
+    "assets",
+    "__tests__",
+    "__mocks__",
+    "test-utils",
+    "test-results",
+    "coverage",
+    "e2e",
+    "scripts",
+    "docs",
+    "dist",
+    "web-build",
+    "static-build",
+    "build",
+    "ios",
+    "android",
+  ]);
+  // Every top-level directory of the real package is either scanned or on the
+  // non-source list (or a dot-directory); nothing falls through unnoticed.
+  const topLevel = readdirSync(packageRoot).filter((name) => statSync(path.join(packageRoot, name)).isDirectory());
+  const expectedScanned = topLevel
+    .filter((name) => !NON_SOURCE_DIRECTORIES.includes(name) && !name.startsWith("."))
+    .sort((a, b) => a.localeCompare(b));
+  assert.deepEqual(scannedDirectories, expectedScanned);
+  assert.deepEqual([...scannedDirectories, ...skippedDirectories].sort(), [...topLevel].sort());
   // The shared-module homes are all present in the real tree, so a helper
-  // moved into any of them is read by the check.
-  assert.deepEqual(SCANNED_DIRECTORIES, ["app", "components", "hooks", "lib", "contexts", "utils"]);
-  assert.deepEqual(scannedDirectories, SCANNED_DIRECTORIES);
+  // moved into any of them is read at module level.
+  for (const home of ["app", "components", "constants", "contexts", "hooks", "lib", "utils"]) {
+    assert.ok(scannedDirectories.includes(home), `expected ${home}/ to be scanned`);
+  }
+  for (const skipped of ["__tests__", "assets", "scripts", "test-utils"]) {
+    assert.ok(skippedDirectories.includes(skipped), `expected ${skipped}/ to be skipped`);
+    assert.ok(!scannedDirectories.includes(skipped), `expected ${skipped}/ not to be scanned`);
+  }
   // Guard against an empty or mis-rooted scan passing silently: the known
   // keyboard call sites, the compat component and one module from each
-  // shared-module home must have been read.
+  // shared-module home must have been read, and nothing from the test tree.
   for (const expected of [
     "artifacts/chat-app/app/room/[roomId].tsx",
     "artifacts/chat-app/app/(tabs)/profile.tsx",
     "artifacts/chat-app/app/(auth)/forgot-password.tsx",
     "artifacts/chat-app/components/AiPanel.tsx",
     `artifacts/chat-app/${COMPAT_COMPONENT_PATH}`,
+    "artifacts/chat-app/constants/colors.ts",
     "artifacts/chat-app/hooks/useColors.ts",
     "artifacts/chat-app/lib/sentry.ts",
     "artifacts/chat-app/contexts/AppContext.tsx",
     "artifacts/chat-app/utils/analytics.ts",
   ]) {
     assert.ok(scannedFiles.includes(expected), `expected ${expected} to be scanned`);
+  }
+  for (const excluded of ["__tests__/", "test-utils/", "scripts/", "assets/", "node_modules/"]) {
+    const stray = scannedFiles.filter((file) => file.startsWith(`artifacts/chat-app/${excluded}`));
+    assert.deepEqual(stray, [], `expected nothing under ${excluded} to be scanned`);
   }
 });
 
@@ -593,10 +640,11 @@ export const Composer = () => <KeyboardShell behavior="padding" />;`;
 export const KeyboardShell = KeyboardAvoidingView;`,
     "components/Composer.tsx": composer,
   });
-  // A module outside the scanned directories is still followed from the call site.
+  // A module outside the scanned directories (a root-level file, where only
+  // configuration lives) is still followed from the call site.
   const unscannedModule = await scanFixture({
-    "constants/keyboard.ts": 'export { KeyboardAvoidingView as KeyboardShell } from "react-native";',
-    "components/Composer.tsx": composer.replace("@/lib/keyboard", "@/constants/keyboard"),
+    "keyboard.ts": 'export { KeyboardAvoidingView as KeyboardShell } from "react-native";',
+    "components/Composer.tsx": composer.replace("@/lib/keyboard", "@/keyboard"),
   });
   cleanup(t, [reexported.root, aliased.root, unscannedModule.root]);
 
@@ -624,7 +672,8 @@ export const KeyboardShell = KeyboardAvoidingView;`,
       detail: 'imports KeyboardAvoidingView from "react-native"',
     },
   ]);
-  assert.deepEqual(unscannedModule.findings, [callSiteFinding("@/constants/keyboard")]);
+  assert.deepEqual(unscannedModule.findings, [callSiteFinding("@/keyboard")]);
+  assert.deepEqual(unscannedModule.scannedFiles, [ROOT_LAYOUT_PATH, "components/Composer.tsx"]);
 });
 
 test("holds the controller KeyboardAvoidingView re-exported under another name to the padding rule", async (t) => {
@@ -662,14 +711,14 @@ export const Shell = () => <KeyboardAvoidingView behavior={behavior satisfies Ke
   assert.deepEqual(findings, []);
 });
 
-test("skips absent optional directories but still requires app/ and components/", async (t) => {
+test("scans whatever top-level directories exist but still requires app/ and components/", async (t) => {
   const minimal = await mkdtemp(path.join(os.tmpdir(), "keyboard-strategy-"));
   await mkdir(path.join(minimal, "app"));
   await mkdir(path.join(minimal, "components"));
   await writeFile(path.join(minimal, ROOT_LAYOUT_PATH), compliantRootLayout);
   await writeFile(path.join(minimal, "app/screen.tsx"), compliantScreen);
   const noApp = await mkdtemp(path.join(os.tmpdir(), "keyboard-strategy-"));
-  for (const directory of SCANNED_DIRECTORIES.filter((entry) => entry !== "app")) {
+  for (const directory of ["components", "constants", "hooks", "lib", "services"]) {
     await mkdir(path.join(noApp, directory));
   }
   await writeFile(path.join(noApp, "components/Fine.tsx"), compliantScreen);
@@ -678,24 +727,37 @@ test("skips absent optional directories but still requires app/ and components/"
   await writeFile(path.join(noComponents, "app/screen.tsx"), compliantScreen);
   cleanup(t, [minimal, noApp, noComponents]);
 
+  // No optional directory, nothing skipped: the scope is the two required trees.
   const result = scanKeyboardStrategy({ packageRoot: minimal, workspaceRoot: minimal });
   assert.deepEqual(result.findings, []);
   assert.deepEqual(result.scannedDirectories, ["app", "components"]);
+  assert.deepEqual(result.skippedDirectories, []);
   assert.deepEqual(result.scannedFiles, [ROOT_LAYOUT_PATH, "app/screen.tsx"]);
+  assert.equal(result.packagePath, "");
   assert.equal(result.rootLayoutFile, ROOT_LAYOUT_PATH);
+  assert.deepEqual(listSourceDirectories({ packageRoot: minimal }), { scanned: ["app", "components"], skipped: [] });
+  // Other folders never stand in for the required ones.
   assert.throws(
     () => scanKeyboardStrategy({ packageRoot: noApp, workspaceRoot: noApp }),
-    /expected directory app does not exist/,
+    /expected directory app does not exist\. Update REQUIRED_DIRECTORIES/,
   );
   assert.throws(
     () => scanKeyboardStrategy({ packageRoot: noComponents, workspaceRoot: noComponents }),
     /expected directory components does not exist/,
   );
+  // The guard names the directory relative to the workspace root, as findings do.
+  assert.throws(
+    () => listSourceDirectories({ packageRoot: noApp, workspaceRoot: path.dirname(noApp) }),
+    new RegExp(`expected directory ${path.basename(noApp)}/app does not exist`),
+  );
 });
 
 test("violations in every shared-module home are reported", async (t) => {
-  const { root, findings } = await scanFixture({
+  // None of these modules is imported by a screen, so each finding can only
+  // come from reading the module itself.
+  const { root, findings, scannedDirectories } = await scanFixture({
     "app/screen.tsx": compliantScreen,
+    "constants/keyboard.ts": 'export { KeyboardAvoidingView as KeyboardShell } from "react-native";',
     "hooks/useKeyboard.ts": 'export { KeyboardAvoidingView } from "react-native";',
     "lib/keyboard.ts": `import { Platform } from "react-native";
 export const keyboardProps = { behavior: Platform.select({ ios: "padding", default: "height" }) };`,
@@ -705,15 +767,100 @@ export const Provider = ({ children }) => <KeyboardAvoidingView>{children}</Keyb
   });
   cleanup(t, [root]);
 
+  assert.deepEqual(scannedDirectories, ["app", "components", "constants", "contexts", "hooks", "lib", "utils"]);
   assert.deepEqual(
-    findings.map(({ file, rule }) => `${file} ${rule}`),
+    findings.map(({ file, rule, line }) => `${file}:${line} ${rule}`),
     [
-      "hooks/useKeyboard.ts react-native-keyboard-avoiding-view",
-      "lib/keyboard.ts platform-split-behavior",
-      "contexts/KeyboardContext.tsx keyboard-avoiding-view-behavior",
-      "utils/forms.ts direct-keyboard-aware-scroll-view",
+      "constants/keyboard.ts:1 react-native-keyboard-avoiding-view",
+      "contexts/KeyboardContext.tsx:2 keyboard-avoiding-view-behavior",
+      "hooks/useKeyboard.ts:1 react-native-keyboard-avoiding-view",
+      "lib/keyboard.ts:2 platform-split-behavior",
+      "utils/forms.ts:1 direct-keyboard-aware-scroll-view",
     ],
   );
+});
+
+test("a top-level folder that did not exist before is scanned without editing a list", async (t) => {
+  // services/, store/ and features/ are not named anywhere in the check; a
+  // violation in each — including one nested below the top level — is
+  // reported at module level, and a compliant module there is left alone.
+  const { root, findings, scannedDirectories, skippedDirectories } = await scanFixture({
+    "app/screen.tsx": compliantScreen,
+    "services/keyboardShell.ts": 'export { KeyboardAvoidingView as KeyboardShell } from "react-native";',
+    "services/api.ts": "export const baseUrl = process.env.EXPO_PUBLIC_API_URL;",
+    "store/forms.ts": 'import { KeyboardAwareScrollView } from "react-native-keyboard-controller";',
+    "features/composer/keyboard.ts": `import { Platform } from "react-native";
+export const keyboardProps = { behavior: process.env.EXPO_OS === "ios" ? "padding" : "height" };`,
+    "features/composer/Composer.tsx": compliantScreen,
+  });
+  cleanup(t, [root]);
+
+  assert.deepEqual(scannedDirectories, ["app", "components", "features", "services", "store"]);
+  assert.deepEqual(skippedDirectories, []);
+  assert.deepEqual(
+    findings.map(({ file, rule, line }) => `${file}:${line} ${rule}`),
+    [
+      "features/composer/keyboard.ts:2 platform-split-behavior",
+      "services/keyboardShell.ts:1 react-native-keyboard-avoiding-view",
+      "store/forms.ts:1 direct-keyboard-aware-scroll-view",
+    ],
+  );
+});
+
+test("a platform split spread onto a compliant call site is caught where it is defined", async (t) => {
+  // The wrapper passes the required literal "padding" and then spreads the
+  // helper's props over it, so the call site is clean and only the module
+  // itself shows the split. Before constants/ was scanned this shipped.
+  const { root, findings } = await scanFixture({
+    "constants/keyboard.ts": `import { Platform } from "react-native";
+export const keyboardProps = {
+  behavior: Platform.OS === "ios" ? "padding" : "height",
+  keyboardVerticalOffset: 0,
+};`,
+    "components/KeyboardShell.tsx": `import { KeyboardAvoidingView } from "react-native-keyboard-controller";
+import { keyboardProps } from "@/constants/keyboard";
+export const KeyboardShell = ({ children }) => (
+  <KeyboardAvoidingView behavior="padding" {...keyboardProps}>{children}</KeyboardAvoidingView>
+);`,
+  });
+  cleanup(t, [root]);
+
+  assert.deepEqual(findings, [
+    {
+      file: "constants/keyboard.ts",
+      rule: "platform-split-behavior",
+      line: 3,
+      detail: "the behavior property depends on Platform.OS",
+    },
+  ]);
+});
+
+test("non-source directories are skipped even when they hold keyboard violations", async (t) => {
+  // Test suites and stand-ins legitimately mention the forbidden components
+  // (they mock them), dependencies and build output are not the app's source,
+  // and dot-directories are tooling state; none of them can trip the check or
+  // stand in for a source folder.
+  const violation = 'export { KeyboardAvoidingView } from "react-native";';
+  const files = { "app/screen.tsx": compliantScreen, ".expo/types/router.ts": violation };
+  for (const directory of NON_SOURCE_DIRECTORIES) {
+    files[`${directory}/keyboard.ts`] = violation;
+  }
+  const { root, findings, scannedDirectories, skippedDirectories, scannedFiles } = await scanFixture(files);
+  cleanup(t, [root]);
+
+  assert.deepEqual(findings, []);
+  assert.deepEqual(scannedDirectories, ["app", "components"]);
+  assert.deepEqual(scannedFiles, [ROOT_LAYOUT_PATH, "app/screen.tsx"]);
+  assert.deepEqual([...skippedDirectories].sort(), [".expo", ...NON_SOURCE_DIRECTORIES].sort());
+  // The exclusion list is an opt-out for known names only: renaming the
+  // exclusions makes the same folders source again.
+  const rescanned = scanKeyboardStrategy({ packageRoot: root, workspaceRoot: root, excludedDirectories: [] });
+  assert.deepEqual(rescanned.skippedDirectories, [".expo"]);
+  assert.deepEqual(
+    new Set(rescanned.findings.map(({ file }) => file)),
+    new Set(NON_SOURCE_DIRECTORIES.map((directory) => `${directory}/keyboard.ts`)),
+  );
+  assert.ok(rescanned.findings.every(({ rule }) => rule === "react-native-keyboard-avoiding-view"));
 });
 
 test("flags KeyboardAwareScrollView used directly outside the compat component", () => {
@@ -838,12 +985,14 @@ test("refuses to pass when a scanned directory is missing or empty", async (t) =
     () => scanKeyboardStrategy({ packageRoot: root, workspaceRoot: root }),
     /expected directory app does not exist/,
   );
-  for (const directory of SCANNED_DIRECTORIES) {
+  // Empty directories — required, shared-module home or new — count as
+  // scanned but yield nothing, and nothing is not a pass.
+  for (const directory of [...REQUIRED_DIRECTORIES, "constants", "services", "__tests__"]) {
     await mkdir(path.join(root, directory), { recursive: true });
   }
   assert.throws(
     () => scanKeyboardStrategy({ packageRoot: root, workspaceRoot: root }),
-    /no source files found under app, components/,
+    /no source files found under app, components, constants, services; refusing to pass an empty scan/,
   );
 });
 
@@ -1404,8 +1553,26 @@ test("the command line entry point fails with the violation and passes a clean t
 import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 export default () => <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} />;`,
   });
+  // A module-level violation in a folder the check never heard of, with the
+  // screens clean, fails the command line the same way.
+  const hiddenHelper = await writeFixtureRoot({
+    "app/screen.tsx": compliantScreen,
+    "services/keyboardShell.ts": 'export { KeyboardAvoidingView as KeyboardShell } from "react-native";',
+  });
   const clean = await writeFixtureRoot({ "app/screen.tsx": compliantScreen });
-  t.after(() => Promise.all([violating, clean].map((root) => rm(root, { recursive: true, force: true }))));
+  // Scanned, skipped and dot-directories side by side, as in the real tree.
+  const mixed = await writeFixtureRoot({
+    "app/screen.tsx": compliantScreen,
+    "components/Fine.tsx": compliantScreen,
+    "constants/colors.ts": "export const colors = { background: '#000' };",
+    "services/api.ts": "export const baseUrl = process.env.EXPO_PUBLIC_API_URL;",
+    "__tests__/screen.test.tsx": 'export { KeyboardAvoidingView } from "react-native";',
+    "assets/README.md": "images",
+    ".expo/types/router.ts": 'export { KeyboardAvoidingView } from "react-native";',
+  });
+  t.after(() =>
+    Promise.all([violating, hiddenHelper, clean, mixed].map((root) => rm(root, { recursive: true, force: true }))),
+  );
 
   await assert.rejects(
     execFileAsync(process.execPath, [scriptPath, "--root", violating], { cwd: packageRoot }),
@@ -1416,23 +1583,55 @@ export default () => <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "pa
       return true;
     },
   );
+  await assert.rejects(
+    execFileAsync(process.execPath, [scriptPath, "--root", hiddenHelper], { cwd: packageRoot }),
+    (error) => {
+      assert.equal(error.code, 1);
+      assert.match(
+        error.stderr,
+        /services\/keyboardShell\.ts:1 \[react-native-keyboard-avoiding-view\] re-exports KeyboardAvoidingView from "react-native"/,
+      );
+      return true;
+    },
+  );
 
   const { stdout } = await execFileAsync(process.execPath, [scriptPath, "--root", clean], {
     cwd: packageRoot,
   });
-  assert.match(
-    stdout,
-    /Keyboard strategy check passed: 2 source files under app\/, components\/, hooks\/, lib\/, contexts\/ and utils\/ follow the .*, and app\/_layout\.tsx wraps the navigator in KeyboardProvider\./,
+  assert.equal(
+    stdout.trim(),
+    "Keyboard strategy check passed: 2 source files under app/ and components/ (every top-level directory of the package) " +
+      'follow the "Keyboard handling on native has one strategy" note in replit.md, and app/_layout.tsx wraps the navigator in KeyboardProvider.',
   );
 
-  // Optional directories that do not exist are left out of the report.
-  const minimal = await mkdtemp(path.join(os.tmpdir(), "keyboard-strategy-"));
-  await mkdir(path.join(minimal, "app"));
-  await mkdir(path.join(minimal, "components"));
-  await writeFile(path.join(minimal, ROOT_LAYOUT_PATH), compliantRootLayout);
-  await writeFile(path.join(minimal, "app/screen.tsx"), compliantScreen);
-  await writeFile(path.join(minimal, "components/Fine.tsx"), compliantScreen);
-  t.after(() => rm(minimal, { recursive: true, force: true }));
-  const minimalRun = await execFileAsync(process.execPath, [scriptPath, "--root", minimal], { cwd: packageRoot });
-  assert.match(minimalRun.stdout, /Keyboard strategy check passed: 3 source files under app\/ and components\/ follow the/);
+  // The pass message names what was read and what was deliberately left out,
+  // so a folder skipped by name is visible in the run output.
+  const mixedRun = await execFileAsync(process.execPath, [scriptPath, "--root", mixed], { cwd: packageRoot });
+  assert.equal(
+    mixedRun.stdout.trim(),
+    "Keyboard strategy check passed: 5 source files under app/, components/, constants/ and services/ " +
+      "(every top-level directory of the package except the non-source __tests__/, .expo/ and assets/) " +
+      'follow the "Keyboard handling on native has one strategy" note in replit.md, and app/_layout.tsx wraps the navigator in KeyboardProvider.',
+  );
+});
+
+test("the pass message describes the real tree's scope", () => {
+  const result = scanKeyboardStrategy({ packageRoot });
+  const message = formatKeyboardStrategyPass(result);
+
+  const [scanned, rest] = message.split(" (every top-level directory of artifacts/chat-app except the non-source ");
+  assert.match(scanned, /^Keyboard strategy check passed: \d+ source files under app\/, components\/, constants\/, /);
+  for (const skipped of ["__tests__/", "assets/", "scripts/", "test-utils/"]) {
+    assert.ok(!scanned.includes(skipped), `${skipped} must be listed as skipped, not scanned`);
+    assert.ok(rest.split(") follow ")[0].includes(skipped), `${skipped} must be listed as skipped`);
+  }
+  assert.match(
+    rest,
+    /\) follow the "Keyboard handling on native has one strategy" note in replit\.md, and artifacts\/chat-app\/app\/_layout\.tsx wraps the navigator in KeyboardProvider\.$/,
+  );
+  // One file reads as singular.
+  assert.match(
+    formatKeyboardStrategyPass({ ...result, scannedFiles: ["app/_layout.tsx"], skippedDirectories: [], packagePath: "" }),
+    /^Keyboard strategy check passed: 1 source file under .* \(every top-level directory of the package\) follows the/,
+  );
 });

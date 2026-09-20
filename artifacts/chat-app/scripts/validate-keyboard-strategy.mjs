@@ -10,10 +10,16 @@
 // a non-padding behavior, or hides a platform split behind a helper can still
 // pass both Jest projects. Only reading the source catches it without a device.
 //
-// The check parses app/** and components/** plus the shared-module homes
-// hooks/**, lib/**, contexts/** and utils/** with the TypeScript compiler API
-// (already a Chat App devDependency) instead of regular expressions so that
-// comments, import aliases, namespace imports and same-file indirection
+// The check parses every top-level directory of the package except the known
+// non-source ones (NON_SOURCE_DIRECTORIES: dependencies, assets, the test
+// suites with their stand-ins and output, this package's scripts, written
+// records, build output) and dot-directories, so app/**, components/** and
+// every shared-module home — hooks/**, lib/**, contexts/**, utils/**,
+// constants/** and any folder added later (services/, store/, features/, …) —
+// are read at module level without editing a list; app/ and components/ must
+// exist. It uses the TypeScript compiler API (already a Chat App
+// devDependency) instead of regular expressions so that comments, import
+// aliases, namespace imports and same-file indirection
 // (`const isIOS = Platform.OS === "ios"`) are handled exactly. A behavior value
 // or JSX tag that comes from another Chat App file (`@/hooks/...`, `./...`) is
 // followed one import hop: the module is parsed and the exported declaration
@@ -22,7 +28,9 @@
 // found — is rejected outright so the platform split cannot be hidden by
 // moving it. Controller KeyboardAvoidingView usages are also required to
 // provide an explicit, statically provable behavior="padding" prop at the
-// call site.
+// call site. Root-level files are configuration (Metro, Babel, Jest) and are
+// not scanned; a value or tag imported from one is still followed from its
+// call site like any other module.
 //
 // None of that helps if the provider itself disappears: the controller's
 // KeyboardAvoidingView and KeyboardAwareScrollView only work under
@@ -61,14 +69,40 @@ export const ROOT_LAYOUT_PATH = "app/_layout.tsx";
 export const ROUTER_NAVIGATOR_EXPORTS = ["Stack", "Slot", "Tabs", "NativeTabs", "Drawer", "Navigator"];
 
 /**
- * Directories (relative to the package root) covered by the check: the screens
- * and components, plus every shared-module home a helper could move into.
+ * Top-level directories (relative to the package root) that never hold app
+ * source and are skipped by the scan: dependencies, static assets, the test
+ * suites with their stand-ins, device flows and output, this package's Node
+ * tooling (this check included), written records, and build output — the web
+ * export and the native projects `expo prebuild` generates. Dot-directories
+ * (`.expo`, `.replit-artifact`, …) are skipped as well. Every other top-level
+ * directory is scanned, so a helper moved into constants/ or into a folder
+ * that does not exist yet is read at module level without editing this list.
+ * Keep the list in step with the "Keyboard handling on native has one
+ * strategy" note in replit.md.
  */
-export const SCANNED_DIRECTORIES = ["app", "components", "hooks", "lib", "contexts", "utils"];
+export const NON_SOURCE_DIRECTORIES = [
+  "node_modules",
+  "assets",
+  "__tests__",
+  "__mocks__",
+  "test-utils",
+  "test-results",
+  "coverage",
+  "e2e",
+  "scripts",
+  "docs",
+  "dist",
+  "web-build",
+  "static-build",
+  "build",
+  "ios",
+  "android",
+];
 
 /**
- * Scanned directories that must exist. The other entries are optional homes
- * for shared modules and are skipped while the tree does not have them.
+ * Directories that must exist: the screens and the components. They are
+ * scanned whatever the exclusions say, and a tree without them is not the
+ * Chat App, so the scan refuses to run instead of passing on what is left.
  */
 export const REQUIRED_DIRECTORIES = ["app", "components"];
 
@@ -1727,41 +1761,78 @@ function scanRootLayout({ packageRoot, workspaceRoot, loader }) {
 }
 
 /**
- * Scans the package's app/, components/ and shared-module trees, then checks
- * that the root layout wraps the navigator in KeyboardProvider.
+ * Enumerates the top-level directories the scan reads: every directory of the
+ * package root except the non-source ones and dot-directories, plus the
+ * required directories whatever the exclusions say. A folder added later is
+ * therefore scanned without editing a list, and only a name on the
+ * non-source list can keep one out. Throws when a required directory is
+ * missing.
  *
- * @param {{ packageRoot?: string, workspaceRoot?: string, directories?: string[], requiredDirectories?: string[] }} options
+ * @param {{ packageRoot: string, workspaceRoot?: string, excludedDirectories?: string[], requiredDirectories?: string[] }} options
+ * @returns {{ scanned: string[], skipped: string[] }} names sorted by name;
+ *   `skipped` lists the existing top-level directories the scan left out.
+ */
+export function listSourceDirectories({
+  packageRoot,
+  workspaceRoot = path.resolve(packageRoot, "../.."),
+  excludedDirectories = NON_SOURCE_DIRECTORIES,
+  requiredDirectories = REQUIRED_DIRECTORIES,
+}) {
+  for (const directory of requiredDirectories) {
+    const absoluteDirectory = path.join(packageRoot, directory);
+    if (!isDirectory(absoluteDirectory)) {
+      throw new Error(
+        `Keyboard strategy check: expected directory ${displayPath(workspaceRoot, absoluteDirectory)} ` +
+          "does not exist. Update REQUIRED_DIRECTORIES in scripts/validate-keyboard-strategy.mjs if the Chat App source moved.",
+      );
+    }
+  }
+  const excluded = new Set(excludedDirectories);
+  const scanned = [];
+  const skipped = [];
+  for (const name of readdirSync(packageRoot).sort((a, b) => a.localeCompare(b))) {
+    if (!isDirectory(path.join(packageRoot, name))) continue;
+    if (requiredDirectories.includes(name) || (!excluded.has(name) && !name.startsWith("."))) {
+      scanned.push(name);
+    } else {
+      skipped.push(name);
+    }
+  }
+  return { scanned, skipped };
+}
+
+/**
+ * Scans every top-level source directory of the package (see
+ * listSourceDirectories), then checks that the root layout wraps the
+ * navigator in KeyboardProvider.
+ *
+ * @param {{ packageRoot?: string, workspaceRoot?: string, excludedDirectories?: string[], requiredDirectories?: string[] }} options
  *   Findings name files relative to `workspaceRoot` (defaults to two levels
  *   above the package root, i.e. `artifacts/chat-app/app/...`). Directories
- *   listed in `requiredDirectories` must exist; the others are skipped while
- *   absent.
- * @returns {{ findings: Array<{ file: string, rule: string, line: number | null, detail: string }>, scannedFiles: string[], scannedDirectories: string[], rootLayoutFile: string }}
+ *   named in `excludedDirectories` (default NON_SOURCE_DIRECTORIES) and
+ *   dot-directories are skipped; those in `requiredDirectories` must exist.
+ * @returns {{ findings: Array<{ file: string, rule: string, line: number | null, detail: string }>, scannedFiles: string[], scannedDirectories: string[], skippedDirectories: string[], packagePath: string, rootLayoutFile: string }}
  *   `line` is null for a file-level finding (the root layout is missing, has
- *   no default export, …).
+ *   no default export, …). `packagePath` is the package root relative to
+ *   `workspaceRoot` ("" when they coincide).
  */
 export function scanKeyboardStrategy({
   packageRoot = defaultPackageRoot(),
   workspaceRoot = path.resolve(packageRoot, "../.."),
-  directories = SCANNED_DIRECTORIES,
+  excludedDirectories = NON_SOURCE_DIRECTORIES,
   requiredDirectories = REQUIRED_DIRECTORIES,
 } = {}) {
   const findings = [];
   const scannedFiles = [];
-  const scannedDirectories = [];
+  const { scanned: scannedDirectories, skipped: skippedDirectories } = listSourceDirectories({
+    packageRoot,
+    workspaceRoot,
+    excludedDirectories,
+    requiredDirectories,
+  });
   const loader = createModuleLoader({ packageRoot, workspaceRoot });
-  for (const directory of directories) {
+  for (const directory of scannedDirectories) {
     const absoluteDirectory = path.join(packageRoot, directory);
-    if (!isDirectory(absoluteDirectory)) {
-      if (requiredDirectories.includes(directory)) {
-        throw new Error(
-          `Keyboard strategy check: expected directory ${displayPath(workspaceRoot, absoluteDirectory)} ` +
-            "does not exist. Update SCANNED_DIRECTORIES / REQUIRED_DIRECTORIES in scripts/validate-keyboard-strategy.mjs if the Chat App source moved.",
-        );
-      }
-      // An optional shared-module home this tree does not have.
-      continue;
-    }
-    scannedDirectories.push(directory);
     for (const absoluteFile of listSourceFiles(absoluteDirectory)) {
       const file = displayPath(workspaceRoot, absoluteFile);
       const packageRelativePath = displayPath(packageRoot, absoluteFile);
@@ -1783,7 +1854,40 @@ export function scanKeyboardStrategy({
   }
   const rootLayout = scanRootLayout({ packageRoot, workspaceRoot, loader });
   findings.push(...rootLayout.findings);
-  return { findings, scannedFiles, scannedDirectories, rootLayoutFile: rootLayout.rootLayoutFile };
+  return {
+    findings,
+    scannedFiles,
+    scannedDirectories,
+    skippedDirectories,
+    packagePath: displayPath(workspaceRoot, packageRoot),
+    rootLayoutFile: rootLayout.rootLayoutFile,
+  };
+}
+
+/**
+ * One sentence saying what a passing scan covered: the directories read, the
+ * fact that they are every top-level directory of the package minus the
+ * skipped non-source ones, and the root layout the whole-tree rule checked.
+ */
+export function formatKeyboardStrategyPass({
+  scannedFiles,
+  scannedDirectories,
+  skippedDirectories,
+  packagePath,
+  rootLayoutFile,
+}) {
+  const count = scannedFiles.length;
+  const asDirectories = (names) => formatList(names.map((name) => `${name}/`));
+  const where = packagePath ? `of ${packagePath}` : "of the package";
+  const scope =
+    skippedDirectories.length > 0
+      ? `every top-level directory ${where} except the non-source ${asDirectories(skippedDirectories)}`
+      : `every top-level directory ${where}`;
+  return (
+    `Keyboard strategy check passed: ${count} source file${count === 1 ? "" : "s"} under ` +
+    `${asDirectories(scannedDirectories)} (${scope}) follow${count === 1 ? "s" : ""} ` +
+    `${KEYBOARD_STRATEGY_NOTE}, and ${rootLayoutFile} wraps the navigator in KeyboardProvider.`
+  );
 }
 
 /** Formats findings as the failure message: file, line, rule, what was found, and the fix. */
@@ -1837,19 +1941,13 @@ function main() {
     // A custom root (fixtures, other checkouts) reports paths relative to itself.
     options.workspaceRoot = options.packageRoot;
   }
-  const { findings, scannedFiles, scannedDirectories, rootLayoutFile } = scanKeyboardStrategy(options);
-  if (findings.length > 0) {
-    console.error(formatKeyboardStrategyFailure(findings));
+  const result = scanKeyboardStrategy(options);
+  if (result.findings.length > 0) {
+    console.error(formatKeyboardStrategyFailure(result.findings));
     process.exitCode = 1;
     return;
   }
-  const count = scannedFiles.length;
-  console.log(
-    `Keyboard strategy check passed: ${count} source file${count === 1 ? "" : "s"} under ` +
-      `${formatList(scannedDirectories.map((directory) => `${directory}/`))} ` +
-      `follow${count === 1 ? "s" : ""} ${KEYBOARD_STRATEGY_NOTE}, and ${rootLayoutFile} ` +
-      "wraps the navigator in KeyboardProvider.",
-  );
+  console.log(formatKeyboardStrategyPass(result));
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
