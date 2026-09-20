@@ -236,7 +236,7 @@ function stripAnsiEscapeSequences(value) {
       continue;
     }
 
-    cursor += nextCodePoint ? 2 : 1;
+    cursor += 1;
   }
 
   return characters.join("");
