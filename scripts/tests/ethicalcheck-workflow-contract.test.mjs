@@ -30,6 +30,9 @@ function runEthicalCheckStep(env) {
 }
 
 test("EthicalCheck workflow runs the scan inline instead of depending on a missing third-party action", () => {
+  assert.ok(job, "expected the EthicalCheck workflow to define Trigger_EthicalCheck");
+  assert.ok(step, "expected Trigger_EthicalCheck to define a first step");
+  assert.equal(typeof step.run, "string", "expected Trigger_EthicalCheck to run inline bash");
   assert.equal(step.uses, undefined);
   assert.match(step.run, /\bcurl\b/);
   assert.match(step.run, /\bhttps:\/\/pentest\.apisec\.ai\/api\/v1\/pentest\b/);
