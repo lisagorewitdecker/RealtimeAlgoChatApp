@@ -69,7 +69,9 @@ jobs:
           stall_preload_path="$(mktemp --suffix=.mjs)"
           healthy_log="$(mktemp)"
           expected_failure_summary_path="$(mktemp)"
-          trap 'rm -f "$summary_path" "$failure_summary_path" "$setting_summary_path" "$tooling_summary_path" "$tooling_marker_path" "$stall_summary_path" "$stall_output_path" "$stall_preload_path" "$healthy_log" "$expected_failure_summary_path"' EXIT
+          unexpected_summary_path="$(mktemp)"
+          expected_unexpected_summary_path="$(mktemp)"
+          trap 'rm -f "$summary_path" "$failure_summary_path" "$setting_summary_path" "$tooling_summary_path" "$tooling_marker_path" "$stall_summary_path" "$stall_output_path" "$stall_preload_path" "$healthy_log" "$expected_failure_summary_path" "$unexpected_summary_path" "$expected_unexpected_summary_path"' EXIT
           resolved_commit_sha="$(git rev-parse --verify HEAD)"
           source scripts/workflow-output-safety.sh
           safe_reviewed_ref="$(sanitize_workflow_text "$REVIEWED_REF")"
@@ -209,6 +211,29 @@ jobs:
             cat "$stall_summary_path"
           } >> "$GITHUB_STEP_SUMMARY"
 
+          if GITHUB_STEP_SUMMARY="$unexpected_summary_path" \
+            PREVIEW_STARTUP_TEST_FIXTURE=unexpected-startup-failure \
+            node artifacts/chat-app/scripts/validate-preview-startup.mjs > /tmp/preview-startup-unexpected-failure.log 2>&1; then
+            echo "The unexpected preview startup scenario unexpectedly passed." >&2
+            exit 1
+          fi
+          cat > "$expected_unexpected_summary_path" <<'EOF'
+          ### Expo preview startup
+
+          **Status:** FAIL
+
+          **Diagnosis:** Preview startup could not be confirmed. See the workflow log for details.
+
+          EOF
+          if ! cmp -s "$unexpected_summary_path" "$expected_unexpected_summary_path" ||
+            [[ "$(wc -c < "$unexpected_summary_path")" -gt 700 ]] ||
+            grep -Eiq -- 'https?://|authorization|proxy-authorization|password|passwd|secret|token|credential|unexpected-private-token' "$unexpected_summary_path"; then
+            echo "The hosted unexpected-startup summary exposed raw output or lost its bounded diagnosis." >&2
+            cat "$unexpected_summary_path" >&2
+            diff -u "$expected_unexpected_summary_path" "$unexpected_summary_path" >&2 || true
+            exit 1
+          fi
+
           printf 'Starting Metro Bundler\n' > "$healthy_log"
           healthy_output="$(
             GITHUB_STEP_SUMMARY="$summary_path" \
@@ -274,6 +299,8 @@ jobs:
           {
             echo "- Missing library startup: **PASS** (bounded diagnosis retained; private material excluded)"
             cat "$failure_summary_path"
+            echo "- Unexpected startup failure: **PASS** (generic diagnosis retained; raw output and private material excluded)"
+            cat "$unexpected_summary_path"
             echo "- Healthy captured startup: **PASS** (success output retained; no failure section)"
             cat "$summary_path"
             echo "- Malformed preview setting: **PASS** (configuration diagnosis retained; private material excluded)"
@@ -281,6 +308,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
           if [[ "$(grep -Fc -- "$expected_diagnosis" "$GITHUB_STEP_SUMMARY")" != "1" ]] ||
             [[ "$(grep -Fc -- "$expected_library_identifier" "$GITHUB_STEP_SUMMARY")" != "1" ]] ||
+            [[ "$(grep -Fc -- "Preview startup could not be confirmed. See the workflow log for details." "$GITHUB_STEP_SUMMARY")" != "1" ]] ||
             grep -Fq -- "Starting Metro Bundler" "$GITHUB_STEP_SUMMARY" ||
             grep -Fq -- "unrelated log text" "$GITHUB_STEP_SUMMARY" ||
             grep -Eiq -- 'https?://|authorization|proxy-authorization|password|passwd|secret|token|credential' "$GITHUB_STEP_SUMMARY"; then

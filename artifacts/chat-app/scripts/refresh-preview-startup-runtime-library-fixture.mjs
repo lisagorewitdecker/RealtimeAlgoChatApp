@@ -43,6 +43,9 @@ const PRESERVED_FIXTURE_OUTPUTS = Object.freeze({
     "dyld[12345]: Library not loaded: '/opt/homebrew/Library/Application Support/Expo/libgtk-3.dylib\" trailing unrelated loader text\ndyld[12345]: Library not loaded: /opt/homebrew/lib/libgtk-3.dylib\n",
   "unsupported-loader-wording":
     "React Native DevTools launcher exited with status 127\n",
+  "unexpected-startup-failure":
+    "Unexpected preview launcher failure: https://private.example.test/start?token=unexpected-private-token\n" +
+    "Authorization: Bearer unexpected-private-token\n",
 });
 
 function installedPackageVersion(packageName) {

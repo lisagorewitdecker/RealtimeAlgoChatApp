@@ -161,6 +161,7 @@ const STARTUP_TEST_FIXTURES = new Set([
   "missing-runtime-library-malformed-control",
   "missing-runtime-library-malformed-trailing",
   "missing-runtime-library-malformed-followed-by-valid",
+  "unexpected-startup-failure",
 ]);
 const MISSING_LIBRARY_PATH = String.raw`[A-Za-z0-9._+~ /\\:[\]-]`;
 const MISSING_LIBRARY_CAPTURE = String.raw`(?:(["'])([^"'\u0000-\u001f\u007f]+)\1|(${MISSING_LIBRARY_PATH}+?))`;

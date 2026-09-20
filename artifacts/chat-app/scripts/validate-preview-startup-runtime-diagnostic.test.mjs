@@ -1048,6 +1048,44 @@ test("unsupported loader wording fails with a maintenance message", () => {
   }
 });
 
+test("unexpected startup failures keep the generic summary bounded", () => {
+  const temporaryDirectory = mkdtempSync(
+    join(tmpdir(), "chat-preview-unexpected-startup-"),
+  );
+  const summaryPath = join(temporaryDirectory, "summary.md");
+  const capturedLogPath = join(temporaryDirectory, "expo-startup.log");
+
+  try {
+    const live = runNodeScript([validatorPath], {
+      GITHUB_STEP_SUMMARY: summaryPath,
+      PREVIEW_STARTUP_TEST_FIXTURE: "unexpected-startup-failure",
+    });
+
+    assert.equal(live.status, 1, live.output);
+    writeFileSync(capturedLogPath, fixtureOutput["unexpected-startup-failure"], "utf8");
+    const capturedSummaryPath = join(temporaryDirectory, "captured-summary.md");
+    const captured = runNodeScript(
+      [validatorPath, "--log-file", capturedLogPath],
+      { GITHUB_STEP_SUMMARY: capturedSummaryPath },
+    );
+
+    assert.equal(captured.status, 1, captured.output);
+    const expectedSummary =
+      "### Expo preview startup\n\n" +
+      "**Status:** FAIL\n\n" +
+      "**Diagnosis:** Preview startup could not be confirmed. See the workflow log for details.\n\n";
+    assert.equal(readFileSync(summaryPath, "utf8"), expectedSummary);
+    assert.equal(readFileSync(capturedSummaryPath, "utf8"), expectedSummary);
+    assert.doesNotMatch(
+      `${readFileSync(summaryPath, "utf8")}${readFileSync(capturedSummaryPath, "utf8")}`,
+      /https?:\/\/|authorization|password|passwd|secret|token|credential|unexpected-private-token/i,
+    );
+    assert.ok(expectedSummary.length <= 700, "summary exceeded its bounded size");
+  } finally {
+    rmSync(temporaryDirectory, { recursive: true, force: true });
+  }
+});
+
 test("malformed loader paths fail closed without leaking corrupted text", () => {
   const temporaryDirectory = mkdtempSync(
     join(tmpdir(), "chat-preview-malformed-loader-"),
