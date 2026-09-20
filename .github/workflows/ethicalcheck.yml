@@ -173,6 +173,7 @@ jobs:
               ) from error
 
           success = response.get("success")
+          code = response.get("code")
           message = response.get("message")
           status = response.get("status")
           accepted_pattern = re.compile(
@@ -182,12 +183,16 @@ jobs:
 
           if success is True:
               raise SystemExit(0)
+          if isinstance(code, int) and 200 <= code < 300:
+              raise SystemExit(0)
           if isinstance(message, str) and accepted_pattern.search(message):
+              raise SystemExit(0)
+          if isinstance(status, int) and 200 <= status < 300:
               raise SystemExit(0)
           if isinstance(status, str) and accepted_pattern.search(status):
               raise SystemExit(0)
 
           raise SystemExit(
-              "EthicalCheck response did not confirm scan acceptance via success, message, or status fields."
+              "EthicalCheck response did not confirm scan acceptance via success, code, message, or status fields."
           )
           PY
