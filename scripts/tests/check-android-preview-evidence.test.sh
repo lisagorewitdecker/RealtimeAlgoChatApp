@@ -316,6 +316,42 @@ EOF
 missing_phone_output="$(bash "$CHECKER" "$json_contract_record" 2>&1)"
 assert_contains "$missing_phone_output" "validation passed"
 
+for duplicate_boundary in \
+  "Public manifest reachability" \
+  "Local handoff probe (manifest and bundle)"; do
+  duplicate_boundary_slug="$(
+    printf '%s' "$duplicate_boundary" |
+      tr '[:upper:] ' '[:lower:]-' |
+      tr -cd '[:alnum:]-'
+  )"
+  duplicate_boundary_record="$TEST_ROOT/duplicate-${duplicate_boundary_slug}.md"
+  duplicate_boundary_preflight="$TEST_ROOT/duplicate-${duplicate_boundary_slug}-preflight.json"
+  duplicate_boundary_sentinel="duplicate-${duplicate_boundary_slug}-boundary-sentinel"
+  awk -F'|' -v boundary="$duplicate_boundary" -v sentinel="$duplicate_boundary_sentinel" '
+    {
+      print
+      label = $2
+      gsub(/^[[:space:]]+|[[:space:]]+$/, "", label)
+      if (label == boundary) {
+        print "| " boundary " | FAIL | " sentinel " |"
+      }
+    }
+  ' "$blocked_record" >"$duplicate_boundary_record"
+  cp "$blocked_preflight" "$duplicate_boundary_preflight"
+  if duplicate_boundary_output="$(
+    bash "$CHECKER" "$duplicate_boundary_record" "$duplicate_boundary_preflight" 2>&1
+  )"; then
+    printf 'Android evidence with duplicate %s rows unexpectedly passed.\n' \
+      "$duplicate_boundary" >&2
+    exit 1
+  fi
+  assert_contains "$duplicate_boundary_output" \
+    "Android preview evidence records must contain only one '${duplicate_boundary}' boundary row."
+  assert_not_contains "$duplicate_boundary_output" "$duplicate_boundary_sentinel"
+  assert_not_contains "$duplicate_boundary_output" "does not match the Markdown record"
+  assert_not_contains "$duplicate_boundary_output" "unsupported status"
+done
+
 # Default discovery must be exercised against an isolated repository layout:
 # the workspace's artifact-level test-results/ tree is gitignored, so a clean
 # checkout has no record there. The checker resolves its record root relative
