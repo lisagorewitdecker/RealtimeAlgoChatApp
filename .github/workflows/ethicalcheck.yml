@@ -119,6 +119,12 @@ jobs:
             exit 0
           fi
 
-          curl --location --request POST 'https://pentest.apisec.ai/api/v1/pentest' \
+          payload="$(jq -cn \
+            --arg openAPISpec "${ETHICALCHECK_OAS_URL}" \
+            --arg email "${ETHICALCHECK_REPORT_EMAIL}" \
+            --arg source "Github-Action" \
+            '{openAPISpec: $openAPISpec, email: $email, source: $source}')"
+
+          curl --fail-with-body --location --request POST 'https://pentest.apisec.ai/api/v1/pentest' \
             --header 'Content-Type: application/json' \
-            --data-raw "{\"openAPISpec\":\"${ETHICALCHECK_OAS_URL}\",\"email\":\"${ETHICALCHECK_REPORT_EMAIL}\",\"source\":\"Github-Action\"}"
+            --data-raw "${payload}"
