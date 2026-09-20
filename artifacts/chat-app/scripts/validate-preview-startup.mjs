@@ -290,9 +290,9 @@ function normalizeLoaderFailureForMatching(value) {
   ) {
     nonWhitespaceEnd -= 1;
   }
-  const trailingBellIndex = nonWhitespaceEnd - 1;
-  return withoutAnsiSequences[trailingBellIndex] === trailingBell
-    ? withoutAnsiSequences.slice(0, trailingBellIndex)
+  const trimmedSuffix = withoutAnsiSequences.slice(0, nonWhitespaceEnd);
+  return trimmedSuffix.endsWith(trailingBell)
+    ? trimmedSuffix.slice(0, -1)
     : withoutAnsiSequences;
 }
 
