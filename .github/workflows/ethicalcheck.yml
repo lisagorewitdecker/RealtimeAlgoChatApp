@@ -132,6 +132,6 @@ jobs:
           PY
           )"
 
-          curl --fail-with-body --location --request POST 'https://pentest.apisec.ai/api/v1/pentest' \
+          curl --fail --silent --show-error --location --request POST 'https://pentest.apisec.ai/api/v1/pentest' \
             --header 'Content-Type: application/json' \
             --data-raw "${payload}"
