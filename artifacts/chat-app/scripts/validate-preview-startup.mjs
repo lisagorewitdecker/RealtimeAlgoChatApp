@@ -374,7 +374,6 @@ function sanitizeRecordedStartupOutput(value) {
     let removedFlag = true;
     while (removedFlag) {
       removedFlag = false;
-    for (;;) {
       if (/\s+--localhost$/.test(trimmedPath)) {
         trimmedPath = trimmedPath.replace(/\s+--localhost$/, "");
         removedFlag = true;
