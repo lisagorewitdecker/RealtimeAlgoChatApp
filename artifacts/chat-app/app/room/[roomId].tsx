@@ -693,9 +693,9 @@ export default function RoomScreen() {
   );
 
   const retrySavingRoomKey = useCallback(async () => {
+    const recoveryOperation =
+      roomKeyPersistenceFailure?.kind === "load" ? "load" : "save";
     const reportRetryFailure = () => {
-      const recoveryOperation =
-        roomKeyPersistenceFailure?.kind === "load" ? "load" : "save";
       if (!reportedPersistenceRetryFailuresRef.current.has(recoveryOperation)) {
         reportedPersistenceRetryFailuresRef.current.add(recoveryOperation);
         captureRoomKeyPersistenceRetryFailure(recoveryOperation);
@@ -706,6 +706,9 @@ export default function RoomScreen() {
     try {
       const persisted = await retryRoomKeyPersistence(roomId);
       if (persisted) {
+        // A successful retry ends this operation's outage episode. A later
+        // failure is a distinct outage and may emit one new diagnostic.
+        reportedPersistenceRetryFailuresRef.current.delete(recoveryOperation);
         setHasRoomKey(!!getRoomKey(roomId));
       } else {
         reportRetryFailure();
