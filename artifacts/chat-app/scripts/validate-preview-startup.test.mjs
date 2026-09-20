@@ -45,7 +45,7 @@ const ANSI_ESCAPE = String.fromCharCode(27);
 const ANSI_ESCAPE_PATTERN = new RegExp(
   `${ANSI_ESCAPE}\\[[0-?]*[ -/]*[@-~]`,
 );
-const ANSI_CSI_FRAGMENT_PATTERN = /\[[0-?]*[ -/]*[@-~]/;
+const ANSI_CSI_FRAGMENT_PATTERN = /\[[0-9;?]+[ -/]*[@-~]/;
 
 function assertHasNoControlCharacters(value, message = "unexpected control characters") {
   const hasControlCharacters = [...value].some((char) => {
