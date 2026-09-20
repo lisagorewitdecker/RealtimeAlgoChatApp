@@ -73,7 +73,7 @@ catalog:
   lucide-react: ^0.545.0
   # Must be this exact version because Expo SDK 57 requires it.
   react: 19.2.3
-  # Must be this exact version because Expo SDK 57 requires it.
+  # Keep this pinned to one version across the workspace.
   react-dom: 19.3.0
   tailwind-merge: ^3.6.0
   tailwindcss: ^4.3.3
