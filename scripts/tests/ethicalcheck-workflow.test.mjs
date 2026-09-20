@@ -18,7 +18,7 @@ test("EthicalCheck workflow pins the live action repository and preserves guarde
   assert.match(workflowText, /^permissions:\n  contents: read$/m);
   assert.match(
     workflowText,
-    /Trigger_EthicalCheck:[\s\S]*?if: github\.event_name != 'pull_request' \|\| github\.event\.pull_request\.head\.repo\.fork == false/,
+    /^\s+if: github\.event_name != 'pull_request' \|\| github\.event\.pull_request\.head\.repo\.fork == false$/m,
   );
   assert.match(workflowText, /^\s+contents: read\b/m);
   assert.match(workflowText, /^\s+security-events: write\b/m);
