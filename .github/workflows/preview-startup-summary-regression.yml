@@ -71,7 +71,11 @@ jobs:
           expected_failure_summary_path="$(mktemp)"
           unexpected_summary_path="$(mktemp)"
           expected_unexpected_summary_path="$(mktemp)"
-          trap 'rm -f "$summary_path" "$failure_summary_path" "$setting_summary_path" "$tooling_summary_path" "$tooling_marker_path" "$stall_summary_path" "$stall_output_path" "$stall_preload_path" "$healthy_log" "$expected_failure_summary_path" "$unexpected_summary_path" "$expected_unexpected_summary_path"' EXIT
+          macos_failure_log="$(mktemp)"
+          macos_failure_summary_path="$(mktemp)"
+          windows_failure_log="$(mktemp)"
+          windows_failure_summary_path="$(mktemp)"
+          trap 'rm -f "$summary_path" "$failure_summary_path" "$setting_summary_path" "$tooling_summary_path" "$tooling_marker_path" "$stall_summary_path" "$stall_output_path" "$stall_preload_path" "$healthy_log" "$expected_failure_summary_path" "$unexpected_summary_path" "$expected_unexpected_summary_path" "$macos_failure_log" "$macos_failure_summary_path" "$windows_failure_log" "$windows_failure_summary_path"' EXIT
           resolved_commit_sha="$(git rev-parse --verify HEAD)"
           source scripts/workflow-output-safety.sh
           safe_reviewed_ref="$(sanitize_workflow_text "$REVIEWED_REF")"
@@ -152,6 +156,62 @@ jobs:
             cat "$failure_summary_path" >&2
             exit 1
           fi
+
+          verify_long_loader_summary() {
+            local platform="$1"
+            local fixture="$2"
+            local library_identifier="$3"
+            local log_path="$4"
+            local summary_path="$5"
+            local fixture_status=0
+            local validator_status=0
+
+            printf 'unrelated loader output before %s should not leak\n' "$platform" > "$log_path"
+            PREVIEW_STARTUP_TEST_FIXTURE="$fixture" \
+              node artifacts/chat-app/scripts/preview-startup-runtime-library-fixture.mjs \
+              >> "$log_path" 2>&1 || fixture_status=$?
+            printf 'unrelated loader output after %s should not leak\n' "$platform" >> "$log_path"
+
+            if [[ "$fixture_status" != "1" ]]; then
+              echo "The $platform long-loader fixture exited with $fixture_status instead of 1." >&2
+              cat "$log_path" >&2
+              return 1
+            fi
+
+            GITHUB_STEP_SUMMARY="$summary_path" \
+              node artifacts/chat-app/scripts/validate-preview-startup.mjs \
+              --log-file "$log_path" > "/tmp/preview-startup-${platform}-failure.log" 2>&1 ||
+              validator_status=$?
+            if [[ "$validator_status" != "1" ]]; then
+              echo "The $platform long-loader summary validator exited with $validator_status instead of 1." >&2
+              cat "$summary_path" >&2
+              return 1
+            fi
+
+            if [[ "$(grep -Fc -- "### Expo preview startup" "$summary_path")" != "1" ]] ||
+              [[ "$(grep -Fc -- "**Status:** FAIL" "$summary_path")" != "1" ]] ||
+              [[ "$(grep -Fc -- "missing runtime library:" "$summary_path")" != "1" ]] ||
+              [[ "$(grep -Fc -- "$library_identifier" "$summary_path")" != "1" ]] ||
+              [[ "$(wc -c < "$summary_path")" -gt 700 ]] ||
+              grep -Fq -- "unrelated loader output" "$summary_path"; then
+              echo "The $platform long-loader summary lost its bounded diagnosis, library identifier, or output boundary." >&2
+              cat "$summary_path" >&2
+              return 1
+            fi
+          }
+
+          verify_long_loader_summary \
+            "macOS" \
+            "missing-runtime-library-dyld-long-path" \
+            "libgtk-3.dylib" \
+            "$macos_failure_log" \
+            "$macos_failure_summary_path"
+          verify_long_loader_summary \
+            "Windows" \
+            "missing-runtime-library-windows-long-path" \
+            "libgtk-3-0.dll" \
+            "$windows_failure_log" \
+            "$windows_failure_summary_path"
 
           cat > "$stall_preload_path" <<'EOF'
           const originalFetch = globalThis.fetch;
@@ -299,6 +359,10 @@ jobs:
           {
             echo "- Missing library startup: **PASS** (bounded diagnosis retained; private material excluded)"
             cat "$failure_summary_path"
+            echo "- macOS long-path loader: **PASS** (bounded diagnosis and platform library identifier retained; unrelated output excluded)"
+            cat "$macos_failure_summary_path"
+            echo "- Windows long-path loader: **PASS** (bounded diagnosis and platform library identifier retained; unrelated output excluded)"
+            cat "$windows_failure_summary_path"
             echo "- Unexpected startup failure: **PASS** (generic diagnosis retained; raw output and private material excluded)"
             cat "$unexpected_summary_path"
             echo "- Healthy captured startup: **PASS** (success output retained; no failure section)"
@@ -308,9 +372,11 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
           if [[ "$(grep -Fc -- "$expected_diagnosis" "$GITHUB_STEP_SUMMARY")" != "1" ]] ||
             [[ "$(grep -Fc -- "$expected_library_identifier" "$GITHUB_STEP_SUMMARY")" != "1" ]] ||
+            [[ "$(grep -Fc -- "libgtk-3.dylib" "$GITHUB_STEP_SUMMARY")" != "1" ]] ||
+            [[ "$(grep -Fc -- "libgtk-3-0.dll" "$GITHUB_STEP_SUMMARY")" != "1" ]] ||
             [[ "$(grep -Fc -- "Preview startup could not be confirmed. See the workflow log for details." "$GITHUB_STEP_SUMMARY")" != "1" ]] ||
             grep -Fq -- "Starting Metro Bundler" "$GITHUB_STEP_SUMMARY" ||
-            grep -Fq -- "unrelated log text" "$GITHUB_STEP_SUMMARY" ||
+            grep -Fq -- "unrelated loader output" "$GITHUB_STEP_SUMMARY" ||
             grep -Eiq -- 'https?://|authorization|proxy-authorization|password|passwd|secret|token|credential' "$GITHUB_STEP_SUMMARY"; then
             echo "The published hosted summary exposed raw child-process output or private material." >&2
             exit 1
