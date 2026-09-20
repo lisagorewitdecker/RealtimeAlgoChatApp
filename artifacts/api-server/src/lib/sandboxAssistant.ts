@@ -19,6 +19,8 @@ export async function streamSandboxAssistant({
   signal,
   onText,
 }: SandboxAssistantRequest): Promise<void> {
+  if (signal.aborted) return;
+
   const context = [
     "<sandbox-files>",
     `<html>\n${files.html}\n</html>`,
