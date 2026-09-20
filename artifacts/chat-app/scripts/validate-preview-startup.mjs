@@ -224,6 +224,10 @@ function stripAnsiEscapeSequences(value) {
           cursor += 1;
           break;
         }
+        if (codePoint === 0x9c) {
+          cursor += 1;
+          break;
+        }
         if (
           codePoint === escapeCodePoint &&
           value.charCodeAt(cursor + 1) === 0x5c
