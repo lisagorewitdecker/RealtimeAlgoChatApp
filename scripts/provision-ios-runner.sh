@@ -569,6 +569,12 @@ find_simulator_udid() {
     tail -n 1
 }
 
+# simctl lists device types as "<name> (<identifier>)"; the identifier match
+# tolerates padded lines like the device and runtime patterns above.
+simulator_device_type_available() {
+  xcrun simctl list devicetypes 2>/dev/null | grep -Fq -- "(${IOS_RUNNER_SIMULATOR_DEVICE_TYPE})"
+}
+
 boot_simulator() {
   xcrun simctl boot "$1" >/dev/null 2>&1 || true
   xcrun simctl bootstatus "$1" -b
@@ -671,7 +677,15 @@ check_simulator() {
     if [[ -z "$udid" ]]; then
       if [[ -n "$SIMULATOR_RUNTIME" ]]; then
         if ((DRY_RUN)); then
-          log "[dry-run] create '${IOS_RUNNER_SIMULATOR_NAME}': xcrun simctl create \"${IOS_RUNNER_SIMULATOR_NAME}\" ${IOS_RUNNER_SIMULATOR_DEVICE_TYPE} ${SIMULATOR_RUNTIME}"
+          # A dry run cannot learn simctl create's refusal, so ask the device
+          # type list instead: the report must not promise a device that the
+          # installed Xcode no longer offers.
+          if simulator_device_type_available; then
+            log "[dry-run] create '${IOS_RUNNER_SIMULATOR_NAME}': xcrun simctl create \"${IOS_RUNNER_SIMULATOR_NAME}\" ${IOS_RUNNER_SIMULATOR_DEVICE_TYPE} ${SIMULATOR_RUNTIME}"
+          else
+            create_error="${IOS_RUNNER_SIMULATOR_DEVICE_TYPE} is not offered by the installed Xcode; check 'xcrun simctl list devicetypes'"
+            log "cannot plan the simulator: ${create_error}"
+          fi
         else
           log "Creating '${IOS_RUNNER_SIMULATOR_NAME}' on ${SIMULATOR_RUNTIME}..."
           # simctl's reason for refusing (for example a device type that the
@@ -688,7 +702,7 @@ check_simulator() {
     fi
     if [[ -n "$udid" ]]; then
       run_action "boot ${IOS_RUNNER_SIMULATOR_NAME} (${udid}): xcrun simctl boot ${udid} && xcrun simctl bootstatus ${udid} -b" boot_simulator "$udid" || true
-    elif ((DRY_RUN)); then
+    elif ((DRY_RUN)) && [[ -z "$create_error" ]]; then
       plan "boot the created simulator: xcrun simctl boot <udid> && xcrun simctl bootstatus <udid> -b"
     fi
   fi
@@ -700,6 +714,8 @@ check_simulator() {
   else
     if ((DRY_RUN)) && [[ -n "$udid" ]]; then
       record "Booted ${IOS_RUNNER_SIMULATOR_NAME}" MISSING "will be booted (${udid})" core
+    elif ((DRY_RUN)) && [[ -n "$create_error" ]]; then
+      record "Booted ${IOS_RUNNER_SIMULATOR_NAME}" MISSING "cannot be created: ${create_error}" core
     elif ((DRY_RUN)); then
       record "Booted ${IOS_RUNNER_SIMULATOR_NAME}" MISSING "will be created on ${SIMULATOR_RUNTIME:-an iOS runtime} and booted" core
     elif [[ -n "$create_error" ]]; then

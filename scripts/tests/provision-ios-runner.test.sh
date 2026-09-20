@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 #
-# Exercises scripts/provision-ios-runner.sh in dry-run mode on Linux so the
-# runner label set, the pinned runner release, the toolchain versions, and the
+# Exercises scripts/provision-ios-runner.sh in dry-run mode so the runner
+# label set, the pinned runner release, the toolchain versions, and the
 # readiness report stay in step with .github/workflows/mobile-release.yml and
-# the device-check documentation. macOS-only actions are skipped by the script
-# itself; this test never touches the real HOME.
+# the device-check documentation. The isolated cases describe a Linux host
+# through a uname stub even when the suite runs on a real Mac (the GitHub-hosted
+# macOS job runs it under /bin/bash 3.2 with BSD tools), so the script skips
+# its macOS-only actions itself; this test never touches the real HOME.
 
 set -euo pipefail
 
@@ -136,12 +138,52 @@ esac
 # Isolated PATH: only the utilities the script needs, plus optional stubs.
 # ---------------------------------------------------------------------------
 
+link_utility() {
+  local directory="$1" command="$2" resolved
+  resolved="$(command -v "$command" 2>/dev/null || true)"
+  [[ -n "$resolved" ]] || fail "the test host lacks '$command', which the isolated PATH needs"
+  ln -s "$resolved" "$directory/$command"
+}
+
 make_utilities() {
   local directory="$1" command
   mkdir -p "$directory"
-  for command in uname sed head tail tr date cat mkdir mktemp rm id sort grep find sha256sum sleep; do
-    ln -s "$(command -v "$command")" "$directory/$command"
+  for command in sed head tail tr date cat mkdir mktemp rm id sort grep find sleep; do
+    link_utility "$directory" "$command"
   done
+  # The digest check runs for real. The script prefers shasum (macOS ships
+  # it; Linux usually has it through Perl) and falls back to sha256sum, so
+  # the isolated PATH offers whichever tools this host has and needs one.
+  for command in shasum sha256sum; do
+    if command -v "$command" >/dev/null 2>&1; then
+      link_utility "$directory" "$command"
+    fi
+  done
+  [[ -e "$directory/shasum" || -e "$directory/sha256sum" ]] ||
+    fail "the test host has neither shasum nor sha256sum; the archive digest cases cannot run"
+  # The isolated cases always describe a Linux host (with this machine's
+  # architecture) so that on a real Mac the script skips its macOS-only
+  # branches instead of reaching the real Xcode, Homebrew, or installers. The
+  # simulated-macOS cases put their own Darwin uname stub ahead of this one.
+  cat >"$directory/uname" <<EOF
+#!${BASH_BIN}
+case "\${1:-}" in
+  -s) printf 'Linux\\n' ;;
+  -m) printf '%s\\n' '$(uname -m)' ;;
+  *) exec '$(command -v uname)' "\$@" ;;
+esac
+EOF
+  chmod +x "$directory/uname"
+}
+
+# sha256_hex: prints the SHA-256 of stdin with whichever digest tool the host
+# offers (the same preference as the script under test).
+sha256_hex() {
+  if command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 | sed 's/ .*//'
+  else
+    sha256sum | sed 's/ .*//'
+  fi
 }
 
 # make_download_stubs <directory>: curl writes a fixed payload to --output and
@@ -259,6 +301,11 @@ run_case() {
 download_payload="runner-archive-payload"
 utilities="$test_root/utilities"
 make_utilities "$utilities"
+# Prove the isolation before any case runs: a real Darwin answer here would
+# send the non-dry-run usage case into the script's real installers on a Mac.
+isolated_host="$("$ENV_BIN" -i PATH="$utilities" "$BASH_BIN" -c 'uname -s')"
+[[ "$isolated_host" == "Linux" ]] ||
+  fail "the isolated PATH must describe a Linux host for the dry-run cases; got '$isolated_host'"
 token_sentinel="registration-token-must-never-print"
 repository_url="https://github.com/lisagorewitdecker/RealtimeAlgoChatApp"
 
@@ -712,6 +759,13 @@ case "\$*" in
       printf '    %s (%s) (%s) \\n' "${IOS_RUNNER_SIMULATOR_NAME}" "\$SIM_UDID" "\$state"
     fi
     ;;
+  "simctl list devicetypes")
+    printf '== Device Types ==\\n'
+    printf 'iPhone 17 (com.apple.CoreSimulator.SimDeviceType.iPhone-17) \\n'
+    if [[ -z "\${XCRUN_NO_SE_TYPE:-}" ]]; then
+      printf '%s (%s) \\n' "${IOS_RUNNER_SIMULATOR_NAME}" "${IOS_RUNNER_SIMULATOR_DEVICE_TYPE}"
+    fi
+    ;;
   "simctl get_app_container "*)
     printf '%s\\n' "\$CANDIDATE_CONTAINER"
     ;;
@@ -776,6 +830,47 @@ assert_not_contains "$(cat "$test_root/xcrun-macos-create.log")" "simctl boot"
 [[ ! -e "$test_root/launchctl-macos-create.log" ]] || fail "launchctl must not run when the simulator could not be created: $(cat "$test_root/launchctl-macos-create.log")"
 [[ ! -d "$macos_create_home/Library/LaunchAgents" ]] || fail "no launch agent may be written when the simulator could not be created"
 
+# A dry run on a Mac without the simulator consults the device type list:
+# it plans the creation only for a device type the Xcode offers, and it
+# reports an unavailable device type instead of promising the simulator.
+macos_plan_home="$test_root/home-macos-plan"
+macos_plan_output="$(
+  run_sourced simulated-macos-dry-run-plans-simulator-creation 0 "$macos_stubs:$utilities" "$macos_plan_home" \
+    XCRUN_LOG="$test_root/xcrun-macos-plan.log" XCRUN_BOOTED="$test_root/xcrun-macos-plan.booted" \
+    XCRUN_NO_SE=1 LAUNCHCTL_LOG="$test_root/launchctl-macos-plan.log" SIM_UDID="$simulator_udid" \
+    -- 'check_xcode; check_simulator'
+)"
+assert_contains "$macos_plan_output" "[READY] iOS simulator runtime: com.apple.CoreSimulator.SimRuntime.iOS-26-0"
+assert_contains \
+  "$macos_plan_output" \
+  "[dry-run] create '${IOS_RUNNER_SIMULATOR_NAME}': xcrun simctl create \"${IOS_RUNNER_SIMULATOR_NAME}\" ${IOS_RUNNER_SIMULATOR_DEVICE_TYPE} com.apple.CoreSimulator.SimRuntime.iOS-26-0"
+assert_contains "$macos_plan_output" "[dry-run] boot the created simulator: xcrun simctl boot <udid> && xcrun simctl bootstatus <udid> -b"
+assert_contains \
+  "$macos_plan_output" \
+  "[MISSING] Booted ${IOS_RUNNER_SIMULATOR_NAME}: will be created on com.apple.CoreSimulator.SimRuntime.iOS-26-0 and booted"
+assert_contains "$(cat "$test_root/xcrun-macos-plan.log")" "simctl list devicetypes"
+assert_not_contains "$(cat "$test_root/xcrun-macos-plan.log")" "simctl create"
+assert_not_contains "$(cat "$test_root/xcrun-macos-plan.log")" "simctl boot"
+[[ ! -e "$test_root/launchctl-macos-plan.log" ]] || fail "a dry run must not touch launchctl: $(cat "$test_root/launchctl-macos-plan.log")"
+[[ -z "$(find "$macos_plan_home" -mindepth 1 -print -quit)" ]] || fail "a dry run must not write under HOME: $(find "$macos_plan_home" -mindepth 1)"
+
+macos_no_type_home="$test_root/home-macos-no-type"
+macos_no_type_output="$(
+  run_sourced simulated-macos-dry-run-reports-unavailable-device-type 0 "$macos_stubs:$utilities" "$macos_no_type_home" \
+    XCRUN_LOG="$test_root/xcrun-macos-no-type.log" XCRUN_BOOTED="$test_root/xcrun-macos-no-type.booted" \
+    XCRUN_NO_SE=1 XCRUN_NO_SE_TYPE=1 LAUNCHCTL_LOG="$test_root/launchctl-macos-no-type.log" SIM_UDID="$simulator_udid" \
+    -- 'check_xcode; check_simulator'
+)"
+assert_contains \
+  "$macos_no_type_output" \
+  "[MISSING] Booted ${IOS_RUNNER_SIMULATOR_NAME}: cannot be created: ${IOS_RUNNER_SIMULATOR_DEVICE_TYPE} is not offered by the installed Xcode; check 'xcrun simctl list devicetypes'"
+assert_not_contains "$macos_no_type_output" "[dry-run] create '${IOS_RUNNER_SIMULATOR_NAME}'"
+assert_not_contains "$macos_no_type_output" "boot the created simulator"
+assert_not_contains "$macos_no_type_output" "will be created on"
+assert_not_contains "$(cat "$test_root/xcrun-macos-no-type.log")" "simctl create"
+assert_not_contains "$(cat "$test_root/xcrun-macos-no-type.log")" "simctl boot"
+[[ ! -e "$test_root/launchctl-macos-no-type.log" ]] || fail "a dry run must not touch launchctl: $(cat "$test_root/launchctl-macos-no-type.log")"
+
 macos_agent_label="${macos_agent_plist##*/}"
 macos_agent_label="${macos_agent_label%.plist}"
 [[ "$(cat "$test_root/launchctl-macos.log")" == "bootout gui/$(id -u)/${macos_agent_label}
@@ -807,12 +902,12 @@ assert_contains "$missing_candidate_marker_output" "[MISSING] Release candidate 
 
 # ---------------------------------------------------------------------------
 # Runner archive: a digest mismatch must stop before extraction. curl and tar
-# are stubbed; the digest check runs for real through sha256sum.
+# are stubbed; the digest check runs for real through shasum or sha256sum.
 # ---------------------------------------------------------------------------
 
 download_stubs="$test_root/download-stubs"
 make_download_stubs "$download_stubs"
-payload_sha256="$(printf '%s\n' "$download_payload" | sha256sum | sed 's/ .*//')"
+payload_sha256="$(printf '%s\n' "$download_payload" | sha256_hex)"
 install_snippet='RUNNER_SHA256="$EXPECTED_SHA256"; install_runner_package "https://example.invalid/actions-runner-osx-x64-test.tar.gz"'
 
 mismatch_tar_log="$test_root/tar-mismatch.log"
