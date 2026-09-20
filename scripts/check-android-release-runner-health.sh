@@ -97,55 +97,60 @@ elif ! command -v jq >/dev/null 2>&1; then
   record_failure "jq is required to inspect the GitHub runner inventory."
 elif [[ -z "${GITHUB_REPOSITORY:-}" ]]; then
   record_failure "GITHUB_REPOSITORY is required to inspect the repository runner inventory."
-elif [[ -z "${GH_TOKEN:-}" ]]; then
+elif [[ ! -v GH_TOKEN ]]; then
   record_failure "GITHUB_WORKFLOW_PULL_TOKEN_FINAL must be configured with Administration: read access."
 else
-  runner_json="$(
-    gh api --paginate --slurp \
-      "repos/${GITHUB_REPOSITORY}/actions/runners?per_page=100" \
-      2>/dev/null
-  )"
-  api_status=$?
-  if ((api_status != 0)); then
-    record_failure "Could not query the repository self-hosted runner inventory."
-  elif ! jq -e 'type == "array" and all(.[]; (.runners? | type == "array"))' \
-    >/dev/null 2>&1 <<<"$runner_json"; then
-    record_failure "The repository self-hosted runner inventory response was invalid."
+  gh_token_name="GH_TOKEN"
+  if [[ -z "${!gh_token_name}" ]]; then
+    record_failure "GITHUB_WORKFLOW_PULL_TOKEN_FINAL must be configured with Administration: read access."
   else
-    while IFS=$'\t' read -r runner_name runner_status runner_labels; do
-      [[ -n "$runner_name" ]] || continue
-      missing_labels=()
-      for required_label in "${required_labels[@]}"; do
-        if ! has_label "$runner_labels" "$required_label"; then
-          missing_labels+=("$required_label")
+    runner_json="$(
+      gh api --paginate --slurp \
+        "repos/${GITHUB_REPOSITORY}/actions/runners?per_page=100" \
+        2>/dev/null
+    )"
+    api_status=$?
+    if ((api_status != 0)); then
+      record_failure "Could not query the repository self-hosted runner inventory."
+    elif ! jq -e 'type == "array" and all(.[]; (.runners? | type == "array"))' \
+      >/dev/null 2>&1 <<<"$runner_json"; then
+      record_failure "The repository self-hosted runner inventory response was invalid."
+    else
+      while IFS=$'\t' read -r runner_name runner_status runner_labels; do
+        [[ -n "$runner_name" ]] || continue
+        missing_labels=()
+        for required_label in "${required_labels[@]}"; do
+          if ! has_label "$runner_labels" "$required_label"; then
+            missing_labels+=("$required_label")
+          fi
+        done
+
+        if [[ "$runner_status" == "online" && "${#missing_labels[@]}" -eq 0 ]]; then
+          safe_runner_name="$(sanitize_workflow_text "$runner_name")"
+          online_ready_runners+=("\`${safe_runner_name}\`")
+          runner_details+=("\`${safe_runner_name}\`: online; all required labels present")
+        elif ((${#missing_labels[@]})); then
+          missing_label_text="$(IFS=', '; echo "${missing_labels[*]}")"
+          safe_runner_name="$(sanitize_workflow_text "$runner_name")"
+          runner_details+=("\`${safe_runner_name}\`: ${runner_status}; missing labels: ${missing_label_text}")
+        else
+          safe_runner_name="$(sanitize_workflow_text "$runner_name")"
+          runner_details+=("\`${safe_runner_name}\`: ${runner_status}; required labels present but runner is not online")
         fi
-      done
+      done < <(
+        jq -r '
+          .[]?.runners[]? |
+          [
+            (.name // "unnamed-runner"),
+            (.status // "unknown"),
+            ([.labels[]?.name] | join(","))
+          ] | @tsv
+        ' <<<"$runner_json"
+      )
 
-      if [[ "$runner_status" == "online" && "${#missing_labels[@]}" -eq 0 ]]; then
-        safe_runner_name="$(sanitize_workflow_text "$runner_name")"
-        online_ready_runners+=("\`${safe_runner_name}\`")
-        runner_details+=("\`${safe_runner_name}\`: online; all required labels present")
-      elif ((${#missing_labels[@]})); then
-        missing_label_text="$(IFS=', '; echo "${missing_labels[*]}")"
-        safe_runner_name="$(sanitize_workflow_text "$runner_name")"
-        runner_details+=("\`${safe_runner_name}\`: ${runner_status}; missing labels: ${missing_label_text}")
-      else
-        safe_runner_name="$(sanitize_workflow_text "$runner_name")"
-        runner_details+=("\`${safe_runner_name}\`: ${runner_status}; required labels present but runner is not online")
+      if ((${#online_ready_runners[@]} == 0)); then
+        record_failure "No online repository runner has all required labels: ${required_label_text}."
       fi
-    done < <(
-      jq -r '
-        .[]?.runners[]? |
-        [
-          (.name // "unnamed-runner"),
-          (.status // "unknown"),
-          ([.labels[]?.name] | join(","))
-        ] | @tsv
-      ' <<<"$runner_json"
-    )
-
-    if ((${#online_ready_runners[@]} == 0)); then
-      record_failure "No online repository runner has all required labels: ${required_label_text}."
     fi
   fi
 fi
