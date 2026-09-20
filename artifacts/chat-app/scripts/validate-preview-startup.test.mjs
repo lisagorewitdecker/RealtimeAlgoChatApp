@@ -41,6 +41,7 @@ const validatorPath = join(
   "validate-preview-startup.mjs",
 );
 const packageRoot = join(import.meta.dirname, "..");
+const controlCharacterPattern = new RegExp(String.raw`[\u0000-\u001f\u007f]`);
 
 test("CI summaries identify a failed public-manifest handoff without raw details", () => {
   const summary = formatStartupFailureSummary(
@@ -172,7 +173,7 @@ test("keeps the missing library when a DevTools wrapper precedes the loader line
         error.message,
         /Expo preview startup error: .*libgtk-3\.so\.0/,
       );
-      assert.doesNotMatch(error.message, /[\u0000-\u001f\u007f]/);
+      assert.doesNotMatch(error.message, controlCharacterPattern);
       assert.ok(
         error.message.length <= 512,
         "startup diagnostic exceeded its bounded length",
@@ -200,7 +201,7 @@ test("validates captured startup logs with a bounded, sanitized library diagnost
       diagnostic.length <= 512,
       "captured startup diagnostic exceeded its bounded length",
     );
-    assert.doesNotMatch(diagnostic, /[\u0000-\u001f\u007f]/);
+    assert.doesNotMatch(diagnostic, controlCharacterPattern);
     assert.doesNotMatch(diagnostic, /unrelated captured output/);
   } finally {
     rmSync(validation.directory, { recursive: true, force: true });
@@ -217,7 +218,7 @@ test("reports a DevTools failure without inventing a missing library", () => {
     (error) => {
       assert.match(error.message, /Expo preview startup error: .*DevTools/);
       assert.doesNotMatch(error.message, /missing runtime library/i);
-      assert.doesNotMatch(error.message, /[\u0000-\u001f\u007f]/);
+      assert.doesNotMatch(error.message, controlCharacterPattern);
       assert.ok(
         error.message.length <= 512,
         "startup diagnostic exceeded its bounded length",

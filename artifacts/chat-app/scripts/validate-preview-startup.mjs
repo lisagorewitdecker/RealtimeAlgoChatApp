@@ -366,7 +366,7 @@ function sanitizeRecordedStartupOutput(value) {
   };
   const stripTrailingStartupProjectFlags = (path) => {
     let trimmedPath = path;
-    while (true) {
+    for (;;) {
       if (/\s+--localhost$/.test(trimmedPath)) {
         trimmedPath = trimmedPath.replace(/\s+--localhost$/, "");
         continue;

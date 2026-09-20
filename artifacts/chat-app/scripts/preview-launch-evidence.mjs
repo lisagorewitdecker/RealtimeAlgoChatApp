@@ -59,7 +59,7 @@ const FORWARDED_SIGNALS = ["SIGTERM", "SIGINT", "SIGHUP"];
 // by choice). Everything else, including 1006 (no close frame), is abnormal.
 const NORMAL_CLOSE_CODES = new Set([1000, 1001]);
 
-const ANSI_PATTERN = /\u001b\[[0-9;?]*[ -/]*[@-~]/g;
+const ANSI_PATTERN = new RegExp(String.raw`\u001b\[[0-9;?]*[ -/]*[@-~]`, "g");
 const ISO_TIMESTAMP = String.raw`\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z`;
 const LEADING_TIMESTAMP_PATTERN = new RegExp(`^\\s*(${ISO_TIMESTAMP}) `);
 // @react-native/dev-middleware InspectorProxy debug lines. The device name and
