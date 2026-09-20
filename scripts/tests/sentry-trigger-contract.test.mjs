@@ -131,19 +131,19 @@ test("native Sentry probe runs Maestro once and writes one trigger record", asyn
       maestroPath,
       `#!/usr/bin/env bash
 set -euo pipefail
-count="\$(< "\${MAESTRO_COUNT_FILE}")"
-printf '%s\\n' "\$((count + 1))" > "\${MAESTRO_COUNT_FILE}"
+count="$(< "\${MAESTRO_COUNT_FILE}")"
+printf '%s\\n' "$((count + 1))" > "\${MAESTRO_COUNT_FILE}"
 output=""
-while ((\$# > 0)); do
-  if [[ "\$1" == "--output" ]]; then
-    output="\$2"
+while (($# > 0)); do
+  if [[ "$1" == "--output" ]]; then
+    output="$2"
     shift 2
   else
     shift
   fi
 done
-[[ -n "\$output" ]]
-printf '%s\\n' '<testsuite tests="1" failures="0"></testsuite>' > "\$output"
+[[ -n "$output" ]]
+printf '%s\\n' '<testsuite tests="1" failures="0"></testsuite>' > "$output"
 `,
       "utf8",
     );
@@ -151,9 +151,9 @@ printf '%s\\n' '<testsuite tests="1" failures="0"></testsuite>' > "\$output"
       catPath,
       `#!/usr/bin/env bash
 set -euo pipefail
-count="\$(< "\${CAT_COUNT_FILE}")"
-printf '%s\\n' "\$((count + 1))" > "\${CAT_COUNT_FILE}"
-exec /bin/cat "\$@"
+count="$(< "\${CAT_COUNT_FILE}")"
+printf '%s\\n' "$((count + 1))" > "\${CAT_COUNT_FILE}"
+exec /bin/cat "$@"
 `,
       "utf8",
     );
