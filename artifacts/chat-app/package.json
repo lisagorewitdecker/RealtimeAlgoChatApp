@@ -46,7 +46,7 @@
     "@expo/vector-icons": "^15.1.1",
     "@react-native-async-storage/async-storage": "2.2.0",
     "@react-native/jest-preset": "0.86.3",
-    "@react-native/metro-config": "0.86.3",
+    "@react-native/metro-config": "0.87.1",
     "@sentry/cli": "2.58.4",
     "@stardazed/streams-text-encoding": "^1.0.2",
     "@tanstack/react-query": "catalog:",
