@@ -256,9 +256,10 @@ function stripAnsiEscapeSequences(value) {
 function sanitizeStartupDiagnostic(value, maxLength) {
   const withoutAnsiSequences = stripAnsiEscapeSequences(value);
   const characters = [];
-  for (const character of withoutAnsiSequences) {
-    const codePoint = character.codePointAt(0) ?? 0;
-    characters.push(codePoint <= 0x1f || codePoint === 0x7f ? " " : character);
+  for (let index = 0; index < withoutAnsiSequences.length; index += 1) {
+    const character = withoutAnsiSequences[index];
+    const codeUnit = withoutAnsiSequences.charCodeAt(index);
+    characters.push(codeUnit <= 0x1f || codeUnit === 0x7f ? " " : character);
   }
   const withoutControlChars = characters.join("");
 
