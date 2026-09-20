@@ -1318,6 +1318,7 @@ jobs:
       actions: write
       contents: read
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Check out release candidate
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -1408,14 +1409,25 @@ jobs:
 
       - name: Run strict tamper block check against downloaded fixtures
         id: tamper-check
+        continue-on-error: true
         env:
           NATIVE_EVIDENCE_TAMPER_FIXTURES_ROOT: ${{ runner.temp }}/native-evidence-tamper-downloads
-        run: bash scripts/run-untrusted-checker.sh pnpm run test:native-large-text-evidence
+          NATIVE_EVIDENCE_TAMPER_DEADLINE: 20 minutes
+          TAMPER_LOG_PATH: ${{ runner.temp }}/native-evidence-tamper-regression.log
+        run: |
+          set +e
+          bash scripts/run-untrusted-checker.sh pnpm run test:native-large-text-evidence \
+            > "$TAMPER_LOG_PATH" 2>&1
+          tamper_status=$?
+          set -e
+          exit "$tamper_status"
 
       - name: Summarize native evidence tamper regression
         if: ${{ always() }}
         env:
           TAMPER_RESULT: ${{ steps.tamper-check.outcome }}
+          TAMPER_LOG_PATH: ${{ runner.temp }}/native-evidence-tamper-regression.log
+          TAMPER_DEADLINE: 20 minutes
         run: |
           set -euo pipefail
           {
@@ -1429,7 +1441,37 @@ jobs:
               echo "- Status: **BLOCKED**"
               echo "- Result: downloaded-fixture tamper validation failed; store submission is blocked."
             fi
+            echo "- Validation deadline: **${TAMPER_DEADLINE}**"
           } >> "$GITHUB_STEP_SUMMARY"
+
+          if [[ "$TAMPER_RESULT" == "success" ]]; then
+            for platform in ios android; do
+              if ! grep -Fq -- \
+                "Hosted tampered ${platform} evidence recorded BLOCKED without invoking the submission stub. (validation deadline: ${TAMPER_DEADLINE})." \
+                "$TAMPER_LOG_PATH"; then
+                echo "Hosted tamper regression did not record the ${platform} BLOCKED result before the ${TAMPER_DEADLINE} deadline." >&2
+                exit 1
+              fi
+            done
+            if ! grep -Fq -- \
+              "- Altered iOS fixture: **BLOCKED**; submission stub: **NOT INVOKED**" \
+              "$GITHUB_STEP_SUMMARY" ||
+              ! grep -Fq -- \
+              "- Altered Android fixture: **BLOCKED**; submission stub: **NOT INVOKED**" \
+              "$GITHUB_STEP_SUMMARY"; then
+              echo "Hosted tamper regression summary did not preserve both platform BLOCKED results before the ${TAMPER_DEADLINE} deadline." >&2
+              exit 1
+            fi
+          fi
+
+          bash scripts/verify-native-tamper-output.sh \
+            "$TAMPER_LOG_PATH" \
+            "$GITHUB_STEP_SUMMARY"
+
+          if [[ "$TAMPER_RESULT" != "success" ]]; then
+            echo "Hosted tamper regression blocked release before the ${TAMPER_DEADLINE} deadline; inspect platform-specific diagnostics in the captured log." >&2
+            exit 1
+          fi
 
   native-ios:
     name: Native large-text smoke (iOS)

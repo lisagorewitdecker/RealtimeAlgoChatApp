@@ -4,8 +4,10 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 CHECKER="$ROOT_DIR/scripts/check-native-large-text-evidence.sh"
 FIXTURE_BUILDER="$ROOT_DIR/scripts/tests/native-large-text-evidence-fixture.sh"
+TAMPER_OUTPUT_CHECKER="$ROOT_DIR/scripts/verify-native-tamper-output.sh"
 SAVED_TEST_STATUS="$ROOT_DIR/artifacts/api-server/test-results/.last-run.json"
 HOSTED_TAMPER_FIXTURES_ROOT="${NATIVE_EVIDENCE_TAMPER_FIXTURES_ROOT:-}"
+HOSTED_TAMPER_DEADLINE="${NATIVE_EVIDENCE_TAMPER_DEADLINE:-}"
 PRIVACY_FAILURE_FIXTURE_ROOT="${NATIVE_EVIDENCE_PRIVACY_FAILURE_FIXTURE_ROOT:-}"
 TEST_PARENT="$(mktemp -d)"
 TEST_ROOT="$TEST_PARENT/fixtures"
@@ -66,6 +68,65 @@ assert_not_contains() {
     exit 1
   fi
 }
+
+assert_not_contains_private_fixture() {
+  local output="$1"
+  local private_value="$2"
+  local context="$3"
+  if grep -Fq -- "$private_value" <<<"$output"; then
+    printf 'The %s exposed private fixture content; the value is intentionally omitted from this diagnostic.\n' \
+      "$context" >&2
+    exit 1
+  fi
+}
+
+tamper_output_contract_root="$TEST_ROOT/tamper-output-contract"
+tamper_output_log="$tamper_output_contract_root/checker.log"
+tamper_output_summary="$tamper_output_contract_root/summary.md"
+tamper_output_stdout="$tamper_output_contract_root/verifier.stdout"
+tamper_output_stderr="$tamper_output_contract_root/verifier.stderr"
+mkdir -p "$tamper_output_contract_root"
+printf '%s\n' \
+  '::stop-commands::01234567-89ab-cdef-0123-456789abcdef' \
+  'safe checker output' \
+  '::01234567-89ab-cdef-0123-456789abcdef::' \
+  > "$tamper_output_log"
+printf '%s\n' '# Safe tamper summary' > "$tamper_output_summary"
+if ! bash "$TAMPER_OUTPUT_CHECKER" \
+  "$tamper_output_log" \
+  "$tamper_output_summary" \
+  > "$tamper_output_stdout" \
+  2> "$tamper_output_stderr"; then
+  echo "safe tamper output unexpectedly failed verification" >&2
+  exit 1
+fi
+assert_contains "$(cat "$tamper_output_stdout")" "safe checker output"
+
+tamper_private_marker="$(printf '%s' 'Y2FuZGlkYXRlLWlvcy1wcml2YXRlLXNlbnRpbmVs' | base64 --decode)"
+printf '%s\n' \
+  '::stop-commands::01234567-89ab-cdef-0123-456789abcdef' \
+  "$tamper_private_marker" \
+  '::error::must-not-run' \
+  '::01234567-89ab-cdef-0123-456789abcdef::' \
+  > "$tamper_output_log"
+: > "$tamper_output_stdout"
+: > "$tamper_output_stderr"
+if bash "$TAMPER_OUTPUT_CHECKER" \
+  "$tamper_output_log" \
+  "$tamper_output_summary" \
+  > "$tamper_output_stdout" \
+  2> "$tamper_output_stderr"; then
+  echo "unsafe tamper output unexpectedly passed verification" >&2
+  exit 1
+fi
+if [[ -s "$tamper_output_stdout" ]]; then
+  echo "unsafe tamper output was printed before verification rejected it" >&2
+  exit 1
+fi
+assert_not_contains_private_fixture \
+  "$(cat "$tamper_output_stderr")" \
+  "$tamper_private_marker" \
+  "tamper output verifier diagnostics"
 
 release_node_range="$(node --input-type=module - <<'NODE'
 import { readFileSync } from "node:fs";
@@ -1359,12 +1420,24 @@ EOF
   assert_contains "$(cat "$blocked_result")" "status=BLOCKED"
   assert_contains "$(cat "$blocked_result")" "reason=native-evidence-validation-failed"
   assert_contains "$(cat "$tampered_summary_path")" "- Status: **FAIL**"
-  assert_not_contains "$validation_output" "$private_candidate_id"
-  assert_not_contains "$validation_output" "$private_reviewer"
-  assert_not_contains "$(cat "$tampered_summary_path")" "$private_candidate_id"
-  assert_not_contains "$(cat "$tampered_summary_path")" "$private_reviewer"
+  assert_not_contains_private_fixture \
+    "$validation_output" \
+    "$private_candidate_id" \
+    "$tampered_platform diagnostics"
+  assert_not_contains_private_fixture \
+    "$validation_output" \
+    "$private_reviewer" \
+    "$tampered_platform diagnostics"
+  assert_not_contains_private_fixture \
+    "$(cat "$tampered_summary_path")" \
+    "$private_candidate_id" \
+    "$tampered_platform summary"
+  assert_not_contains_private_fixture \
+    "$(cat "$tampered_summary_path")" \
+    "$private_reviewer" \
+    "$tampered_platform summary"
   if [[ -n "$HOSTED_TAMPER_FIXTURES_ROOT" ]]; then
-    echo "Hosted tampered $tampered_platform evidence recorded BLOCKED without invoking the submission stub."
+    echo "Hosted tampered $tampered_platform evidence recorded BLOCKED without invoking the submission stub. (validation deadline: ${HOSTED_TAMPER_DEADLINE:-not configured})."
   fi
 done
 
@@ -1448,12 +1521,30 @@ for artifact_mutation in ios-screenshot android-sentry; do
   assert_contains "$(cat "$blocked_result")" "status=BLOCKED"
   assert_contains "$(cat "$blocked_result")" "reason=native-evidence-validation-failed"
   assert_contains "$(cat "$tampered_summary_path")" "- Status: **FAIL**"
-  assert_not_contains "$validation_output" "$private_candidate_id"
-  assert_not_contains "$validation_output" "$private_reviewer"
-  assert_not_contains "$validation_output" "$private_evidence"
-  assert_not_contains "$(cat "$tampered_summary_path")" "$private_candidate_id"
-  assert_not_contains "$(cat "$tampered_summary_path")" "$private_reviewer"
-  assert_not_contains "$(cat "$tampered_summary_path")" "$private_evidence"
+  assert_not_contains_private_fixture \
+    "$validation_output" \
+    "$private_candidate_id" \
+    "$tampered_platform diagnostics"
+  assert_not_contains_private_fixture \
+    "$validation_output" \
+    "$private_reviewer" \
+    "$tampered_platform diagnostics"
+  assert_not_contains_private_fixture \
+    "$validation_output" \
+    "$private_evidence" \
+    "$tampered_platform diagnostics"
+  assert_not_contains_private_fixture \
+    "$(cat "$tampered_summary_path")" \
+    "$private_candidate_id" \
+    "$tampered_platform summary"
+  assert_not_contains_private_fixture \
+    "$(cat "$tampered_summary_path")" \
+    "$private_reviewer" \
+    "$tampered_platform summary"
+  assert_not_contains_private_fixture \
+    "$(cat "$tampered_summary_path")" \
+    "$private_evidence" \
+    "$tampered_platform summary"
 done
 
 # Exercise the publish summary branch after a controlled privacy failure. The
@@ -1510,9 +1601,18 @@ if [[ -e "$privacy_submission_marker" ]]; then
   echo "failed privacy scenario reached the simulated store submission boundary" >&2
   exit 1
 fi
-assert_not_contains "$privacy_checker_output" "$privacy_fixture_sentinel"
-assert_not_contains "$(cat "$privacy_checker_summary")" "$privacy_fixture_sentinel"
-assert_not_contains "$(cat "$privacy_publish_summary")" "$privacy_fixture_sentinel"
+assert_not_contains_private_fixture \
+  "$privacy_checker_output" \
+  "$privacy_fixture_sentinel" \
+  "privacy checker diagnostics"
+assert_not_contains_private_fixture \
+  "$(cat "$privacy_checker_summary")" \
+  "$privacy_fixture_sentinel" \
+  "privacy checker summary"
+assert_not_contains_private_fixture \
+  "$(cat "$privacy_publish_summary")" \
+  "$privacy_fixture_sentinel" \
+  "privacy publish summary"
 
 if [[ -n "$PRIVACY_FAILURE_FIXTURE_ROOT" ]]; then
   # Hosted release validation opts into one controlled failure of this real
@@ -1552,8 +1652,14 @@ if [[ -n "$PRIVACY_FAILURE_FIXTURE_ROOT" ]]; then
   fi
   assert_contains "$privacy_failure_output" "[ios] Missing runner metadata and device details"
   assert_contains "$(cat "$privacy_failure_summary")" "- Status: **FAIL**"
-  assert_not_contains "$privacy_failure_output" "$privacy_failure_sentinel"
-  assert_not_contains "$(cat "$privacy_failure_summary")" "$privacy_failure_sentinel"
+  assert_not_contains_private_fixture \
+    "$privacy_failure_output" \
+    "$privacy_failure_sentinel" \
+    "privacy failure diagnostics"
+  assert_not_contains_private_fixture \
+    "$(cat "$privacy_failure_summary")" \
+    "$privacy_failure_sentinel" \
+    "privacy failure summary"
   echo "Controlled native privacy failure fixture was rejected without exposing its contents."
   exit 1
 fi
