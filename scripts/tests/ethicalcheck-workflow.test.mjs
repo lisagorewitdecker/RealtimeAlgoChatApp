@@ -51,6 +51,10 @@ test("EthicalCheck workflow inlines the scan trigger instead of referencing the 
     scanStep.run,
     /Skipping EthicalCheck scan because ETHICALCHECK_OAS_URL variable or ETHICALCHECK_REPORT_EMAIL secret is not configured\./,
   );
+  assert.match(
+    scanStep.run,
+    /::add-mask::\$\{ETHICALCHECK_REPORT_EMAIL\}/,
+  );
   assert.match(scanStep.run, /jq -cn \\/);
   assert.match(scanStep.run, /--arg openAPISpec "\$\{ETHICALCHECK_OAS_URL\}"/);
   assert.match(scanStep.run, /--arg email "\$\{ETHICALCHECK_REPORT_EMAIL\}"/);

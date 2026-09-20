@@ -119,6 +119,8 @@ jobs:
             exit 0
           fi
 
+          echo "::add-mask::${ETHICALCHECK_REPORT_EMAIL}"
+
           payload="$(jq -cn \
             --arg openAPISpec "${ETHICALCHECK_OAS_URL}" \
             --arg email "${ETHICALCHECK_REPORT_EMAIL}" \
