@@ -8,6 +8,7 @@
 #
 # Usage:
 #   ./scripts/provision-android-runner.sh
+#   ./scripts/provision-android-runner.sh --install-runner
 #   ANDROID_CMDLINE_TOOLS_SHA256=<checksum> \
 #     ./scripts/provision-android-runner.sh --install-sdk
 #   NATIVE_SMOKE_APK_PATH=/secure/path/candidate.apk \
@@ -35,9 +36,12 @@ export PATH="$HOME/.maestro/bin:$SDK_ROOT/platform-tools:$SDK_ROOT/emulator:$SDK
 AVD_NAME="${ANDROID_NATIVE_AVD_NAME:-native-small-api35}"
 ANDROID_API_LEVEL="${ANDROID_NATIVE_API_LEVEL:-35}"
 SYSTEM_IMAGE="system-images;android-${ANDROID_API_LEVEL};google_apis;x86_64"
+ANDROID_RUNNER_ROOT="${ANDROID_RUNNER_ROOT:-$HOME/actions-runner}"
+ANDROID_RUNNER_ARCHIVE_URL="${ANDROID_RUNNER_ARCHIVE_URL:-https://github.com/actions/runner/releases/download/v${ANDROID_RUNNER_VERSION}/actions-runner-linux-x64-${ANDROID_RUNNER_VERSION}.tar.gz}"
 CMDLINE_TOOLS_URL="${ANDROID_CMDLINE_TOOLS_URL:-https://dl.google.com/android/repository/commandlinetools-linux-13114758_latest.zip}"
 CMDLINE_TOOLS_SHA256="${ANDROID_CMDLINE_TOOLS_SHA256:-}"
 INSTALL_SDK=0
+INSTALL_RUNNER=0
 INSTALL_CANDIDATE=0
 START_EMULATOR=0
 
@@ -46,6 +50,8 @@ usage() {
 Usage: provision-android-runner.sh [options]
 
 Options:
+  --install-runner      Download the pinned GitHub Actions Linux runner,
+                        verify its SHA-256 digest, and extract it.
   --install-sdk         Download pinned Android command-line tools and install
                         platform-tools, emulator, API 35, aapt2, and the small
                         AVD.
@@ -60,6 +66,7 @@ EOF
 
 while (($#)); do
   case "$1" in
+    --install-runner) INSTALL_RUNNER=1 ;;
     --install-sdk) INSTALL_SDK=1 ;;
     --install-candidate) INSTALL_CANDIDATE=1 ;;
     --start-emulator) START_EMULATOR=1 ;;
@@ -80,6 +87,43 @@ require_command() {
     exit 2
   fi
 }
+
+install_runner_archive() {
+  require_command curl
+  require_command tar
+  require_command sha256sum
+
+  local archive
+  archive="$(mktemp)"
+  if ! curl --fail --location --silent --show-error \
+    "$ANDROID_RUNNER_ARCHIVE_URL" --output "$archive"; then
+    rm -f "$archive"
+    echo "Could not download the pinned Android runner archive." >&2
+    return 1
+  fi
+  if ! printf '%s  %s\n' "$ANDROID_RUNNER_SHA256" "$archive" |
+    sha256sum --check --status; then
+    rm -f "$archive"
+    echo "SHA-256 mismatch for the pinned Android runner archive; nothing was extracted." >&2
+    return 1
+  fi
+  mkdir -p "$ANDROID_RUNNER_ROOT"
+  if ! tar --extract --gzip --file "$archive" --directory "$ANDROID_RUNNER_ROOT"; then
+    rm -f "$archive"
+    echo "Could not extract the pinned Android runner archive." >&2
+    return 1
+  fi
+  rm -f "$archive"
+}
+
+if ((INSTALL_RUNNER)); then
+  install_runner_archive
+fi
+
+if ((INSTALL_RUNNER)) && ((!INSTALL_SDK && !START_EMULATOR && !INSTALL_CANDIDATE)); then
+  echo "Android runner archive installed at ${ANDROID_RUNNER_ROOT}."
+  exit 0
+fi
 
 if ((INSTALL_SDK)); then
   require_command curl
