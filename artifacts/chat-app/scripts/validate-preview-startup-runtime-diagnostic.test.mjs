@@ -282,8 +282,55 @@ test("real-platform capture records macOS and Windows loader output safely", () 
       output:
         "Error: The code execution cannot proceed because " +
         "C:\\Users\\reviewer\\AppData\\Local\\Expo\\libgtk-3-0.dll " +
-        "was not found. password=TOP_SECRET_VALUE\n",
+        "was not found. password=TOP_SECRET_VALUE\n" +
+        "Starting project at \\\\server\\share\\repo\\app --localhost --port 8081\n",
       libraryIdentifier: "libgtk-3-0.dll",
+    },
+    {
+      name: "Windows host flag",
+      fixture: "missing-runtime-library-windows",
+      output:
+        "Error: The code execution cannot proceed because " +
+        "C:\\Users\\reviewer\\AppData\\Local\\Expo\\libgtk-3-0.dll " +
+        "was not found. ******" +
+        "Starting project at \\\\server\\share\\repo\\app --host tunnel\n",
+      libraryIdentifier: "libgtk-3-0.dll",
+      diagnosticPattern: /Expo preview loader wording changed/,
+    },
+    {
+      name: "Windows drive startup args",
+      fixture: "missing-runtime-library-windows",
+      output:
+        "Error: The code execution cannot proceed because " +
+        "C:\\Users\\reviewer\\AppData\\Local\\Expo\\libgtk-3-0.dll " +
+        "was not found. ******" +
+        "Starting project at D:\\a\\RealtimeAlgoChatApp\\artifacts\\chat-app --host 0.0.0.0 --port 8081\n",
+      libraryIdentifier: "libgtk-3-0.dll",
+      diagnosticPattern: /Expo preview loader wording changed/,
+    },
+    {
+      name: "Windows embedded host path text",
+      fixture: "missing-runtime-library-windows",
+      output:
+        "Error: The code execution cannot proceed because " +
+        "C:\\Users\\reviewer\\AppData\\Local\\Expo\\libgtk-3-0.dll " +
+        "was not found. ******" +
+        "Starting project at \\\\server\\share\\repo --host docs\\app --localhost --port 8081\n",
+      libraryIdentifier: "libgtk-3-0.dll",
+      diagnosticPattern: /Expo preview loader wording changed/,
+      expectedRedactedProjectPath:
+        String.raw`Starting project at \\[redacted]\repo --host docs\app`,
+    },
+    {
+      name: "Windows UNC library path",
+      fixture: "missing-runtime-library-windows",
+      output:
+        "Error: The code execution cannot proceed because " +
+        "\\\\server\\share\\Expo\\libgtk-3-0.dll " +
+        "was not found. ******" +
+        "Starting project at \\\\server\\share\\repo\\app\n",
+      libraryIdentifier: "libgtk-3-0.dll",
+      diagnosticPattern: /Expo preview loader wording changed/,
     },
   ];
 
@@ -304,8 +351,27 @@ test("real-platform capture records macOS and Windows loader output safely", () 
       assert.equal(live.status, 1, fixtureCase.name);
       const recordedOutput = readFileSync(recordPath, "utf8");
       assert.doesNotMatch(recordedOutput, /\/Users\/reviewer|C:\\Users\\reviewer/);
+      assert.doesNotMatch(recordedOutput, /D:\\a\\RealtimeAlgoChatApp/);
+      assert.doesNotMatch(recordedOutput, /\\\\server\\share\\Expo\\libgtk-3-0\.dll/);
+      assert.doesNotMatch(
+        recordedOutput,
+        /\\\\server\\share\\repo\\app/,
+      );
+      assert.doesNotMatch(recordedOutput, /--localhost/);
+      assert.doesNotMatch(recordedOutput, /--host tunnel/);
+      assert.doesNotMatch(recordedOutput, /--port 8081/);
+      assert.doesNotMatch(recordedOutput, /--host 0\.0\.0\.0/);
       assert.doesNotMatch(recordedOutput, /TOP_SECRET_VALUE/);
       assert.match(recordedOutput, new RegExp(fixtureCase.libraryIdentifier));
+      if (fixtureCase.expectedRedactedProjectPath) {
+        assert.match(
+          recordedOutput,
+          new RegExp(
+            fixtureCase.expectedRedactedProjectPath
+              .replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
+          ),
+        );
+      }
 
       const captured = runNodeScript([
         validatorPath,
@@ -315,12 +381,15 @@ test("real-platform capture records macOS and Windows loader output safely", () 
       assert.equal(captured.status, 1, fixtureCase.name);
       const liveDiagnostic = findDiagnostic(live.output);
       const capturedDiagnostic = findDiagnostic(captured.output);
+      const diagnosticPattern =
+        fixtureCase.diagnosticPattern ??
+        new RegExp(fixtureCase.libraryIdentifier);
       assert.ok(liveDiagnostic, fixtureCase.name);
       assert.ok(capturedDiagnostic, fixtureCase.name);
-      assert.match(liveDiagnostic, new RegExp(fixtureCase.libraryIdentifier));
+      assert.match(liveDiagnostic, diagnosticPattern);
       assert.match(
         capturedDiagnostic,
-        new RegExp(fixtureCase.libraryIdentifier),
+        diagnosticPattern,
         fixtureCase.name,
       );
       assert.match(
@@ -333,6 +402,173 @@ test("real-platform capture records macOS and Windows loader output safely", () 
     rmSync(temporaryDirectory, { recursive: true, force: true });
   }
 });
+
+test("real launcher validation does not require a public preview URL", () => {
+  const temporaryDirectory = mkdtempSync(
+    join(tmpdir(), "chat-preview-real-launcher-only-"),
+  );
+  const recordPath = join(temporaryDirectory, "launcher.log");
+
+  try {
+    const result = runNodeScript(
+      [validatorPath, "--record-log", recordPath],
+      {
+        PREVIEW_STARTUP_REAL_LAUNCHER: "1",
+        PREVIEW_STARTUP_TEST_FIXTURE: "handoff-server",
+        PREVIEW_STARTUP_TIMEOUT_MS: "2000",
+      },
+    );
+
+    assert.equal(result.status, 0, result.output);
+    assert.match(
+      result.output,
+      /Expo preview launcher reached Metro running status/,
+    );
+    assert.match(readFileSync(recordPath, "utf8"), /Starting Metro Bundler/);
+  } finally {
+    rmSync(temporaryDirectory, { recursive: true, force: true });
+  }
+});
+
+test("startup test output override runs without preview URL configuration", () => {
+  const temporaryDirectory = mkdtempSync(
+    join(
+      process.env.RUNNER_TEMP ?? tmpdir(),
+      "chat-preview-startup-test-output-",
+    ),
+  );
+  const recordPath = join(temporaryDirectory, "startup.log");
+
+  try {
+    const result = runNodeScript(
+      [validatorPath, "--record-log", recordPath],
+      {
+        PREVIEW_STARTUP_TEST_OUTPUT:
+          'Error: The code execution cannot proceed because "C:\\Program Files\\Expo\\React Native DevTools\\libgtk-3-0.dll" was not found.\n',
+      },
+    );
+
+    assert.equal(result.status, 1, result.output);
+    assert.match(result.output, /Expo preview startup error:/);
+    assert.match(readFileSync(recordPath, "utf8"), /libgtk-3-0\.dll/);
+  } finally {
+    rmSync(temporaryDirectory, { recursive: true, force: true });
+  }
+});
+
+test(
+  "startup test output override skips preview URL configuration validation",
+  () => {
+    const result = runNodeScript([validatorPath, "--validate-configuration"], {
+      PREVIEW_STARTUP_TEST_OUTPUT:
+        'Error: The code execution cannot proceed because "C:\\Program Files\\Expo\\React Native DevTools\\libgtk-3-0.dll" was not found.\n',
+    });
+
+    assert.equal(result.status, 0, result.output);
+    assert.equal(result.output, "");
+  },
+);
+
+test(
+  "Windows runner loader diagnosis keeps quoted spaced paths bounded",
+  {
+    skip: process.platform !== "win32",
+  },
+  () => {
+    const temporaryDirectory = mkdtempSync(
+      join(process.env.RUNNER_TEMP ?? tmpdir(), "chat-preview-windows-runner-"),
+    );
+    const longPath =
+      `C:\\Program Files\\Expo\\${"React Native DevTools cache\\".repeat(14)}` +
+      "libgtk-3-0.dll";
+    const cases = [
+      {
+        name: "quoted path with spaces",
+        output:
+          'Error: The code execution cannot proceed because "C:\\Program Files\\' +
+          'Expo\\React Native DevTools\\libgtk-3-0.dll" was not found.\r\n' +
+          "unrelated log text should not be included\r\n",
+        detail:
+          /because "C:\\Program Files\\Expo\\React Native DevTools\\libgtk-3-0\.dll" was not found/,
+      },
+      {
+        name: "quoted long path with spaces",
+        output:
+          `Error: The code execution cannot proceed because "${longPath}" was not found.\r\n` +
+          "unrelated log text should not be included\r\n",
+        detail: /missing runtime library: .*libgtk-3-0\.dll/,
+      },
+    ];
+
+    try {
+      for (const [index, fixtureCase] of cases.entries()) {
+        const recordPath = join(temporaryDirectory, `windows-${index}.log`);
+        const realLauncherLive = runNodeScript(
+          [validatorPath, "--record-log", recordPath],
+          {
+            PREVIEW_STARTUP_REAL_LAUNCHER: "1",
+            PREVIEW_STARTUP_TEST_FIXTURE: "missing-runtime-library-windows",
+            PREVIEW_STARTUP_TEST_OUTPUT: fixtureCase.output,
+          },
+        );
+        const fixtureLive = runNodeScript([validatorPath], {
+          PREVIEW_STARTUP_TEST_FIXTURE: "missing-runtime-library-windows",
+          PREVIEW_STARTUP_TEST_OUTPUT: fixtureCase.output,
+        });
+
+        assert.ok(
+          existsSync(recordPath),
+          `${fixtureCase.name}; live validator output: ${JSON.stringify(realLauncherLive.output)}`,
+        );
+        assert.equal(realLauncherLive.status, 1, fixtureCase.name);
+        assert.equal(fixtureLive.status, 1, fixtureCase.name);
+        const captured = runNodeScript([
+          validatorPath,
+          "--log-file",
+          recordPath,
+        ]);
+        assert.equal(captured.status, 1, fixtureCase.name);
+
+        const fixtureDiagnostic = findDiagnostic(fixtureLive.output);
+        const diagnostic = findDiagnostic(captured.output);
+        assert.ok(diagnostic, fixtureCase.name);
+        assert.ok(
+          diagnostic,
+          `${fixtureCase.name}; captured validator output: ${JSON.stringify(captured.output)}`,
+        );
+        assert.ok(fixtureDiagnostic, fixtureCase.name);
+        assert.ok(
+          diagnostic,
+          `${fixtureCase.name}; captured validator output: ${JSON.stringify(captured.output)}`,
+        );
+        assert.ok(diagnostic, fixtureCase.name);
+        assert.equal(fixtureDiagnostic, diagnostic, fixtureCase.name);
+        assert.match(diagnostic, fixtureCase.detail, fixtureCase.name);
+        assert.match(
+          diagnostic,
+          /libgtk-3-0\.dll/,
+          `${fixtureCase.name} lost the DLL basename`,
+        );
+        assert.ok(
+          diagnostic.length <= 512,
+          `${fixtureCase.name} diagnostic exceeded the 512-character limit`,
+        );
+        assert.doesNotMatch(
+          diagnostic,
+          /unrelated log text/,
+          `${fixtureCase.name} included unrelated log text`,
+        );
+        assert.equal(
+          containsControlCharacters(diagnostic),
+          false,
+          `${fixtureCase.name} included control characters`,
+        );
+      }
+    } finally {
+      rmSync(temporaryDirectory, { recursive: true, force: true });
+    }
+  },
+);
 
 test("versioned loader samples match the installed Expo tooling", () => {
   const capturedExpoCliVersion =
@@ -618,6 +854,70 @@ test("unsupported loader wording fails with a maintenance message", () => {
   }
 });
 
+test("malformed loader paths fail closed without leaking corrupted text", () => {
+  const temporaryDirectory = mkdtempSync(
+    join(tmpdir(), "chat-preview-malformed-loader-"),
+  );
+  const malformedFixtures = [
+    "missing-runtime-library-malformed-quotes",
+    "missing-runtime-library-malformed-control",
+    "missing-runtime-library-malformed-trailing",
+    "missing-runtime-library-malformed-followed-by-valid",
+  ];
+
+  try {
+    for (const [index, fixtureName] of malformedFixtures.entries()) {
+      const fixture = runNodeScript([fixturePath], {
+        PREVIEW_STARTUP_TEST_FIXTURE: fixtureName,
+      });
+      assert.equal(fixture.status, 1, fixtureName);
+
+      const capturedLogPath = join(
+        temporaryDirectory,
+        `malformed-${index}.log`,
+      );
+      writeFileSync(capturedLogPath, fixture.output, "utf8");
+
+      const live = runNodeScript([validatorPath], {
+        PREVIEW_STARTUP_TEST_FIXTURE: fixtureName,
+      });
+      const captured = runNodeScript([
+        validatorPath,
+        "--log-file",
+        capturedLogPath,
+      ]);
+
+      assert.equal(live.status, 1, fixtureName);
+      assert.equal(captured.status, 1, fixtureName);
+      const liveDiagnostic = findDiagnostic(live.output);
+      const capturedDiagnostic = findDiagnostic(captured.output);
+      assert.ok(liveDiagnostic, fixtureName);
+      assert.equal(liveDiagnostic, capturedDiagnostic, fixtureName);
+      assert.match(
+        capturedDiagnostic,
+        /Expo preview loader wording changed\. Update STARTUP_FAILURES and MISSING_LIBRARY_PATTERNS/,
+        fixtureName,
+      );
+      assert.ok(
+        capturedDiagnostic.length <= 512,
+        `${fixtureName} diagnostic exceeded the 512-character limit`,
+      );
+      assert.doesNotMatch(
+        capturedDiagnostic,
+        /trailing unrelated loader text|libgtk-3\.(?:so\.0|dylib)|libgtk-3-0\.dll/i,
+        `${fixtureName} leaked malformed loader content`,
+      );
+      assert.equal(
+        containsControlCharacters(capturedDiagnostic),
+        false,
+        `${fixtureName} diagnostic contains control characters`,
+      );
+    }
+  } finally {
+    rmSync(temporaryDirectory, { recursive: true, force: true });
+  }
+});
+
 test("fixture validation does not append to an inherited workflow summary", () => {
   const temporaryDirectory = mkdtempSync(
     join(tmpdir(), "chat-preview-loader-summary-inheritance-"),
@@ -732,6 +1032,127 @@ test("CI summaries retain bounded long-path loader diagnostics and library ident
         `${fixtureName} lost its library identifier`,
       );
       assert.doesNotMatch(summary, new RegExp(unrelatedOutput));
+    }
+  } finally {
+    rmSync(temporaryDirectory, { recursive: true, force: true });
+  }
+});
+
+test("CI summaries redact secrets from long loader diagnostics without losing library identifiers", () => {
+  const temporaryDirectory = mkdtempSync(
+    join(tmpdir(), "chat-preview-long-private-loader-summary-"),
+  );
+  const longLinuxLibraryPath =
+    `/opt/expo/${"react-native-devtools-cache/".repeat(16)}` +
+    "libgtk-3.so.0";
+  const longDyldLibraryPath =
+    `/opt/homebrew/Library/Application Support/Expo/` +
+    `${"react native devtools cache/".repeat(12)}` +
+    "libgtk-3.dylib";
+  const longWindowsLibraryPath =
+    `C:\\Program Files\\Expo\\${"react native devtools cache\\".repeat(12)}` +
+    "libgtk-3-0.dll";
+  const cases = [
+    {
+      fixture: "missing-runtime-library",
+      output:
+        `Error: Authorization: Bearer LONG_LINUX_PRIVATE_TOKEN ` +
+        `/opt/expo/react-native-devtools: error while loading shared libraries: ` +
+        `${longLinuxLibraryPath}: cannot open shared object file: No such file or directory\n`,
+      libraryIdentifier: "libgtk-3.so.0",
+      privateValues: ["LONG_LINUX_PRIVATE_TOKEN"],
+    },
+    {
+      fixture: "missing-runtime-library",
+      output:
+        `Error: Authorization: AWS4-HMAC-SHA256 ` +
+        `Credential=LONG_AWS_ACCESS_KEY/20260918/us-east-1/expo/aws4_request, ` +
+        `SignedHeaders=host;x-amz-date, Signature=VERY_SECRET_AWS_SIGNATURE ` +
+        `/opt/expo/react-native-devtools: error while loading shared libraries: ` +
+        `${longLinuxLibraryPath}: cannot open shared object file: No such file or directory\n`,
+      libraryIdentifier: "libgtk-3.so.0",
+      privateValues: ["LONG_AWS_ACCESS_KEY", "VERY_SECRET_AWS_SIGNATURE"],
+    },
+    {
+      fixture: "missing-runtime-library-dyld",
+      output:
+        `dyld[12345]: Authorization: Bearer LONG_DYLD_PRIVATE_TOKEN; ` +
+        `Library not loaded: ${longDyldLibraryPath}\n`,
+      libraryIdentifier: "libgtk-3.dylib",
+      privateValues: ["LONG_DYLD_PRIVATE_TOKEN"],
+    },
+    {
+      fixture: "missing-runtime-library-dyld",
+      output:
+        `dyld[12345]: Proxy-Authorization: Digest ` +
+        `username="preview-user", realm="private-preview", ` +
+        `nonce="PRIVATE_NONCE", uri="/expo", ` +
+        `response="VERY_SECRET_DIGEST_RESPONSE"; ` +
+        `Library not loaded: ${longDyldLibraryPath}\n`,
+      libraryIdentifier: "libgtk-3.dylib",
+      privateValues: [
+        "preview-user",
+        "PRIVATE_NONCE",
+        "VERY_SECRET_DIGEST_RESPONSE",
+      ],
+    },
+    {
+      fixture: "missing-runtime-library-windows",
+      output:
+        `Error: Authorization: Bearer LONG_WINDOWS_PRIVATE_TOKEN ` +
+        `The code execution cannot proceed because ${longWindowsLibraryPath} ` +
+        `was not found. Reinstalling the program may fix this problem.\n`,
+      libraryIdentifier: "libgtk-3-0.dll",
+      privateValues: ["LONG_WINDOWS_PRIVATE_TOKEN"],
+    },
+  ];
+
+  try {
+    for (const fixtureCase of cases) {
+      const logPath = join(temporaryDirectory, `${fixtureCase.fixture}.log`);
+      const summaryPath = join(temporaryDirectory, `${fixtureCase.fixture}.md`);
+      const fixture = runNodeScript([fixturePath], {
+        PREVIEW_STARTUP_TEST_FIXTURE: fixtureCase.fixture,
+        PREVIEW_STARTUP_TEST_OUTPUT: fixtureCase.output,
+      });
+
+      assert.equal(fixture.status, 1, fixtureCase.fixture);
+      assert.ok(
+        fixture.output.length > 384,
+        `${fixtureCase.fixture} fixture did not cross the long-path boundary`,
+      );
+      writeFileSync(logPath, fixture.output, "utf8");
+
+      const result = runNodeScript(
+        [validatorPath, "--log-file", logPath],
+        { GITHUB_STEP_SUMMARY: summaryPath },
+      );
+
+      assert.equal(result.status, 1, fixtureCase.fixture);
+      const summary = readFileSync(summaryPath, "utf8");
+      const diagnostic = summary.match(/\*\*Diagnosis:\*\* ([^\n]+)/)?.[1];
+      assert.ok(diagnostic, `${fixtureCase.fixture} summary omitted its diagnosis`);
+      assert.ok(
+        diagnostic.length <= 512,
+        `${fixtureCase.fixture} summary diagnostic exceeded the 512-character limit`,
+      );
+      for (const privateValue of fixtureCase.privateValues) {
+        assert.doesNotMatch(
+          summary,
+          new RegExp(escapeRegExp(privateValue)),
+          `${fixtureCase.fixture} leaked ${privateValue}`,
+        );
+      }
+      assert.match(
+        diagnostic,
+        new RegExp(escapeRegExp(fixtureCase.libraryIdentifier)),
+        `${fixtureCase.fixture} lost its library identifier`,
+      );
+      assert.match(
+        summary,
+        /\[redacted authorization\]/,
+        `${fixtureCase.fixture} omitted the authorization redaction`,
+      );
     }
   } finally {
     rmSync(temporaryDirectory, { recursive: true, force: true });

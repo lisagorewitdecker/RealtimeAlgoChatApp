@@ -9,67 +9,17 @@ args = ["pnpm", "store", "prune"]
 env = { "CI" = "true" }
 
 [workflows]
-runButton = "Project"
-
-[[workflows.workflow]]
-name = "Project"
-mode = "parallel"
-author = "agent"
-
-[[workflows.workflow.tasks]]
-task = "workflow.run"
-args = "chat-app-preview-startup"
-
-[[workflows.workflow.tasks]]
-task = "workflow.run"
-args = "typecheck"
-
-[[workflows.workflow.tasks]]
-task = "workflow.run"
-args = "unit-tests"
-
-[[workflows.workflow.tasks]]
-task = "workflow.run"
-args = "api-server-test"
-
-[[workflows.workflow.tasks]]
-task = "workflow.run"
-args = "chat-app-test"
-
-[[workflows.workflow.tasks]]
-task = "workflow.run"
-args = "banned-room-e2e"
-
-[[workflows.workflow.tasks]]
-task = "workflow.run"
-args = "mockup-clean-typecheck"
-
-[[workflows.workflow.tasks]]
-task = "workflow.run"
-args = "key-reset-recovery-e2e"
-
-[[workflows.workflow.tasks]]
-task = "workflow.run"
-args = "idle-profile-registration-e2e"
-
-[[workflows.workflow.tasks]]
-task = "workflow.run"
-args = "reconnect-delivery-e2e"
-
-[[workflows.workflow.tasks]]
-task = "workflow.run"
-args = "playwright-clean-runtime"
 
 [[workflows.workflow]]
 name = "chat-app-preview-startup"
 author = "agent"
 
-[workflows.workflow.metadata]
-isValidation = true
-
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "flock -w 900 /tmp/replit-heavy-validation.lock pnpm --filter @workspace/chat-app run validate:preview-startup"
+
+[workflows.workflow.metadata]
+isValidation = true
 
 [[workflows.workflow]]
 name = "typecheck"
@@ -180,6 +130,69 @@ args = "flock -w 900 /tmp/replit-heavy-validation.lock pnpm --filter @workspace/
 
 [workflows.workflow.metadata]
 isValidation = true
+
+[[workflows.workflow]]
+name = "artifacts/mockup-sandbox: Component Preview Server"
+author = "agent"
+mode = "sequential"
+
+[workflows.workflow.metadata]
+outputType = "webview"
+artifactId = "XegfDyZt7HqfW2Bb8Ghoy"
+isCanvasWorkflow = true
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm --filter @workspace/mockup-sandbox run dev"
+cwd = "./artifacts/mockup-sandbox"
+waitForPort = 8081
+ensurePreviewReachable = "/"
+router = "path"
+
+[workflows.workflow.tasks.env]
+PORT = "8081"
+BASE_PATH = "/__mockup"
+
+[[workflows.workflow]]
+name = "artifacts/chat-app: expo"
+author = "agent"
+mode = "sequential"
+
+[workflows.workflow.metadata]
+outputType = "webview"
+artifactId = "artifacts/chat-app"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm --filter @workspace/chat-app run dev"
+cwd = "./artifacts/chat-app"
+waitForPort = 21127
+ensurePreviewReachable = "/status"
+router = "expo-domain"
+
+[workflows.workflow.tasks.env]
+PORT = "21127"
+BASE_PATH = "/"
+
+[[workflows.workflow]]
+name = "artifacts/api-server: API Server"
+author = "agent"
+mode = "parallel"
+
+[workflows.workflow.metadata]
+outputType = "webview"
+artifactId = "3B4_FFSkEVBkAeYMFRJ2e"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm --filter @workspace/api-server run dev"
+cwd = "./artifacts/api-server"
+waitForPort = 8080
+ensurePreviewReachable = "/"
+router = "path"
+
+[workflows.workflow.tasks.env]
+PORT = "8080"
 
 [agent]
 stack = "PNPM_WORKSPACE"

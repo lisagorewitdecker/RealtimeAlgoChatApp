@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  buildBreakingCompatibilityContent,
   buildStaleGeneratedContent,
   findMatchingWorkflowRun,
   GitHubClient,
@@ -29,6 +30,7 @@ test("probe arguments keep the hosted check defaults and accept an output path",
     "lib/api-client-react/src/generated/api.schemas.ts",
   );
   assert.equal(options.workflow, ".github/workflows/api-codegen.yml");
+  assert.equal(options.compatibilityFile, "lib/api-spec/openapi.yaml");
   assert.equal(options.output, "test-results/probe.json");
   assert.equal(options.pollSeconds, 2);
   assert.equal(options.timeoutSeconds, 30);
@@ -69,6 +71,34 @@ test("stale generated content changes only the checked-in generated file", () =>
   assert.match(stale, /export const generated = true;/);
   assert.match(stale, /api-codegen stale-client event probe: probe-marker/);
   assert.equal(stale.endsWith("\n"), true);
+});
+
+test("compatibility fixture makes a deterministic API operation breaking", () => {
+  const content = [
+    "components:",
+    "  schemas:",
+    "    createRoom:",
+    "      type: string",
+    "paths:",
+    "  /other:",
+    "    post:",
+    "      operationId: createRoom",
+    "  /rooms:",
+    "    post:",
+    "      operationId: createRoom",
+    "",
+  ].join("\n");
+  const breaking = buildBreakingCompatibilityContent(content);
+
+  assert.match(breaking, /\/rooms:\n    post:\n      operationId: createRoomHostedProbe/);
+  assert.match(breaking, /\/other:\n    post:\n      operationId: createRoom/);
+});
+
+test("compatibility fixture rejects malformed YAML before probing for /rooms", () => {
+  assert.throws(
+    () => buildBreakingCompatibilityContent("paths:\n  /rooms:\n    post:\n      [\n"),
+    /invalid compatibility fixture YAML:/,
+  );
 });
 
 test("matching workflow runs are bound to the branch, head, pull request, and event time", () => {
@@ -209,9 +239,9 @@ test("a successful probe confirms cleanup before returning its hosted evidence",
     async getContent() {
       return {
         encoding: "base64",
-        content: Buffer.from("export const generated = true;\n").toString(
-          "base64",
-        ),
+        content: Buffer.from(
+          "paths:\n  /rooms:\n    post:\n      operationId: createRoom\n",
+        ).toString("base64"),
       };
     },
     async createBlob() {
@@ -253,6 +283,10 @@ test("a successful probe confirms cleanup before returning its hosted evidence",
                 name: "Verify generated API clients",
                 conclusion: "failure",
               },
+              {
+                name: "Check API contract compatibility",
+                conclusion: runId === 104 ? "success" : "failure",
+              },
             ],
           },
         ],
@@ -292,6 +326,19 @@ test("a successful probe confirms cleanup before returning its hosted evidence",
   assert.ok(
     result.events.every((event) => event.step.conclusion === "failure"),
   );
+  assert.deepEqual(
+    result.events.map((event) => event.compatibility.conclusion),
+    ["failure", "failure", "failure", "success"],
+  );
+  assert.equal(result.events[2].workflowRun.headSha, "synchronize-sha");
+  assert.equal(
+    result.events[3].workflowRun.headSha,
+    result.events[2].workflowRun.headSha,
+  );
+  const serializedEvidence = JSON.stringify(result);
+  assert.doesNotMatch(serializedEvidence, /API_BREAKING_CHANGE_/);
+  assert.doesNotMatch(serializedEvidence, /Edited-event marker/);
+  assert.doesNotMatch(serializedEvidence, /Hosted description-edit/);
   assert.ok(result.events.every((event) => event.job.url.endsWith("/job/100")));
   assert.equal(updates.length, 4);
   assert.deepEqual(updates[0], {

@@ -25,6 +25,12 @@ const workflow = YAML.parse(
     "utf8",
   ),
 );
+const mobileReleaseWorkflow = YAML.parse(
+  readFileSync(
+    path.join(workspaceRoot, ".github/workflows/mobile-release.yml"),
+    "utf8",
+  ),
+);
 const workflowText = readFileSync(
   path.join(
     workspaceRoot,
@@ -37,6 +43,12 @@ const fixturePath = path.join(
   "scripts/tests/native-evidence-summary-regression-fixture.sh",
 );
 const fixtureText = readFileSync(fixturePath, "utf8");
+
+function schedulesHostedSummaryFor(changedPaths) {
+  return changedPaths.some((changedPath) =>
+    workflow.on.pull_request.paths.includes(changedPath),
+  );
+}
 
 test("hosted summary regression checks only the reviewed ref", () => {
   assert.deepEqual(Object.keys(workflow.on), [
@@ -178,6 +190,53 @@ test("hosted summary regression checks only the reviewed ref", () => {
   );
 });
 
+test("hosted summary path filtering leaves mobile release ownership intact", () => {
+  const unrelatedMobileReleaseChanges = [
+    [".github/workflows/mobile-release.yml"],
+    ["scripts/provision-android-runner.sh"],
+    ["scripts/provision-ios-runner.sh"],
+    ["scripts/check-android-release-runner-health.sh"],
+    [
+      ".github/workflows/mobile-release.yml",
+      "scripts/provision-android-runner.sh",
+    ],
+  ];
+
+  for (const changedPaths of unrelatedMobileReleaseChanges) {
+    assert.equal(
+      schedulesHostedSummaryFor(changedPaths),
+      false,
+      `hosted summary must stay unscheduled for ${changedPaths.join(", ")}`,
+    );
+  }
+
+  for (const scopedPath of workflow.on.pull_request.paths) {
+    assert.equal(
+      schedulesHostedSummaryFor([scopedPath]),
+      true,
+      `hosted summary must schedule for its scoped path ${scopedPath}`,
+    );
+  }
+
+  assert.deepEqual(
+    Object.keys(mobileReleaseWorkflow.jobs).filter((jobId) =>
+      [
+        "android-release-runner-health",
+        "native-ios",
+        "native-android",
+        "mobile-publish",
+      ].includes(jobId),
+    ),
+    [
+      "android-release-runner-health",
+      "native-ios",
+      "native-android",
+      "mobile-publish",
+    ],
+    "mobile release workflow must retain native runner and publishing ownership",
+  );
+});
+
 test("hosted summary regression cannot publish or start native jobs", () => {
   assert.doesNotMatch(workflowText, /self-hosted/);
   assert.doesNotMatch(workflowText, /\bpublish\b/i);
@@ -192,6 +251,9 @@ test("hosted summary keeps revision metadata when the checker fails", () => {
   const summaryPath = path.join(fixtureRoot, "job-summary.md");
   const checkerPath = path.join(fixtureRoot, "synthetic-checker.sh");
   const reviewedRef = "synthetic-reviewed-ref";
+  const secretSentinel =
+    "synthetic-secret-that-must-not-reach-summary-metadata";
+  const evidenceSentinel = "synthetic-evidence-derived-value";
   const resolvedCommitSha = execFileSync(
     "git",
     ["rev-parse", "--verify", "HEAD"],
@@ -212,41 +274,70 @@ test("hosted summary keeps revision metadata when the checker fails", () => {
         '  echo "- Validated run directory: **Unavailable**"',
         '  echo "- Detailed evidence report: **Unavailable**"',
         '  echo "### Blocking evidence findings"',
-        "  printf -- '- `Missing result directory: %s/ios. Run the ios native large-text gate and upload its timestamped result directory.`\\n' \"$blocked_root\"",
+        '  printf -- \'- `Missing result directory: %s/ios. Run the ios native large-text gate and upload its timestamped result directory (%s).`\\n\' "$blocked_root" "$EVIDENCE_SENTINEL"',
         '  echo "## Android native large-text evidence"',
         '  echo "- Status: **FAIL**"',
         '  echo "- Validated run directory: **Unavailable**"',
         '  echo "- Detailed evidence report: **Unavailable**"',
         '  echo "### Blocking evidence findings"',
-        "  printf -- '- `Missing result directory: %s/android. Run the android native large-text gate and upload its timestamped result directory.`\\n' \"$blocked_root\"",
+        '  printf -- \'- `Missing result directory: %s/android. Run the android native large-text gate and upload its timestamped result directory (%s).`\\n\' "$blocked_root" "$EVIDENCE_SENTINEL"',
         '} >> "$GITHUB_STEP_SUMMARY"',
         "exit 41",
         "",
       ].join("\n"),
       "utf8",
     );
-    const result = spawnSync(
-      "bash",
-      [fixturePath, "bash", checkerPath],
-      {
-        cwd: workspaceRoot,
-        env: {
-          ...process.env,
-          GITHUB_STEP_SUMMARY: summaryPath,
-          REVIEWED_REF: reviewedRef,
-        },
-        encoding: "utf8",
+    const result = spawnSync("bash", [fixturePath, "bash", checkerPath], {
+      cwd: workspaceRoot,
+      env: {
+        ...process.env,
+        GITHUB_STEP_SUMMARY: summaryPath,
+        REVIEWED_REF: reviewedRef,
+        SECRET_SENTINEL: secretSentinel,
+        EVIDENCE_SENTINEL: evidenceSentinel,
       },
-    );
+      encoding: "utf8",
+    });
 
     assert.equal(result.status, 0, result.stderr);
     const summary = readFileSync(summaryPath, "utf8");
+    const checkerOutputMarker = "<!-- synthetic checker output -->";
+    const checkerOutputIndex = summary.indexOf(checkerOutputMarker);
+    assert.ok(
+      checkerOutputIndex >= 0,
+      "synthetic checker output must be appended",
+    );
+    const trustedMetadata = summary.slice(0, checkerOutputIndex);
+    assert.equal(
+      trustedMetadata,
+      [
+        "## Reviewed release revision",
+        `- Checked ref: \`${reviewedRef}\``,
+        `- Resolved commit SHA: \`${resolvedCommitSha}\``,
+        "",
+      ].join("\n"),
+      "revision metadata must be an exact, trusted-only block",
+    );
+    assert.doesNotMatch(
+      trustedMetadata,
+      new RegExp(`${secretSentinel}|${evidenceSentinel}|blocked_root`),
+      "revision metadata must not use secret or evidence-derived values",
+    );
     assert.match(
       summary,
       new RegExp(`- Checked ref: \`${reviewedRef}\``),
     );
-    assert.match(summary, new RegExp(`- Resolved commit SHA: \`${resolvedCommitSha}\``));
+    assert.match(
+      summary,
+      new RegExp(`- Resolved commit SHA: \`${resolvedCommitSha}\``),
+    );
     assert.match(summary, /<!-- synthetic checker output -->/);
+    assert.doesNotMatch(
+      summary,
+      new RegExp(secretSentinel),
+      "synthetic secret must not be published anywhere in the summary",
+    );
+    assert.match(summary, new RegExp(evidenceSentinel));
     assert.match(summary, /## iOS native large-text evidence/);
     assert.match(summary, /## Android native large-text evidence/);
     assert.ok(

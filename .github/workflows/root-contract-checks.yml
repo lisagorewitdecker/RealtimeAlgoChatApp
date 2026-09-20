@@ -1,0 +1,83 @@
+name: Root contract checks
+
+# Pull requests into main used to land files that did not even parse (duplicate
+# YAML keys in mobile-release.yml, a redeclared const in the API compatibility
+# test, bash syntax errors in the native evidence checker, a hand-edited
+# generated client) because nothing on GitHub ran this repository's root
+# contract suite. This workflow runs it, and its job is the required status
+# check for main in the repository ruleset.
+
+on:
+  pull_request:
+    branches: ["main"]
+  # Manual runs let a branch prove its head commit before that commit is
+  # pushed to main directly.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: root-contract-checks-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  root-contract-checks:
+    # Keep this display name synchronized with the required check in the repository ruleset.
+    name: Root contract checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out reviewed revision
+        id: checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      # The Android preview evidence tests draw screenshot fixtures with
+      # ImageMagick and read them back with Tesseract; GitHub's Ubuntu image
+      # ships neither.
+      - name: Install screenshot fixture and OCR tools
+        id: install-system-tools
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y \
+            fonts-dejavu-core imagemagick tesseract-ocr tesseract-ocr-eng
+          command -v convert >/dev/null
+          command -v tesseract >/dev/null
+          tesseract --list-langs 2>/dev/null | grep -Fxq "eng"
+
+      - name: Set up pnpm
+        id: setup-pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
+        with:
+          version: 10.26.1
+
+      - name: Set up Node.js
+        id: setup-node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install workspace dependencies
+        id: install-dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck the workspace
+        id: typecheck
+        run: pnpm run typecheck
+
+      # The remaining checks still run after an earlier check fails, so one run
+      # reports every failure a pull request has to fix.
+      - name: Run the root unit and contract tests
+        id: unit-tests
+        if: ${{ !cancelled() && steps.install-dependencies.outcome == 'success' }}
+        run: pnpm test:unit --run
+
+      - name: Validate generated API clients
+        id: api-codegen
+        if: ${{ !cancelled() && steps.install-dependencies.outcome == 'success' }}
+        run: pnpm run validate:api-codegen

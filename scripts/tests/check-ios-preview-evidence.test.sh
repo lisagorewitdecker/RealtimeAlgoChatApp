@@ -4,6 +4,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 CHECKER="$ROOT_DIR/scripts/check-ios-preview-evidence.sh"
+HANDOFF_DOC="$ROOT_DIR/artifacts/chat-app/docs/native-room-key-persistence-device-check.md"
 VALIDATOR="$ROOT_DIR/artifacts/chat-app/scripts/validate-preview-startup.mjs"
 TEST_PARENT="$(mktemp -d)"
 TEST_ROOT="$TEST_PARENT/fixtures"
@@ -39,6 +40,23 @@ assert_not_contains() {
     exit 1
   fi
 }
+
+handoff_doc="$(cat "$HANDOFF_DOC")"
+assert_contains "$handoff_doc" 'artifacts/chat-app/.expo/dev-request-evidence.log'
+assert_contains "$handoff_doc" 'The command reads the retained `.expo/dev-request-evidence.log` by default'
+assert_contains "$handoff_doc" 'EXPO_DEV_REQUEST_EVIDENCE_FILE'
+assert_contains "$handoff_doc" '--source <path>'
+assert_contains "$handoff_doc" '--timestamp "$(date -u +%Y%m%dT%H%M%SZ)"'
+assert_contains "$handoff_doc" 'artifacts/chat-app/test-results/encrypted-room-recovery/ios/<UTC timestamp>'
+assert_contains "$handoff_doc" 'platform=ios client=Expo Go'
+assert_contains "$handoff_doc" 'excluding `OPTIONS`'
+assert_contains "$handoff_doc" 'logs/native-ios-request-evidence.txt'
+assert_contains "$handoff_doc" 'never contain a host, URL, query string,'
+assert_contains "$handoff_doc" 'credentials, account data, or message content'
+assert_contains "$handoff_doc" 'do not retain the full host, URL, credentials, account identifiers, or'
+assert_contains "$handoff_doc" 'message content'
+assert_contains "$handoff_doc" 'Browser and curl probes retain their own client classes and'
+assert_contains "$handoff_doc" 'do not qualify as native iPhone evidence.'
 
 write_record() {
   local path="$1"
