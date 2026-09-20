@@ -165,6 +165,11 @@ const scriptContracts = {
       "java_version",
       "pnpm_version",
       "PNPM_VERSION",
+      // These are fixed, non-secret values from the shared iOS runner
+      // contract. They are safe to copy into bounded diagnostics.
+      "IOS_RUNNER_PNPM_VERSION",
+      "IOS_RUNNER_JAVA_MINIMUM_MAJOR",
+      "IOS_RUNNER_SIMULATOR_NAME",
     ],
     summaryFunction: "write_summary",
     evidenceDirectoryVariable: null,

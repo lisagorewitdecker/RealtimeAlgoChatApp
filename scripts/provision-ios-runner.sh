@@ -5,8 +5,8 @@
 # "native-ios").
 #
 # The script installs or verifies every prerequisite the job expects, boots the
-# iPhone SE (3rd generation) simulator, registers the GitHub Actions runner with
-# the exact labels the workflow selects, installs it as a launch agent that
+# configured iOS simulator, registers the GitHub Actions runner with the exact
+# labels the workflow selects, installs it as a launch agent that
 # keeps running across logins, and ends with a readiness report.
 #
 # Usage:
@@ -33,6 +33,8 @@ case "$SCRIPT_PATH" in
   *) SCRIPT_DIR="$(pwd)" ;;
 esac
 WORKSPACE_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
+# shellcheck source=ios-runner-contract.sh
+source "$SCRIPT_DIR/ios-runner-contract.sh"
 
 # Pinned GitHub Actions runner release. Update the version and both digests
 # together, and keep them in step with the Linux procedure in
@@ -42,9 +44,7 @@ RUNNER_SHA256_OSX_ARM64="5a2cd92908a93d7276a194e1de6008099f3e7946f3f8e14aa7a1a7b
 RUNNER_SHA256_OSX_X64="d383f505d7ed041b1873ab68c35dd766fc093f2252330f95bb427be8f2c6dcfc"
 
 # Toolchain the workflow's iOS job expects on the host.
-PNPM_VERSION="10.26.1"
 NODE_MAJOR_VERSION="24"
-JAVA_MINIMUM_MAJOR="17"
 
 # Runner identity. The labels must match the native-ios job's runs-on list.
 RUNNER_LABELS="self-hosted,macos,ios,smallest-simulator"
@@ -54,17 +54,14 @@ RUNNER_WORK_DIR="_work"
 GITHUB_REPOSITORY="${GITHUB_REPOSITORY:-lisagorewitdecker/RealtimeAlgoChatApp}"
 GITHUB_ENVIRONMENT="mobile-release"
 
-# Simulator the workflow verifies before running the gate.
-SIMULATOR_NAME="iPhone SE (3rd generation)"
-SIMULATOR_DEVICE_TYPE="com.apple.CoreSimulator.SimDeviceType.iPhone-SE-3rd-generation"
 SIMULATOR_AGENT_LABEL="actions.runner.${GITHUB_REPOSITORY//\//-}.ios-release-simulator"
 SIMULATOR_AGENT_PLIST="$HOME/Library/LaunchAgents/${SIMULATOR_AGENT_LABEL}.plist"
 
 # GitHub configuration the native-ios job reads. Names only; the script never
 # handles the values.
-IOS_JOB_ENVIRONMENT_SECRETS="NATIVE_SMOKE_IOS_APP_ID NATIVE_SMOKE_EMAIL NATIVE_SMOKE_PASSWORD SENTRY_AUTH_TOKEN NATIVE_SMOKE_IOS_SENTRY_RELEASE NATIVE_SMOKE_IOS_SENTRY_DIST"
+IOS_JOB_ENVIRONMENT_SECRETS="$IOS_RUNNER_REQUIRED_ENVIRONMENT_VALUES"
 IOS_JOB_OPTIONAL_SECRETS="NATIVE_SMOKE_DISPLAY_NAME"
-IOS_JOB_REPOSITORY_VARIABLES="NATIVE_SMOKE_IOS_BUILD_ID"
+IOS_JOB_REPOSITORY_VARIABLES="$IOS_RUNNER_REQUIRED_REPOSITORY_VARIABLES"
 
 DRY_RUN=0
 INSTALL_CANDIDATE=0
@@ -384,16 +381,16 @@ pnpm_version() {
 }
 
 activate_pnpm() {
-  corepack enable pnpm && corepack prepare "pnpm@${PNPM_VERSION}" --activate
+  corepack enable pnpm && corepack prepare "pnpm@${IOS_RUNNER_PNPM_VERSION}" --activate
 }
 
 check_pnpm() {
-  step "pnpm ${PNPM_VERSION}"
+  step "pnpm ${IOS_RUNNER_PNPM_VERSION}"
   export COREPACK_ENABLE_DOWNLOAD_PROMPT=0
   local found
   found="$(pnpm_version)"
-  if [[ "$found" != "$PNPM_VERSION" ]]; then
-    local activation="activate pnpm ${PNPM_VERSION} through corepack: corepack enable pnpm && corepack prepare pnpm@${PNPM_VERSION} --activate"
+  if [[ "$found" != "$IOS_RUNNER_PNPM_VERSION" ]]; then
+    local activation="activate pnpm ${IOS_RUNNER_PNPM_VERSION} through corepack: corepack enable pnpm && corepack prepare pnpm@${IOS_RUNNER_PNPM_VERSION} --activate"
     if have corepack; then
       run_action "$activation" activate_pnpm || true
     elif have npm; then
@@ -407,10 +404,10 @@ check_pnpm() {
     hash -r 2>/dev/null || true
     found="$(pnpm_version)"
   fi
-  if [[ "$found" == "$PNPM_VERSION" ]]; then
-    record "pnpm ${PNPM_VERSION}" READY "$(command -v pnpm)" core
+  if [[ "$found" == "$IOS_RUNNER_PNPM_VERSION" ]]; then
+    record "pnpm ${IOS_RUNNER_PNPM_VERSION}" READY "$(command -v pnpm)" core
   else
-    record "pnpm ${PNPM_VERSION}" MISSING "found ${found:-none}; expected ${PNPM_VERSION} (corepack prepare pnpm@${PNPM_VERSION} --activate)" core
+    record "pnpm ${IOS_RUNNER_PNPM_VERSION}" MISSING "found ${found:-none}; expected ${IOS_RUNNER_PNPM_VERSION} (corepack prepare pnpm@${IOS_RUNNER_PNPM_VERSION} --activate)" core
   fi
 }
 
@@ -424,21 +421,21 @@ java_major() {
 }
 
 check_java() {
-  step "Java ${JAVA_MINIMUM_MAJOR} or newer"
+  step "Java ${IOS_RUNNER_JAVA_MINIMUM_MAJOR} or newer"
   local java_bin="" major=""
 
   if ((IS_MACOS)) && [[ -x /usr/libexec/java_home ]]; then
     local home
-    home="$(/usr/libexec/java_home -v "${JAVA_MINIMUM_MAJOR}+" 2>/dev/null || true)"
+    home="$(/usr/libexec/java_home -v "${IOS_RUNNER_JAVA_MINIMUM_MAJOR}+" 2>/dev/null || true)"
     if [[ -n "$home" && -x "$home/bin/java" ]]; then
       java_bin="$home/bin/java"
       JAVA_HOME_DIR="$home"
     fi
   fi
   if [[ -z "$java_bin" && -n "$BREW_PREFIX" ]]; then
-    local keg="$BREW_PREFIX/opt/openjdk@${JAVA_MINIMUM_MAJOR}"
+    local keg="$BREW_PREFIX/opt/openjdk@${IOS_RUNNER_JAVA_MINIMUM_MAJOR}"
     if [[ ! -x "$keg/bin/java" ]]; then
-      attempt_brew_install "openjdk@${JAVA_MINIMUM_MAJOR}" || true
+      attempt_brew_install "openjdk@${IOS_RUNNER_JAVA_MINIMUM_MAJOR}" || true
     fi
     if [[ -x "$keg/bin/java" ]]; then
       java_bin="$keg/bin/java"
@@ -447,13 +444,13 @@ check_java() {
   fi
   if [[ -z "$java_bin" ]] && have java; then
     major="$(java_major java)"
-    if [[ -n "$major" && "$major" -ge "$JAVA_MINIMUM_MAJOR" ]]; then
+    if [[ -n "$major" && "$major" -ge "$IOS_RUNNER_JAVA_MINIMUM_MAJOR" ]]; then
       java_bin="$(command -v java)"
       JAVA_HOME_DIR="${JAVA_HOME:-$(cd -- "${java_bin%/*}/.." && pwd)}"
     fi
   fi
   if [[ -z "$java_bin" && -z "$BREW_PREFIX" ]]; then
-    attempt_brew_install "openjdk@${JAVA_MINIMUM_MAJOR}" || true
+    attempt_brew_install "openjdk@${IOS_RUNNER_JAVA_MINIMUM_MAJOR}" || true
   fi
 
   if [[ -n "$java_bin" ]]; then
@@ -461,9 +458,9 @@ check_java() {
     JAVA_BIN_DIR="${java_bin%/*}"
     export JAVA_HOME="$JAVA_HOME_DIR"
     export PATH="$JAVA_BIN_DIR:$PATH"
-    record "Java ${JAVA_MINIMUM_MAJOR} or newer" READY "Java ${major:-?} (${java_bin})" core
+    record "Java ${IOS_RUNNER_JAVA_MINIMUM_MAJOR} or newer" READY "Java ${major:-?} (${java_bin})" core
   else
-    record "Java ${JAVA_MINIMUM_MAJOR} or newer" MISSING "found ${major:-none}; brew install openjdk@${JAVA_MINIMUM_MAJOR}" core
+    record "Java ${IOS_RUNNER_JAVA_MINIMUM_MAJOR} or newer" MISSING "found ${major:-none}; brew install openjdk@${IOS_RUNNER_JAVA_MINIMUM_MAJOR}" core
   fi
 }
 
@@ -489,6 +486,29 @@ check_maestro() {
     fi
   else
     record "Maestro" MISSING "install with the official installer: bash -c \"\$(curl -fsSL https://get.maestro.mobile.dev)\"" core
+  fi
+}
+
+check_shared_release_commands() {
+  step "Shared iOS release tools"
+  if ((!IS_MACOS)); then
+    plan "verify the shared iOS release commands: ${IOS_RUNNER_REQUIRED_COMMANDS}"
+    return 0
+  fi
+
+  local command missing=""
+  for command in $IOS_RUNNER_REQUIRED_COMMANDS; do
+    if ! have "$command"; then
+      if [[ -n "$missing" ]]; then
+        missing="${missing}, "
+      fi
+      missing="${missing}${command}"
+    fi
+  done
+  if [[ -n "$missing" ]]; then
+    record "Shared iOS release tools" MISSING "missing: ${missing}" core
+  else
+    record "Shared iOS release tools" READY "$IOS_RUNNER_REQUIRED_COMMANDS" core
   fi
 }
 
@@ -545,7 +565,7 @@ check_playwright() {
 # (including its tolerance for trailing whitespace after the state).
 find_simulator_udid() {
   xcrun simctl list devices available 2>/dev/null |
-    sed -n 's/^[[:space:]]*iPhone SE (3rd generation) (\([0-9A-F-]\{8,\}\)) ('"$1"')[[:space:]]*$/\1/p' |
+    sed -n 's/^[[:space:]]*'"$IOS_RUNNER_SIMULATOR_NAME"' (\([0-9A-F-]\{8,\}\)) ('"$1"')[[:space:]]*$/\1/p' |
     tail -n 1
 }
 
@@ -618,7 +638,7 @@ ensure_simulator_agent() {
     record "Simulator boot launch agent" READY "$SIMULATOR_AGENT_PLIST"
     return 0
   fi
-  if run_action "write ${SIMULATOR_AGENT_PLIST} so '${SIMULATOR_NAME}' boots at every login, then load it: launchctl bootstrap gui/\$(id -u) ${SIMULATOR_AGENT_PLIST}" write_simulator_agent "$content"; then
+  if run_action "write ${SIMULATOR_AGENT_PLIST} so '${IOS_RUNNER_SIMULATOR_NAME}' boots at every login, then load it: launchctl bootstrap gui/\$(id -u) ${SIMULATOR_AGENT_PLIST}" write_simulator_agent "$content"; then
     if ((DRY_RUN)); then
       record "Simulator boot launch agent" MISSING "will be written to ${SIMULATOR_AGENT_PLIST}"
     else
@@ -630,16 +650,16 @@ ensure_simulator_agent() {
 }
 
 check_simulator() {
-  step "${SIMULATOR_NAME} simulator"
+  step "${IOS_RUNNER_SIMULATOR_NAME} simulator"
   if ((!IS_MACOS)); then
-    plan "locate '${SIMULATOR_NAME}', create it from ${SIMULATOR_DEVICE_TYPE} on the newest available iOS runtime when absent, and boot it: xcrun simctl boot <udid> && xcrun simctl bootstatus <udid> -b"
+    plan "locate '${IOS_RUNNER_SIMULATOR_NAME}', create it from ${IOS_RUNNER_SIMULATOR_DEVICE_TYPE} on the newest available iOS runtime when absent, and boot it: xcrun simctl boot <udid> && xcrun simctl bootstatus <udid> -b"
     plan "write ${SIMULATOR_AGENT_PLIST} so the simulator boots at every login"
-    record "Booted ${SIMULATOR_NAME}" SKIPPED "$SKIP_DETAIL" core
+    record "Booted ${IOS_RUNNER_SIMULATOR_NAME}" SKIPPED "$SKIP_DETAIL" core
     record "Simulator boot launch agent" SKIPPED "$SKIP_DETAIL"
     return 0
   fi
   if ((!XCODE_READY)); then
-    record "Booted ${SIMULATOR_NAME}" MISSING "requires Xcode with simctl" core
+    record "Booted ${IOS_RUNNER_SIMULATOR_NAME}" MISSING "requires Xcode with simctl" core
     record "Simulator boot launch agent" MISSING "written after the simulator is booted"
     return 0
   fi
@@ -651,13 +671,13 @@ check_simulator() {
     if [[ -z "$udid" ]]; then
       if [[ -n "$SIMULATOR_RUNTIME" ]]; then
         if ((DRY_RUN)); then
-          log "[dry-run] create '${SIMULATOR_NAME}': xcrun simctl create \"${SIMULATOR_NAME}\" ${SIMULATOR_DEVICE_TYPE} ${SIMULATOR_RUNTIME}"
+          log "[dry-run] create '${IOS_RUNNER_SIMULATOR_NAME}': xcrun simctl create \"${IOS_RUNNER_SIMULATOR_NAME}\" ${IOS_RUNNER_SIMULATOR_DEVICE_TYPE} ${SIMULATOR_RUNTIME}"
         else
-          log "Creating '${SIMULATOR_NAME}' on ${SIMULATOR_RUNTIME}..."
+          log "Creating '${IOS_RUNNER_SIMULATOR_NAME}' on ${SIMULATOR_RUNTIME}..."
           # simctl's reason for refusing (for example a device type that the
           # installed Xcode no longer offers) belongs in the report row.
           create_stderr="$(mktemp)"
-          udid="$(xcrun simctl create "$SIMULATOR_NAME" "$SIMULATOR_DEVICE_TYPE" "$SIMULATOR_RUNTIME" 2>"$create_stderr" || true)"
+          udid="$(xcrun simctl create "$IOS_RUNNER_SIMULATOR_NAME" "$IOS_RUNNER_SIMULATOR_DEVICE_TYPE" "$SIMULATOR_RUNTIME" 2>"$create_stderr" || true)"
           if [[ -z "$udid" ]]; then
             create_error="$(tr '\n' ' ' <"$create_stderr" | sed 's/[[:space:]]*$//')"
             log "simctl create failed${create_error:+: ${create_error}}"
@@ -667,7 +687,7 @@ check_simulator() {
       fi
     fi
     if [[ -n "$udid" ]]; then
-      run_action "boot ${SIMULATOR_NAME} (${udid}): xcrun simctl boot ${udid} && xcrun simctl bootstatus ${udid} -b" boot_simulator "$udid" || true
+      run_action "boot ${IOS_RUNNER_SIMULATOR_NAME} (${udid}): xcrun simctl boot ${udid} && xcrun simctl bootstatus ${udid} -b" boot_simulator "$udid" || true
     elif ((DRY_RUN)); then
       plan "boot the created simulator: xcrun simctl boot <udid> && xcrun simctl bootstatus <udid> -b"
     fi
@@ -675,17 +695,17 @@ check_simulator() {
 
   SIMULATOR_UDID="$(find_simulator_udid Booted)"
   if [[ -n "$SIMULATOR_UDID" ]]; then
-    record "Booted ${SIMULATOR_NAME}" READY "$SIMULATOR_UDID" core
+    record "Booted ${IOS_RUNNER_SIMULATOR_NAME}" READY "$SIMULATOR_UDID" core
     ensure_simulator_agent
   else
     if ((DRY_RUN)) && [[ -n "$udid" ]]; then
-      record "Booted ${SIMULATOR_NAME}" MISSING "will be booted (${udid})" core
+      record "Booted ${IOS_RUNNER_SIMULATOR_NAME}" MISSING "will be booted (${udid})" core
     elif ((DRY_RUN)); then
-      record "Booted ${SIMULATOR_NAME}" MISSING "will be created on ${SIMULATOR_RUNTIME:-an iOS runtime} and booted" core
+      record "Booted ${IOS_RUNNER_SIMULATOR_NAME}" MISSING "will be created on ${SIMULATOR_RUNTIME:-an iOS runtime} and booted" core
     elif [[ -n "$create_error" ]]; then
-      record "Booted ${SIMULATOR_NAME}" MISSING "xcrun simctl create ${SIMULATOR_DEVICE_TYPE} on ${SIMULATOR_RUNTIME} failed: ${create_error}" core
+      record "Booted ${IOS_RUNNER_SIMULATOR_NAME}" MISSING "xcrun simctl create ${IOS_RUNNER_SIMULATOR_DEVICE_TYPE} on ${SIMULATOR_RUNTIME} failed: ${create_error}" core
     else
-      record "Booted ${SIMULATOR_NAME}" MISSING "no booted '${SIMULATOR_NAME}'; check 'xcrun simctl list devices available' and the runtime row above" core
+      record "Booted ${IOS_RUNNER_SIMULATOR_NAME}" MISSING "no booted '${IOS_RUNNER_SIMULATOR_NAME}'; check 'xcrun simctl list devices available' and the runtime row above" core
     fi
     record "Simulator boot launch agent" MISSING "written after the simulator is booted"
   fi
@@ -731,7 +751,7 @@ install_candidate_bundle() {
 
 check_candidate() {
   step "Release candidate on the simulator"
-  CANDIDATE_BUNDLE_ID="${NATIVE_SMOKE_IOS_APP_ID:-}"
+  CANDIDATE_BUNDLE_ID="${!IOS_RUNNER_CANDIDATE_APP_ID_ENVIRONMENT_VALUE:-}"
   if ((INSTALL_CANDIDATE)); then
     if [[ -z "${NATIVE_SMOKE_IOS_APP_PATH:-}" ]]; then
       die "Set NATIVE_SMOKE_IOS_APP_PATH to the candidate .app bundle or EAS simulator .tar.gz before using --install-candidate."
@@ -756,7 +776,7 @@ check_candidate() {
     run_action "install the candidate from NATIVE_SMOKE_IOS_APP_PATH on ${SIMULATOR_UDID}: xcrun simctl install ${SIMULATOR_UDID} <candidate.app>" install_candidate_bundle || true
   fi
   if [[ -z "$CANDIDATE_BUNDLE_ID" ]]; then
-    record "Release candidate installed" MISSING "not verified: export NATIVE_SMOKE_IOS_APP_ID (the bundle identifier) or use --install-candidate"
+    record "Release candidate installed" MISSING "not verified: export ${IOS_RUNNER_CANDIDATE_APP_ID_ENVIRONMENT_VALUE} (the bundle identifier) or use --install-candidate"
     return 0
   fi
   local container
@@ -765,7 +785,7 @@ check_candidate() {
     record "Release candidate installed" MISSING "not installed on ${SIMULATOR_UDID}; use --install-candidate with NATIVE_SMOKE_IOS_APP_PATH"
     return 0
   fi
-  if ! LC_ALL=C grep -aR -Fq "SENTRY_RELEASE_PREFLIGHT_PASSED_V1" "$container"; then
+  if ! LC_ALL=C grep -aR -Fq "$IOS_RUNNER_CANDIDATE_PREFLIGHT_MARKER" "$container"; then
     record "Release candidate installed" MISSING "installed, but it lacks crash-reporting preflight evidence; rebuild with SENTRY_DSN or EXPO_PUBLIC_SENTRY_DSN configured"
     return 0
   fi
@@ -1320,6 +1340,7 @@ check_pnpm
 check_java
 check_maestro
 check_playwright
+check_shared_release_commands
 check_simulator
 check_candidate
 if ((SKIP_REGISTRATION)); then
@@ -1338,7 +1359,7 @@ offer_github_check
 
 printf '\n'
 log "RUNNER_VERSION=${RUNNER_VERSION}"
-log "PNPM_VERSION=${PNPM_VERSION}"
+log "PNPM_VERSION=${IOS_RUNNER_PNPM_VERSION}"
 log "RUNNER_NAME=${RUNNER_NAME}"
 log "RUNNER_LABELS=${RUNNER_LABELS}"
 log "IOS_RELEASE_RUNNER=${OVERALL}"

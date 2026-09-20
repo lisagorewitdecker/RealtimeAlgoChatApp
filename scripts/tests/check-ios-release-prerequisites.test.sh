@@ -5,7 +5,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 WORKSPACE_ROOT="$(cd -- "$SCRIPT_DIR/../.." && pwd)"
 PREFLIGHT="$WORKSPACE_ROOT/scripts/check-ios-release-prerequisites.sh"
-BASH_BIN="$(command -v bash)"
+CONTRACT="$WORKSPACE_ROOT/scripts/ios-runner-contract.sh"
+BASH_BIN="${IOS_RUNNER_TEST_BASH:-${PROVISION_TEST_BASH:-$(command -v bash)}}"
 ENV_BIN="$(command -v env)"
 GREP_BIN="$(command -v grep)"
 LN_BIN="$(command -v ln)"
@@ -34,6 +35,25 @@ fail() {
   printf '%s\n' "$1" >&2
   exit 1
 }
+
+[[ -x "$BASH_BIN" ]] || fail "IOS_RUNNER_TEST_BASH/PROVISION_TEST_BASH is not an executable bash: $BASH_BIN"
+source "$CONTRACT"
+for mac_script in "$CONTRACT" "$PREFLIGHT"; do
+  "$BASH_BIN" -n "$mac_script" ||
+    fail "Bash 3.2 syntax check failed for $mac_script"
+done
+grep -Fq -- 'source "$SCRIPT_DIR/ios-runner-contract.sh"' "$PREFLIGHT" ||
+  fail "iOS release preflight does not source the shared runner contract."
+grep -Fq -- 'for command in $IOS_RUNNER_REQUIRED_COMMANDS' "$PREFLIGHT" ||
+  fail "iOS release preflight does not consume the shared command contract."
+grep -Fq -- 'for value in $IOS_RUNNER_REQUIRED_RELEASE_VALUES' "$PREFLIGHT" ||
+  fail "iOS release preflight does not consume the shared release-value contract."
+grep -Fq -- '$IOS_RUNNER_CANDIDATE_PREFLIGHT_MARKER' "$PREFLIGHT" ||
+  fail "iOS release preflight does not consume the shared candidate marker."
+grep -Fq -- 'IOS_RUNNER_CANDIDATE_APP_ID_ENVIRONMENT_VALUE' "$PREFLIGHT" ||
+  fail "iOS release preflight does not consume the shared candidate app-ID contract."
+[[ "$IOS_RUNNER_REQUIRED_COMMANDS" == "xcrun pnpm java maestro" ]] ||
+  fail "Shared iOS runner command contract mismatch: expected xcrun pnpm java maestro; found '$IOS_RUNNER_REQUIRED_COMMANDS'"
 
 assert_contains() {
   local output="$1"
@@ -110,10 +130,10 @@ if [[ "\${1:-}" == "simctl" && "\${2:-}" == "list" ]]; then
   if [[ "\${IOS_DEVICE_MODE:-ready}" == "wrong" ]]; then
     printf '    iPhone 14 (00000000-0000-0000-0000-000000000000) (Booted)\n'
   elif [[ "\${IOS_DEVICE_MODE:-ready}" == "ready" ]]; then
-    printf '    iPhone SE (3rd generation) (ABCDEF12-3456-7890-ABCD-EF1234567890) (Booted)\n'
+      printf '    %s (ABCDEF12-3456-7890-ABCD-EF1234567890) (Booted)\n' "${IOS_RUNNER_SIMULATOR_NAME}"
   elif [[ "\${IOS_DEVICE_MODE:-ready}" == "padded" ]]; then
     # Real simctl output pads device rows with trailing spaces.
-    printf '    iPhone SE (3rd generation) (ABCDEF12-3456-7890-ABCD-EF1234567890) (Booted)   \n'
+      printf '    %s (ABCDEF12-3456-7890-ABCD-EF1234567890) (Booted)   \n' "${IOS_RUNNER_SIMULATOR_NAME}"
   fi
   exit 0
 fi
@@ -159,9 +179,9 @@ utilities="$test_root/utilities"
 candidate_container="$test_root/candidate-container"
 "$MKDIR_BIN" -p "$candidate_container"
 printf 'plist\n' >"$candidate_container/Info.plist"
-printf 'SENTRY_RELEASE_PREFLIGHT_PASSED_V1\n' >"$candidate_container/evidence.bin"
+printf '%s\n' "${IOS_RUNNER_CANDIDATE_PREFLIGHT_MARKER}" >"$candidate_container/evidence.bin"
 make_utilities "$utilities"
-make_runner_commands "$ready_commands" "17.0.13" "10.26.1"
+make_runner_commands "$ready_commands" "17.0.13" "$IOS_RUNNER_PNPM_VERSION"
 ready_path="$ready_commands:$utilities"
 
 secret_values="
@@ -203,14 +223,7 @@ missing_values_output="$(
     IOS_CANDIDATE_MODE=installed \
     IOS_APP_CONTAINER="$candidate_container"
 )"
-for missing_value in \
-  NATIVE_SMOKE_IOS_APP_ID \
-  NATIVE_SMOKE_EMAIL \
-  NATIVE_SMOKE_PASSWORD \
-  SENTRY_AUTH_TOKEN \
-  NATIVE_SMOKE_IOS_SENTRY_RELEASE \
-  NATIVE_SMOKE_IOS_SENTRY_DIST \
-  NATIVE_SMOKE_IOS_BUILD_ID; do
+for missing_value in $IOS_RUNNER_REQUIRED_RELEASE_VALUES; do
   assert_contains \
     "$missing_values_output" \
     "Required release value is missing: $missing_value"
@@ -219,7 +232,7 @@ assert_contains "$(<"$test_root/missing-values-summary.md")" "Status: **BLOCKED*
 
 old_java_output="$(
   old_java_commands="$test_root/old-java-commands"
-  make_runner_commands "$old_java_commands" "11.0.24" "10.26.1"
+  make_runner_commands "$old_java_commands" "11.0.24" "$IOS_RUNNER_PNPM_VERSION"
   run_case old-java 2 "$old_java_commands:$utilities" \
     GITHUB_STEP_SUMMARY="$test_root/old-java-summary.md" \
     IOS_DEVICE_MODE=ready \
@@ -233,7 +246,9 @@ old_java_output="$(
     NATIVE_SMOKE_IOS_SENTRY_DIST=ios-sentry-dist-secret-sentinel \
     NATIVE_SMOKE_IOS_BUILD_ID=ios-build-id-secret-sentinel
 )"
-assert_contains "$old_java_output" "Java 17 or newer is required; found Java 11.0.24."
+assert_contains \
+  "$old_java_output" \
+  "Java ${IOS_RUNNER_JAVA_MINIMUM_MAJOR} or newer is required; found Java 11.0.24."
 assert_not_contains "$old_java_output" "smoke-password-secret-sentinel"
 
 wrong_pnpm_output="$(
@@ -251,7 +266,9 @@ wrong_pnpm_output="$(
     NATIVE_SMOKE_IOS_SENTRY_DIST=ios-sentry-dist-secret-sentinel \
     NATIVE_SMOKE_IOS_BUILD_ID=ios-build-id-secret-sentinel
 )"
-assert_contains "$wrong_pnpm_output" "Required pnpm 10.26.1; found 9.15.0."
+assert_contains \
+  "$wrong_pnpm_output" \
+  "Required pnpm ${IOS_RUNNER_PNPM_VERSION}; found 9.15.0."
 assert_not_contains "$wrong_pnpm_output" "sentry-auth-token-secret-sentinel"
 
 wrong_device_output="$(
@@ -269,7 +286,7 @@ wrong_device_output="$(
 )"
 assert_contains \
   "$wrong_device_output" \
-  "A booted iPhone SE (3rd generation) is required on the iOS runner."
+  "A booted ${IOS_RUNNER_SIMULATOR_NAME} is required on the iOS runner."
 assert_not_contains "$wrong_device_output" "ios-app-id-secret-sentinel"
 
 padded_device_output="$(
@@ -289,7 +306,7 @@ padded_device_output="$(
 assert_contains "$padded_device_output" "IOS_RELEASE_PREFLIGHT=READY"
 assert_not_contains \
   "$padded_device_output" \
-  "A booted iPhone SE (3rd generation) is required on the iOS runner."
+  "A booted ${IOS_RUNNER_SIMULATOR_NAME} is required on the iOS runner."
 
 missing_candidate_output="$(
   run_case missing-candidate 2 "$ready_path" \
@@ -331,7 +348,7 @@ assert_contains \
 assert_not_contains "$no_marker_output" "ios-sentry-release-secret-sentinel"
 
 missing_tool_commands="$test_root/missing-tool-commands"
-make_runner_commands "$missing_tool_commands" "17.0.13" "10.26.1"
+make_runner_commands "$missing_tool_commands" "17.0.13" "$IOS_RUNNER_PNPM_VERSION"
 "$RM_BIN" "$missing_tool_commands/maestro"
 missing_tool_output="$(
   run_case missing-tool 2 "$missing_tool_commands:$utilities" \

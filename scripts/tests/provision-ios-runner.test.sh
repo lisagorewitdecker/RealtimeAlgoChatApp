@@ -11,6 +11,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 WORKSPACE_ROOT="$(cd -- "$SCRIPT_DIR/../.." && pwd)"
 PROVISION="$WORKSPACE_ROOT/scripts/provision-ios-runner.sh"
+CONTRACT="$WORKSPACE_ROOT/scripts/ios-runner-contract.sh"
 WORKFLOW="$WORKSPACE_ROOT/.github/workflows/mobile-release.yml"
 DOCS="$WORKSPACE_ROOT/artifacts/chat-app/docs/native-large-text-device-check.md"
 API_SERVER_MANIFEST="$WORKSPACE_ROOT/artifacts/api-server/package.json"
@@ -43,6 +44,28 @@ fail() {
   printf '%s\n' "$*" >&2
   exit 1
 }
+
+source "$CONTRACT"
+for mac_script in "$CONTRACT" "$PROVISION"; do
+  "$BASH_BIN" -n "$mac_script" ||
+    fail "Bash 3.2 syntax check failed for $mac_script"
+done
+grep -Fq -- 'source "$SCRIPT_DIR/ios-runner-contract.sh"' "$PROVISION" ||
+  fail "iOS runner provisioning does not source the shared runner contract."
+grep -Fq -- 'IOS_RUNNER_PNPM_VERSION' "$PROVISION" ||
+  fail "iOS runner provisioning does not consume the shared pnpm contract."
+grep -Fq -- 'IOS_RUNNER_JAVA_MINIMUM_MAJOR' "$PROVISION" ||
+  fail "iOS runner provisioning does not consume the shared Java contract."
+grep -Fq -- 'IOS_RUNNER_SIMULATOR_NAME' "$PROVISION" ||
+  fail "iOS runner provisioning does not consume the shared simulator-name contract."
+grep -Fq -- 'IOS_RUNNER_SIMULATOR_DEVICE_TYPE' "$PROVISION" ||
+  fail "iOS runner provisioning does not consume the shared simulator-device contract."
+grep -Fq -- 'IOS_RUNNER_CANDIDATE_PREFLIGHT_MARKER' "$PROVISION" ||
+  fail "iOS runner provisioning does not consume the shared candidate marker."
+grep -Fq -- 'IOS_RUNNER_CANDIDATE_APP_ID_ENVIRONMENT_VALUE' "$PROVISION" ||
+  fail "iOS runner provisioning does not consume the shared candidate app-ID contract."
+grep -Fq -- 'for command in $IOS_RUNNER_REQUIRED_COMMANDS' "$PROVISION" ||
+  fail "iOS runner provisioning does not consume the shared command contract."
 
 # ---------------------------------------------------------------------------
 # Expected values, read from the workflow, the docs, and the API package so
@@ -80,6 +103,21 @@ done <<<"$(sed -n 's/.*vars\.\([A-Z_][A-Z0-9_]*\).*/\1/p' "$WORKFLOW" | sort -u)
 
 expected_pnpm="$(sed -n 's/^  PNPM_VERSION: \([0-9][0-9.]*\)$/\1/p' "$WORKFLOW" | head -n 1)"
 [[ -n "$expected_pnpm" ]] || fail "could not read PNPM_VERSION from $WORKFLOW"
+[[ "$expected_pnpm" == "$IOS_RUNNER_PNPM_VERSION" ]] ||
+  fail "Workflow PNPM_VERSION disagrees with the shared iOS runner contract: workflow '$expected_pnpm', contract '$IOS_RUNNER_PNPM_VERSION'"
+
+expected_required_secrets="$(
+  printf '%s\n' "$expected_secrets" |
+    grep -v '^NATIVE_SMOKE_DISPLAY_NAME$' |
+    sort
+)"
+contract_required_secrets="$(printf '%s\n' $IOS_RUNNER_REQUIRED_ENVIRONMENT_VALUES | sort)"
+[[ "$expected_required_secrets" == "$contract_required_secrets" ]] ||
+  fail "native-ios required secrets disagree with the shared iOS runner contract: workflow '$expected_required_secrets', contract '$contract_required_secrets'"
+expected_variables="$(printf '%s\n' "$expected_variables" | sort)"
+contract_variables="$(printf '%s\n' $IOS_RUNNER_REQUIRED_REPOSITORY_VARIABLES | sort)"
+[[ "$expected_variables" == "$contract_variables" ]] ||
+  fail "native-ios repository variables disagree with the shared iOS runner contract: workflow '$expected_variables', contract '$contract_variables'"
 
 expected_runner_version="$(sed -n 's/^RUNNER_VERSION=\([0-9][0-9.]*\)$/\1/p' "$DOCS" | sort -u)"
 [[ "$expected_runner_version" == [0-9]*.[0-9]*.[0-9]* && "$expected_runner_version" != *$'\n'* ]] ||
@@ -260,15 +298,15 @@ assert_contains "$bare_output" "./svc.sh install && ./svc.sh start"
 assert_contains "$bare_output" "/.maestro/bin"
 assert_contains "$bare_output" "brew install node@24"
 assert_contains "$bare_output" "corepack prepare pnpm@${expected_pnpm} --activate"
-assert_contains "$bare_output" "brew install openjdk@17"
+assert_contains "$bare_output" "brew install openjdk@${IOS_RUNNER_JAVA_MINIMUM_MAJOR}"
 assert_contains "$bare_output" "https://get.maestro.mobile.dev"
 assert_contains "$bare_output" "pnpm dlx playwright@${expected_playwright} install chromium"
 assert_contains "$bare_output" "xcrun simctl bootstatus"
 assert_contains "$bare_output" "| Xcode with simctl | SKIPPED |"
-assert_contains "$bare_output" "| Booted iPhone SE (3rd generation) | SKIPPED |"
+assert_contains "$bare_output" "| Booted ${IOS_RUNNER_SIMULATOR_NAME} | SKIPPED |"
 assert_contains "$bare_output" "| Node.js 24 | MISSING |"
 assert_contains "$bare_output" "| pnpm ${expected_pnpm} | MISSING |"
-assert_contains "$bare_output" "| Java 17 or newer | MISSING |"
+assert_contains "$bare_output" "| Java ${IOS_RUNNER_JAVA_MINIMUM_MAJOR} or newer | MISSING |"
 assert_contains "$bare_output" "| Maestro | MISSING |"
 assert_contains "$bare_output" "| GitHub Actions runner ${expected_runner_version} | MISSING |"
 assert_contains "$bare_output" "| Runner registered | MISSING |"
@@ -304,12 +342,12 @@ toolchain_output="$(
 
 assert_contains "$toolchain_output" "| Node.js 24 | READY | v24.13.0"
 assert_contains "$toolchain_output" "| pnpm ${expected_pnpm} | READY |"
-assert_contains "$toolchain_output" "| Java 17 or newer | READY | Java 17"
+assert_contains "$toolchain_output" "| Java ${IOS_RUNNER_JAVA_MINIMUM_MAJOR} or newer | READY | Java ${IOS_RUNNER_JAVA_MINIMUM_MAJOR}"
 assert_contains "$toolchain_output" "| Maestro | READY | 1.41.0"
 assert_contains "$toolchain_output" "| Playwright Chromium | READY |"
 assert_not_contains "$toolchain_output" "brew install node@24"
 assert_not_contains "$toolchain_output" "corepack prepare"
-assert_not_contains "$toolchain_output" "brew install openjdk@17"
+assert_not_contains "$toolchain_output" "brew install openjdk@${IOS_RUNNER_JAVA_MINIMUM_MAJOR}"
 assert_not_contains "$toolchain_output" "install Maestro"
 assert_not_contains "$toolchain_output" "pnpm dlx playwright"
 assert_contains "$toolchain_output" "IOS_RELEASE_RUNNER=INCOMPLETE"
@@ -325,7 +363,9 @@ old_java_output="$(
   run_case old-java-dry-run 0 "$old_java:$utilities" "$test_root/home-old-java" \
     -- --dry-run
 )"
-assert_contains "$old_java_output" "| Java 17 or newer | MISSING | found 11;"
+assert_contains \
+  "$old_java_output" \
+  "| Java ${IOS_RUNNER_JAVA_MINIMUM_MAJOR} or newer | MISSING | found 11;"
 
 # ---------------------------------------------------------------------------
 # run_sourced <name> <expected status> <PATH> <HOME> [VAR=value ...] -- <snippet>
@@ -669,11 +709,14 @@ case "\$*" in
     printf '== Devices ==\\n-- iOS 26.0 --\\n'
     printf '    iPhone 17 (11111111-2222-3333-4444-555555555555) (Shutdown) \\n'
     if [[ -z "\${XCRUN_NO_SE:-}" ]]; then
-      printf '    iPhone SE (3rd generation) (%s) (%s) \\n' "\$SIM_UDID" "\$state"
+      printf '    %s (%s) (%s) \\n' "${IOS_RUNNER_SIMULATOR_NAME}" "\$SIM_UDID" "\$state"
     fi
     ;;
+  "simctl get_app_container "*)
+    printf '%s\\n' "\$CANDIDATE_CONTAINER"
+    ;;
   "simctl create "*)
-    printf 'Invalid device type: com.apple.CoreSimulator.SimDeviceType.iPhone-SE-3rd-generation\\n' >&2
+    printf 'Invalid device type: %s\\n' "${IOS_RUNNER_SIMULATOR_DEVICE_TYPE}" >&2
     exit 161
     ;;
   "simctl boot "*) : >"\$XCRUN_BOOTED" ;;
@@ -705,7 +748,7 @@ macos_output="$(
 )"
 assert_contains "$macos_output" "[READY] Xcode with simctl: /Applications/Xcode.app/Contents/Developer"
 assert_contains "$macos_output" "[READY] iOS simulator runtime: com.apple.CoreSimulator.SimRuntime.iOS-26-0"
-assert_contains "$macos_output" "[READY] Booted iPhone SE (3rd generation): ${simulator_udid}"
+assert_contains "$macos_output" "[READY] Booted ${IOS_RUNNER_SIMULATOR_NAME}: ${simulator_udid}"
 assert_contains "$macos_output" "[READY] Simulator boot launch agent: ${macos_home}/Library/LaunchAgents/actions.runner."
 assert_not_contains "$(cat "$test_root/xcrun-macos.log")" "simctl create"
 assert_contains "$(cat "$test_root/xcrun-macos.log")" "simctl boot ${simulator_udid}"
@@ -722,9 +765,13 @@ macos_create_output="$(
     XCRUN_NO_SE=1 LAUNCHCTL_LOG="$test_root/launchctl-macos-create.log" SIM_UDID="$simulator_udid" \
     -- 'DRY_RUN=0; check_xcode; check_simulator'
 )"
-assert_contains "$macos_create_output" "[MISSING] Booted iPhone SE (3rd generation): xcrun simctl create com.apple.CoreSimulator.SimDeviceType.iPhone-SE-3rd-generation on com.apple.CoreSimulator.SimRuntime.iOS-26-0 failed: Invalid device type: com.apple.CoreSimulator.SimDeviceType.iPhone-SE-3rd-generation"
+assert_contains \
+  "$macos_create_output" \
+  "[MISSING] Booted ${IOS_RUNNER_SIMULATOR_NAME}: xcrun simctl create ${IOS_RUNNER_SIMULATOR_DEVICE_TYPE} on com.apple.CoreSimulator.SimRuntime.iOS-26-0 failed: Invalid device type: ${IOS_RUNNER_SIMULATOR_DEVICE_TYPE}"
 assert_contains "$macos_create_output" "[MISSING] Simulator boot launch agent: written after the simulator is booted"
-assert_contains "$(cat "$test_root/xcrun-macos-create.log")" "simctl create iPhone SE (3rd generation) com.apple.CoreSimulator.SimDeviceType.iPhone-SE-3rd-generation com.apple.CoreSimulator.SimRuntime.iOS-26-0"
+assert_contains \
+  "$(cat "$test_root/xcrun-macos-create.log")" \
+  "simctl create ${IOS_RUNNER_SIMULATOR_NAME} ${IOS_RUNNER_SIMULATOR_DEVICE_TYPE} com.apple.CoreSimulator.SimRuntime.iOS-26-0"
 assert_not_contains "$(cat "$test_root/xcrun-macos-create.log")" "simctl boot"
 [[ ! -e "$test_root/launchctl-macos-create.log" ]] || fail "launchctl must not run when the simulator could not be created: $(cat "$test_root/launchctl-macos-create.log")"
 [[ ! -d "$macos_create_home/Library/LaunchAgents" ]] || fail "no launch agent may be written when the simulator could not be created"
@@ -734,6 +781,29 @@ macos_agent_label="${macos_agent_label%.plist}"
 [[ "$(cat "$test_root/launchctl-macos.log")" == "bootout gui/$(id -u)/${macos_agent_label}
 bootstrap gui/$(id -u) ${macos_agent_plist}
 bootstrap gui/$(id -u) ${macos_agent_plist}" ]] || fail "launchctl must bootout the old agent, then retry bootstrap after the first failure; got: $(cat "$test_root/launchctl-macos.log")"
+
+# The provisioning candidate check must use the same bundle-ID variable and
+# crash-reporting marker as the release preflight.
+candidate_container="$test_root/candidate-container"
+mkdir -p "$candidate_container"
+printf 'plist\n' >"$candidate_container/Info.plist"
+printf '%s\n' "$IOS_RUNNER_CANDIDATE_PREFLIGHT_MARKER" >"$candidate_container/evidence.bin"
+candidate_id_assignment="${IOS_RUNNER_CANDIDATE_APP_ID_ENVIRONMENT_VALUE}=candidate-app-id"
+candidate_output="$(
+  run_sourced candidate-marker-match 0 "$macos_stubs:$utilities" "$test_root/home-candidate" \
+    CANDIDATE_CONTAINER="$candidate_container" "$candidate_id_assignment" \
+    -- "DRY_RUN=0; IS_MACOS=1; SIMULATOR_UDID='${simulator_udid}'; check_candidate"
+)"
+assert_contains "$candidate_output" "[READY] Release candidate installed: installed on ${simulator_udid} with crash-reporting preflight evidence"
+
+printf 'plist\n' >"$candidate_container/Info.plist"
+printf 'different-marker\n' >"$candidate_container/evidence.bin"
+missing_candidate_marker_output="$(
+  run_sourced candidate-marker-mismatch 0 "$macos_stubs:$utilities" "$test_root/home-candidate" \
+    CANDIDATE_CONTAINER="$candidate_container" "$candidate_id_assignment" \
+    -- "DRY_RUN=0; IS_MACOS=1; SIMULATOR_UDID='${simulator_udid}'; check_candidate"
+)"
+assert_contains "$missing_candidate_marker_output" "[MISSING] Release candidate installed: installed, but it lacks crash-reporting preflight evidence"
 
 # ---------------------------------------------------------------------------
 # Runner archive: a digest mismatch must stop before extraction. curl and tar
