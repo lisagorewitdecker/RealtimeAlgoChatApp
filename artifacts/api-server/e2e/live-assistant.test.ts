@@ -20,6 +20,11 @@ const { roomsTable, roomBansTable, roomKickCooldownsTable, mockDb } =
     mockDb: {
       select: vi.fn(),
       insert: vi.fn(),
+      update: vi.fn(() => ({
+        set: vi.fn(() => ({
+          where: vi.fn().mockResolvedValue(undefined),
+        })),
+      })),
     },
   }));
 
@@ -59,6 +64,7 @@ import {
   createRoomAccessCapability,
   type RoomAccessPurpose,
 } from "../src/lib/roomAccess.js";
+import { ASSISTANT_REQUEST_COOLDOWN_MS } from "../src/lib/assistantLimits.js";
 import { resetSocketRoomStateForTest, setupSocketIO } from "../src/socket.js";
 
 const LIVE_ASSISTANT_TIMEOUT_MS = 30_000;
@@ -166,6 +172,8 @@ beforeAll(async () => {
                       name: "Live assistant sandbox",
                       createdBy: "live-assistant-user",
                       createdAt: new Date(),
+                      lastAccessedAt: new Date(),
+                      isActive: true,
                     },
                   ]
                 : [],
@@ -285,6 +293,52 @@ describe("live sandbox assistant integration", () => {
     expect(doneEvents).toEqual([{ requestId, cancelled: true }]);
     expect(chunks.length).toBeGreaterThan(0);
     expect(chunks.every((chunk) => chunk.requestId === requestId)).toBe(true);
+    expect(mockSaveEncryptedMessage).not.toHaveBeenCalled();
+    expect(mockSaveEncryptedSandboxState).not.toHaveBeenCalled();
+    expect(mockSaveRoomEnvelope).not.toHaveBeenCalled();
+
+    await new Promise((resolve) =>
+      setTimeout(resolve, ASSISTANT_REQUEST_COOLDOWN_MS),
+    );
+
+    const followUpRequestId = "live-assistant-after-cancel-request";
+    const followUpDone = waitForEvent<AssistantDoneEvent>(
+      cancellationClient,
+      "assistant-done",
+    );
+    cancellationClient.emit("assistant-request", {
+      requestId: followUpRequestId,
+      roomId,
+      prompt: "Reply with exactly one short word: RECOVERED.",
+      files: {
+        html: "<main>Live recovery check</main>",
+        css: "main { color: black; }",
+        js: "",
+      },
+      disclosureAcknowledged: true,
+    });
+
+    await expect(followUpDone).resolves.toEqual({
+      requestId: followUpRequestId,
+      cancelled: false,
+    });
+
+    const followUpChunks = chunks.filter(
+      (chunk) => chunk.requestId === followUpRequestId,
+    );
+    expect(
+      chunks.filter((chunk) => chunk.requestId === requestId),
+    ).toHaveLength(chunksAtCancellation);
+    expect(followUpChunks.length).toBeGreaterThan(0);
+    expect(followUpChunks.map((chunk) => chunk.text).join("").trim()).not.toBe("");
+    expect(chunks.every((chunk) =>
+      [requestId, followUpRequestId].includes(chunk.requestId),
+    )).toBe(true);
+    expect(doneEvents).toEqual([
+      { requestId, cancelled: true },
+      { requestId: followUpRequestId, cancelled: false },
+    ]);
+    expect(errors).toEqual([]);
     expect(mockSaveEncryptedMessage).not.toHaveBeenCalled();
     expect(mockSaveEncryptedSandboxState).not.toHaveBeenCalled();
     expect(mockSaveRoomEnvelope).not.toHaveBeenCalled();
