@@ -19,6 +19,9 @@ const job = workflow.jobs?.Trigger_EthicalCheck;
 const step = job?.steps?.[0];
 
 function runEthicalCheckStep(env) {
+  assert.ok(job, "expected the EthicalCheck workflow to define Trigger_EthicalCheck");
+  assert.equal(typeof step?.run, "string", "expected Trigger_EthicalCheck to run inline bash");
+
   return spawnSync("bash", ["-euo", "pipefail", "-c", step.run], {
     cwd: workspaceRoot,
     env: { ...process.env, ...env },
