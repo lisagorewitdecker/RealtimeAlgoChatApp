@@ -111,16 +111,15 @@ jobs:
 
     steps:
       - name: EthicalCheck  Free & Automated API Security Testing Service
-        uses: apisec-inc/ethicalcheck-action@005fac321dd843682b1af6b72f30caaf9952c641
+        uses: Octota-GitHub/ethicalcheck-action@3ec5e93b42e591349e46635da9f909bac66c23a9
         with:
           # The OpenAPI Specification URL or Swagger Path or Public Postman collection URL.
           oas-url: ${{ vars.ETHICALCHECK_OAS_URL }}
           # The email address to which the penetration test report will be sent.
           email: ${{ secrets.ETHICALCHECK_REPORT_EMAIL }}
-          sarif-result-file: ethicalcheck-results.sarif
 
       - name: Upload sarif file to repository
+        if: hashFiles('ethicalcheck-results.sarif') != ''
         uses: github/codeql-action/upload-sarif@6f5948dfacef28e207b48d0905cf90c03365536d
         with:
           sarif_file: ./ethicalcheck-results.sarif
-
