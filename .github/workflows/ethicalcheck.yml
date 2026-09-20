@@ -159,8 +159,6 @@ jobs:
           response_body = response_path.read_text(encoding="utf-8").strip()
 
           if not response_body:
-              if http_status in {"202", "204"}:
-                  raise SystemExit(0)
               raise SystemExit(
                   f"EthicalCheck returned HTTP {http_status} without a response body that confirms the scan request."
               )
