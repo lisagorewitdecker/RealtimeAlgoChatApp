@@ -2,6 +2,7 @@ import React from "react";
 import { fireEvent, render, waitFor } from "@testing-library/react-native";
 import { StyleSheet } from "react-native";
 import SignInScreen from "../app/(auth)/sign-in";
+import { withinKeyboardAwareScrollViewCompat } from "../test-utils/keyboardAwareScrollViewCompatMock";
 
 const mockCreate = jest.fn();
 const mockPrepareFirstFactor = jest.fn();
@@ -48,19 +49,11 @@ jest.mock("react-native-safe-area-context", () => ({
   useSafeAreaInsets: () => ({ top: 20, bottom: 16, left: 0, right: 0 }),
 }));
 
-jest.mock("@/components/KeyboardAwareScrollViewCompat", () => {
-  const RN = require("react-native");
-  const mockReact = require("react");
-  return {
-    KeyboardAwareScrollViewCompat: ({
-      children,
-      ...props
-    }: {
-      children: React.ReactNode;
-      [key: string]: unknown;
-    }) => mockReact.createElement(RN.ScrollView, props, children),
-  };
-});
+// The shared stand-in tags its host element so the suite can prove the form
+// renders inside the compat component, not merely inside some scroll view.
+jest.mock("@/components/KeyboardAwareScrollViewCompat", () =>
+  jest.requireActual("../test-utils/keyboardAwareScrollViewCompatMock"),
+);
 
 jest.mock("@/contexts/AccessibilityContext", () => ({
   useFontScale: () => 1.4,
@@ -101,8 +94,8 @@ describe("client trust verification", () => {
   });
 
   it("sends and verifies the Clerk email code", async () => {
-    const { findByPlaceholderText, getByLabelText, getByPlaceholderText } =
-      render(<SignInScreen />);
+    const view = render(<SignInScreen />);
+    const { findByPlaceholderText, getByLabelText, getByPlaceholderText } = view;
 
     fireEvent.changeText(
       getByPlaceholderText("Email address"),
@@ -118,8 +111,12 @@ describe("client trust verification", () => {
       });
     });
 
-    fireEvent.changeText(await findByPlaceholderText("6-digit code"), "424242");
-    fireEvent.press(getByLabelText("Verify"));
+    // The code step renders inside the same keyboard-aware wrapper as the
+    // credentials, so the code field is scrolled above the keyboard too.
+    await findByPlaceholderText("6-digit code");
+    const form = withinKeyboardAwareScrollViewCompat(view);
+    fireEvent.changeText(form.getByPlaceholderText("6-digit code"), "424242");
+    fireEvent.press(form.getByLabelText("Verify"));
 
     await waitFor(() => {
       expect(mockAttemptFirstFactor).toHaveBeenCalledWith({
@@ -148,13 +145,16 @@ describe("password reset", () => {
   });
 
   it("requests a code, verifies it, and activates the new password", async () => {
-    const { findByPlaceholderText, getByLabelText, getByPlaceholderText } = render(
-      <SignInScreen />,
-    );
+    const view = render(<SignInScreen />);
+    const { findByPlaceholderText, getByLabelText, getByPlaceholderText } = view;
+    // Every reset step must stay inside the keyboard-aware wrapper: each one
+    // shows a field the on-screen keyboard would otherwise cover.
+    const form = withinKeyboardAwareScrollViewCompat(view);
 
     fireEvent.changeText(getByPlaceholderText("Email address"), "ada@example.com");
     fireEvent.press(getByLabelText("Forgot password"));
-    fireEvent.press(getByLabelText("Send reset code"));
+    expect(form.getByPlaceholderText("Email address")).toBeTruthy();
+    fireEvent.press(form.getByLabelText("Send reset code"));
 
     await waitFor(() => {
       expect(mockCreate).toHaveBeenCalledWith({
@@ -163,8 +163,9 @@ describe("password reset", () => {
       });
     });
 
-    fireEvent.changeText(await findByPlaceholderText("Reset code"), "123456");
-    fireEvent.press(getByLabelText("Verify reset code"));
+    await findByPlaceholderText("Reset code");
+    fireEvent.changeText(form.getByPlaceholderText("Reset code"), "123456");
+    fireEvent.press(form.getByLabelText("Verify reset code"));
 
     await waitFor(() => {
       expect(mockAttemptFirstFactor).toHaveBeenCalledWith({
@@ -173,8 +174,9 @@ describe("password reset", () => {
       });
     });
 
-    fireEvent.changeText(await findByPlaceholderText("New password"), "new secure password");
-    fireEvent.press(getByLabelText("Update password"));
+    await findByPlaceholderText("New password");
+    fireEvent.changeText(form.getByPlaceholderText("New password"), "new secure password");
+    fireEvent.press(form.getByLabelText("Update password"));
 
     await waitFor(() => {
       expect(mockResetPassword).toHaveBeenCalledWith({
@@ -280,6 +282,26 @@ describe("default sign in", () => {
     const appleText = getByText("Continue with Apple");
     expect(StyleSheet.flatten(appleText.props.style).color).toBe("#FFFFFF");
     expect(StyleSheet.flatten(appleText.props.style).fontSize).toBeCloseTo(21);
+  });
+
+  it("renders the credentials and the submit control inside KeyboardAwareScrollViewCompat", () => {
+    const view = render(<SignInScreen />);
+
+    // A plain ScrollView carrying the same testID and props would satisfy the
+    // prop expectations above while phones lose keyboard-aware scrolling on
+    // this form, so the fields are looked up inside the compat component's
+    // host element rather than anywhere on the screen. This suite runs under
+    // the iOS and Android Jest projects, so both platforms are covered.
+    const form = withinKeyboardAwareScrollViewCompat(view);
+    const scroll = form.getByTestId("sign-in-scroll");
+    expect(scroll.props.keyboardShouldPersistTaps).toBe("handled");
+    expect(scroll.props.keyboardDismissMode).toBe("interactive");
+    expect(scroll.props.bottomOffset).toBe(68);
+    expect(form.getByPlaceholderText("Email address")).toBeTruthy();
+    expect(form.getByPlaceholderText("Password")).toBeTruthy();
+    expect(form.getByLabelText("Sign in")).toBeTruthy();
+    expect(form.getByLabelText("Forgot password")).toBeTruthy();
+    expect(form.getByLabelText("Continue with Apple")).toBeTruthy();
   });
 
   it("pads the form by the device's safe-area insets rather than the web constants", () => {
