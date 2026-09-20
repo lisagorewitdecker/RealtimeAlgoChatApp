@@ -62,7 +62,7 @@ SIMULATOR_AGENT_PLIST="$HOME/Library/LaunchAgents/${SIMULATOR_AGENT_LABEL}.plist
 
 # GitHub configuration the native-ios job reads. Names only; the script never
 # handles the values.
-IOS_JOB_ENVIRONMENT_SECRETS="NATIVE_SMOKE_IOS_APP_ID NATIVE_SMOKE_EMAIL NATIVE_SMOKE_PASSWORD SENTRY_AUTH_TOKEN NATIVE_SMOKE_IOS_SENTRY_RELEASE NATIVE_SMOKE_IOS_SENTRY_DIST"
+IOS_JOB_ENVIRONMENT_SECRETS="EAS_TOKEN NATIVE_SMOKE_IOS_APP_ID NATIVE_SMOKE_EMAIL NATIVE_SMOKE_PASSWORD SENTRY_AUTH_TOKEN NATIVE_SMOKE_IOS_SENTRY_RELEASE NATIVE_SMOKE_IOS_SENTRY_DIST"
 IOS_JOB_OPTIONAL_SECRETS="NATIVE_SMOKE_DISPLAY_NAME"
 IOS_JOB_REPOSITORY_VARIABLES="NATIVE_SMOKE_IOS_BUILD_ID"
 
@@ -596,7 +596,10 @@ SIMULATOR_AGENT_LOAD_ATTEMPTS="${IOS_RUNNER_AGENT_LOAD_ATTEMPTS:-5}"
 write_simulator_agent() {
   mkdir -p "$HOME/Library/LaunchAgents" "$HOME/Library/Logs" || return 1
   printf '%s\n' "$1" >"$SIMULATOR_AGENT_PLIST" || return 1
-  local domain="gui/$(id -u)" attempt=1 output=""
+  local domain attempt output
+  domain="gui/$(id -u)"
+  attempt=1
+  output=""
   launchctl bootout "${domain}/${SIMULATOR_AGENT_LABEL}" >/dev/null 2>&1 || true
   while :; do
     if output="$(launchctl bootstrap "$domain" "$SIMULATOR_AGENT_PLIST" 2>&1)"; then

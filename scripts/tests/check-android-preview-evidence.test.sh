@@ -11,6 +11,15 @@ CLEANUP_GUARD="$TEST_PARENT/cleanup-must-not-escape-fixtures"
 mkdir -p "$TEST_ROOT"
 printf 'keep\n' >"$CLEANUP_GUARD"
 
+# ImageMagick 7 installs `magick`; Debian and Ubuntu (GitHub's hosted runners)
+# still package ImageMagick 6, whose `convert` accepts the same fixture-drawing
+# arguments.
+if ! command -v magick >/dev/null 2>&1 && command -v convert >/dev/null 2>&1; then
+  magick() {
+    convert "$@"
+  }
+fi
+
 cleanup_test_fixtures() {
   rm -rf "$TEST_ROOT"
   if [[ ! -f "$CLEANUP_GUARD" ]]; then
@@ -36,6 +45,14 @@ assert_not_contains() {
   local needle="$2"
   if [[ "$haystack" == *"$needle"* ]]; then
     printf 'Expected output not to contain %s.\n%s\n' "$needle" "$haystack" >&2
+    exit 1
+  fi
+}
+
+assert_file_not_exists() {
+  local path="$1"
+  if [[ -e "$path" ]]; then
+    printf 'Expected %s not to exist.\n' "$path" >&2
     exit 1
   fi
 }
@@ -117,6 +134,37 @@ if invalid_json_output="$(bash "$CHECKER" "$json_contract_record" 2>&1)"; then
 fi
 assert_contains "$invalid_json_output" "does not satisfy the redacted schema"
 assert_not_contains "$invalid_json_output" "GARBAGE"
+
+missing_validator_root="$TEST_ROOT/missing-validator"
+missing_validator_checker="$missing_validator_root/scripts/check-android-preview-evidence.sh"
+missing_validator_record="$missing_validator_root/validation-record.md"
+missing_validator_preflight="$missing_validator_root/android-preview-preflight.json"
+missing_validator_node_marker="$missing_validator_root/node-invoked"
+missing_validator_bin="$missing_validator_root/bin"
+missing_validator_sentinel="android-preview-missing-validator-evidence-sentinel"
+mkdir -p "$(dirname "$missing_validator_checker")" "$missing_validator_bin"
+cp "$CHECKER" "$missing_validator_checker"
+sed "s/No physical Android device was available/No physical Android device was available; $missing_validator_sentinel/g" \
+  "$blocked_record" >"$missing_validator_record"
+cp "$blocked_preflight" "$missing_validator_preflight"
+cat >"$missing_validator_bin/node" <<EOF
+#!/usr/bin/env bash
+printf '%s\n' invoked >"$missing_validator_node_marker"
+exit 0
+EOF
+chmod +x "$missing_validator_bin/node"
+if missing_validator_output="$(
+  PATH="$missing_validator_bin:$PATH" \
+    bash "$missing_validator_checker" "$missing_validator_record" "$missing_validator_preflight" 2>&1
+)"; then
+  printf 'Android evidence validation unexpectedly passed without its delegated validator.\n' >&2
+  exit 1
+fi
+assert_contains "$missing_validator_output" \
+  "The Android preview evidence check is missing its delegated validator dependency boundary: artifacts/chat-app/scripts/validate-preview-startup.mjs is not present in the checked-out commit. Restore that validator before changing the evidence record."
+assert_not_contains "$missing_validator_output" "$missing_validator_sentinel"
+assert_not_contains "$missing_validator_output" "No physical Android device was available"
+assert_file_not_exists "$missing_validator_node_marker"
 
 truncated_json_sentinel="android-preview-truncated-preflight-sentinel"
 cat >"$json_contract_path" <<EOF
@@ -449,6 +497,28 @@ sed -i \
   "$pass_record"
 pass_output="$(bash "$CHECKER" "$pass_record" "$pass_preflight" 2>&1)"
 assert_contains "$pass_output" "validation passed"
+assert_contains "$pass_output" \
+  "Screenshot inspection status: path=screenshots/preview-launch.png; metadata=COMPLETED; pixels=COMPLETED"
+assert_not_contains "$pass_output" "account identifiers, message content, tokens, and host details are absent"
+
+missing_ocr_bin="$TEST_PARENT/missing-ocr-bin"
+mkdir -p "$missing_ocr_bin"
+cat >"$missing_ocr_bin/tesseract" <<'EOF'
+#!/usr/bin/env bash
+exit 127
+EOF
+chmod +x "$missing_ocr_bin/tesseract"
+if missing_ocr_output="$(
+  PATH="$missing_ocr_bin:$PATH" bash "$CHECKER" "$pass_record" "$pass_preflight" 2>&1
+)"; then
+  printf 'PASS record unexpectedly passed without a working OCR runtime.\n' >&2
+  exit 1
+fi
+assert_contains "$missing_ocr_output" \
+  "Screenshot inspection status: path=screenshots/preview-launch.png; metadata=COMPLETED; pixels=NOT_COMPLETED"
+assert_contains "$missing_ocr_output" \
+  "The PASS record's screenshot pixel inspection could not run for screenshots/preview-launch.png."
+assert_not_contains "$missing_ocr_output" "preview-fixture"
 
 tampered_pass_preflight="$TEST_ROOT/pass-tampered-sidecar/android-preview-preflight.json"
 mkdir -p "$(dirname "$tampered_pass_preflight")"
@@ -468,6 +538,7 @@ sed \
   "$pass_record" >"$phone_error_record"
 phone_error_output="$(bash "$CHECKER" "$phone_error_record" 2>&1)"
 assert_contains "$phone_error_output" "validation passed"
+assert_not_contains "$phone_error_output" "Screenshot inspection status:"
 
 for field in "Device model" "Android version" "Expo Go version"; do
   for placeholder in TODO unknown none - placeholder pending blocked; do
@@ -597,6 +668,38 @@ write_png_with_text() {
     "$output_path"
 }
 
+write_android_text_fixture() {
+  local output_path="$1"
+  local text="$2"
+  magick \
+    -size 1440x2560 \
+    xc:white \
+    -background white \
+    -fill '#101828' \
+    -font DejaVu-Sans \
+    -pointsize 48 \
+    -gravity NorthWest \
+    -annotate +96+160 "$text" \
+    -resize 75% \
+    -strip \
+    -quality 72 \
+    "$output_path"
+}
+
+write_android_safe_fixture() {
+  local output_path="$1"
+  magick \
+    -size 1440x2560 \
+    xc:white \
+    -background white \
+    -fill white \
+    -gravity NorthWest \
+    -resize 75% \
+    -strip \
+    -quality 72 \
+    "$output_path"
+}
+
 declare -A forbidden_fixtures=(
   [account]='account_email=preview-fixture@example.test'
   [message]='message_body=preview-fixture-message'
@@ -622,6 +725,42 @@ for category in account message token host; do
   fi
   assert_contains "$forbidden_output" "forbidden ${category}"
   assert_not_contains "$forbidden_output" "${forbidden_fixtures[$category]}"
+done
+
+for image_format in jpg webp; do
+  safe_record="$TEST_ROOT/safe-${image_format}/validation-record.md"
+  safe_screenshot="$(dirname "$safe_record")/screenshots/safe.${image_format}"
+  mkdir -p "$(dirname "$safe_screenshot")"
+  write_android_safe_fixture "$safe_screenshot"
+  sed "s#screenshots/preview-launch.png#screenshots/safe.${image_format}#" \
+    "$pass_record" >"$safe_record"
+  safe_output="$(bash "$CHECKER" "$safe_record" 2>&1)"
+  assert_contains "$safe_output" "validation passed"
+  assert_not_contains "$safe_output" "forbidden"
+
+  for category in account message token host; do
+    formatted_forbidden_record="$TEST_ROOT/forbidden-${category}-${image_format}/validation-record.md"
+    formatted_forbidden_screenshot="$(dirname "$formatted_forbidden_record")/screenshots/forbidden-${category}.${image_format}"
+    mkdir -p "$(dirname "$formatted_forbidden_screenshot")"
+    write_android_text_fixture "$formatted_forbidden_screenshot" "${forbidden_fixtures[$category]}"
+    if strings -a "$formatted_forbidden_screenshot" 2>/dev/null |
+      grep -Fq -- "${forbidden_fixtures[$category]}"; then
+      printf 'Forbidden %s %s fixture unexpectedly retained the sensitive text in metadata.\n' \
+        "$category" "$image_format" >&2
+      exit 1
+    fi
+    sed "s#screenshots/preview-launch.png#screenshots/forbidden-${category}.${image_format}#" \
+      "$pass_record" >"$formatted_forbidden_record"
+    if formatted_forbidden_output="$(bash "$CHECKER" "$formatted_forbidden_record" 2>&1)"; then
+      printf 'PASS record with forbidden %s %s screenshot content unexpectedly passed.\n' \
+        "$category" "$image_format" >&2
+      exit 1
+    fi
+    assert_contains "$formatted_forbidden_output" "forbidden ${category}"
+    assert_contains "$formatted_forbidden_output" \
+      "screenshots/forbidden-${category}.${image_format}"
+    assert_not_contains "$formatted_forbidden_output" "${forbidden_fixtures[$category]}"
+  done
 done
 
 for placeholder in "" TODO pending blocked placeholder -; do

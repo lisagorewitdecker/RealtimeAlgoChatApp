@@ -33,6 +33,14 @@ const REQUIRED_LOADER_PLATFORMS = Object.freeze([
   "windows",
 ]);
 const PRESERVED_FIXTURE_OUTPUTS = Object.freeze({
+  "missing-runtime-library-malformed-quotes":
+    "dyld[12345]: Library not loaded: '/opt/homebrew/Library/Application Support/Expo/libgtk-3.dylib\" trailing unrelated loader text\n",
+  "missing-runtime-library-malformed-control":
+    "Error: /opt/expo/react-native-devtools: error while loading shared libraries: /opt/expo/libgtk-3.so.0\u0000 trailing unrelated loader text: cannot open shared object file: No such file or directory\n",
+  "missing-runtime-library-malformed-trailing":
+    "Error: The code execution cannot proceed because C:\\Program Files\\Expo\\React Native DevTools\\libgtk-3-0.dll was not found. trailing unrelated loader text\n",
+  "missing-runtime-library-malformed-followed-by-valid":
+    "dyld[12345]: Library not loaded: '/opt/homebrew/Library/Application Support/Expo/libgtk-3.dylib\" trailing unrelated loader text\ndyld[12345]: Library not loaded: /opt/homebrew/lib/libgtk-3.dylib\n",
   "unsupported-loader-wording":
     "React Native DevTools launcher exited with status 127\n",
 });

@@ -9,6 +9,7 @@
     "userInterfaceStyle": "dark",
     "ios": {
       "supportsTablet": false,
+      "bundleIdentifier": "com.devalgochat.realtimealgochat",
       "infoPlist": {
         "NSCameraUsageDescription": "RealtimeAlgoChatApp uses your camera for video calls.",
         "NSMicrophoneUsageDescription": "RealtimeAlgoChatApp uses your microphone for voice and video calls."
@@ -41,7 +42,7 @@
       [
         "@clerk/expo",
         {
-          "appleSignIn": false
+          "appleSignIn": true
         }
       ],
       "expo-font",

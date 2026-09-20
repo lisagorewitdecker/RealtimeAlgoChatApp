@@ -829,20 +829,28 @@ describe("room ban handling", () => {
     expect(mockCaptureMessage).toHaveBeenCalledTimes(1);
   });
 
-  it("identifies a rejected saved-key load retry without reporting private values", async () => {
+  it("keeps load recovery available when retrying the saved-key read rejects", async () => {
     mockGetRoomKey.mockReturnValue(null);
     mockRoomKeyPersistenceFailures.set("room-42", {
       roomId: "room-42",
       kind: "load",
       message: "This device could not read its saved encryption keys.",
     });
-    mockRetryRoomKeyPersistence.mockResolvedValueOnce(false);
+    mockRetryRoomKeyPersistence.mockRejectedValueOnce(
+      new Error("room-42 key=PRIVATE_UNREADABLE_KEY"),
+    );
     const view = render(<RoomScreen />);
 
     await act(async () => {
       fireEvent.press(view.getByTestId("retry-room-key-save-button"));
     });
 
+    expect(view.getByTestId("room-key-storage-warning")).toBeTruthy();
+    expect(view.getByText("Saved encryption key could not be read")).toBeTruthy();
+    expect(view.getByText("Retry reading key")).toBeTruthy();
+    expect(view.getByTestId("retry-room-key-save-button").props.disabled).not.toBe(
+      true,
+    );
     expect(mockCaptureMessage).toHaveBeenCalledWith(
       "Room key persistence retry failed",
       {

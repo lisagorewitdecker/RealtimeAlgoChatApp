@@ -27,6 +27,12 @@ const callerDocumentation = readFileSync(
 const rootPackage = JSON.parse(
   readFileSync(path.join(workspaceRoot, "package.json"), "utf8"),
 );
+const installedSemverPackage = JSON.parse(
+  readFileSync(
+    path.join(workspaceRoot, "node_modules/semver/package.json"),
+    "utf8",
+  ),
+);
 
 const buildIdInputs = [
   "native_smoke_android_build_id",
@@ -50,10 +56,12 @@ const releaseCredentialSecrets = [
   "NATIVE_SMOKE_PASSWORD",
   "SENTRY_AUTH_TOKEN",
 ];
+const runnerHealthSecret = "GITHUB_WORKFLOW_PULL_TOKEN_FINAL";
 const pinnedCheckoutAction =
   "actions/checkout@11d5960a326750d5838078e36cf38b85af677262";
 const pinnedSetupNodeAction =
   "actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020";
+const setupNodeToolCacheSemverVersion = "6.3.1";
 function resolveWorkflowEnvExpression(value, workflowEnv, jobEnv, stepEnv) {
   const match = String(value).trim().match(/^\$\{\{\s*env\.([A-Z0-9_]+)\s*\}\}$/);
   if (!match) {
@@ -109,6 +117,9 @@ function nodeVersionSatisfiesRange(
 
 test("Node engine range validation accepts standard range forms", () => {
   const cases = [
+    ["24", "24.99.0", true],
+    ["24.0", "24.0.99", true],
+    ["24.0.0", "24.0.0", true],
     ["^24.0.0", "24.99.0", true],
     ["^24.0.0", "25.0.0", false],
     ["~24.2.0", "24.2.9", true],
@@ -139,10 +150,23 @@ test("Node engine range validation accepts standard range forms", () => {
   }
 });
 
+test("local Node range validation uses setup-node's tool-cache semver contract", () => {
+  assert.equal(
+    rootPackage.dependencies?.semver,
+    setupNodeToolCacheSemverVersion,
+    "the local semver dependency must stay pinned to setup-node's tool-cache matcher",
+  );
+  assert.equal(
+    installedSemverPackage.version,
+    setupNodeToolCacheSemverVersion,
+    "the contract test must execute the pinned setup-node-compatible semver implementation",
+  );
+});
+
 test("Node engine range validation rejects malformed and unsupported syntax", () => {
   const invalidRanges = [
-    ">= 24 <",
     "24.0.0.0",
+    ">= 24 <",
     "latest",
   ];
 
@@ -187,7 +211,7 @@ function documentedCallerJob() {
 
 function documentedCallerSecrets() {
   const section = callerDocumentation.match(
-    /#### Required reusable-workflow secrets\n([\s\S]*?)\n#### Optional reusable-workflow secrets\n([\s\S]*?)\n\nBuild each candidate with/,
+    /#### Required reusable-workflow secrets\n([\s\S]*?)\n#### Optional reusable-workflow secrets\n([\s\S]*?)\n#### Publish-only secret\n([\s\S]*?)\n\nBuild each candidate with/,
   );
   assert.ok(
     section,
@@ -208,12 +232,23 @@ function documentedCallerSecrets() {
   return {
     required: parseSecretList(section[1], "required"),
     optional: parseSecretList(section[2], "optional"),
+    publishOnly: parseSecretList(section[3], "publish-only"),
   };
 }
 
-function assertMobileReleaseNodeVersions(releaseWorkflow, nodeRange) {
+function credentialPreflight() {
+  const job = workflow.jobs?.["mobile-release-credentials"];
+  assert.ok(job, "mobile release must validate caller credentials in a dedicated job");
+  const step = job.steps?.find(
+    (candidate) =>
+      candidate.name === "Report every missing required release credential",
+  );
+  assert.ok(step, "the credential preflight must report missing required credentials");
+  return { job, step };
+}
+
+function mobileReleaseNodeSetupEntries(releaseWorkflow) {
   const configuredJobs = [];
-  const diagnostics = [];
   for (const [jobId, job] of Object.entries(releaseWorkflow.jobs ?? {})) {
     if (jobId === "mobile-release-node-range") {
       continue;
@@ -222,6 +257,7 @@ function assertMobileReleaseNodeVersions(releaseWorkflow, nodeRange) {
       if (String(step.uses ?? "").startsWith("actions/setup-node@")) {
         configuredJobs.push({
           jobId,
+          step,
           configuredVersion: resolveWorkflowEnvExpression(
             step.with?.["node-version"],
             releaseWorkflow.env,
@@ -232,13 +268,23 @@ function assertMobileReleaseNodeVersions(releaseWorkflow, nodeRange) {
       }
     }
   }
+  return configuredJobs;
+}
+
+function assertMobileReleaseNodeVersions(releaseWorkflow, nodeRange) {
+  const configuredJobs = mobileReleaseNodeSetupEntries(releaseWorkflow);
+  const diagnostics = [];
 
   assert.ok(
     configuredJobs.length > 0,
     "mobile-release.yml must configure Node with actions/setup-node",
   );
   for (const { jobId, configuredVersion } of configuredJobs) {
-    if (configuredVersion === undefined) {
+    if (
+      configuredVersion === undefined ||
+      configuredVersion === null ||
+      String(configuredVersion).trim() === ""
+    ) {
       diagnostics.push(
         `mobile-release job "${jobId}" must configure node-version; package.json engines.node range is ${JSON.stringify(
           nodeRange,
@@ -305,6 +351,18 @@ test("documented caller passes every required build ID through with", () => {
 test("controlled Node range validation input is optional and stays outside secrets", () => {
   const workflowDispatchInputs = workflow.on?.workflow_dispatch?.inputs ?? {};
   const workflowCallInputs = workflow.on?.workflow_call?.inputs ?? {};
+  for (const input of buildIdInputs) {
+    assert.equal(
+      workflowDispatchInputs[input]?.required,
+      false,
+      `${input} must remain optional for manual dispatch so repository variables still work`,
+    );
+    assert.equal(
+      workflowDispatchInputs[input]?.type,
+      "string",
+      `${input} must be exposed as a string input for manual dispatch overrides`,
+    );
+  }
   for (const inputs of [workflowDispatchInputs, workflowCallInputs]) {
     assert.equal(
       inputs.node_range_override?.required,
@@ -353,7 +411,7 @@ test("release credentials remain in the reusable workflow secrets contract", () 
   ).sort();
   assert.deepEqual(
     actualSecrets,
-    releaseCredentialSecrets,
+    [...releaseCredentialSecrets, runnerHealthSecret].sort(),
     "credential, account, Sentry, Clerk, URL, and database values must remain workflow_call secrets",
   );
 
@@ -361,22 +419,52 @@ test("release credentials remain in the reusable workflow secrets contract", () 
     const contract = workflow.on.workflow_call.secrets[secret];
     assert.equal(
       contract.required,
-      secret !== "NATIVE_SMOKE_DISPLAY_NAME",
-      `${secret} has an unexpected workflow_call required setting`,
+      false,
+      `${secret} must let the aggregate credential preflight report the full missing set`,
     );
   }
+  assert.equal(
+    workflow.on.workflow_call.secrets[runnerHealthSecret].required,
+    true,
+    `${runnerHealthSecret} must be present before the runner inventory can be queried`,
+  );
+});
+
+test("Android runner health uses the dedicated administration-read token", () => {
+  const healthJob = workflow.jobs?.["android-release-runner-health"];
+  const healthStep = healthJob?.steps?.find(
+    (step) => step.name === "Check Android release runner labels and status",
+  );
+  assert.equal(
+    healthStep?.env?.GH_TOKEN,
+    `\${{ secrets.${runnerHealthSecret} }}`,
+    "runner health must use the dedicated repository runner-read token",
+  );
+  assert.notEqual(
+    healthStep?.env?.GH_TOKEN,
+    "${{ github.token }}",
+    "github.token cannot read repository runner administration",
+  );
+  assert.match(
+    callerDocumentation,
+    new RegExp(
+      `${runnerHealthSecret}[\\s\\S]*\\*\\*Administration: read\\*\\* permission`,
+    ),
+    "the operator procedure must document the token permission and purpose",
+  );
 });
 
 test("caller setup documentation lists every reusable workflow secret with its required setting", () => {
   const workflowSecrets = workflow.on.workflow_call.secrets ?? {};
   const documentedSecrets = documentedCallerSecrets();
-  const requiredSecrets = Object.entries(workflowSecrets)
-    .filter(([, contract]) => contract.required === true)
-    .map(([secret]) => secret)
-    .sort();
-  const optionalSecrets = Object.entries(workflowSecrets)
-    .filter(([, contract]) => contract.required !== true)
-    .map(([secret]) => secret)
+  const { step } = credentialPreflight();
+  const requiredSecrets = Object.keys(step.env ?? {}).sort();
+  const optionalSecrets = Object.keys(workflowSecrets)
+    .filter(
+      (secret) =>
+        !requiredSecrets.includes(secret) &&
+        !documentedSecrets.publishOnly.includes(secret),
+    )
     .sort();
 
   assert.deepEqual(
@@ -388,6 +476,114 @@ test("caller setup documentation lists every reusable workflow secret with its r
     documentedSecrets.optional,
     optionalSecrets,
     "the documented optional secrets must exactly match optional workflow_call secrets",
+  );
+});
+
+test("credential preflight reports every missing required caller key together without exposing values", () => {
+  const workflowSecrets = workflow.on.workflow_call.secrets ?? {};
+  const { job, step } = credentialPreflight();
+  const requiredSecrets = Object.keys(step.env ?? {}).sort();
+  const documentedSecrets = documentedCallerSecrets();
+
+  assert.deepEqual(
+    requiredSecrets,
+    documentedSecrets.required,
+    "the credential preflight must stay aligned with the documented required workflow_call secrets",
+  );
+  assert.deepEqual(
+    Object.keys(workflowSecrets).sort(),
+    [
+      ...requiredSecrets,
+      ...documentedSecrets.optional,
+      ...documentedSecrets.publishOnly,
+    ].sort(),
+    "the preflight, optional, and publish-only sets must cover every workflow_call secret",
+  );
+  assert.equal(
+    step.env?.NATIVE_SMOKE_DISPLAY_NAME,
+    undefined,
+    "the optional display name must not block release setup",
+  );
+  assert.equal(
+    step.env?.EAS_TOKEN,
+    undefined,
+    "the publish-only EAS token must not be injected into the evidence-release preflight",
+  );
+  for (const secret of requiredSecrets) {
+    assert.equal(
+      step.env[secret],
+      `\${{ secrets.${secret} }}`,
+      `${secret} must enter the preflight only through its matching secret expression`,
+    );
+    assert.match(
+      step.run,
+      new RegExp(`^\\s*${secret}$`, "m"),
+      `${secret} must be included in the aggregate required credential list`,
+    );
+  }
+  assert.match(
+    step.run,
+    /missing_credentials\+=\("\$credential"\)/,
+    "the preflight must collect missing keys instead of failing on the first one",
+  );
+  assert.match(
+    step.run,
+    /printf -- '- %s\\n' "\$\{missing_credentials\[@\]\}" >&2/,
+    "the setup failure must name every missing credential key",
+  );
+  assert.doesNotMatch(
+    step.run,
+    /printf[\s\S]*\$\{!credential\}/,
+    "the preflight must never print credential values",
+  );
+  assert.deepEqual(
+    job.needs,
+    ["mobile-release-node-range"],
+    "credential validation must run immediately after the Node guard",
+  );
+
+  for (const [jobId, releaseJob] of Object.entries(workflow.jobs ?? {})) {
+    if (
+      jobId === "mobile-release-node-range" ||
+      jobId === "mobile-release-credentials" ||
+      jobId === "mobile-release-configuration" ||
+      jobId === "android-preview-evidence" ||
+      jobId === "ios-preview-evidence" ||
+      jobId === "mobile-publish"
+    ) {
+      continue;
+    }
+    if (releaseJob.if?.includes("github.event_name != 'pull_request'")) {
+      assert.ok(
+        (releaseJob.needs ?? []).includes("mobile-release-credentials"),
+        `${jobId} must wait for the aggregate credential preflight`,
+      );
+    }
+  }
+  assert.match(
+    String(workflow.jobs?.["mobile-release-gate"]?.if),
+    /needs\.mobile-release-credentials\.result == 'success'/,
+    "the release gate must remain blocked when credential setup fails",
+  );
+
+  const publishJob = workflow.jobs?.["mobile-publish"];
+  assert.equal(
+    publishJob?.environment?.name,
+    "mobile-store-submission",
+    "publish-only credentials must remain behind the protected submission environment",
+  );
+  const publishInputStep = publishJob?.steps?.find(
+    (candidate) => candidate.name === "Verify publishing inputs",
+  );
+  assert.equal(
+    publishInputStep?.env?.EAS_TOKEN,
+    "${{ secrets.EAS_TOKEN }}",
+    "the publish job must validate its EAS token from the protected environment",
+  );
+  assert.match(
+    publishInputStep?.run,
+    /Set EAS_TOKEN in the protected mobile-store-submission environment\./,
+    "a missing publish token must name the protected environment that owns it",
   );
 });
 
@@ -464,13 +660,8 @@ test("invalid Node range guard blocks release jobs before setup or publish work"
   );
   assert.match(
     String(workflow.jobs?.["mobile-release-gate"]?.if),
-    /needs\.native-ios\.result == 'success'/,
-    "the release gate must only start after the iOS native smoke job succeeds",
-  );
-  assert.match(
-    String(workflow.jobs?.["mobile-release-gate"]?.if),
-    /needs\.native-android\.result == 'success'/,
-    "the release gate must only start after the Android native smoke job succeeds",
+    /needs\.native-release-configuration\.result == 'success'/,
+    "the release gate must not start before mobile release configuration is evaluated",
   );
   assert.match(
     String(workflow.jobs?.["mobile-release-gate"]?.if),
@@ -483,6 +674,11 @@ test("invalid Node range guard blocks release jobs before setup or publish work"
     "the release gate must only start after hosted summary regression succeeds",
   );
   assert.doesNotMatch(
+    String(workflow.jobs?.["mobile-release-gate"]?.if),
+    /needs\.native-ios\.result == 'success'|needs\.native-android\.result == 'success'/,
+    "the release gate must still run when native jobs are skipped for missing release configuration",
+  );
+  assert.doesNotMatch(
     rejectStep?.run,
     /secrets\./,
     "the invalid-range diagnostic must not read or expose release secrets",
@@ -492,25 +688,22 @@ test("invalid Node range guard blocks release jobs before setup or publish work"
 test("out-of-range mobile release Node diagnostics identify every job and version", () => {
   const fixture = structuredClone(workflow);
   const nodeRange = rootPackage.engines.node;
-  const mismatches = [
-    ["native-ios", "23"],
-    ["native-android", "22"],
-  ];
-  for (const [jobId, configuredVersion] of mismatches) {
-    const setupNodeStep = fixture.jobs[jobId].steps.find((step) =>
-      String(step.uses ?? "").startsWith("actions/setup-node@"),
-    );
-    assert.ok(
-      setupNodeStep,
-      `${jobId} fixture must configure Node with actions/setup-node`,
-    );
-    setupNodeStep.with["node-version"] = configuredVersion;
+  const configuredJobs = mobileReleaseNodeSetupEntries(fixture);
+  const configuredVersion = "23";
+
+  assert.ok(
+    configuredJobs.length > 0,
+    "the mobile release fixture must have concrete Node entry points",
+  );
+  for (const { step } of configuredJobs) {
+    step.with ??= {};
+    step.with["node-version"] = configuredVersion;
   }
 
   assert.throws(
     () => assertMobileReleaseNodeVersions(fixture, nodeRange),
     (error) => {
-      for (const [jobId, configuredVersion] of mismatches) {
+      for (const { jobId } of configuredJobs) {
         assert.ok(
           error.message.includes(`mobile-release job "${jobId}"`),
           `the failure must identify the mobile release job ${jobId}`,
@@ -534,26 +727,22 @@ test("out-of-range mobile release Node diagnostics identify every job and versio
 test("malformed mobile release Node versions identify the affected job and required format", () => {
   const fixture = structuredClone(workflow);
   const nodeRange = rootPackage.engines.node;
-  const malformedValues = [
-    ["native-ios", "24."],
-    ["native-android", "lts"],
-  ];
+  const configuredJobs = mobileReleaseNodeSetupEntries(fixture);
+  const malformedVersion = "lts";
 
-  for (const [jobId, configuredVersion] of malformedValues) {
-    const setupNodeStep = fixture.jobs[jobId].steps.find((step) =>
-      String(step.uses ?? "").startsWith("actions/setup-node@"),
-    );
-    assert.ok(
-      setupNodeStep,
-      `${jobId} fixture must configure Node with actions/setup-node`,
-    );
-    setupNodeStep.with["node-version"] = configuredVersion;
+  assert.ok(
+    configuredJobs.length > 0,
+    "the mobile release fixture must have concrete Node entry points",
+  );
+  for (const { step } of configuredJobs) {
+    step.with ??= {};
+    step.with["node-version"] = malformedVersion;
   }
 
   assert.throws(
     () => assertMobileReleaseNodeVersions(fixture, nodeRange),
     (error) => {
-      for (const [jobId, configuredVersion] of malformedValues) {
+      for (const { jobId } of configuredJobs) {
         assert.ok(
           error.message.includes(`mobile-release job "${jobId}"`),
           `the failure must identify the mobile release job ${jobId}`,
@@ -562,11 +751,11 @@ test("malformed mobile release Node versions identify the affected job and requi
           error.message.includes(
             "must be a concrete Node major/minor/patch version",
           ),
-          "the failure must explain the required concrete Node version format",
+          `the failure for ${jobId} must explain the required concrete Node version format`,
         );
         assert.ok(
-          error.message.includes(JSON.stringify(configuredVersion)),
-          `the failure must identify the malformed Node version ${JSON.stringify(configuredVersion)}`,
+          error.message.includes(JSON.stringify(malformedVersion)),
+          `the failure must identify the malformed Node version ${JSON.stringify(malformedVersion)}`,
         );
       }
       return true;
@@ -607,6 +796,51 @@ test("missing mobile release Node versions identify the affected job and require
       return true;
     },
   );
+});
+
+test("blank and whitespace-only mobile release Node versions identify the affected job and required configuration", () => {
+  const nodeRange = rootPackage.engines.node;
+  const jobId = "native-ios";
+  const yamlBlankNodeVersion = YAML.parse("node-version:\n")["node-version"];
+  assert.equal(
+    yamlBlankNodeVersion,
+    null,
+    "the blank YAML fixture must exercise YAML's native null value",
+  );
+
+  for (const configuredVersion of ["", yamlBlankNodeVersion, "   "]) {
+    const fixture = structuredClone(workflow);
+    const setupNodeStep = fixture.jobs[jobId].steps.find((step) =>
+      String(step.uses ?? "").startsWith("actions/setup-node@"),
+    );
+    assert.ok(
+      setupNodeStep,
+      `${jobId} fixture must configure Node with actions/setup-node`,
+    );
+    setupNodeStep.with["node-version"] = configuredVersion;
+
+    assert.throws(
+      () => assertMobileReleaseNodeVersions(fixture, nodeRange),
+      (error) => {
+        assert.ok(
+          error.message.includes(`mobile-release job "${jobId}"`),
+          "the failure must identify the mobile release job",
+        );
+        assert.ok(
+          error.message.includes("must configure node-version"),
+          "the failure must explain that node-version is required",
+        );
+        assert.ok(
+          error.message.includes(
+            `package.json engines.node range is ${JSON.stringify(nodeRange)}`,
+          ),
+          "the failure must identify the supported package.json Node range",
+        );
+        return true;
+      },
+      `the blank Node version ${JSON.stringify(configuredVersion)} must be rejected`,
+    );
+  }
 });
 
 test("combined mobile release Node diagnostics report every affected job and correction", () => {
@@ -728,8 +962,18 @@ test("blocked release diagnostics identify the supported Node range safely", () 
   );
   assert.match(
     blockStep.run,
-    /summary-regression=\$SUMMARY_REGRESSION_RESULT\./,
-    "blocked release output must use the declared summary regression result",
+    /configuration=\$RELEASE_CONFIGURATION_RESULT/,
+    "blocked release output must include the centralized configuration result",
+  );
+  assert.match(
+    blockStep.run,
+    /idle-profile=\$IDLE_PROFILE_RESULT/,
+    "blocked release output must include the idle-profile registration result",
+  );
+  assert.match(
+    blockStep.run,
+    /summary-regression=\$SUMMARY_REGRESSION_RESULT tamper-regression=\$TAMPER_REGRESSION_RESULT\./,
+    "blocked release output must use the declared summary and tamper regression results",
   );
 });
 
@@ -838,9 +1082,9 @@ test("publish job runs the evidence privacy and submission-boundary regression b
     privacyIndex >= 0,
     "mobile-publish must run the native evidence privacy regression",
   );
-  assert.equal(
+  assert.match(
     publishSteps[privacyIndex].run,
-    "pnpm run test:native-large-text-evidence",
+    /^bash scripts\/run-untrusted-checker\.sh pnpm run test:native-large-text-evidence$/,
     "mobile-publish must use the focused native evidence privacy regression command",
   );
   assert.equal(

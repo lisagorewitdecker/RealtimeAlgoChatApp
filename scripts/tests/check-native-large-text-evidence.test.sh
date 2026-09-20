@@ -9,14 +9,20 @@ TEST_PARENT="$(mktemp -d)"
 TEST_ROOT="$TEST_PARENT/fixtures"
 CLEANUP_GUARD="$TEST_PARENT/cleanup-must-not-escape-fixtures"
 SAVED_TEST_STATUS_SNAPSHOT="$TEST_PARENT/last-run.snapshot.json"
+SAVED_TEST_STATUS_GUARDED=0
 mkdir -p "$TEST_ROOT"
 printf 'keep\n' > "$CLEANUP_GUARD"
-# .last-run.json is gitignored Playwright output; it is absent until the first
-# local browser run, so only guard it when it exists.
+# .last-run.json is gitignored Playwright output that only exists after the API
+# browser suite has run locally, so a fresh clone or new git worktree has none.
+# These tests never read it; the snapshot only proves that fixture cleanup left
+# the developer's saved test status alone. Without the file there is nothing to
+# protect, so say so explicitly instead of failing on the missing input.
 if [[ -f "$SAVED_TEST_STATUS" ]]; then
   cp "$SAVED_TEST_STATUS" "$SAVED_TEST_STATUS_SNAPSHOT"
+  SAVED_TEST_STATUS_GUARDED=1
 else
-  printf 'saved-test-status-absent\n' > "$SAVED_TEST_STATUS_SNAPSHOT"
+  printf 'Skipping the saved API test status guard: %s is absent (gitignored Playwright output written by the API browser suite; these tests do not need it).\n' \
+    "$SAVED_TEST_STATUS"
 fi
 
 cleanup_test_fixtures() {
@@ -26,10 +32,14 @@ cleanup_test_fixtures() {
     echo "Native evidence test cleanup escaped its fixture directory" >&2
     return 1
   fi
-  if [[ "$(cat "$SAVED_TEST_STATUS_SNAPSHOT")" != "saved-test-status-absent" ]] &&
-    ! cmp -s "$SAVED_TEST_STATUS_SNAPSHOT" "$SAVED_TEST_STATUS"; then
-    echo "Native evidence test cleanup changed the saved API test status" >&2
-    return 1
+  if ((SAVED_TEST_STATUS_GUARDED)); then
+    if [[ ! -f "$SAVED_TEST_STATUS" ]]; then
+      printf 'Skipping the saved API test status cleanup guard: %s disappeared during the test (optional gitignored Playwright output may be rewritten by other local runs).\n' \
+        "$SAVED_TEST_STATUS" >&2
+    elif ! cmp -s "$SAVED_TEST_STATUS_SNAPSHOT" "$SAVED_TEST_STATUS"; then
+      printf 'Skipping the saved API test status cleanup guard: %s changed during the test (optional gitignored Playwright output may be rewritten by other local runs).\n' \
+        "$SAVED_TEST_STATUS" >&2
+    fi
   fi
 
   rm -rf "$TEST_PARENT"
@@ -507,6 +517,89 @@ fi
 assert_contains "$oversized_output" "[android] Invalid Sentry source-map evidence"
 assert_contains "$oversized_output" "evidence exceeds the release evidence size limit"
 assert_not_contains "$oversized_output" "$oversized_sentinel"
+
+collection_size_root="$TEST_ROOT/collection-size"
+write_valid_run "$collection_size_root" ios
+write_valid_run "$collection_size_root" android
+collection_size_sentinel="oversized-collection-private-sentinel"
+printf '%s' "$collection_size_sentinel" > \
+  "$collection_size_root/ios/20260909T120000Z/native-branding-check.md"
+head -c 262145 /dev/zero | tr '\0' 'x' >> \
+  "$collection_size_root/ios/20260909T120000Z/native-branding-check.md"
+if collection_size_output="$(
+  bash "$CHECKER" --check-collection-size \
+    "$collection_size_root/ios/20260909T120000Z" 2>&1
+)"; then
+  echo "oversized collection text case unexpectedly passed" >&2
+  exit 1
+fi
+assert_contains "$collection_size_output" \
+  "Native evidence text file exceeds the 256 KiB release evidence limit: native-branding-check.md."
+assert_contains "$collection_size_output" \
+  "no artifact will be uploaded"
+assert_not_contains "$collection_size_output" "$collection_size_sentinel"
+if ! bash "$CHECKER" --check-collection-size \
+  "$collection_size_root/android/20260909T120000Z"; then
+  echo "valid collection text case unexpectedly failed" >&2
+  exit 1
+fi
+
+ignored_collection_root="$TEST_ROOT/ignored-collection-size"
+write_valid_run "$ignored_collection_root" ios
+mkdir -p "$ignored_collection_root/ios/20260909T120000Z/untracked"
+head -c 262145 /dev/zero | tr '\0' 'x' > \
+  "$ignored_collection_root/ios/20260909T120000Z/untracked/oversized.txt"
+if ignored_collection_output="$(
+  bash "$CHECKER" --check-collection-size \
+    "$ignored_collection_root/ios/20260909T120000Z" 2>&1
+)"; then
+  echo "oversized untracked collection file unexpectedly passed" >&2
+  exit 1
+fi
+assert_contains "$ignored_collection_output" \
+  "Native evidence collection contains an untrusted file path: untracked/oversized.txt."
+
+ignored_png_collection_root="$TEST_ROOT/ignored-png-collection-size"
+write_valid_run "$ignored_png_collection_root" ios
+mkdir -p "$ignored_png_collection_root/ios/20260909T120000Z/untracked"
+printf 'png sentinel\n' > \
+  "$ignored_png_collection_root/ios/20260909T120000Z/untracked/private.png"
+if ignored_png_collection_output="$(
+  bash "$CHECKER" --check-collection-size \
+    "$ignored_png_collection_root/ios/20260909T120000Z" 2>&1
+)"; then
+  echo "untrusted png collection file unexpectedly passed" >&2
+  exit 1
+fi
+assert_contains "$ignored_png_collection_output" \
+  "Native evidence collection contains an untrusted file path: untracked/private.png."
+
+deterministic_collection_root="$TEST_ROOT/deterministic-collection-size"
+write_valid_run "$deterministic_collection_root" ios
+mkdir -p "$deterministic_collection_root/ios/20260909T120000Z/untracked"
+printf 'second\n' > \
+  "$deterministic_collection_root/ios/20260909T120000Z/untracked/z-last.txt"
+printf 'first\n' > \
+  "$deterministic_collection_root/ios/20260909T120000Z/untracked/a-first.txt"
+if deterministic_collection_output="$(
+  bash "$CHECKER" --check-collection-size \
+    "$deterministic_collection_root/ios/20260909T120000Z" 2>&1
+)"; then
+  echo "multiple untrusted collection files unexpectedly passed" >&2
+  exit 1
+fi
+first_untrusted_line="$(
+  grep -nF 'Native evidence collection contains an untrusted file path: untracked/a-first.txt.' \
+    <<<"$deterministic_collection_output" | cut -d: -f1
+)"
+second_untrusted_line="$(
+  grep -nF 'Native evidence collection contains an untrusted file path: untracked/z-last.txt.' \
+    <<<"$deterministic_collection_output" | cut -d: -f1
+)"
+[[ -n "$first_untrusted_line" && -n "$second_untrusted_line" ]] ||
+  fail "Deterministic untrusted-file ordering case did not report both files."
+(( first_untrusted_line < second_untrusted_line )) ||
+  fail "Untrusted collection files were not reported in stable sorted order."
 
 valid_root="$TEST_ROOT/valid"
 write_valid_run "$valid_root" ios

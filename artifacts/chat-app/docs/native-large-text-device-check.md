@@ -95,6 +95,23 @@ copy or another branch that has not been synchronized with `main`.
 - The Android evidence job repeats the final device checks because separate
   self-hosted jobs may be assigned to different runners.
 
+### Checking Android runner health before a release
+
+The workflow includes a GitHub-hosted **Android release runner health** job.
+It uses the read-only Actions API to verify that the repository has at least
+one online runner with all four labels required by the Android jobs:
+`self-hosted`, `linux`, `android`, and `smallest-simulator`. Its job summary
+lists offline runners and the exact labels missing from otherwise eligible
+runners. It does not read or print registration tokens, release credentials,
+or other secret values.
+
+To run only this check, open **Actions → Mobile release accessibility gate →
+Run workflow**, leave **Publish** disabled, and enable
+`android_runner_health_only`. The health job links back to this procedure and
+the other release jobs are skipped. Normal release runs perform the same
+check first; a failed health check prevents the Android self-hosted preflight
+from being scheduled.
+
 For a new Linux x86_64 runner, create the service account before any
 user-scoped SDK, AVD, or Maestro installation. Install the host prerequisites
 as root, but run the bootstrap as `actions` so its `$HOME` is the same home
@@ -490,15 +507,31 @@ Do not replace `secrets: inherit` while making this change. The authentication,
 test-account, Sentry, Clerk, and database values listed below still cross the
 reusable-workflow secrets boundary.
 
-Store the following values as **secrets** in the GitHub Actions
-`mobile-release` environment. Authentication values are injected only into the process that
-needs them and are never written to the repository or printed by the workflow.
+The called workflow validates these credentials in one hosted setup preflight.
+When required credentials are absent, the preflight reports every missing key
+together before native runners or release regressions start. It names keys only,
+never values. GitHub's reusable-workflow declarations leave the secrets
+syntactically optional so this aggregate diagnostic can run; the preflight list
+below is the blocking required contract. `NATIVE_SMOKE_DISPLAY_NAME` remains
+optional and is not included in that failure. The publish-only `EAS_TOKEN` also
+stays out of this preflight and remains available only after approval from the
+protected `mobile-store-submission` environment.
+
+Store the runner-read token below as a repository Actions **secret** so manual
+dispatches can use it, and pass it through the reusable-workflow secret contract.
+Store the release credentials in the GitHub Actions `mobile-release` environment.
+Authentication values are injected only into the process that needs them and
+are never written to the repository or printed by the workflow.
 The candidate build IDs are recorded in each smoke result directory so the
 tested candidate can be audited by the publish job:
 
 #### Required reusable-workflow secrets
 
-- `EAS_TOKEN` — EAS authentication token used only by the publish job
+- `GITHUB_WORKFLOW_PULL_TOKEN_FINAL` — a dedicated fine-grained GitHub token
+  scoped to this repository with **Administration: read** permission, used only
+  by the hosted Android runner-health job to read
+  `GET /repos/<owner>/<repo>/actions/runners`; it must not be a registration
+  token or a release credential
 - `SENTRY_AUTH_TOKEN` — a masked Sentry token with release-upload and
   event-read access for organization `lisagorewitdecker-06`, project
   `react-native`; store the same token in the EAS release build environment and
@@ -521,6 +554,11 @@ tested candidate can be audited by the publish job:
 
 - `NATIVE_SMOKE_DISPLAY_NAME` — reusable display name for the smoke account; the
   test flow can register the account without a preconfigured value
+
+#### Publish-only secret
+
+- `EAS_TOKEN` — EAS authentication token used only by the publish job; store it
+  in the protected `mobile-store-submission` environment, not `mobile-release`
 
 Build each candidate with `SENTRY_DSN`, `SENTRY_AUTH_TOKEN`, `SENTRY_RELEASE`,
 and `SENTRY_DIST` in its EAS release environment. EAS supplies `EAS_BUILD_ID`;
