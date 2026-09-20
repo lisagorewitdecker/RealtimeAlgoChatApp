@@ -26,6 +26,14 @@ function reactNativeResponse(
   return response;
 }
 
+function responseWithoutBlob(response: Response): Response {
+  Object.defineProperty(response, "blob", {
+    configurable: true,
+    value: undefined,
+  });
+  return response;
+}
+
 function installFetch(response: Response) {
   const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(response);
   vi.stubGlobal("fetch", fetchMock);
@@ -138,6 +146,59 @@ describe("customFetch response parsing", () => {
       message:
         "HTTP 422 Unprocessable Entity: Invalid profile — Name is required",
     });
+  });
+
+  it.each([
+    ["a non-empty text response", "plain text", "plain text"],
+    ["an empty text response", "", null],
+  ])(
+    "parses %s when response.body is unavailable",
+    async (_label, body, expected) => {
+      installFetch(
+        reactNativeResponse(body, {
+          headers: { "content-type": "text/plain" },
+        }),
+      );
+
+      await expect(
+        customFetch<string | null>("/status", { responseType: "text" }),
+      ).resolves.toBe(expected);
+    },
+  );
+
+  it("returns a Blob response when blob() is available", async () => {
+    const blob = new Blob(["file contents"], {
+      type: "application/octet-stream",
+    });
+    const response = reactNativeResponse("file contents", {
+      headers: { "content-type": "application/octet-stream" },
+    });
+    const blobMock = vi.fn<() => Promise<Blob>>().mockResolvedValue(blob);
+    Object.defineProperty(response, "blob", {
+      configurable: true,
+      value: blobMock,
+    });
+    installFetch(response);
+
+    await expect(
+      customFetch<Blob>("/download", { responseType: "blob" }),
+    ).resolves.toBe(blob);
+    expect(blobMock).toHaveBeenCalledOnce();
+  });
+
+  it("fails clearly when a Blob response is requested without blob()", async () => {
+    const response = responseWithoutBlob(
+      reactNativeResponse("file contents", {
+        headers: { "content-type": "application/octet-stream" },
+      }),
+    );
+    installFetch(response);
+
+    await expect(
+      customFetch("/download", { responseType: "blob" }),
+    ).rejects.toThrow(
+      'Blob responses are not supported in this runtime. Use responseType "json" or "text" instead.',
+    );
   });
 });
 
