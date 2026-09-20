@@ -68,7 +68,8 @@ jobs:
           stall_output_path="$(mktemp)"
           stall_preload_path="$(mktemp --suffix=.mjs)"
           healthy_log="$(mktemp)"
-          trap 'rm -f "$summary_path" "$failure_summary_path" "$setting_summary_path" "$tooling_summary_path" "$tooling_marker_path" "$stall_summary_path" "$stall_output_path" "$stall_preload_path" "$healthy_log"' EXIT
+          expected_failure_summary_path="$(mktemp)"
+          trap 'rm -f "$summary_path" "$failure_summary_path" "$setting_summary_path" "$tooling_summary_path" "$tooling_marker_path" "$stall_summary_path" "$stall_output_path" "$stall_preload_path" "$healthy_log" "$expected_failure_summary_path"' EXIT
           resolved_commit_sha="$(git rev-parse --verify HEAD)"
           source scripts/workflow-output-safety.sh
           safe_reviewed_ref="$(sanitize_workflow_text "$REVIEWED_REF")"
@@ -125,14 +126,23 @@ jobs:
             echo "The missing-runtime-library-long-path preview startup scenario unexpectedly passed." >&2
             exit 1
           fi
+          expected_library_identifier="libgtk-3.so.0"
           expected_diagnosis="Expo preview startup error: Error: /opt/expo/react-native-devtools: error while loading shared libraries:"
-          if ! grep -Fq -- "### Expo preview startup" "$failure_summary_path" ||
-            ! grep -Fq -- "**Status:** FAIL" "$failure_summary_path" ||
-            ! grep -Fq -- "$expected_diagnosis" "$failure_summary_path" ||
+          cat > "$expected_failure_summary_path" <<'EOF'
+          ### Expo preview startup
+
+          **Status:** FAIL
+
+          **Diagnosis:** Expo preview startup error: Error: /opt/expo/react-native-devtools: error while loading shared libraries: /opt/expo/react-native-devtools-cache/react-native-devtools-cache/react-native-devtools-cache/react-native-devtools-cache/react-native-devtools-cache/react-native-devtools-cache/react-na (missing runtime library: /opt/expo/react-native-devtools-cache/react-native-devtools-cache/react-native-devtools-cache/react-native-devtools-cache/react-native-devtools-cache/react-native-devtools-cache…/libgtk-3.so.0)
+
+          EOF
+          if ! cmp -s "$failure_summary_path" "$expected_failure_summary_path" ||
             [[ "$(grep -Fc -- "### Expo preview startup" "$failure_summary_path")" != "1" ]] ||
+            [[ "$(grep -Fc -- "$expected_library_identifier" "$failure_summary_path")" != "1" ]] ||
             [[ "$(wc -c < "$failure_summary_path")" -gt 700 ]]; then
             echo "The hosted summary did not contain the bounded missing-library diagnosis." >&2
             cat "$failure_summary_path" >&2
+            diff -u "$expected_failure_summary_path" "$failure_summary_path" >&2 || true
             exit 1
           fi
           if grep -Eiq -- 'https?://|authorization|proxy-authorization|password|passwd|secret|token|credential' "$failure_summary_path"; then
@@ -269,6 +279,14 @@ jobs:
             echo "- Malformed preview setting: **PASS** (configuration diagnosis retained; private material excluded)"
             cat "$setting_summary_path"
           } >> "$GITHUB_STEP_SUMMARY"
+          if [[ "$(grep -Fc -- "$expected_diagnosis" "$GITHUB_STEP_SUMMARY")" != "1" ]] ||
+            [[ "$(grep -Fc -- "$expected_library_identifier" "$GITHUB_STEP_SUMMARY")" != "1" ]] ||
+            grep -Fq -- "Starting Metro Bundler" "$GITHUB_STEP_SUMMARY" ||
+            grep -Fq -- "unrelated log text" "$GITHUB_STEP_SUMMARY" ||
+            grep -Eiq -- 'https?://|authorization|proxy-authorization|password|passwd|secret|token|credential' "$GITHUB_STEP_SUMMARY"; then
+            echo "The published hosted summary exposed raw child-process output or private material." >&2
+            exit 1
+          fi
 
   measure-preview-timing:
     name: Measure preview timing on ${{ matrix.os }}

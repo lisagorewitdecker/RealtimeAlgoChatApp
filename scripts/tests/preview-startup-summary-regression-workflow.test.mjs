@@ -93,6 +93,27 @@ test("hosted preview startup summary regression checks the reviewed revision", (
     /The hosted Metro body-stall summary did not retain safe failure and recovery guidance/,
   );
   assert.match(verification, /bounded missing-library diagnosis/);
+  assert.match(verification, /expected_library_identifier="libgtk-3\.so\.0"/);
+  assert.match(
+    verification,
+    /expected_failure_summary_path="\$\(mktemp\)"/,
+  );
+  assert.match(
+    verification,
+    /cmp -s "\$failure_summary_path" "\$expected_failure_summary_path"/,
+  );
+  assert.match(
+    verification,
+    /grep -Fc -- "\$expected_library_identifier" "\$failure_summary_path"/,
+  );
+  assert.match(
+    verification,
+    /grep -Fc -- "\$expected_diagnosis" "\$GITHUB_STEP_SUMMARY"/,
+  );
+  assert.match(
+    verification,
+    /published hosted summary exposed raw child-process output or private material/,
+  );
   assert.match(verification, /private material/);
   assert.match(
     verification,
