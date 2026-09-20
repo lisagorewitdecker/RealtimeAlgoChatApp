@@ -129,3 +129,4 @@
 - [Socket tests time out on stale dev-DB rooms](socket-test-stale-dev-rooms.md) — mass join timeouts = stale rooms rows (old last_accessed_at / is_active=false) emitting ROOM_INACTIVE; refresh the dev DB, not the code.
 - [Native privacy publish boundary](native-privacy-publish-boundary.md) — test failed privacy summaries and the unreachable store boundary together, not only the evidence checker.
 - [Tagged wrapper test doubles](tagged-wrapper-test-doubles.md) — a wrapper stand-in must render its own tagged host and suites query through within(); prove it with a typecheck-clean mutant under both Jest projects.
+- [Preview evidence byte pairing](preview-evidence-byte-pairing.md) — when a preview sidecar is present, Markdown evidence must preserve the producer’s exact redacted byte-bearing strings.

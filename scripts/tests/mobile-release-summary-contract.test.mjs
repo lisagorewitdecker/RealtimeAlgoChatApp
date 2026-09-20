@@ -4542,8 +4542,8 @@ PRIVATE_IOS_EVIDENCE_MARKER
 
 | Boundary | Status | Evidence |
 | --- | --- | --- |
-| Public manifest reachability | PASS | Public edge was reachable. |
-| Local handoff probe (manifest and bundle) | NOT_RUN | No local probe was available. |
+| Public manifest reachability | PASS | public manifest HTTP 200 (128 bytes) |
+| Local handoff probe (manifest and bundle) | NOT_RUN | Local manifest/bundle probe not run — no successful probe result was recorded |
 | Expo Go launch on physical iPhone | BLOCKED | No physical phone was available. |
 | Server-side native request evidence | BLOCKED | No native request was available. |
 `;
@@ -4628,8 +4628,8 @@ PRIVATE_IOS_EVIDENCE_MARKER
 
 | Boundary | Status | Evidence |
 | --- | --- | --- |
-| Public manifest reachability | FAIL | The public edge was unavailable. |
-| Local handoff probe (manifest and bundle) | NOT_RUN | The public probe failed first. |
+| Public manifest reachability | FAIL | Public manifest probe failed — no successful probe result was recorded |
+| Local handoff probe (manifest and bundle) | NOT_RUN | Local manifest/bundle probe not run — no successful probe result was recorded |
 | Expo Go launch on physical iPhone | FAIL | Physical launch was not attempted after the public failure. |
 | Server-side native request evidence | FAIL | Native request evidence was not available after the public failure. |
 `;
@@ -4955,10 +4955,15 @@ PRIVATE_IOS_EVIDENCE_MARKER
 `,
     updateOnlyPreflight: true,
   });
-  assert.equal(
+  assert.notEqual(
     preflightOnly.result.status,
     0,
-    "a changed iOS preflight artifact must still validate its paired record",
+    "a changed iOS preflight artifact with a tampered byte count must fail its paired record",
+  );
+  assert.match(
+    [preflightOnly.result.stdout, preflightOnly.result.stderr].join("\n"),
+    /preflight JSON public manifest evidence does not match the Markdown record/,
+    "a preflight-only iOS byte-count mismatch must report the fixed paired-evidence diagnostic",
   );
   assert.match(
     preflightOnly.summary,
@@ -4992,17 +4997,22 @@ PRIVATE_IOS_EVIDENCE_MARKER
       },
     ],
   });
-  assert.equal(
+  assert.notEqual(
     pairedAlongsideRecord.result.status,
     0,
-    "a changed iOS record and sibling preflight alongside another record must pass",
+    "a changed iOS record and sibling preflight with a tampered byte count must fail",
   );
-  assert.equal(
-    pairedAlongsideRecord.summary.match(
-      /- Changed records checked: \*\*2\*\*/g,
-    )?.length ?? 0,
-    1,
-    "a paired iOS change must count its record once alongside another changed record",
+  assert.match(
+    [pairedAlongsideRecord.result.stdout, pairedAlongsideRecord.result.stderr].join(
+      "\n",
+    ),
+    /preflight JSON public manifest evidence does not match the Markdown record/,
+    "a paired iOS byte-count mismatch must report the fixed paired-evidence diagnostic",
+  );
+  assert.match(
+    pairedAlongsideRecord.summary,
+    /Validation: \*\*FAIL\*\*/,
+    "a paired iOS byte-count mismatch must fail the release summary",
   );
   assert.deepEqual(
     pairedAlongsideRecord.checkerArgs,
@@ -5011,11 +5021,10 @@ PRIVATE_IOS_EVIDENCE_MARKER
         pairedAlongsideRecord.recordPaths[0],
         pairedAlongsideRecord.preflightPaths[0],
       ],
-      [pairedAlongsideRecord.recordPaths[1]],
     ],
-    "the iOS checker must receive the changed sidecar with its record without duplicating the record",
+    "the iOS checker must receive the changed sidecar with its record without duplicating it before the job fails fast",
   );
-  for (const recordPath of pairedAlongsideRecord.recordPaths) {
+  for (const recordPath of pairedAlongsideRecord.recordPaths.slice(0, 1)) {
     const escapedPath = recordPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     const recordLinkPattern = new RegExp(
       `\\[${escapedPath}\\]\\(https://github\\.example/example/chat-app/blob/[^)]+/${escapedPath}\\)`,
