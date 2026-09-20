@@ -194,13 +194,14 @@ function findUnrecognizedLoaderFailure(output) {
 }
 
 function sanitizeStartupDiagnostic(value, maxLength) {
-  return [...value]
+  return value
+    .replace(ANSI_PATTERN, "")
+    .split("")
     .map((char) => {
       const code = char.charCodeAt(0);
       return code <= 0x1f || code === 0x7f ? " " : char;
     })
     .join("")
-    .replace(ANSI_PATTERN, "")
     .replace(/\s+/g, " ")
     .trim()
     .slice(0, maxLength);

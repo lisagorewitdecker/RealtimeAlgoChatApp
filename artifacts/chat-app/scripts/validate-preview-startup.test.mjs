@@ -181,6 +181,7 @@ test("keeps the missing library when a DevTools wrapper precedes the loader line
         /Expo preview startup error: .*libgtk-3\.so\.0/,
       );
       assertHasNoControlCharacters(error.message);
+      assert.doesNotMatch(error.message, /\[(?:0|31)m/);
       assert.ok(
         error.message.length <= 512,
         "startup diagnostic exceeded its bounded length",
@@ -209,6 +210,7 @@ test("validates captured startup logs with a bounded, sanitized library diagnost
       "captured startup diagnostic exceeded its bounded length",
     );
     assertHasNoControlCharacters(diagnostic);
+    assert.doesNotMatch(diagnostic, /\[(?:0|31)m/);
     assert.doesNotMatch(diagnostic, /unrelated captured output/);
   } finally {
     rmSync(validation.directory, { recursive: true, force: true });
@@ -226,6 +228,7 @@ test("reports a DevTools failure without inventing a missing library", () => {
       assert.match(error.message, /Expo preview startup error: .*DevTools/);
       assert.doesNotMatch(error.message, /missing runtime library/i);
       assertHasNoControlCharacters(error.message);
+      assert.doesNotMatch(error.message, /\[(?:0|31)m/);
       assert.ok(
         error.message.length <= 512,
         "startup diagnostic exceeded its bounded length",
