@@ -283,15 +283,16 @@ function redactKnownStartupFailureSecrets(value) {
 function normalizeLoaderFailureForMatching(value) {
   const withoutAnsiSequences = stripAnsiEscapeSequences(value);
   const trailingBell = String.fromCharCode(0x07);
-  let trailingWhitespaceStart = withoutAnsiSequences.length;
+  let nonWhitespaceEnd = withoutAnsiSequences.length;
   while (
-    trailingWhitespaceStart > 0 &&
-    /\s/.test(withoutAnsiSequences[trailingWhitespaceStart - 1] ?? "")
+    nonWhitespaceEnd > 0 &&
+    /\s/.test(withoutAnsiSequences[nonWhitespaceEnd - 1] ?? "")
   ) {
-    trailingWhitespaceStart -= 1;
+    nonWhitespaceEnd -= 1;
   }
-  return withoutAnsiSequences[trailingWhitespaceStart - 1] === trailingBell
-    ? withoutAnsiSequences.slice(0, trailingWhitespaceStart - 1)
+  const trailingBellIndex = nonWhitespaceEnd - 1;
+  return withoutAnsiSequences[trailingBellIndex] === trailingBell
+    ? withoutAnsiSequences.slice(0, trailingBellIndex)
     : withoutAnsiSequences;
 }
 
