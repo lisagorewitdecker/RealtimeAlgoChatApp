@@ -15,6 +15,7 @@ shell_marker_path="$blocked_root/unsafe-download-metadata-shell-marker"
 trap 'rm -rf "$blocked_root" "$summary_path" "$checker_stdout" "$checker_stderr"' EXIT
 resolved_commit_sha="$(git -C "$root_dir" rev-parse --verify HEAD)"
 hostile_metadata="${NATIVE_EVIDENCE_HOSTILE_METADATA:-0}"
+summary_capture_path="${NATIVE_EVIDENCE_SUMMARY_CAPTURE_PATH:-}"
 
 : "${GITHUB_STEP_SUMMARY:?Set GITHUB_STEP_SUMMARY to the job summary file.}"
 : "${REVIEWED_REF:?Set REVIEWED_REF to the checked ref.}"
@@ -192,4 +193,9 @@ fi
 
 cat "$checker_stdout"
 cat "$checker_stderr" >&2
+if [[ -n "$summary_capture_path" ]]; then
+  # Capture only the trusted revision block and the checker summary after all
+  # assertions pass. Checker stdout/stderr are intentionally never copied.
+  cat "$GITHUB_STEP_SUMMARY" "$summary_path" > "$summary_capture_path"
+fi
 cat "$summary_path" >> "$GITHUB_STEP_SUMMARY"

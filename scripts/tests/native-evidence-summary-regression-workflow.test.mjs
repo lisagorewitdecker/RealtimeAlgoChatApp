@@ -61,6 +61,8 @@ test("hosted summary regression checks only the reviewed ref", () => {
     "scripts/find-duplicate-json-object-keys.mjs",
     "scripts/read-bounded-text.mjs",
     "scripts/run-untrusted-checker.sh",
+    "scripts/publish-native-evidence-summary-check.mjs",
+    "scripts/tests/publish-native-evidence-summary-check.test.mjs",
     "scripts/tests/native-evidence-summary-regression-fixture.sh",
   ]);
   assert.equal(
@@ -71,7 +73,10 @@ test("hosted summary regression checks only the reviewed ref", () => {
     workflow.on.workflow_dispatch.inputs.reviewed_ref.type,
     "string",
   );
-  assert.deepEqual(workflow.permissions, { contents: "read" });
+  assert.deepEqual(workflow.permissions, {
+    contents: "read",
+    checks: "write",
+  });
 
   const jobs = Object.entries(workflow.jobs);
   assert.deepEqual(
@@ -80,7 +85,7 @@ test("hosted summary regression checks only the reviewed ref", () => {
   );
   const [, job] = jobs[0];
   assert.equal(job["runs-on"], "ubuntu-latest");
-  assert.equal(job.steps.length, 3);
+  assert.equal(job.steps.length, 4);
   assert.equal(job.steps[0].uses, "actions/checkout@v4");
   assert.equal(
     job.steps[0].with.ref,
@@ -93,6 +98,8 @@ test("hosted summary regression checks only the reviewed ref", () => {
     REVIEWED_REF:
       "${{ github.event.pull_request.head.sha || inputs.reviewed_ref }}",
     NATIVE_EVIDENCE_HOSTILE_METADATA: "1",
+    NATIVE_EVIDENCE_SUMMARY_CAPTURE_PATH:
+      "${{ runner.temp }}/native-evidence-summary-capture.md",
   });
   assert.equal(
     verification.trim(),
@@ -188,6 +195,31 @@ test("hosted summary regression checks only the reviewed ref", () => {
     oversizedStep.run,
     /Oversized evidence payload leaked into hosted output/,
   );
+
+  const captureStep = job.steps[3];
+  assert.equal(captureStep.name, "Publish verified summary bytes");
+  assert.equal(
+    captureStep.run,
+    "node scripts/publish-native-evidence-summary-check.mjs",
+  );
+  assert.equal(captureStep.if, "${{ success() }}");
+  assert.deepEqual(captureStep.env, {
+    GITHUB_TOKEN: "${{ github.token }}",
+    NATIVE_EVIDENCE_SUMMARY_CAPTURE_PATH:
+      "${{ runner.temp }}/native-evidence-summary-capture.md",
+  });
+  assert.match(
+    workflowText,
+    /output is available[\s#]+through the public Checks API and Checks tab/,
+  );
+  assert.match(
+    fixtureText,
+    /# Capture only the trusted revision block and the checker summary after all\s+# assertions pass/,
+  );
+  assert.match(
+    fixtureText,
+    /cat "\$GITHUB_STEP_SUMMARY" "\$summary_path" > "\$summary_capture_path"/,
+  );
 });
 
 test("hosted summary path filtering leaves mobile release ownership intact", () => {
@@ -237,9 +269,8 @@ test("hosted summary path filtering leaves mobile release ownership intact", () 
   );
 });
 
-test("hosted summary regression cannot publish or start native jobs", () => {
+test("hosted summary regression cannot start native jobs", () => {
   assert.doesNotMatch(workflowText, /self-hosted/);
-  assert.doesNotMatch(workflowText, /\bpublish\b/i);
   assert.doesNotMatch(workflowText, /EAS_TOKEN|NATIVE_SMOKE/);
   assert.doesNotMatch(workflowText, /runs-on:\s*.*(?:macos|self-hosted)/i);
 });
@@ -345,6 +376,67 @@ test("hosted summary keeps revision metadata when the checker fails", () => {
         summary.indexOf("<!-- synthetic checker output -->"),
       "trusted revision metadata must precede appended checker findings",
     );
+  } finally {
+    rmSync(fixtureRoot, { recursive: true, force: true });
+  }
+});
+
+test("hosted summary capture contains only the validated summary bytes", () => {
+  const fixtureRoot = mkdtempSync(
+    path.join(tmpdir(), "native-evidence-summary-capture-"),
+  );
+  const summaryPath = path.join(fixtureRoot, "job-summary.md");
+  const capturePath = path.join(fixtureRoot, "captured-summary.md");
+  const checkerPath = path.join(fixtureRoot, "synthetic-checker.sh");
+
+  try {
+    writeFileSync(
+      checkerPath,
+      [
+        "#!/usr/bin/env bash",
+        "set -euo pipefail",
+        'blocked_root="$1"',
+        "{",
+        '  echo "## iOS native large-text evidence"',
+        '  echo "- Status: **FAIL**"',
+        '  echo "- Validated run directory: **Unavailable**"',
+        '  echo "- Detailed evidence report: **Unavailable**"',
+        '  echo "## Android native large-text evidence"',
+        '  echo "- Status: **FAIL**"',
+        '  echo "- Validated run directory: **Unavailable**"',
+        '  echo "- Detailed evidence report: **Unavailable**"',
+        '} >> "$GITHUB_STEP_SUMMARY"',
+        'echo "<!-- checker output must not be captured -->"',
+        'echo "checker stdout must not be captured"',
+        'echo "checker stderr must not be captured" >&2',
+        "exit 41",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const result = spawnSync("bash", [fixturePath, "bash", checkerPath], {
+      cwd: workspaceRoot,
+      env: {
+        ...process.env,
+        GITHUB_STEP_SUMMARY: summaryPath,
+        NATIVE_EVIDENCE_SUMMARY_CAPTURE_PATH: capturePath,
+        REVIEWED_REF: "capture-reviewed-ref",
+      },
+      encoding: "utf8",
+    });
+
+    assert.equal(result.status, 0, result.stderr);
+    const summary = readFileSync(summaryPath, "utf8");
+    const captured = readFileSync(capturePath, "utf8");
+    assert.equal(captured, summary);
+    assert.doesNotMatch(captured, /checker output must not be captured/);
+    assert.doesNotMatch(captured, /checker stdout must not be captured/);
+    assert.doesNotMatch(captured, /checker stderr must not be captured/);
+    assert.match(captured, /## Reviewed release revision/);
+    assert.match(captured, /- Checked ref: `capture-reviewed-ref`/);
+    assert.match(captured, /## iOS native large-text evidence/);
+    assert.match(captured, /## Android native large-text evidence/);
   } finally {
     rmSync(fixtureRoot, { recursive: true, force: true });
   }

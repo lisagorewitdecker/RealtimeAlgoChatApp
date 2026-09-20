@@ -96,6 +96,7 @@
 - [Hosted redaction probes](hosted-redaction-probes.md) — Actions echoes env and run scripts; assemble hostile values from encoded literals before capturing checker streams.
 - [GitHub release browser evidence](github-release-browser-evidence.md) — missing release-environment targets make idle-profile evidence skip before Playwright runs.
 - [Reviewer-visible CI evidence](reviewer-visible-ci-evidence.md) — step summaries are sign-in-only and API-invisible; publish failure evidence as a bounded check-run summary and verify it unauthenticated.
+- [Hosted summary byte capture](hosted-summary-byte-capture.md) — exact validated bytes can use a successful-run artifact with ref/SHA metadata; keep raw checker streams out.
 - [API codegen fixture test hides nested failures](api-codegen-fixture-test-diagnosis.md) — a missing drift message usually means an earlier api-spec suite failed; rebuild the fixture by hand to see which.
 - [Stale composite TypeScript output](stale-composite-dist-typecheck.md) — untracked lib `dist` declarations outlive rebases; rebuild with `tsc -b` before believing a contradictory typecheck error.
 - [Pre-rebase guard blocks task merges](pre-rebase-guard-blocks-task-merges.md) — a local hook refusing big replays makes task merges fail as opaque UNKNOWN with no conflicts; exempt main-repl/main.

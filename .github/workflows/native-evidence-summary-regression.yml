@@ -8,6 +8,8 @@ on:
       - scripts/find-duplicate-json-object-keys.mjs
       - scripts/read-bounded-text.mjs
       - scripts/run-untrusted-checker.sh
+      - scripts/publish-native-evidence-summary-check.mjs
+      - scripts/tests/publish-native-evidence-summary-check.test.mjs
       - scripts/tests/native-evidence-summary-regression-fixture.sh
   workflow_dispatch:
     inputs:
@@ -18,6 +20,7 @@ on:
 
 permissions:
   contents: read
+  checks: write
 
 jobs:
   verify-hosted-summary:
@@ -36,6 +39,7 @@ jobs:
         env:
           REVIEWED_REF: ${{ github.event.pull_request.head.sha || inputs.reviewed_ref }}
           NATIVE_EVIDENCE_HOSTILE_METADATA: "1"
+          NATIVE_EVIDENCE_SUMMARY_CAPTURE_PATH: ${{ runner.temp }}/native-evidence-summary-capture.md
         run: |
           bash scripts/tests/native-evidence-summary-regression-fixture.sh \
             bash scripts/check-native-large-text-evidence.sh
@@ -124,3 +128,13 @@ jobs:
           require_not_contains "$output" "$private_marker"
           require_not_contains "$summary" "$private_marker"
           cat "$summary_path" >> "$GITHUB_STEP_SUMMARY"
+
+      # The job summary above is hidden from signed-out viewers. Publish the
+      # exact bounded summary through a check run, whose output is available
+      # through the public Checks API and Checks tab.
+      - name: Publish verified summary bytes
+        if: ${{ success() }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          NATIVE_EVIDENCE_SUMMARY_CAPTURE_PATH: ${{ runner.temp }}/native-evidence-summary-capture.md
+        run: node scripts/publish-native-evidence-summary-check.mjs
