@@ -67,6 +67,12 @@ render_summary_source() {
     sanitize_workflow_stream
 }
 
+render_branding_source_literal() {
+  render_summary_source |
+    sed -e '1d' -e '/^- Detailed report:/d' |
+    render_markdown_code_block
+}
+
 write_archived_snapshot() {
   echo "- Archived report snapshot: [available in this summary](#archived-native-branding-report-snapshot)"
   echo
@@ -74,12 +80,10 @@ write_archived_snapshot() {
   echo
 
   if [[ -s "$SUMMARY_SOURCE" ]]; then
-    # The concise branding fragment is safe for reviewer-visible output. Keep
-    # its result, fingerprint, and permission finding in the durable summary,
-    # but replace the expiring artifact link with a local snapshot note.
-    render_summary_source |
-      sed -e '1d' \
-        -e 's|^- Detailed report:.*|- Detailed report: preserved in this release summary; the artifact copy is linked above while retained.|'
+    # Keep the fixed snapshot link outside the copied report. The report
+    # content itself is literal so it cannot restyle the durable summary.
+    echo "- Detailed report: preserved in this release summary; the artifact copy is linked above while retained."
+    render_branding_source_literal
   else
     echo "- Status: **FAIL**"
     echo "$FALLBACK_BUILD_LINE"
@@ -93,7 +97,12 @@ write_archived_snapshot() {
 write_summary() {
   {
     if [[ -s "$SUMMARY_SOURCE" ]]; then
-      render_summary_source
+      echo "## ${PLATFORM_LABEL} native branding"
+      echo
+      echo "- Detailed report: [native-branding-check.md](${SAFE_REPORT_URL})"
+      echo
+      echo "### Branding validation details"
+      render_branding_source_literal
     else
       echo "## ${PLATFORM_LABEL} native branding"
       echo

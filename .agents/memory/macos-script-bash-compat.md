@@ -7,7 +7,7 @@ Scripts executed on macOS run under Apple's stock `/bin/bash` 3.2 when invoked a
 
 **Why:** The repeatable checks for these scripts run only on Linux (bash 5), so a bash 4 construct passes every workspace test and then fails on the owner's Mac, where nobody can debug it from here.
 
-**How to apply:** Grep first (`declare -A|mapfile|readarray|,,|\^\^|%\(|\[\[ -v|\[-1\]`), then run the real thing: a genuine bash 3.2.57 builds on this Linux workspace in a few minutes and the iOS runner harness accepts `PROVISION_TEST_BASH=/path/to/bash` to run the script and every stub under it. `bash -n` under 3.2 catches parse-level constructs; the harness cases catch runtime ones.
+**How to apply:** Grep first (`declare -A|mapfile|readarray|,,|\^\^|%\(|\[\[ -v|\[-1\]`), then run the real thing: a genuine bash 3.2.57 builds on this Linux workspace in a few minutes and the iOS runner harness accepts `PROVISION_TEST_BASH=/path/to/bash` to run the script and every stub under it. `bash -n` under 3.2 catches parse-level constructs; the harness cases catch runtime ones. Shared summary helpers must also work with an intentionally minimal `PATH`, so prefer Bash builtins over adding an `awk`/GNU utility dependency.
 
 Build recipe (do not commit the binary; `/tmp` is fine):
 

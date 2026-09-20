@@ -64,9 +64,9 @@ write_summary() {
       if ((${#failures[@]})); then
         echo
         echo "### Blocking prerequisites"
-        for failure in "${failures[@]}"; do
-          printf -- '- %s\n' "$(sanitize_workflow_text "$failure")"
-        done
+        printf -- '%s\n' "${failures[@]}" |
+          sanitize_workflow_stream |
+          render_markdown_code_block
       fi
     } >>"$GITHUB_STEP_SUMMARY"
   fi

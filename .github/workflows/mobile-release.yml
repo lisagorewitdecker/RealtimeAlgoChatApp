@@ -463,7 +463,7 @@ jobs:
                 echo "- Record result: **${record_result:-Unavailable}**"
                 echo
                 echo "#### Missing-boundary reason"
-                printf '%s\n' "$safe_reasons"
+                printf '%s\n' "$safe_reasons" | render_markdown_code_block
               fi
               if [[ -n "$safe_screenshot_inspection_status" ]]; then
                 echo
@@ -1822,14 +1822,17 @@ jobs:
               diagnostics="$(
                 awk '
                   /^### Blocking prerequisites$/ { collecting=1; next }
-                  collecting && /^- / { print; next }
-                  collecting && !/^- / { exit }
+                  collecting && /^### / { exit }
+                  collecting && substr($0, 1, 3) == "```" { next }
+                  collecting { print }
                 ' "$IOS_RESULTS_DIR/ios-readiness.md"
               )"
               if [[ -n "$diagnostics" ]]; then
                 echo
                 echo "### Readiness diagnostics"
-                printf '%s\n' "$diagnostics" | sanitize_workflow_stream
+                printf '%s\n' "$diagnostics" |
+                  sanitize_workflow_stream |
+                  render_markdown_code_block
               fi
             fi
             if ((${#blockers[@]})); then

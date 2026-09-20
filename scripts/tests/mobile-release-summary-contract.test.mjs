@@ -5577,8 +5577,18 @@ test("iOS gate keeps private values out of logs and the readiness report while r
     );
     if (diagnostic) {
       assert.ok(
-        readiness.includes(`- ${diagnostic}`),
+        readiness.includes(diagnostic),
         `${run.name}: readiness report should list the fixed diagnostic\n${readiness}`,
+      );
+      assert.match(
+        readiness,
+        new RegExp(
+          String.raw`### Blocking prerequisites[\s\S]*\n` +
+            String.raw`(` + "```" + String.raw`+)\n` +
+            diagnostic.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") +
+            String.raw`\n\1`,
+        ),
+        `${run.name}: readiness diagnostic should be in a literal code block`,
       );
     }
     assertNoSentinels(readiness, `${run.name}: ios-readiness.md`);
@@ -5741,10 +5751,24 @@ test("Android preflight keeps private values out of its log and step summary", (
         ["summary", run.summary],
       ]) {
         assert.ok(
-          text.includes(`- ${scenario.diagnostic}`),
+          text.includes(
+            surface === "summary"
+              ? scenario.diagnostic
+              : `- ${scenario.diagnostic}`,
+          ),
           `${run.name}: ${surface} should carry the fixed diagnostic\n${text}`,
         );
       }
+      assert.match(
+        run.summary,
+        new RegExp(
+          String.raw`### Blocking prerequisites[\s\S]*\n` +
+            String.raw`(` + "```" + String.raw`+)\n` +
+            scenario.diagnostic.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") +
+            String.raw`\n\1`,
+        ),
+        `${run.name}: summary diagnostic should stay in a literal code block`,
+      );
     }
   }
 });
@@ -5971,8 +5995,18 @@ test("workflow summaries show candidate build IDs without exposing private value
     );
     if (scenario.diagnostic) {
       assert.ok(
-        iosSummary.includes(`- ${scenario.diagnostic}`),
+        iosSummary.includes(scenario.diagnostic),
         `${scenario.name}: iOS summary should surface the fixed readiness diagnostic\n${iosSummary}`,
+      );
+      assert.match(
+        iosSummary,
+        new RegExp(
+          String.raw`### Readiness diagnostics[\s\S]*\n` +
+            String.raw`(` + "```" + String.raw`+)\n` +
+            scenario.diagnostic.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") +
+            String.raw`\n\1`,
+        ),
+        `${scenario.name}: readiness diagnostic should stay in a literal code block`,
       );
     }
     // Both the copied fragment and the fallback branch must have produced the
@@ -7157,6 +7191,136 @@ test("release summary writers encode workflow-command sentinels", () => {
   const summary = readFileSync(summaryPath, "utf8");
   assert.doesNotMatch(summary, /::error::/);
   assert.match(summary, /&#58;&#58;error&#58;&#58;summary-control-input/);
+});
+
+test("release summary writers keep hostile diagnostics literal and line-broken", () => {
+  const hostileDiagnostic = [
+    "# reviewer-controlled heading",
+    "- reviewer-controlled bullet",
+    "`reviewer-controlled code` | reviewer-controlled pipe",
+    "",
+    "reviewer-controlled continuation",
+  ].join("\n");
+  const rendererProbe = spawnSync(
+    bashPath,
+    [
+      "-c",
+      'source "$1"; printf "%s\\n" "$2" | render_markdown_code_block',
+      "workflow-output-safety",
+      path.join(workspaceRoot, workflowOutputSafetyScript),
+      hostileDiagnostic,
+    ],
+    { cwd: workspaceRoot, encoding: "utf8" },
+  );
+  assert.equal(rendererProbe.status, 0, rendererProbe.stderr);
+  assert.equal(
+    rendererProbe.stdout,
+    `\`\`\`\n${hostileDiagnostic}\n\`\`\`\n`,
+    "the shared renderer must preserve Markdown-looking diagnostics as code",
+  );
+
+  const androidPreviewStep = listSteps().find(
+    ({ jobId, step }) =>
+      jobId === "android-preview-evidence" &&
+      step.name === "Validate changed Android preview records",
+  );
+  assert.match(
+    androidPreviewStep?.step.run ?? "",
+    /safe_reasons[\s\S]*render_markdown_code_block/,
+    "Android preview reasons must use the literal renderer",
+  );
+
+  const iosReadinessStep = summarySteps.find(
+    ({ jobId, step }) =>
+      jobId === "native-ios" && step.name === "Summarize iOS readiness",
+  );
+  assert.ok(iosReadinessStep, "the iOS readiness summary step must exist");
+  const readinessResultsDir = path.join(
+    testRoot,
+    "hostile-ios-readiness-summary-results",
+  );
+  mkdirSync(readinessResultsDir, { recursive: true });
+  writeFileSync(
+    path.join(readinessResultsDir, "ios-readiness.md"),
+    [
+      "## iOS native large-text readiness",
+      "",
+      "### Blocking prerequisites",
+      hostileDiagnostic,
+      "",
+      "### Later fixed section",
+      "- fixed content",
+      "",
+    ].join("\n"),
+  );
+  const { summary: readinessSummary } = runSummaryStep(iosReadinessStep, {
+    name: "hostile-ios-readiness",
+    resultsDir: readinessResultsDir,
+    outcome: "failure",
+  });
+  assert.match(
+    readinessSummary,
+    new RegExp(
+      String.raw`### Readiness diagnostics[\s\S]*\n` +
+        String.raw`(` + "```" + String.raw`+)\n` +
+        hostileDiagnostic
+          .split("\n")
+          .map((line) => line.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+          .join("\\n") +
+        String.raw`\n\1`,
+    ),
+    "iOS readiness diagnostics must remain one literal multi-line block",
+  );
+
+  const brandingStep = summarySteps.find(
+    ({ jobId, step }) =>
+      jobId === "native-ios" && step.name === "Summarize iOS native branding",
+  );
+  assert.ok(brandingStep, "the iOS branding summary step must exist");
+  const brandingResultsDir = path.join(
+    testRoot,
+    "hostile-native-branding-summary-results",
+  );
+  mkdirSync(brandingResultsDir, { recursive: true });
+  writeFileSync(
+    path.join(brandingResultsDir, "native-branding-summary.md"),
+    [
+      "## iOS native branding",
+      "",
+      hostileDiagnostic,
+      "",
+      "- Detailed report: [native-branding-check.md](__NATIVE_BRANDING_REPORT_URL__)",
+      "",
+    ].join("\n"),
+  );
+  const { summary: brandingSummary } = runSummaryStep(brandingStep, {
+    name: "hostile-native-branding",
+    resultsDir: brandingResultsDir,
+    outcome: "success",
+  });
+  assert.match(
+    brandingSummary,
+    /## iOS native branding[\s\S]*### Branding validation details[\s\S]*```[\s\S]*# reviewer-controlled heading[\s\S]*reviewer-controlled continuation[\s\S]*```/,
+    "native branding report content must be copied as literal text",
+  );
+  assert.match(
+    brandingSummary,
+    /- Detailed report: \[native-branding-check\.md\]\(https:\/\/github\.example\/example\/chat-app\/upload-ios-native-smoke\/artifact-url\)/,
+    "the fixed branding report link must remain outside the literal report block",
+  );
+
+  for (const relativePath of [
+    iosPreflightScript,
+    androidPreflightScript,
+    "artifacts/chat-app/e2e/native-large-text/run.sh",
+    nativeBrandingSummaryScript,
+  ]) {
+    assert.match(
+      scriptSource(relativePath),
+      /render_markdown_code_block/,
+      `${relativePath} must use the shared literal renderer`,
+    );
+  }
 });
 
 test("hosted native evidence summaries record the checked revision before untrusted checks", () => {
