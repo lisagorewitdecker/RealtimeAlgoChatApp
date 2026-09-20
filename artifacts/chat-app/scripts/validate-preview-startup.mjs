@@ -236,18 +236,18 @@ function stripAnsiEscapeSequences(value) {
           break;
         }
         cursor += 1;
-        while (cursor < value.length) {
-          const codePoint = value.charCodeAt(cursor);
-          cursor += 1;
-          if (codePoint >= 0x30 && codePoint <= 0x7e) {
-            break;
-          }
-        }
       }
       continue;
     }
 
     cursor += 1;
+    while (cursor < value.length) {
+      const codePoint = value.charCodeAt(cursor);
+      cursor += 1;
+      if (codePoint >= 0x30 && codePoint <= 0x7e) {
+        break;
+      }
+    }
   }
 
   return characters.join("");
