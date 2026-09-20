@@ -124,3 +124,4 @@
 - [Workflow actionlint invocation](workflow-actionlint-invocation.md) — lint workflows one at a time and keep any non-structural runtime deprecation ignore narrowly scoped.
 - [Mobile release helper discovery](mobile-release-helper-discovery.md) — fail clearly at the supported helper depth instead of silently hiding deeper summary writers or evidence readers.
 - [Drizzle check constraint replacement](drizzle-check-constraint-replacement.md) — rename a check constraint when its SQL changes; push may miss same-name expression edits.
+- [Socket tests time out on stale dev-DB rooms](socket-test-stale-dev-rooms.md) — mass join timeouts = stale rooms rows (old last_accessed_at / is_active=false) emitting ROOM_INACTIVE; refresh the dev DB, not the code.
