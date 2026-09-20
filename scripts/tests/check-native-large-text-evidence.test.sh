@@ -3,6 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 CHECKER="$ROOT_DIR/scripts/check-native-large-text-evidence.sh"
+FIXTURE_BUILDER="$ROOT_DIR/scripts/tests/native-large-text-evidence-fixture.sh"
 SAVED_TEST_STATUS="$ROOT_DIR/artifacts/api-server/test-results/.last-run.json"
 HOSTED_TAMPER_FIXTURES_ROOT="${NATIVE_EVIDENCE_TAMPER_FIXTURES_ROOT:-}"
 PRIVACY_FAILURE_FIXTURE_ROOT="${NATIVE_EVIDENCE_PRIVACY_FAILURE_FIXTURE_ROOT:-}"
@@ -44,6 +45,9 @@ cleanup_test_fixtures() {
 }
 
 trap cleanup_test_fixtures EXIT
+
+# The hosted tamper job sources the same complete fixture builder below.
+source "$FIXTURE_BUILDER"
 
 assert_contains() {
   local output="$1"
@@ -102,84 +106,12 @@ EOF
 write_valid_run() {
   local root="$1"
   local platform="$2"
-  local run_dir="$root/$platform/20260909T120000Z"
   local build_id="${3:-build-$platform}"
-  local index
-
-  mkdir -p "$run_dir/screenshots" "$run_dir/call-surface"
-  printf '%s\n' "$build_id" > "$run_dir/candidate-build-id.txt"
-  # Mirror every field the native large-text runner writes, so duplicate-field
-  # coverage tracks the real producer rather than a minimal subset.
-  if [[ "$platform" == "ios" ]]; then
-    cat > "$run_dir/runner-metadata.txt" <<EOF
-platform=ios
-run_mode=release-gate
-candidate_build_id=$build_id
-app_id=com.example.chat
-device=iPhone SE (3rd generation)
-device_udid=00000000-0000-0000-0000-000000000000
-recorded_at_utc=2026-09-09T12:00:00Z
-EOF
-    printf '# iOS native readiness\n\n- Status: **READY**\n' > "$run_dir/ios-readiness.md"
-  else
-    cat > "$run_dir/runner-metadata.txt" <<EOF
-platform=android
-run_mode=release-gate
-candidate_build_id=$build_id
-app_id=com.example.chat
-device_serial=emulator-5554
-device_model=Smallest supported emulator
-android_release=16
-android_api=36
-screen_px=320x568
-screen_dp=320x568
-density_dpi=160
-user_rotation=0
-recorded_at_utc=2026-09-09T12:00:00Z
-EOF
-    printf 'applicationLabel=Chat\npermissions=android.permission.INTERNET\n' > "$run_dir/android-badging.txt"
-  fi
-  cat > "$run_dir/pass-fail-record.txt" <<EOF
-platform=$platform
-run_mode=release-gate
-candidate_build_id=$build_id
-status=PASS
-native_screenshot_count=11
-call_surface_screenshot_count=2
-recorded_at_utc=2026-09-09T12:30:00Z
-EOF
-  printf '{}\n' > "$run_dir/native-info.json"
-  printf '# Native branding validation\n\n- Status: **PASS**\n' > "$run_dir/native-branding-check.md"
-  printf '<testsuite tests="1" failures="0"></testsuite>\n' > "$run_dir/maestro-results.xml"
-  printf '<testsuite tests="1" failures="0"></testsuite>\n' > "$run_dir/sentry-maestro-results.xml"
-  cat > "$run_dir/sentry-trigger.txt" <<EOF
-platform=$platform
-candidate_build_id=$build_id
-marker=run-1234-$platform
-EOF
-  cat > "$run_dir/sentry-source-map-evidence.json" <<EOF
-{
-  "status": "PASS",
-  "eventId": "0123456789abcdef0123456789abcdef",
-  "platform": "$platform",
-  "candidateBuildId": "$build_id",
-  "marker": "run-1234-$platform",
-  "release": "chat-app@1.0.0+abc123",
-  "dist": "42",
-  "readableFrame": {
-    "filename": "artifacts/chat-app/lib/sentry.ts",
-    "function": "createNativeSourceMapProbeError",
-    "line": 55,
-    "column": 10
-  }
-}
-EOF
-  for index in $(seq 1 11); do
-    printf 'png-%s\n' "$index" > "$run_dir/screenshots/screen-$index.png"
-  done
-  for index in 1 2; do
-    printf 'call-%s\n' "$index" > "$run_dir/call-surface/call-$index.png"
-  done
+  write_native_large_text_evidence_fixture \
+    "$root" "$platform" "$build_id" \
+    "20260909T120000Z" \
+    "2026-09-09T12:00:00Z" \
+    "2026-09-09T12:30:00Z"
 }
 
 trusted_digest_manifest_for_run() {

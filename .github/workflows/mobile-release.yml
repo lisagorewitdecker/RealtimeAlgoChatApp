@@ -1370,38 +1370,15 @@ jobs:
           set -euo pipefail
           fixture_root="$RUNNER_TEMP/native-evidence-tamper-fixtures"
           run_timestamp=20260915T120000Z
-
-          write_fixture() {
-            local platform="$1"
-            local run_dir="$fixture_root/$platform/$run_timestamp"
-            mkdir -p "$run_dir/screenshots" "$run_dir/call-surface"
-            printf 'controlled\n' > "$run_dir/candidate-build-id.txt"
-            if [[ "$platform" == "ios" ]]; then
-              printf 'platform=ios\nrun_mode=release-gate\ncandidate_build_id=controlled\napp_id=com.example.chat\ndevice=controlled-device\ndevice_udid=controlled\nrecorded_at_utc=2026-09-15T12:00:00Z\n' > "$run_dir/runner-metadata.txt"
-              printf '# iOS native readiness\n\n- Status: **READY**\n' > "$run_dir/ios-readiness.md"
-            else
-              printf 'platform=android\nrun_mode=release-gate\ncandidate_build_id=controlled\napp_id=com.example.chat\ndevice_serial=controlled\ndevice_model=controlled\nandroid_release=controlled\nandroid_api=36\nscreen_px=320x568\nscreen_dp=320x568\ndensity_dpi=160\nuser_rotation=0\nrecorded_at_utc=2026-09-15T12:00:00Z\n' > "$run_dir/runner-metadata.txt"
-              printf 'applicationLabel=Chat\npermissions=android.permission.INTERNET\n' > "$run_dir/android-badging.txt"
-            fi
-            printf 'platform=%s\nrun_mode=release-gate\ncandidate_build_id=controlled\nstatus=PASS\nnative_screenshot_count=11\ncall_surface_screenshot_count=2\nrecorded_at_utc=2026-09-15T12:30:00Z\n' "$platform" > "$run_dir/pass-fail-record.txt"
-            printf '{}\n' > "$run_dir/native-info.json"
-            printf '# Native branding validation\n\n- Status: **PASS**\n' > "$run_dir/native-branding-check.md"
-            printf '<testsuite tests="1" failures="0"></testsuite>\n' > "$run_dir/maestro-results.xml"
-            printf '<testsuite tests="1" failures="0"></testsuite>\n' > "$run_dir/sentry-maestro-results.xml"
-            printf 'platform=%s\ncandidate_build_id=controlled\nmarker=controlled\n' "$platform" > "$run_dir/sentry-trigger.txt"
-            printf '{"status":"PASS","eventId":"0123456789abcdef0123456789abcdef","platform":"%s","candidateBuildId":"controlled","marker":"controlled","release":"controlled","dist":"1","readableFrame":{"filename":"controlled.tsx","function":"createNativeSourceMapProbeError","line":1,"column":1}}\n' "$platform" > "$run_dir/sentry-source-map-evidence.json"
-            for screenshot_index in $(seq 1 11); do
-              printf 'controlled screenshot\n' > "$run_dir/screenshots/screen-$screenshot_index.png"
-            done
-            for call_index in $(seq 1 2); do
-              printf 'controlled call surface\n' > "$run_dir/call-surface/call-$call_index.png"
-            done
-            printf 'platform=%s\nreviewer=controlled-reviewer\nreviewed_at_utc=2026-09-15T12:31:00Z\ncandidate_build_id=controlled\ndecision=APPROVED\nnotes=Controlled fixture approval.\n' "$platform" > "$run_dir/review-record.txt"
-          }
+          source scripts/tests/native-large-text-evidence-fixture.sh
 
           rm -rf "$fixture_root"
-          write_fixture ios
-          write_fixture android
+          write_native_large_text_evidence_fixture \
+            "$fixture_root" ios controlled "$run_timestamp" \
+            2026-09-15T12:00:00Z 2026-09-15T12:30:00Z
+          write_native_large_text_evidence_fixture \
+            "$fixture_root" android controlled "$run_timestamp" \
+            2026-09-15T12:00:00Z 2026-09-15T12:30:00Z
 
       - name: Upload controlled iOS evidence fixture
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
