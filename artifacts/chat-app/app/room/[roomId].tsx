@@ -28,7 +28,7 @@ import { useSocket } from "@/contexts/SocketContext";
 import { ScaledText as Text } from "@/components/ScaledText";
 import { ScaledTextInput } from "@/components/ScaledTextInput";
 import { useColors } from "@/hooks/useColors";
-import { Sentry } from "@/lib/sentry";
+import { captureRoomKeyPersistenceRetryFailure } from "@/lib/sentry";
 import { textLengthBucket, trackEvent } from "@/utils/analytics";
 
 interface Message {
@@ -698,10 +698,7 @@ export default function RoomScreen() {
         roomKeyPersistenceFailure?.kind === "load" ? "load" : "save";
       if (!reportedPersistenceRetryFailuresRef.current.has(recoveryOperation)) {
         reportedPersistenceRetryFailuresRef.current.add(recoveryOperation);
-        Sentry.captureMessage("Room key persistence retry failed", {
-          level: "warning",
-          tags: { recovery_operation: recoveryOperation },
-        });
+        captureRoomKeyPersistenceRetryFailure(recoveryOperation);
       }
     };
 

@@ -1094,7 +1094,7 @@ jobs:
             printf '<testsuite tests="1" failures="0"></testsuite>\n' > "$run_dir/maestro-results.xml"
             printf '<testsuite tests="1" failures="0"></testsuite>\n' > "$run_dir/sentry-maestro-results.xml"
             printf 'platform=%s\ncandidate_build_id=controlled\nmarker=controlled\n' "$platform" > "$run_dir/sentry-trigger.txt"
-            printf '{"status":"PASS","eventId":"0123456789abcdef0123456789abcdef","platform":"%s","candidateBuildId":"controlled","marker":"controlled","release":"controlled","dist":"1","readableFrame":{"filename":"controlled.tsx","function":"createNativeSourceMapProbeError","line":1,"column":1}}\n' "$platform" > "$run_dir/sentry-source-map-evidence.json"
+            printf '{"status":"PASS","eventId":"0123456789abcdef0123456789abcdef","platform":"%s","candidateBuildId":"controlled","marker":"controlled","release":"controlled","dist":"1","readableFrame":{"filename":"controlled.tsx","function":"createNativeSourceMapProbeError","line":1,"column":1},"storageRecovery":{"eventId":"fedcba9876543210fedcba9876543210","message":"Room key persistence retry failed","operation":"save"}}\n' "$platform" > "$run_dir/sentry-source-map-evidence.json"
             for screenshot_index in $(seq 1 11); do
               printf 'controlled screenshot\n' > "$run_dir/screenshots/screen-$screenshot_index.png"
             done

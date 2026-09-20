@@ -82,6 +82,11 @@ EOF
     "function": "createNativeSourceMapProbeError",
     "line": 55,
     "column": 10
+  },
+  "storageRecovery": {
+    "eventId": "fedcba9876543210fedcba9876543210",
+    "message": "Room key persistence retry failed",
+    "operation": "save"
   }
 }
 EOF

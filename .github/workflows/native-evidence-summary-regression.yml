@@ -84,7 +84,7 @@ jobs:
           done
 
           {
-            printf '{"status":"PASS","eventId":"0123456789abcdef0123456789abcdef","platform":"android","candidateBuildId":"build-android","marker":"run-1234-android","release":"chat-app@1.0.0+abc123","dist":"42","readableFrame":{"filename":"artifacts/chat-app/lib/sentry.ts","function":"createNativeSourceMapProbeError","line":55,"column":10},"private":"'
+            printf '{"status":"PASS","eventId":"0123456789abcdef0123456789abcdef","platform":"android","candidateBuildId":"build-android","marker":"run-1234-android","release":"chat-app@1.0.0+abc123","dist":"42","readableFrame":{"filename":"artifacts/chat-app/lib/sentry.ts","function":"createNativeSourceMapProbeError","line":55,"column":10},"storageRecovery":{"eventId":"fedcba9876543210fedcba9876543210","message":"Room key persistence retry failed","operation":"save"},"private":"'
             printf '%s' "$private_marker"
             printf '%s' '","padding":"'
             head -c 262144 /dev/zero | tr '\0' 'x'

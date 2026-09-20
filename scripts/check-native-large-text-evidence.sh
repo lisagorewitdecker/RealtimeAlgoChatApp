@@ -808,6 +808,16 @@ if (
 ) {
   throw new Error("readable source-mapped frame is missing");
 }
+const storageRecovery = evidence.storageRecovery;
+if (
+  !storageRecovery ||
+  typeof storageRecovery.eventId !== "string" ||
+  storageRecovery.eventId.trim() === "" ||
+  storageRecovery.message !== "Room key persistence retry failed" ||
+  storageRecovery.operation !== "save"
+) {
+  throw new Error("storage recovery warning evidence is missing");
+}
 NODE
     )"; then
       issue "$platform" "Invalid Sentry source-map evidence at ${run_dir}/sentry-source-map-evidence.json: ${sentry_validation_output:-validation failed}."
