@@ -283,6 +283,17 @@ function sanitizeStartupDiagnostic(value, maxLength) {
     .slice(0, maxLength);
 }
 
+function isWhitespaceCodeUnit(codeUnit) {
+  return (
+    codeUnit === 0x09 ||
+    codeUnit === 0x0a ||
+    codeUnit === 0x0b ||
+    codeUnit === 0x0c ||
+    codeUnit === 0x0d ||
+    codeUnit === 0x20
+  );
+}
+
 function redactStartupAuthorization(value) {
   return value.replace(
     /(?<!redacted )\b(?:authorization|proxy-authorization)\s*:?.*$/gi,
@@ -312,7 +323,7 @@ function normalizeLoaderFailureForMatching(value) {
   let nonWhitespaceEnd = withoutAnsiSequences.length;
   while (
     nonWhitespaceEnd > 0 &&
-    /\s/.test(withoutAnsiSequences[nonWhitespaceEnd - 1] ?? "")
+    isWhitespaceCodeUnit(withoutAnsiSequences.charCodeAt(nonWhitespaceEnd - 1))
   ) {
     nonWhitespaceEnd -= 1;
   }
