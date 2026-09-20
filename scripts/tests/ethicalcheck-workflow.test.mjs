@@ -59,6 +59,11 @@ test("EthicalCheck workflow inlines the scan trigger instead of referencing the 
   assert.match(scanStep.run, /import json/);
   assert.match(scanStep.run, /os\.environ\["ETHICALCHECK_OAS_URL"\]/);
   assert.match(scanStep.run, /os\.environ\["ETHICALCHECK_REPORT_EMAIL"\]/);
+  assert.match(scanStep.run, /response_path="\$\(mktemp\)"/);
+  assert.match(scanStep.run, /trap 'rm -f "\$response_path"' EXIT/);
+  assert.match(scanStep.run, /--write-out '%\{http_code\}'/);
+  assert.match(scanStep.run, /HTTP status \$\{http_status\}/);
+  assert.match(scanStep.run, /response did not confirm scan acceptance via success, message, or status fields/);
   assert.match(scanStep.run, /'https:\/\/pentest\.apisec\.ai\/api\/v1\/pentest'/);
   assert.doesNotMatch(workflowText, /apisec-inc\/ethicalcheck-action/);
   assert.doesNotMatch(workflowText, /upload-sarif/);

@@ -132,6 +132,62 @@ jobs:
           PY
           )"
 
-          curl --fail --silent --show-error --location --request POST 'https://pentest.apisec.ai/api/v1/pentest' \
-            --header 'Content-Type: application/json' \
-            --data-raw "${payload}"
+          response_path="$(mktemp)"
+          trap 'rm -f "$response_path"' EXIT
+
+          http_status="$(
+            curl --silent --show-error --location --request POST 'https://pentest.apisec.ai/api/v1/pentest' \
+              --header 'Content-Type: application/json' \
+              --data-raw "${payload}" \
+              --output "${response_path}" \
+              --write-out '%{http_code}'
+          )"
+
+          if [[ ! "${http_status}" =~ ^2 ]]; then
+            echo "::error::EthicalCheck request failed with HTTP status ${http_status}."
+            exit 1
+          fi
+
+          python3 - "${response_path}" "${http_status}" <<'PY'
+          import json
+          import pathlib
+          import re
+          import sys
+
+          response_path = pathlib.Path(sys.argv[1])
+          http_status = sys.argv[2]
+          response_body = response_path.read_text(encoding="utf-8").strip()
+
+          if not response_body:
+              if http_status in {"202", "204"}:
+                  raise SystemExit(0)
+              raise SystemExit(
+                  f"EthicalCheck returned HTTP {http_status} without a response body that confirms the scan request."
+              )
+
+          try:
+              response = json.loads(response_body)
+          except json.JSONDecodeError as error:
+              raise SystemExit(
+                  f"EthicalCheck returned HTTP {http_status} with a non-JSON response: {error}"
+              ) from error
+
+          success = response.get("success")
+          message = response.get("message")
+          status = response.get("status")
+          accepted_pattern = re.compile(
+              r"(accepted|initiated|queued|started|submitted|success)",
+              re.IGNORECASE,
+          )
+
+          if success is True:
+              raise SystemExit(0)
+          if isinstance(message, str) and accepted_pattern.search(message):
+              raise SystemExit(0)
+          if isinstance(status, str) and accepted_pattern.search(status):
+              raise SystemExit(0)
+
+          raise SystemExit(
+              "EthicalCheck response did not confirm scan acceptance via success, message, or status fields."
+          )
+          PY
