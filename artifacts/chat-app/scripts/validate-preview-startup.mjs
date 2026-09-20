@@ -193,7 +193,7 @@ function findUnrecognizedLoaderFailure(output) {
 function sanitizeStartupDiagnostic(value, maxLength) {
   const withoutAnsiSequences = stripVTControlCharacters(value);
   const withoutControlChars = Array.from(withoutAnsiSequences, (character) => {
-    const codePoint = character.charCodeAt(0);
+    const codePoint = character.codePointAt(0) ?? 0;
     return codePoint <= 0x1f || codePoint === 0x7f ? " " : character;
   }).join("");
 
