@@ -121,11 +121,16 @@ jobs:
 
           echo "::add-mask::${ETHICALCHECK_REPORT_EMAIL}"
 
-          payload="$(jq -cn \
-            --arg openAPISpec "${ETHICALCHECK_OAS_URL}" \
-            --arg email "${ETHICALCHECK_REPORT_EMAIL}" \
-            --arg source "Github-Action" \
-            '{openAPISpec: $openAPISpec, email: $email, source: $source}')"
+          payload="$(python3 - <<'PY'
+          import json
+          import os
+          print(json.dumps({
+              "openAPISpec": os.environ["ETHICALCHECK_OAS_URL"],
+              "email": os.environ["ETHICALCHECK_REPORT_EMAIL"],
+              "source": "Github-Action",
+          }))
+          PY
+          )"
 
           curl --fail-with-body --location --request POST 'https://pentest.apisec.ai/api/v1/pentest' \
             --header 'Content-Type: application/json' \

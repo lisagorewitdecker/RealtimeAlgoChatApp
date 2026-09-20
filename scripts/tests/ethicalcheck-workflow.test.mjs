@@ -55,9 +55,10 @@ test("EthicalCheck workflow inlines the scan trigger instead of referencing the 
     scanStep.run,
     /::add-mask::\$\{ETHICALCHECK_REPORT_EMAIL\}/,
   );
-  assert.match(scanStep.run, /jq -cn \\/);
-  assert.match(scanStep.run, /--arg openAPISpec "\$\{ETHICALCHECK_OAS_URL\}"/);
-  assert.match(scanStep.run, /--arg email "\$\{ETHICALCHECK_REPORT_EMAIL\}"/);
+  assert.match(scanStep.run, /payload="\$\(python3 - <<'PY'/);
+  assert.match(scanStep.run, /import json/);
+  assert.match(scanStep.run, /os\.environ\["ETHICALCHECK_OAS_URL"\]/);
+  assert.match(scanStep.run, /os\.environ\["ETHICALCHECK_REPORT_EMAIL"\]/);
   assert.match(scanStep.run, /'https:\/\/pentest\.apisec\.ai\/api\/v1\/pentest'/);
   assert.doesNotMatch(workflowText, /apisec-inc\/ethicalcheck-action/);
   assert.doesNotMatch(workflowText, /upload-sarif/);
