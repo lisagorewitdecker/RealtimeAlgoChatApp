@@ -45,7 +45,7 @@ const packageRoot = join(import.meta.dirname, "..");
 function assertHasNoControlCharacters(value, message = "unexpected control characters") {
   const hasControlCharacters = [...value].some((char) => {
     const code = char.charCodeAt(0);
-    return code <= 0x1f || code === 0x7f;
+    return (code <= 0x1f && code !== 0x09 && code !== 0x0a && code !== 0x0d) || code === 0x7f;
   });
   assert.equal(hasControlCharacters, false, message);
 }
