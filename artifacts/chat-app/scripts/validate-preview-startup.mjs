@@ -206,12 +206,26 @@ function stripAnsiEscapeSequences(value) {
     const nextCodePoint = value.charCodeAt(cursor + 1);
     if (nextCodePoint === 0x5b) {
       cursor += 2;
-      while (cursor < value.length) {
-        const codePoint = value.charCodeAt(cursor);
+      while (
+        cursor < value.length &&
+        value.charCodeAt(cursor) >= 0x30 &&
+        value.charCodeAt(cursor) <= 0x3f
+      ) {
         cursor += 1;
-        if (codePoint >= 0x40 && codePoint <= 0x7e) {
-          break;
-        }
+      }
+      while (
+        cursor < value.length &&
+        value.charCodeAt(cursor) >= 0x20 &&
+        value.charCodeAt(cursor) <= 0x2f
+      ) {
+        cursor += 1;
+      }
+      if (
+        cursor < value.length &&
+        value.charCodeAt(cursor) >= 0x40 &&
+        value.charCodeAt(cursor) <= 0x7e
+      ) {
+        cursor += 1;
       }
       continue;
     }
