@@ -1005,7 +1005,11 @@ export default function RoomScreen() {
             </Text>
           ) : null}
           {users.map((u) => (
-            <View key={u.userId} style={styles.userRow}>
+            <View
+              key={u.userId}
+              testID={`room-member-row-${u.userId}`}
+              style={styles.userRow}
+            >
               <View style={[styles.userAvatar, { backgroundColor: colors.secondary }]}>
                 <Text style={styles.userAvatarText}>
                   {u.avatarEmoji || u.username.charAt(0).toUpperCase()}
