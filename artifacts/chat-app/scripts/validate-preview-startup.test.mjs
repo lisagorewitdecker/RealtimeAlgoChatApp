@@ -571,70 +571,97 @@ globalThis.fetch = async (url, options = {}) => {
   }
 }
 
-function runMalformedPreviewConfigurationCli(setting, value) {
-  const environment = {
-    ...process.env,
-    PREVIEW_PUBLIC_TIMEOUT_MS: "1000",
-    PREVIEW_HANDOFF_TIMEOUT_MS: "1000",
-    PREVIEW_STARTUP_TIMEOUT_MS: "1000",
-  };
-  delete environment.PREVIEW_PUBLIC_URL;
-  delete environment.REPLIT_EXPO_DEV_DOMAIN;
-  environment[setting] = value;
+function runRejectedPreviewConfigurationCli(
+  setting,
+  value,
+  expectedDiagnostic,
+) {
+  const directory = mkdtempSync(join(tmpdir(), "preview-configuration-cli-"));
+  const metroMarkerPath = join(directory, "metro-started.marker");
 
-  const result = spawnSync(
-    process.execPath,
-    [validatorPath, "--validate-configuration"],
-    {
-      env: environment,
-      stdio: ["ignore", "pipe", "pipe"],
-      timeout: 1_000,
-    },
-  );
-  const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
+  try {
+    const environment = {
+      ...process.env,
+      PREVIEW_PUBLIC_TIMEOUT_MS: "1000",
+      PREVIEW_HANDOFF_TIMEOUT_MS: "1000",
+      PREVIEW_STARTUP_TIMEOUT_MS: "1000",
+      PREVIEW_STARTUP_TEST_FIXTURE: "handoff-server",
+      PREVIEW_STARTUP_LIVE_START_MARKER: metroMarkerPath,
+    };
+    delete environment.PREVIEW_PUBLIC_URL;
+    delete environment.REPLIT_EXPO_DEV_DOMAIN;
+    environment[setting] = value;
 
-  assert.notEqual(
-    result.error?.code,
-    "ETIMEDOUT",
-    `${setting} left configuration validation running indefinitely`,
-  );
-  assert.notEqual(result.status, 0, output);
-  assert.match(
-    output,
-    new RegExp(
-      `Public Expo preview manifest URL configuration from ${setting} is invalid`,
-    ),
-  );
-  assert.match(output, new RegExp(`\\b${setting}\\b`));
+    const result = spawnSync(
+      process.execPath,
+      [validatorPath],
+      {
+        env: environment,
+        stdio: ["ignore", "pipe", "pipe"],
+        timeout: 1_000,
+      },
+    );
+    const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
+
+    assert.notEqual(
+      result.error?.code,
+      "ETIMEDOUT",
+      `${setting} left configuration validation running indefinitely`,
+    );
+    assert.notEqual(result.status, 0, output);
+    assert.match(output, expectedDiagnostic);
+    assert.match(output, new RegExp(`\\b${setting}\\b`));
+    assert.equal(
+      existsSync(metroMarkerPath),
+      false,
+      `${setting} started Metro before rejecting its configuration`,
+    );
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 }
 
 function runEmptyPreviewConfigurationCli() {
-  const result = spawnSync(
-    process.execPath,
-    [validatorPath, "--validate-configuration"],
-    {
-      env: {
-        ...process.env,
-        PREVIEW_PUBLIC_URL: "",
-        REPLIT_EXPO_DEV_DOMAIN: "preview.example.test/expo",
-      },
-      stdio: ["ignore", "pipe", "pipe"],
-      timeout: 1_000,
-    },
-  );
-  const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
+  const directory = mkdtempSync(join(tmpdir(), "preview-configuration-cli-"));
+  const metroMarkerPath = join(directory, "metro-started.marker");
 
-  assert.notEqual(
-    result.error?.code,
-    "ETIMEDOUT",
-    "an empty PREVIEW_PUBLIC_URL left configuration validation running indefinitely",
-  );
-  assert.notEqual(result.status, 0, output);
-  assert.match(
-    output,
-    /Public Expo preview manifest URL is not configured.*REPLIT_EXPO_DEV_DOMAIN or PREVIEW_PUBLIC_URL/,
-  );
-  assert.match(output, /\bPREVIEW_PUBLIC_URL\b/);
+  try {
+    const result = spawnSync(
+      process.execPath,
+      [validatorPath],
+      {
+        env: {
+          ...process.env,
+          PREVIEW_PUBLIC_URL: "",
+          REPLIT_EXPO_DEV_DOMAIN: "preview.example.test/expo",
+          PREVIEW_STARTUP_TEST_FIXTURE: "handoff-server",
+          PREVIEW_STARTUP_LIVE_START_MARKER: metroMarkerPath,
+        },
+        stdio: ["ignore", "pipe", "pipe"],
+        timeout: 1_000,
+      },
+    );
+    const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
+
+    assert.notEqual(
+      result.error?.code,
+      "ETIMEDOUT",
+      "an empty PREVIEW_PUBLIC_URL left live preview validation running indefinitely",
+    );
+    assert.notEqual(result.status, 0, output);
+    assert.match(
+      output,
+      /Public Expo preview manifest URL is not configured.*REPLIT_EXPO_DEV_DOMAIN or PREVIEW_PUBLIC_URL/,
+    );
+    assert.match(output, /\bPREVIEW_PUBLIC_URL\b/);
+    assert.equal(
+      existsSync(metroMarkerPath),
+      false,
+      "an empty PREVIEW_PUBLIC_URL started Metro before rejection",
+    );
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 }
 
 test("accepts a public HTTP 200 manifest and sends the Android Expo header", async () => {
@@ -2191,21 +2218,55 @@ test("rejects malformed REPLIT_EXPO_DEV_DOMAIN configuration before making a req
   }
 });
 
-test("CLI rejects malformed PREVIEW_PUBLIC_URL before making a public request", () => {
-  runMalformedPreviewConfigurationCli(
+test("CLI rejects malformed PREVIEW_PUBLIC_URL before starting Metro", () => {
+  runRejectedPreviewConfigurationCli(
     "PREVIEW_PUBLIC_URL",
     "https://[invalid",
+    /Public Expo preview manifest URL configuration from PREVIEW_PUBLIC_URL is invalid/,
   );
 });
 
-test("CLI reports missing configuration for an empty PREVIEW_PUBLIC_URL before making a public request", () => {
+test("CLI rejects non-HTTPS PREVIEW_PUBLIC_URL before Metro starts", () => {
+  runRejectedPreviewConfigurationCli(
+    "PREVIEW_PUBLIC_URL",
+    "http://preview.example.test/expo",
+    /Public Expo preview manifest URL configured by PREVIEW_PUBLIC_URL must use HTTPS/,
+  );
+});
+
+test("CLI rejects credential-bearing PREVIEW_PUBLIC_URL before Metro starts", () => {
+  runRejectedPreviewConfigurationCli(
+    "PREVIEW_PUBLIC_URL",
+    "https://preview-user:preview-password@preview.example.test/expo",
+    /Public Expo preview manifest URL configured by PREVIEW_PUBLIC_URL must not contain credentials/,
+  );
+});
+
+test("CLI reports missing configuration for an empty PREVIEW_PUBLIC_URL before starting Metro", () => {
   runEmptyPreviewConfigurationCli();
 });
 
-test("CLI rejects malformed REPLIT_EXPO_DEV_DOMAIN before making a public request", () => {
-  runMalformedPreviewConfigurationCli(
+test("CLI rejects malformed REPLIT_EXPO_DEV_DOMAIN before starting Metro", () => {
+  runRejectedPreviewConfigurationCli(
     "REPLIT_EXPO_DEV_DOMAIN",
     "https://[invalid",
+    /Public Expo preview manifest URL configuration from REPLIT_EXPO_DEV_DOMAIN is invalid/,
+  );
+});
+
+test("CLI rejects non-HTTPS REPLIT_EXPO_DEV_DOMAIN before Metro starts", () => {
+  runRejectedPreviewConfigurationCli(
+    "REPLIT_EXPO_DEV_DOMAIN",
+    "http://preview.example.test/expo",
+    /Public Expo preview manifest URL configured by REPLIT_EXPO_DEV_DOMAIN must use HTTPS/,
+  );
+});
+
+test("CLI rejects credential-bearing REPLIT_EXPO_DEV_DOMAIN before Metro starts", () => {
+  runRejectedPreviewConfigurationCli(
+    "REPLIT_EXPO_DEV_DOMAIN",
+    "https://preview-user:preview-password@preview.example.test/expo",
+    /Public Expo preview manifest URL configured by REPLIT_EXPO_DEV_DOMAIN must not contain credentials/,
   );
 });
 

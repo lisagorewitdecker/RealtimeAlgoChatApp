@@ -50,7 +50,7 @@ afterEach(() => {
 describe("customFetch URL handling", () => {
   it("accepts URL-like React Native polyfill values and joins relative paths", async () => {
     setBaseUrl("https://api.example.test/root///");
-      const fetchMock = installFetch(reactNativeResponse(""));
+    const fetchMock = installFetch(reactNativeResponse("ok"));
     const polyfilledUrl = {
       href: "/rooms",
       toString: () => "/rooms",
@@ -68,7 +68,7 @@ describe("customFetch URL handling", () => {
 
   it("does not prepend the base URL to an explicit absolute URL", async () => {
     setBaseUrl("https://api.example.test/root");
-      const fetchMock = installFetch(reactNativeResponse(""));
+    const fetchMock = installFetch(reactNativeResponse("ok"));
 
     await expect(
       customFetch("https://other.example.test/rooms", {
@@ -85,13 +85,10 @@ describe("customFetch URL handling", () => {
 
 describe("customFetch authentication", () => {
   it("adds a bearer token when no Authorization header is supplied", async () => {
-      const fetchMock = installFetch(reactNativeResponse(""));
-    setAuthTokenGetter(() => "ignored-token");
+    const fetchMock = installFetch(reactNativeResponse("ok"));
+    setAuthTokenGetter(() => "clerk-token");
 
-    await customFetch("/profile", {
-      responseType: "text",
-      headers: { Authorization: "Basic explicit-credentials" },
-    });
+    await customFetch("/profile", { responseType: "text" });
 
     const requestInit = fetchMock.mock.calls[0]?.[1];
     expect(requestInit?.headers).toBeInstanceOf(Headers);
@@ -101,7 +98,7 @@ describe("customFetch authentication", () => {
   });
 
   it("preserves an explicit Authorization header", async () => {
-      const fetchMock = installFetch(reactNativeResponse(""));
+    const fetchMock = installFetch(reactNativeResponse("ok"));
     setAuthTokenGetter(() => "ignored-token");
 
     await customFetch("/profile", {
@@ -130,6 +127,22 @@ describe("customFetch response parsing", () => {
     ).resolves.toEqual({ profile: "ready" });
   });
 
+  it("preserves the raw body when a successful JSON response is malformed", async () => {
+    const rawBody = '{"profile":';
+    installFetch(reactNativeResponse(rawBody, { status: 200 }));
+
+    const error = await customFetch("/profile").catch((caught) => caught);
+
+    expect(error).toBeInstanceOf(ResponseParseError);
+    expect(error).toMatchObject({
+      status: 200,
+      method: "GET",
+      url: "/profile",
+      rawBody,
+    });
+    expect((error as ResponseParseError).cause).toBeInstanceOf(SyntaxError);
+  });
+
   it("parses a JSON error response and exposes it on ApiError", async () => {
     installFetch(
       reactNativeResponse(
@@ -142,8 +155,6 @@ describe("customFetch response parsing", () => {
     );
 
     const error = await customFetch("/profile").catch((caught) => caught);
-
-    const rawBody = '{"profile":';
 
     expect(error).toBeInstanceOf(ApiError);
     expect(error).toMatchObject({
@@ -224,5 +235,3 @@ describe("customFetch request body guard", () => {
     },
   );
 });
-
-    let originalCause: unknown;
