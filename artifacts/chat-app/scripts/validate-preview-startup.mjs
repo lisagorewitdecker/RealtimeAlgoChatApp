@@ -4,6 +4,7 @@ import { writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { spawn } from "node:child_process";
 import { setTimeout as delay } from "node:timers/promises";
+import { stripVTControlCharacters } from "node:util";
 import { fileURLToPath } from "node:url";
 import {
   findDuplicateJsonObjectKeys,
@@ -190,11 +191,13 @@ function findUnrecognizedLoaderFailure(output) {
 }
 
 function sanitizeStartupDiagnostic(value, maxLength) {
-  return value
-    // eslint-disable-next-line no-control-regex
-    .replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, "")
-    // eslint-disable-next-line no-control-regex
-    .replace(/[\u0000-\u001f\u007f]/g, " ")
+  const withoutAnsiSequences = stripVTControlCharacters(value);
+  const withoutControlChars = Array.from(withoutAnsiSequences, (character) => {
+    const codePoint = character.charCodeAt(0);
+    return codePoint <= 0x1f || codePoint === 0x7f ? " " : character;
+  }).join("");
+
+  return withoutControlChars
     .replace(/\s+/g, " ")
     .trim()
     .slice(0, maxLength);
@@ -224,11 +227,7 @@ function redactKnownStartupFailureSecrets(value) {
 }
 
 function normalizeLoaderFailureForMatching(value) {
-  return value
-    // eslint-disable-next-line no-control-regex
-    .replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, "")
-    // eslint-disable-next-line no-control-regex
-    .replace(/\u0007\s*$/g, "");
+  return stripVTControlCharacters(value).replace(/\s+$/g, "");
 }
 
 function findMissingLibrary(output) {
