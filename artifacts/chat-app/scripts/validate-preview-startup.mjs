@@ -227,7 +227,7 @@ function redactKnownStartupFailureSecrets(value) {
 }
 
 function normalizeLoaderFailureForMatching(value) {
-  return stripVTControlCharacters(value).replace(/\s+$/g, "");
+  return stripVTControlCharacters(value);
 }
 
 function findMissingLibrary(output) {
