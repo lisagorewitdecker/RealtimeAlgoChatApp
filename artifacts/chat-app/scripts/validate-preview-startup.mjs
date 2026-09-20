@@ -192,7 +192,7 @@ function findUnrecognizedLoaderFailure(output) {
 function stripAnsiEscapeSequences(value) {
   const escapeCharacter = String.fromCharCode(0x1b);
   let cursor = 0;
-  let normalized = "";
+  const characters = [];
 
   while (cursor < value.length) {
     if (value[cursor] === escapeCharacter && value[cursor + 1] === "[") {
@@ -207,11 +207,11 @@ function stripAnsiEscapeSequences(value) {
       continue;
     }
 
-    normalized += value[cursor];
+    characters.push(value[cursor]);
     cursor += 1;
   }
 
-  return normalized;
+  return characters.join("");
 }
 
 function sanitizeStartupDiagnostic(value, maxLength) {
