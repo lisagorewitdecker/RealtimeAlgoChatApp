@@ -21,7 +21,15 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
  *
  * Outside a classic tab bar (the iOS 26 native tabs, or a screen rendered on
  * its own) there is no measured bar, and the safe-area inset already covers
- * whatever the system draws at the bottom.
+ * whatever the system draws at the bottom. Inside the native tabs that holds
+ * because expo-router's vendored `NativeTabsView.ios.js` renders each tab's
+ * content in its own `SafeAreaProvider`, nested inside the tab's
+ * react-native-screens `Tabs.Screen`, where UIKit's safe area already
+ * includes the Liquid Glass tab bar; adding a bar height on top would reserve
+ * it twice. `__tests__/VendoredNativeTabsView.test.tsx` renders that vendored
+ * view and fails if the per-tab provider disappears, so an Expo upgrade has
+ * to re-verify the native tabs on an iPhone running iOS 26 before this
+ * fallback changes.
  *
  * @param extra additional spacing below the last item, in points.
  */
