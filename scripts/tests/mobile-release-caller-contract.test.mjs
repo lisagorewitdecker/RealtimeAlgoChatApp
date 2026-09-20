@@ -967,6 +967,11 @@ test("blocked release diagnostics identify the supported Node range safely", () 
   );
   assert.match(
     blockStep.run,
+    /idle-profile=\$IDLE_PROFILE_RESULT/,
+    "blocked release output must include the idle-profile registration result",
+  );
+  assert.match(
+    blockStep.run,
     /summary-regression=\$SUMMARY_REGRESSION_RESULT tamper-regression=\$TAMPER_REGRESSION_RESULT\./,
     "blocked release output must use the declared summary and tamper regression results",
   );
