@@ -1209,6 +1209,77 @@ test("combined mobile release Node diagnostics report every affected job and cor
   );
 });
 
+test("combined mobile release Node diagnostics report every invalid declaration in one job", () => {
+  const fixture = structuredClone(workflow);
+  const nodeRange = rootPackage.engines.node;
+  const jobId = "native-ios";
+  const malformedVersion = "lts";
+  const outOfRangeVersion = "23";
+  const job = fixture.jobs[jobId];
+  const setupNodeStep = job.steps.find((step) =>
+    String(step.uses ?? "").startsWith("actions/setup-node@"),
+  );
+  assert.ok(
+    setupNodeStep,
+    `${jobId} fixture must configure Node with actions/setup-node`,
+  );
+
+  job.steps.push(
+    structuredClone(setupNodeStep),
+    structuredClone(setupNodeStep),
+  );
+  const setupNodeSteps = job.steps.filter((step) =>
+    String(step.uses ?? "").startsWith("actions/setup-node@"),
+  );
+  assert.equal(
+    setupNodeSteps.length,
+    3,
+    `${jobId} fixture must contain multiple setup-node declarations`,
+  );
+
+  delete setupNodeSteps[0].with["node-version"];
+  setupNodeSteps[1].with["node-version"] = malformedVersion;
+  setupNodeSteps[2].with["node-version"] = outOfRangeVersion;
+
+  assert.throws(
+    () => assertMobileReleaseNodeVersions(fixture, nodeRange),
+    (error) => {
+      const jobMentionCount =
+        error.message.split(`mobile-release job "${jobId}"`).length - 1;
+      assert.equal(
+        jobMentionCount,
+        setupNodeSteps.length,
+        "the combined failure must report every invalid setup-node declaration in the job",
+      );
+      assert.ok(
+        error.message.includes("must configure node-version"),
+        "the failure must explain that the missing node-version is required",
+      );
+      assert.ok(
+        error.message.includes(JSON.stringify(malformedVersion)),
+        "the failure must identify the malformed Node version",
+      );
+      assert.ok(
+        error.message.includes(
+          "must be a concrete Node major/minor/patch version",
+        ),
+        "the failure must explain the required concrete Node version format",
+      );
+      assert.ok(
+        error.message.includes(`Node ${JSON.stringify(outOfRangeVersion)}`),
+        "the failure must identify the out-of-range Node version",
+      );
+      assert.ok(
+        error.message.includes(
+          `outside package.json engines.node range ${JSON.stringify(nodeRange)}`,
+        ),
+        "the failure must explain the required supported Node range",
+      );
+      return true;
+    },
+  );
+});
+
 test("blocked release diagnostics identify the supported Node range safely", () => {
   const gateSteps = workflow.jobs?.["mobile-release-gate"]?.steps ?? [];
   const blockStep = gateSteps.find(
