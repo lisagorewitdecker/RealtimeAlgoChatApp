@@ -2093,7 +2093,7 @@ jobs:
 
   mobile-release-gate:
     name: Mobile release gate
-    if: ${{ github.event_name != 'pull_request' && inputs.android_runner_health_only != true && needs.mobile-release-node-range.result == 'success' && needs.mobile-release-credentials.result == 'success' && needs.native-ios.result == 'success' && needs.native-android.result == 'success' && needs.idle-profile-registration.result == 'success' && needs.native-evidence-summary-regression.result == 'success' && needs.native-evidence-tamper-regression.result == 'success' }}
+    if: ${{ always() && github.event_name != 'pull_request' && inputs.android_runner_health_only != true && needs.mobile-release-node-range.result == 'success' && needs.mobile-release-credentials.result == 'success' && needs.native-release-configuration.result == 'success' && needs.idle-profile-registration.result == 'success' && needs.native-evidence-summary-regression.result == 'success' && needs.native-evidence-tamper-regression.result == 'success' }}
     outputs:
       ios_native_evidence_artifact_url: ${{ needs.native-ios.outputs.native_evidence_artifact_url }}
       android_native_evidence_artifact_url: ${{ needs.native-android.outputs.native_evidence_artifact_url }}
@@ -2102,6 +2102,7 @@ jobs:
     needs:
       - mobile-release-node-range
       - mobile-release-credentials
+      - native-release-configuration
       - android-release-runner-health
       - native-ios
       - native-android
@@ -2193,6 +2194,7 @@ jobs:
         env:
           IOS_RESULT: ${{ needs.native-ios.result }}
           ANDROID_RESULT: ${{ needs.native-android.result }}
+          RELEASE_CONFIGURATION_RESULT: ${{ needs.native-release-configuration.result }}
           IDLE_PROFILE_RESULT: ${{ needs.idle-profile-registration.result }}
           SUMMARY_REGRESSION_RESULT: ${{ needs.native-evidence-summary-regression.result }}
           TAMPER_REGRESSION_RESULT: ${{ needs.native-evidence-tamper-regression.result }}
@@ -2228,13 +2230,14 @@ jobs:
             echo "- Native evidence completeness: **${EVIDENCE_RESULT^^}**"
             echo "- iOS native smoke: **${IOS_RESULT^^}**"
             echo "- Android native smoke: **${ANDROID_RESULT^^}**"
+            echo "- Release configuration: **${RELEASE_CONFIGURATION_RESULT^^}**"
             echo "- Idle profile registration: **${IDLE_PROFILE_RESULT^^}**"
             echo "- Native evidence summary regression: **${SUMMARY_REGRESSION_RESULT^^}**"
             echo "- Native evidence tamper regression: **${TAMPER_REGRESSION_RESULT^^}**"
             echo "- Supported Node.js range: ${safe_supported_node_range}"
           } >> "$GITHUB_STEP_SUMMARY"
-          if [[ "$EVIDENCE_RESULT" != "success" || "$IOS_RESULT" != "success" || "$ANDROID_RESULT" != "success" || "$IDLE_PROFILE_RESULT" != "success" || "$SUMMARY_REGRESSION_RESULT" != "success" || "$TAMPER_REGRESSION_RESULT" != "success" ]]; then
-            echo "Mobile release blocked: evidence=$EVIDENCE_RESULT iOS=$IOS_RESULT Android=$ANDROID_RESULT idle-profile=$IDLE_PROFILE_RESULT summary-regression=$SUMMARY_REGRESSION_RESULT. tamper-regression=$TAMPER_REGRESSION_RESULT Supported Node.js range from package.json engines.node: ${safe_supported_node_range} (must be a valid semver range)." >&2
+          if [[ "$EVIDENCE_RESULT" != "success" || "$IOS_RESULT" != "success" || "$ANDROID_RESULT" != "success" || "$RELEASE_CONFIGURATION_RESULT" != "success" || "$IDLE_PROFILE_RESULT" != "success" || "$SUMMARY_REGRESSION_RESULT" != "success" || "$TAMPER_REGRESSION_RESULT" != "success" ]]; then
+            echo "Mobile release blocked: evidence=$EVIDENCE_RESULT iOS=$IOS_RESULT Android=$ANDROID_RESULT configuration=$RELEASE_CONFIGURATION_RESULT idle-profile=$IDLE_PROFILE_RESULT summary-regression=$SUMMARY_REGRESSION_RESULT tamper-regression=$TAMPER_REGRESSION_RESULT. Supported Node.js range from package.json engines.node: ${safe_supported_node_range} (must be a valid semver range)." >&2
             exit 1
           fi
           echo "Mobile release gate passed native accessibility and idle-profile registration checks."

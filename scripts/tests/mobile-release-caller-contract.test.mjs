@@ -660,7 +660,7 @@ test("invalid Node range guard blocks release jobs before setup or publish work"
   );
   assert.match(
     String(workflow.jobs?.["mobile-release-gate"]?.if),
-    /needs\.mobile-release-configuration\.result == 'success'/,
+    /needs\.native-release-configuration\.result == 'success'/,
     "the release gate must not start before mobile release configuration is evaluated",
   );
   assert.match(
