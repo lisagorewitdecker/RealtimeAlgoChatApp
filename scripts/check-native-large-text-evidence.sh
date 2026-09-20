@@ -32,6 +32,7 @@ source "$ROOT_DIR/scripts/native-release-recovery-contract.sh"
 check_native_text_evidence_sizes() {
   local results_dir="$1"
   local path
+  local -a sorted_evidence_paths=()
   local relative_path
   local file_size
   local oversized=0
@@ -41,8 +42,31 @@ check_native_text_evidence_sizes() {
     return 0
   fi
 
-  while IFS= read -r -d '' path; do
+  mapfile -d '' -t sorted_evidence_paths < <(find "$results_dir" -type f -print0)
+  if ((${#sorted_evidence_paths[@]} > 1)); then
+    local current_path
+    local index
+    local compare_index
+    local LC_ALL=C
+    for ((index = 1; index < ${#sorted_evidence_paths[@]}; index += 1)); do
+      current_path="${sorted_evidence_paths[index]}"
+      compare_index=$((index - 1))
+      while ((compare_index >= 0)) &&
+        [[ "${sorted_evidence_paths[compare_index]}" > "$current_path" ]]; do
+        sorted_evidence_paths[compare_index + 1]="${sorted_evidence_paths[compare_index]}"
+        compare_index=$((compare_index - 1))
+      done
+      sorted_evidence_paths[compare_index + 1]="$current_path"
+    done
+  fi
+
+  for path in "${sorted_evidence_paths[@]}"; do
     relative_path="${path#"$results_dir"/}"
+    if [[ ! "$relative_path" =~ $TRUSTED_EVIDENCE_PATH_PATTERN ]]; then
+      echo "Native evidence collection contains an untrusted file path: ${relative_path}." >&2
+      oversized=1
+      continue
+    fi
     if [[ "$relative_path" =~ ^(screenshots|call-surface)/[A-Za-z0-9._-]+\.png$ ]]; then
       continue
     fi
@@ -53,14 +77,10 @@ check_native_text_evidence_sizes() {
       continue
     fi
     if ((file_size > MAX_NATIVE_TEXT_EVIDENCE_BYTES)); then
-      if [[ "$relative_path" =~ $TRUSTED_EVIDENCE_PATH_PATTERN ]]; then
-        echo "Native evidence text file exceeds the ${MAX_NATIVE_TEXT_EVIDENCE_LABEL} release evidence limit: ${relative_path}." >&2
-      else
-        echo "Native evidence contains an oversized text file with an unrecognized path; refusing to package evidence." >&2
-      fi
+      echo "Native evidence text file exceeds the ${MAX_NATIVE_TEXT_EVIDENCE_LABEL} release evidence limit: ${relative_path}." >&2
       oversized=1
     fi
-  done < <(find "$results_dir" -type f -print0)
+  done
 
   if ((oversized)); then
     echo "Native evidence collection failed its bounded text-file size check; no artifact will be uploaded." >&2

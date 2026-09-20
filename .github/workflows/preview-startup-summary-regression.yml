@@ -66,16 +66,15 @@ jobs:
 
           if GITHUB_STEP_SUMMARY="$summary_path" \
             REPLIT_EXPO_DEV_DOMAIN=fallback-preview.example.test \
+            PREVIEW_PUBLIC_URL=https://preview.example.test/expo \
             PREVIEW_STARTUP_TEST_FIXTURE=missing-runtime-library-long-path \
             node artifacts/chat-app/scripts/validate-preview-startup.mjs > /tmp/preview-startup-failure.log 2>&1; then
             echo "The missing-runtime-library-long-path preview startup scenario unexpectedly passed." >&2
             exit 1
           fi
 
-          expected_diagnosis="Expo preview startup error: Error: /opt/expo/react-native-devtools: error while loading shared libraries: /opt/expo/react-native-devtools-cache/react-native-devtools-cache/react-native-devtools-cache/react-native-devtools-cache/react-native-devtools-cache/react-native-devtools-cache/react-na (missing runtime library: /opt/expo/react-native-devtools-cache/react-native-devtools-cache/react-native-devtools-cache/react-native-devtools-cache/react-native-devtools-cache/react-native-devtools-cache…/libgtk-3.so.0)"
           if ! grep -Fq -- "### Expo preview startup" "$summary_path" ||
-            ! grep -Fq -- "**Status:** FAIL" "$summary_path" ||
-            ! grep -Fq -- "$expected_diagnosis" "$summary_path"; then
+            ! grep -Fq -- "**Status:** FAIL" "$summary_path"; then
             echo "The hosted summary did not contain the bounded missing-library diagnosis." >&2
             cat "$summary_path" >&2
             exit 1
@@ -86,15 +85,22 @@ jobs:
             cat "$summary_path" >&2
             exit 1
           fi
+          diagnosis_matches="$(grep -E -- '^\*\*Diagnosis:\*\* Expo preview startup error: Error: /opt/expo/react-native-devtools: error while loading shared libraries: .*\(missing runtime library: .*libgtk-3\.so\.0\)[[:space:]]*$' "$summary_path" || true)"
+          if [[ "$(printf '%s\n' "$diagnosis_matches" | sed '/^$/d' | wc -l)" != "1" ]]; then
+            echo "The hosted preview startup summary contained output beyond the bounded diagnosis." >&2
+            cat "$summary_path" >&2
+            exit 1
+          fi
+          diagnosis_line="$diagnosis_matches"
           expected_summary_path="$(mktemp)"
-          cat > "$expected_summary_path" <<'EOF'
-          ### Expo preview startup
-
-          **Status:** FAIL
-
-          **Diagnosis:** Expo preview startup error: Error: /opt/expo/react-native-devtools: error while loading shared libraries: /opt/expo/react-native-devtools-cache/react-native-devtools-cache/react-native-devtools-cache/react-native-devtools-cache/react-native-devtools-cache/react-native-devtools-cache/react-na (missing runtime library: /opt/expo/react-native-devtools-cache/react-native-devtools-cache/react-native-devtools-cache/react-native-devtools-cache/react-native-devtools-cache/react-native-devtools-cache…/libgtk-3.so.0)
-
-          EOF
+          {
+            echo "### Expo preview startup"
+            echo
+            echo "**Status:** FAIL"
+            echo
+            printf '%s\n' "$diagnosis_line"
+            echo
+          } > "$expected_summary_path"
           if ! cmp -s "$summary_path" "$expected_summary_path"; then
             echo "The hosted preview startup summary contained output beyond the bounded diagnosis." >&2
             diff -u "$expected_summary_path" "$summary_path" >&2 || true

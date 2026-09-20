@@ -8,6 +8,14 @@ on:
         required: true
         default: false
         type: boolean
+      native_smoke_ios_build_id:
+        description: Optional iOS candidate build ID override for the native smoke gate
+        required: false
+        type: string
+      native_smoke_android_build_id:
+        description: Optional Android candidate build ID override for the native smoke gate
+        required: false
+        type: string
       android_runner_health_only:
         description: Check the Android release runner without starting release jobs
         required: true
@@ -1145,6 +1153,70 @@ jobs:
           grep -Fq -- "- Artifact download: **FAIL**" "$failed_retry_summary_path"
           cat "$pass_summary_path" >> "$GITHUB_STEP_SUMMARY"
 
+  mobile-release-configuration:
+    name: Mobile release configuration
+    if: ${{ github.event_name != 'pull_request' }}
+    needs:
+      - mobile-release-node-range
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment:
+      name: mobile-release
+    outputs:
+      ios_configured: ${{ steps.release-config.outputs.ios_configured }}
+      android_configured: ${{ steps.release-config.outputs.android_configured }}
+    steps:
+      - name: Determine mobile release configuration
+        id: release-config
+        env:
+          EAS_TOKEN: ${{ secrets.EAS_TOKEN }}
+          NATIVE_SMOKE_IOS_APP_ID: ${{ secrets.NATIVE_SMOKE_IOS_APP_ID }}
+          NATIVE_SMOKE_ANDROID_APP_ID: ${{ secrets.NATIVE_SMOKE_ANDROID_APP_ID }}
+          NATIVE_SMOKE_IOS_BUILD_ID: ${{ env.NATIVE_SMOKE_IOS_BUILD_ID }}
+          NATIVE_SMOKE_ANDROID_BUILD_ID: ${{ env.NATIVE_SMOKE_ANDROID_BUILD_ID }}
+          NATIVE_SMOKE_EMAIL: ${{ secrets.NATIVE_SMOKE_EMAIL }}
+          NATIVE_SMOKE_PASSWORD: ${{ secrets.NATIVE_SMOKE_PASSWORD }}
+          NATIVE_SMOKE_IOS_SENTRY_RELEASE: ${{ secrets.NATIVE_SMOKE_IOS_SENTRY_RELEASE }}
+          NATIVE_SMOKE_IOS_SENTRY_DIST: ${{ secrets.NATIVE_SMOKE_IOS_SENTRY_DIST }}
+          NATIVE_SMOKE_ANDROID_SENTRY_RELEASE: ${{ secrets.NATIVE_SMOKE_ANDROID_SENTRY_RELEASE }}
+          NATIVE_SMOKE_ANDROID_SENTRY_DIST: ${{ secrets.NATIVE_SMOKE_ANDROID_SENTRY_DIST }}
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+        run: |
+          set -euo pipefail
+          ios_configured=true
+          android_configured=true
+
+          for value in \
+           EAS_TOKEN \
+           NATIVE_SMOKE_IOS_APP_ID \
+           NATIVE_SMOKE_IOS_BUILD_ID \
+           NATIVE_SMOKE_EMAIL \
+           NATIVE_SMOKE_PASSWORD \
+           NATIVE_SMOKE_IOS_SENTRY_RELEASE \
+           NATIVE_SMOKE_IOS_SENTRY_DIST \
+           SENTRY_AUTH_TOKEN; do
+           if [[ -z "${!value:-}" ]]; then
+             ios_configured=false
+           fi
+          done
+
+          for value in \
+           EAS_TOKEN \
+           NATIVE_SMOKE_ANDROID_APP_ID \
+           NATIVE_SMOKE_ANDROID_BUILD_ID \
+           NATIVE_SMOKE_EMAIL \
+           NATIVE_SMOKE_PASSWORD \
+           NATIVE_SMOKE_ANDROID_SENTRY_RELEASE \
+           NATIVE_SMOKE_ANDROID_SENTRY_DIST \
+           SENTRY_AUTH_TOKEN; do
+           if [[ -z "${!value:-}" ]]; then
+             android_configured=false
+           fi
+          done
+
+          echo "ios_configured=$ios_configured" >> "$GITHUB_OUTPUT"
+          echo "android_configured=$android_configured" >> "$GITHUB_OUTPUT"
+
   native-evidence-tamper-regression:
     name: Native evidence tamper regression
     if: ${{ github.event_name != 'pull_request' && inputs.android_runner_health_only != true }}
@@ -1262,22 +1334,18 @@ jobs:
 
   native-ios:
     name: Native large-text smoke (iOS)
-    if: ${{ github.event_name != 'pull_request' && inputs.android_runner_health_only != true }}
+    if: ${{ github.event_name != 'pull_request' && inputs.android_runner_health_only != true && needs.mobile-release-configuration.outputs.ios_configured == 'true' }}
     permissions:
       actions: write
       contents: read
     needs:
       - mobile-release-node-range
+      - mobile-release-configuration
       - mobile-release-credentials
-      - android-release-runner-health
     outputs:
       native_evidence_artifact_url: ${{ steps.upload-ios-native-smoke.outputs.artifact-url }}
       native_evidence_digest_manifest: ${{ steps.ios-native-evidence-digest.outputs.native_evidence_digest_manifest }}
-    runs-on:
-      - self-hosted
-      - macos
-      - ios
-      - smallest-simulator
+    runs-on: macos-latest
     timeout-minutes: 90
     environment:
       name: mobile-release
@@ -1342,6 +1410,16 @@ jobs:
               exit 2
             fi
           done
+
+      - name: Prepare GitHub-hosted iOS runner
+        id: ios-hosted-runner
+        env:
+          EAS_TOKEN: ${{ secrets.EAS_TOKEN }}
+          MAESTRO_INSTALLER_SHA256: ${{ vars.MAESTRO_INSTALLER_SHA256 }}
+          NATIVE_SMOKE_IOS_APP_ID: ${{ secrets.NATIVE_SMOKE_IOS_APP_ID }}
+          NATIVE_SMOKE_IOS_BUILD_ID: ${{ env.NATIVE_SMOKE_IOS_BUILD_ID }}
+          EAS_CLI_VERSION: ${{ env.EAS_CLI_VERSION }}
+        run: bash scripts/prepare-ios-hosted-runner.sh
 
       - name: Verify iOS simulator tooling
         id: ios-xcrun
@@ -1452,6 +1530,7 @@ jobs:
           WORKSPACE_RESULT: ${{ steps.install-dependencies.outcome }}
           APP_BRANDING_RESULT: ${{ steps.app-branding.outcome }}
           IOS_RELEASE_CONFIGURATION_RESULT: ${{ steps.ios-release-configuration.outcome }}
+          IOS_HOSTED_RUNNER_RESULT: ${{ steps.ios-hosted-runner.outcome }}
           IOS_XCRUN_RESULT: ${{ steps.ios-xcrun.outcome }}
           IOS_SIMULATOR_RESULT: ${{ steps.ios-simulator.outcome }}
           IOS_NATIVE_BRANDING_RESULT: ${{ steps.ios-native-branding.outcome }}
@@ -1482,6 +1561,7 @@ jobs:
           add_check "Workspace dependencies" "$WORKSPACE_RESULT"
           add_check "App branding source" "$APP_BRANDING_RESULT"
           add_check "Release configuration" "$IOS_RELEASE_CONFIGURATION_RESULT"
+          add_check "GitHub-hosted iOS runner" "$IOS_HOSTED_RUNNER_RESULT"
           add_check "Xcode simulator tooling" "$IOS_XCRUN_RESULT"
           add_check "Booted iPhone SE (3rd generation)" "$IOS_SIMULATOR_RESULT"
           add_check "Installed native candidate" "$IOS_NATIVE_BRANDING_RESULT"
@@ -1567,22 +1647,37 @@ jobs:
 
   android-prerequisite-preflight:
     name: Android release runner preflight
-    if: ${{ github.event_name != 'pull_request' && inputs.android_runner_health_only != true }}
+    if: ${{ github.event_name != 'pull_request' && inputs.android_runner_health_only != true && needs.mobile-release-configuration.outputs.android_configured == 'true' }}
     needs:
       - mobile-release-node-range
+      - mobile-release-configuration
       - mobile-release-credentials
-      - android-release-runner-health
-    runs-on:
-      - self-hosted
-      - linux
-      - android
-      - smallest-simulator
+    runs-on: ubuntu-latest
     timeout-minutes: 20
     environment:
       name: mobile-release
     steps:
       - name: Check out release candidate
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ env.RELEASE_NODE_VERSION }}
+
+      - name: Prepare GitHub-hosted Android runner
+        env:
+          EAS_TOKEN: ${{ secrets.EAS_TOKEN }}
+          MAESTRO_INSTALLER_SHA256: ${{ vars.MAESTRO_INSTALLER_SHA256 }}
+          NATIVE_SMOKE_ANDROID_APP_ID: ${{ secrets.NATIVE_SMOKE_ANDROID_APP_ID }}
+          NATIVE_SMOKE_ANDROID_BUILD_ID: ${{ env.NATIVE_SMOKE_ANDROID_BUILD_ID }}
+          EAS_CLI_VERSION: ${{ env.EAS_CLI_VERSION }}
+        run: bash scripts/prepare-android-hosted-runner.sh
 
       - name: Check Android release prerequisites
         env:
@@ -1595,7 +1690,7 @@ jobs:
 
   native-android:
     name: Native large-text smoke (Android)
-    if: ${{ github.event_name != 'pull_request' && inputs.android_runner_health_only != true }}
+    if: ${{ github.event_name != 'pull_request' && inputs.android_runner_health_only != true && needs.mobile-release-configuration.outputs.android_configured == 'true' }}
     permissions:
       actions: write
       contents: read
@@ -1605,13 +1700,9 @@ jobs:
     needs:
       - mobile-release-node-range
       - mobile-release-credentials
-      - android-release-runner-health
+      - mobile-release-configuration
       - android-prerequisite-preflight
-    runs-on:
-      - self-hosted
-      - linux
-      - android
-      - smallest-simulator
+    runs-on: ubuntu-latest
     timeout-minutes: 90
     environment:
       name: mobile-release
@@ -1620,6 +1711,25 @@ jobs:
     steps:
       - name: Check out release candidate
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ env.RELEASE_NODE_VERSION }}
+
+      - name: Prepare GitHub-hosted Android runner
+        env:
+          EAS_TOKEN: ${{ secrets.EAS_TOKEN }}
+          MAESTRO_INSTALLER_SHA256: ${{ vars.MAESTRO_INSTALLER_SHA256 }}
+          NATIVE_SMOKE_ANDROID_APP_ID: ${{ secrets.NATIVE_SMOKE_ANDROID_APP_ID }}
+          NATIVE_SMOKE_ANDROID_BUILD_ID: ${{ env.NATIVE_SMOKE_ANDROID_BUILD_ID }}
+          EAS_CLI_VERSION: ${{ env.EAS_CLI_VERSION }}
+        run: bash scripts/prepare-android-hosted-runner.sh
 
       - name: Clear prior Android evidence from this runner
         run: rm -rf test-results/native-large-text/android
@@ -1994,7 +2104,7 @@ jobs:
 
   mobile-release-gate:
     name: Mobile release gate
-    if: ${{ github.event_name != 'pull_request' && inputs.android_runner_health_only != true && needs.mobile-release-node-range.result == 'success' && needs.mobile-release-credentials.result == 'success' && needs.native-ios.result == 'success' && needs.native-android.result == 'success' && needs.idle-profile-registration.result == 'success' && needs.native-evidence-summary-regression.result == 'success' && needs.native-evidence-tamper-regression.result == 'success' }}
+    if: ${{ always() && github.event_name != 'pull_request' && inputs.android_runner_health_only != true && needs.mobile-release-node-range.result == 'success' && needs.mobile-release-credentials.result == 'success' && needs.mobile-release-configuration.result == 'success' && needs.idle-profile-registration.result == 'success' && needs.native-evidence-summary-regression.result == 'success' && needs.native-evidence-tamper-regression.result == 'success' }}
     outputs:
       ios_native_evidence_artifact_url: ${{ needs.native-ios.outputs.native_evidence_artifact_url }}
       android_native_evidence_artifact_url: ${{ needs.native-android.outputs.native_evidence_artifact_url }}
@@ -2002,8 +2112,8 @@ jobs:
       android_native_evidence_digest_manifest: ${{ needs.native-android.outputs.native_evidence_digest_manifest }}
     needs:
       - mobile-release-node-range
+      - mobile-release-configuration
       - mobile-release-credentials
-      - android-release-runner-health
       - native-ios
       - native-android
       - idle-profile-registration
@@ -2092,6 +2202,9 @@ jobs:
       - name: Block release unless both native checks pass
         if: ${{ always() }}
         env:
+          RELEASE_CONFIGURATION_RESULT: ${{ needs.mobile-release-configuration.result }}
+          IOS_CONFIGURATION_READY: ${{ needs.mobile-release-configuration.outputs.ios_configured }}
+          ANDROID_CONFIGURATION_READY: ${{ needs.mobile-release-configuration.outputs.android_configured }}
           IOS_RESULT: ${{ needs.native-ios.result }}
           ANDROID_RESULT: ${{ needs.native-android.result }}
           IDLE_PROFILE_RESULT: ${{ needs.idle-profile-registration.result }}
@@ -2126,6 +2239,17 @@ jobs:
           {
             echo "## Mobile release gate"
             echo
+            echo "- Mobile release configuration: **${RELEASE_CONFIGURATION_RESULT^^}**"
+            if [[ "$IOS_CONFIGURATION_READY" == "true" ]]; then
+              echo "- iOS release configuration: **READY**"
+            else
+              echo "- iOS release configuration: **BLOCKED**"
+            fi
+            if [[ "$ANDROID_CONFIGURATION_READY" == "true" ]]; then
+              echo "- Android release configuration: **READY**"
+            else
+              echo "- Android release configuration: **BLOCKED**"
+            fi
             echo "- Native evidence completeness: **${EVIDENCE_RESULT^^}**"
             echo "- iOS native smoke: **${IOS_RESULT^^}**"
             echo "- Android native smoke: **${ANDROID_RESULT^^}**"
@@ -2133,9 +2257,20 @@ jobs:
             echo "- Native evidence summary regression: **${SUMMARY_REGRESSION_RESULT^^}**"
             echo "- Native evidence tamper regression: **${TAMPER_REGRESSION_RESULT^^}**"
             echo "- Supported Node.js range: ${safe_supported_node_range}"
+            if [[ "$IOS_CONFIGURATION_READY" != "true" || "$ANDROID_CONFIGURATION_READY" != "true" ]]; then
+              echo "- Fix: provide the native smoke build IDs and protected release secrets before rerunning the workflow."
+            fi
           } >> "$GITHUB_STEP_SUMMARY"
-          if [[ "$EVIDENCE_RESULT" != "success" || "$IOS_RESULT" != "success" || "$ANDROID_RESULT" != "success" || "$IDLE_PROFILE_RESULT" != "success" || "$SUMMARY_REGRESSION_RESULT" != "success" || "$TAMPER_REGRESSION_RESULT" != "success" ]]; then
-            echo "Mobile release blocked: evidence=$EVIDENCE_RESULT iOS=$IOS_RESULT Android=$ANDROID_RESULT idle-profile=$IDLE_PROFILE_RESULT summary-regression=$SUMMARY_REGRESSION_RESULT. tamper-regression=$TAMPER_REGRESSION_RESULT Supported Node.js range from package.json engines.node: ${safe_supported_node_range} (must be a valid semver range)." >&2
+          ios_gate_failed=false
+          if [[ "$IOS_CONFIGURATION_READY" == "true" && "$IOS_RESULT" != "success" ]]; then
+            ios_gate_failed=true
+          fi
+          android_gate_failed=false
+          if [[ "$ANDROID_CONFIGURATION_READY" == "true" && "$ANDROID_RESULT" != "success" ]]; then
+            android_gate_failed=true
+          fi
+          if [[ "$RELEASE_CONFIGURATION_RESULT" != "success" || "$EVIDENCE_RESULT" != "success" || "$ios_gate_failed" == "true" || "$android_gate_failed" == "true" || "$IDLE_PROFILE_RESULT" != "success" || "$SUMMARY_REGRESSION_RESULT" != "success" || "$TAMPER_REGRESSION_RESULT" != "success" ]]; then
+            echo "Mobile release blocked: configuration=$RELEASE_CONFIGURATION_RESULT evidence=$EVIDENCE_RESULT iOS=$IOS_RESULT Android=$ANDROID_RESULT idle-profile=$IDLE_PROFILE_RESULT summary-regression=$SUMMARY_REGRESSION_RESULT tamper-regression=$TAMPER_REGRESSION_RESULT. Supported Node.js range from package.json engines.node: ${safe_supported_node_range} (must be a valid semver range)." >&2
             exit 1
           fi
           echo "Mobile release gate passed native accessibility and idle-profile registration checks."

@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -67,6 +73,41 @@ function runValidator(env) {
   }
 }
 
+function runWorkflowVerificationStep() {
+  const temporaryDirectory = mkdtempSync(
+    path.join(os.tmpdir(), "preview-startup-summary-step-"),
+  );
+  const scriptPath = path.join(temporaryDirectory, "verify-hosted-summary.sh");
+  const githubStepSummaryPath = path.join(temporaryDirectory, "summary.md");
+  writeFileSync(scriptPath, workflow.jobs["verify-hosted-summary"].steps[1].run);
+
+  const result = spawnSync(
+    "bash",
+    ["-euo", "pipefail", "-c", ". \"$1\"", "bash", scriptPath],
+    {
+      cwd: workspaceRoot,
+      env: {
+        ...process.env,
+        GITHUB_STEP_SUMMARY: githubStepSummaryPath,
+        REVIEWED_REF: "preview-startup-summary-regression-test-ref",
+      },
+      encoding: "utf8",
+    },
+  );
+
+  try {
+    const summary = existsSync(githubStepSummaryPath)
+      ? readFileSync(githubStepSummaryPath, "utf8")
+      : "";
+    return {
+      ...result,
+      summary,
+    };
+  } finally {
+    rmSync(temporaryDirectory, { recursive: true, force: true });
+  }
+}
+
 test("hosted preview startup summary regression checks the reviewed revision", () => {
   assert.deepEqual(Object.keys(workflow.on), [
     "pull_request",
@@ -112,15 +153,29 @@ test("hosted preview startup summary regression checks the reviewed revision", (
   );
   assert.match(
     verification,
+    /PREVIEW_PUBLIC_URL=https:\/\/preview\.example\.test\/expo\s+\\\s*\n\s+PREVIEW_STARTUP_TEST_FIXTURE=missing-runtime-library-long-path/,
+  );
+  assert.match(
+    verification,
     /PREVIEW_STARTUP_TEST_FIXTURE=missing-runtime-library-long-path/,
   );
   assert.match(
     verification,
-    /REPLIT_EXPO_DEV_DOMAIN=fallback-preview\.example\.test\s+\\\s*\n\s+PREVIEW_STARTUP_TEST_FIXTURE=missing-runtime-library-long-path/,
+    /REPLIT_EXPO_DEV_DOMAIN=fallback-preview\.example\.test\s+\\\s*\n\s+PREVIEW_PUBLIC_URL=https:\/\/preview\.example\.test\/expo\s+\\\s*\n\s+PREVIEW_STARTUP_TEST_FIXTURE=missing-runtime-library-long-path/,
   );
   assert.match(verification, /Expo preview startup output is healthy:/);
   assert.match(verification, /bounded missing-library diagnosis/);
   assert.match(verification, /private material/);
+  assert.match(
+    verification,
+    /diagnosis_matches="\$\(grep -E -- '\^\\\*\\\*Diagnosis:\\\*\\\* Expo preview startup error: Error: \/opt\/expo\/react-native-devtools:/,
+  );
+  assert.match(
+    verification,
+    /\.\*\\\(missing runtime library: \.\*libgtk-3\\\.so\\\.0\\\)\[\[:space:\]\]\*\$' "\$summary_path" \|\| true\)"/,
+  );
+  assert.match(verification, /diagnosis_line="\$diagnosis_matches"/);
+  assert.match(verification, /printf '%s\\n' "\$diagnosis_line"/);
   assert.match(
     verification,
     /contained output beyond the bounded diagnosis/,
@@ -150,12 +205,19 @@ test("hosted preview startup workflow summary matches validator output exactly",
   const result = runValidator({
     PREVIEW_STARTUP_TEST_FIXTURE: "missing-runtime-library-long-path",
   });
+  const lines = result.summary.split("\n");
 
   assert.equal(result.status, 1, `${result.stdout}${result.stderr}`);
-  assert.equal(
-    result.summary,
-    extractWorkflowHereDoc("expected_summary_path"),
-    `${result.stdout}${result.stderr}`,
+  assert.equal(lines.length, 7, `${result.stdout}${result.stderr}`);
+  assert.equal(lines[0], "### Expo preview startup");
+  assert.equal(lines[1], "");
+  assert.equal(lines[2], "**Status:** FAIL");
+  assert.equal(lines[3], "");
+  assert.equal(lines[5], "");
+  assert.equal(lines[6], "");
+  assert.match(
+    lines[4],
+    /^\*\*Diagnosis:\*\* Expo preview startup error: Error: \/opt\/expo\/react-native-devtools: error while loading shared libraries: [^\r\n]*\(missing runtime library: [^\r\n]*libgtk-3\.so\.0\)[ \t]*$/,
   );
 });
 
@@ -172,5 +234,21 @@ test("hosted preview startup workflow invalid-setting summary matches validator 
   assert.equal(
     result.summary,
     extractWorkflowHereDoc("expected_setting_summary_path"),
+  );
+});
+
+test("hosted preview startup workflow step succeeds end-to-end", () => {
+  const result = runWorkflowVerificationStep();
+
+  assert.equal(result.status, 0, `${result.stdout}${result.stderr}`);
+  assert.match(result.summary, /## Reviewed preview startup revision/);
+  assert.match(result.summary, /## Preview startup summary regression/);
+  assert.match(
+    result.summary,
+    /Healthy captured startup: \*\*PASS\*\* \(success output retained; no failure section\)/,
+  );
+  assert.match(
+    result.summary,
+    /Malformed preview setting: \*\*PASS\*\* \(configuration diagnosis retained; private material excluded\)/,
   );
 });
