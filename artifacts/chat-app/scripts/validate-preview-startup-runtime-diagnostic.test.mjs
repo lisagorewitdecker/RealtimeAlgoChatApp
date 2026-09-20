@@ -432,7 +432,10 @@ test("real launcher validation does not require a public preview URL", () => {
 
 test("startup test output override runs without preview URL configuration", () => {
   const temporaryDirectory = mkdtempSync(
-    join(tmpdir(), "chat-preview-startup-test-output-"),
+    join(
+      process.env.RUNNER_TEMP ?? tmpdir(),
+      "chat-preview-startup-test-output-",
+    ),
   );
   const recordPath = join(temporaryDirectory, "startup.log");
 
