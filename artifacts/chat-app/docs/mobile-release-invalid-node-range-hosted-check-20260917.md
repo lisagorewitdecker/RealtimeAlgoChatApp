@@ -8,6 +8,67 @@ repository. The run used the secret-free `node_range_override` fixture and
 `publish=false`; no release credential was read or written and no self-hosted
 runner was available to claim release work.
 
+## Repeatable probe preflight
+
+Run this preflight against the current hosted `main` branch and the published
+`mobile-release.yml` workflow **before creating a verification ref**. Use the
+already connected GitHub client for these requests. Do not request, copy,
+print, or include a token in the probe output or the dated evidence record.
+Record only the repository, branch, workflow, HTTP status classification, run
+ID, job IDs, and public URLs.
+
+The preflight is a capability check, not release evidence:
+
+| Capability | Read-only or safe request | Required result |
+| --- | --- | --- |
+| Branch lookup | `GET /repos/<owner>/<repo>/branches/main` | `200`; the response's commit SHA is the baseline |
+| Dispatch | `POST /repos/<owner>/<repo>/actions/workflows/mobile-release.yml/dispatches` with the baseline ref, `node_range_override=not-a-valid-node-range`, and `publish=false` | accepted; this known invalid range must fail in the Node guard before credential, native, or publish jobs can run |
+| Run metadata | `GET /repos/<owner>/<repo>/actions/runs/<run_id>` | `200`; the uniquely correlated run belongs to the expected workflow, ref, and repository |
+| Job metadata | `GET /repos/<owner>/<repo>/actions/runs/<run_id>/jobs` | `200`; job IDs and conclusions are available |
+| Annotations | `GET /repos/<owner>/<repo>/check-runs/<check_run_id>/annotations` for the relevant jobs | `200`; annotation-only evidence is available |
+| Raw job logs | `GET /repos/<owner>/<repo>/actions/jobs/<job_id>/logs`, following redirects | final `200` for log-capable access, or a classified `403`/`404` limitation; never record a signed redirect URL |
+
+The dispatch request must use the known invalid range above and must never set
+`publish=true`. That fixture is intentionally secret-free: the Node guard
+fails before the credential preflight, native runners, browser release work, or
+publish job can start. Workflow dispatch returns no run ID, so record the UTC
+dispatch start time, the authenticated connection actor, the baseline commit
+SHA, and the workflow/ref used. Poll workflow runs and accept exactly one
+candidate matching all of those facts (workflow, `workflow_dispatch` event,
+baseline ref and SHA, actor, and `created_at` at or after the recorded start).
+Reject zero matches and reject multiple matches; never guess which concurrent
+`main` dispatch is the probe. Then verify the run metadata, job graph, and
+check-run annotations in that order.
+
+For raw logs, treat the API's documented redirect as an intermediate response:
+follow it and classify the final response status. A `403` or `404` from the
+final raw-log request is a **missing log capability**, not a failed release
+probe: report `raw job-log download: unavailable (Actions log scope)` and
+select annotation-only evidence. If rendered step-summary bytes are required,
+stop before creating the verification ref and use an owner-provided,
+log-capable path instead. Do not retry by requesting or displaying
+credentials, and do not write a signed redirect URL to the record.
+
+Install the temporary-ref cleanup guard immediately before the first
+create/push-ref operation. The guard must run on normal completion, dispatch
+failure, metadata or annotation failure, log-capability failure, interruption,
+and any later setup error:
+
+```text
+cleanup_ref() {
+  if temporary_ref_was_created; then
+    delete refs/heads/<temporary-ref>
+    verify GET /repos/<owner>/<repo>/git/ref/heads/<temporary-ref> returns 404
+  fi
+}
+trap cleanup_ref EXIT INT TERM
+```
+
+Do not create the temporary ref until every preflight row has been classified.
+If setup fails after the ref is created, run the cleanup guard before reporting
+the failure; a cleanup failure is itself evidence that the probe did not finish
+cleanly and must not be hidden by the original error.
+
 ## Metadata
 
 | Field | Result |

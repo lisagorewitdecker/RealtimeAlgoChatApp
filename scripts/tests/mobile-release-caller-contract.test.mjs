@@ -37,6 +37,13 @@ const callerDocumentation = readFileSync(
   ),
   "utf8",
 );
+const invalidNodeRangeHostedDocumentation = readFileSync(
+  path.join(
+    workspaceRoot,
+    "artifacts/chat-app/docs/mobile-release-invalid-node-range-hosted-check-20260917.md",
+  ),
+  "utf8",
+);
 const rootPackage = JSON.parse(
   readFileSync(path.join(workspaceRoot, "package.json"), "utf8"),
 );
@@ -253,6 +260,133 @@ test("malformed mobile release workflow expressions fail with line-specific diag
   } finally {
     rmSync(fixtureRoot, { recursive: true, force: true });
   }
+});
+
+test("hosted invalid-Node probe preflights capabilities before creating a temporary ref", () => {
+  const preflightStart = invalidNodeRangeHostedDocumentation.indexOf(
+    "## Repeatable probe preflight",
+  );
+  const metadataStart = invalidNodeRangeHostedDocumentation.indexOf(
+    "\n## Metadata",
+    preflightStart,
+  );
+  assert.ok(preflightStart >= 0, "the hosted probe must document its preflight");
+  assert.ok(
+    metadataStart > preflightStart,
+    "the hosted probe preflight must be a bounded documentation section",
+  );
+
+  const preflight = invalidNodeRangeHostedDocumentation.slice(
+    preflightStart,
+    metadataStart,
+  );
+  const capabilityRequests = [
+    /GET .*\/branches\/main/,
+    /POST .*\/actions\/workflows\/mobile-release\.yml\/dispatches/,
+    /GET .*\/actions\/runs\/<run_id>/,
+    /GET .*\/actions\/runs\/<run_id>\/jobs/,
+    /GET .*\/check-runs\/<check_run_id>\/annotations/,
+    /GET .*\/actions\/jobs\/<job_id>\/logs/,
+  ];
+  for (const request of capabilityRequests) {
+    assert.match(
+      preflight,
+      request,
+      `the hosted probe preflight must cover ${request}`,
+    );
+  }
+
+  const refCreation = preflight.indexOf("create/push-ref");
+  assert.ok(refCreation >= 0, "the preflight must identify temporary ref creation");
+  for (const request of capabilityRequests) {
+    const requestMatch = preflight.match(request);
+    assert.ok(requestMatch, `missing capability request ${request}`);
+    assert.ok(
+      requestMatch.index < refCreation,
+      `capability request ${request} must happen before temporary ref creation`,
+    );
+  }
+
+  assert.match(
+    preflight,
+    /publish=false/,
+    "the capability dispatch must use the non-publishing path",
+  );
+  assert.match(
+    preflight,
+    /node_range_override=not-a-valid-node-range/,
+    "the capability dispatch must use the known fail-early Node fixture",
+  );
+  assert.match(
+    preflight,
+    /fails before the credential preflight, native runners, browser release work, or\npublish job can start/,
+    "the fail-early fixture must prevent release work from starting",
+  );
+  assert.match(
+    preflight,
+    /dispatch start time, the authenticated connection actor, the baseline commit\nSHA/,
+    "the procedure must record deterministic dispatch-correlation facts",
+  );
+  assert.match(
+    preflight,
+    /`workflow_dispatch` event,\nbaseline ref and SHA, actor, and `created_at` at or after the recorded start/,
+    "run discovery must match the dispatch event, ref, actor, SHA, and time",
+  );
+  assert.match(
+    preflight,
+    /Reject zero matches and reject multiple matches; never guess/,
+    "ambiguous or missing run matches must fail closed",
+  );
+  assert.match(
+    preflight,
+    /following redirects/,
+    "the raw-log capability check must follow the API redirect",
+  );
+  assert.match(
+    preflight,
+    /final response status/,
+    "the raw-log capability check must classify the final response",
+  );
+  assert.match(
+    preflight,
+    /raw job-log download: unavailable \(Actions log scope\)/,
+    "missing raw-log scope must be classified without treating the probe as failed",
+  );
+  assert.match(
+    preflight,
+    /annotation-only evidence/,
+    "the probe must select annotation-only evidence when logs are unavailable",
+  );
+  assert.match(
+    preflight,
+    /owner-provided,\s+log-capable\s+path/,
+    "the procedure must identify the owner-provided path for summary-byte evidence",
+  );
+  assert.match(
+    preflight,
+    /trap cleanup_ref EXIT INT TERM/,
+    "temporary ref cleanup must cover normal completion and interruptions",
+  );
+  assert.match(
+    preflight,
+    /delete refs\/heads\/<temporary-ref>/,
+    "the cleanup guard must delete a created temporary ref",
+  );
+  assert.match(
+    preflight,
+    /returns 404/,
+    "the cleanup guard must verify that the temporary ref is gone",
+  );
+  assert.match(
+    preflight,
+    /cleanup failure is itself evidence/,
+    "cleanup failures must remain visible instead of hiding the setup error",
+  );
+  assert.doesNotMatch(
+    preflight,
+    /(?:echo|printf)[^\n]*(?:TOKEN|token)/,
+    "the preflight must not print credentials",
+  );
 });
 
 function documentedCallerJob() {
