@@ -33,6 +33,13 @@ import {
   writeHandoffPreflight,
 } from "./validate-preview-startup.mjs";
 
+function hasControlCharacters(value) {
+  return Array.from(value).some((character) => {
+    const codePoint = character.codePointAt(0);
+    return codePoint !== undefined && (codePoint <= 0x1f || codePoint === 0x7f);
+  });
+}
+
 const previewEnvironment = {
   PREVIEW_PUBLIC_URL: "https://preview.example.test/expo",
 };
@@ -172,7 +179,7 @@ test("keeps the missing library when a DevTools wrapper precedes the loader line
         error.message,
         /Expo preview startup error: .*libgtk-3\.so\.0/,
       );
-      assert.doesNotMatch(error.message, /[\u0000-\u001f\u007f]/);
+      assert.equal(hasControlCharacters(error.message), false);
       assert.ok(
         error.message.length <= 512,
         "startup diagnostic exceeded its bounded length",
@@ -200,7 +207,7 @@ test("validates captured startup logs with a bounded, sanitized library diagnost
       diagnostic.length <= 512,
       "captured startup diagnostic exceeded its bounded length",
     );
-    assert.doesNotMatch(diagnostic, /[\u0000-\u001f\u007f]/);
+    assert.equal(hasControlCharacters(diagnostic), false);
     assert.doesNotMatch(diagnostic, /unrelated captured output/);
   } finally {
     rmSync(validation.directory, { recursive: true, force: true });
@@ -217,7 +224,7 @@ test("reports a DevTools failure without inventing a missing library", () => {
     (error) => {
       assert.match(error.message, /Expo preview startup error: .*DevTools/);
       assert.doesNotMatch(error.message, /missing runtime library/i);
-      assert.doesNotMatch(error.message, /[\u0000-\u001f\u007f]/);
+      assert.equal(hasControlCharacters(error.message), false);
       assert.ok(
         error.message.length <= 512,
         "startup diagnostic exceeded its bounded length",
