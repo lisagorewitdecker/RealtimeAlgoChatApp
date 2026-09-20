@@ -143,7 +143,7 @@ jobs:
               --write-out '%{http_code}'
           )"
 
-          if [[ ! "${http_status}" =~ ^2 ]]; then
+          if [[ ! "${http_status}" =~ ^2[0-9][0-9]$ ]]; then
             echo "::error::EthicalCheck request failed with HTTP status ${http_status}."
             exit 1
           fi
@@ -177,19 +177,30 @@ jobs:
           message = response.get("message")
           status = response.get("status")
           accepted_pattern = re.compile(
-              r"(accepted|initiated|queued|started|submitted|success)",
+              r"\b(?:accepted|initiated|queued|started|submitted|success(?:ful(?:ly)?)?)\b",
               re.IGNORECASE,
           )
+          negative_pattern = re.compile(
+              r"\b(?:not|no|un|fail(?:ed|ure)?|error|reject(?:ed|ion)?|den(?:y|ied)|invalid)\b",
+              re.IGNORECASE,
+          )
+
+          def confirms_acceptance(value):
+              return (
+                  isinstance(value, str)
+                  and accepted_pattern.search(value)
+                  and not negative_pattern.search(value)
+              )
 
           if success is True:
               raise SystemExit(0)
           if isinstance(code, int) and 200 <= code < 300:
               raise SystemExit(0)
-          if isinstance(message, str) and accepted_pattern.search(message):
+          if confirms_acceptance(message):
               raise SystemExit(0)
           if isinstance(status, int) and 200 <= status < 300:
               raise SystemExit(0)
-          if isinstance(status, str) and accepted_pattern.search(status):
+          if confirms_acceptance(status):
               raise SystemExit(0)
 
           raise SystemExit(

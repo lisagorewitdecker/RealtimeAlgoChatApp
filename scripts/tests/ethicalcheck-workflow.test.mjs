@@ -63,9 +63,13 @@ test("EthicalCheck workflow inlines the scan trigger instead of referencing the 
   assert.match(scanStep.run, /trap 'rm -f "\$response_path"' EXIT/);
   assert.match(scanStep.run, /--write-out '%\{http_code\}'/);
   assert.match(scanStep.run, /HTTP status \$\{http_status\}/);
+  assert.match(scanStep.run, /\^2\[0-9\]\[0-9\]\$/);
   assert.match(scanStep.run, /response\.get\("code"\)/);
   assert.match(scanStep.run, /isinstance\(code, int\) and 200 <= code < 300/);
   assert.match(scanStep.run, /isinstance\(status, int\) and 200 <= status < 300/);
+  assert.match(scanStep.run, /success\(\?:ful\(\?:ly\)\?\)\?\)/);
+  assert.match(scanStep.run, /negative_pattern = re\.compile/);
+  assert.match(scanStep.run, /and not negative_pattern\.search\(value\)/);
   assert.match(scanStep.run, /response did not confirm scan acceptance via success, code, message, or status fields/);
   assert.match(scanStep.run, /'https:\/\/pentest\.apisec\.ai\/api\/v1\/pentest'/);
   assert.doesNotMatch(workflowText, /apisec-inc\/ethicalcheck-action/);
