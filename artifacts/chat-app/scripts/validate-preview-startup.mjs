@@ -1205,9 +1205,6 @@ async function validateLivePreview(
 ) {
   const launcherOnly = process.env.PREVIEW_STARTUP_REAL_LAUNCHER === "1";
   const useStartupTestFixture = usesStartupTestFixture(process.env);
-  if (!launcherOnly && !useStartupTestFixture) {
-    getPublicPreviewManifestUrl(process.env);
-  }
   const port = await findFreePort();
   const output = [];
   const pnpmCommand = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
