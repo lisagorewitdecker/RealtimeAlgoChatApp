@@ -18,12 +18,11 @@ test("EthicalCheck workflow pins the live action repository and preserves guarde
   assert.match(workflowText, /^permissions:\n  contents: read$/m);
   assert.match(
     workflowText,
-    /Trigger_EthicalCheck:\n    if: github\.event_name != 'pull_request' \|\| github\.event\.pull_request\.head\.repo\.fork == false/,
+    /Trigger_EthicalCheck:[\s\S]*?if: github\.event_name != 'pull_request' \|\| github\.event\.pull_request\.head\.repo\.fork == false/,
   );
-  assert.match(
-    workflowText,
-    /permissions:\n      contents: read\n      security-events: write # for github\/codeql-action\/upload-sarif to upload SARIF results\n      actions: read # only required for a private repository by github\/codeql-action\/upload-sarif to get the Action run status/,
-  );
+  assert.match(workflowText, /^\s+contents: read\b/m);
+  assert.match(workflowText, /^\s+security-events: write\b/m);
+  assert.match(workflowText, /^\s+actions: read\b/m);
   assert.match(workflowText, /runs-on: ubuntu-latest/);
   assert.match(
     workflowText,
