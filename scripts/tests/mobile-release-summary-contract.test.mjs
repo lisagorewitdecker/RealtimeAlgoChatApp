@@ -3225,6 +3225,64 @@ test("Android preview evidence keeps its pull-request validation and privacy con
     "the job must not print Android record evidence into the summary",
   );
 
+  const hostedRenameJob = workflow.jobs["android-preview-rename-regression"];
+  assert.ok(
+    hostedRenameJob,
+    "the release workflow must define the hosted Android rename regression",
+  );
+  assert.equal(
+    hostedRenameJob.if,
+    "${{ github.event_name == 'pull_request' }}",
+    "the hosted Android rename regression must run on pull requests",
+  );
+  const hostedCheckout = hostedRenameJob.steps.find(
+    (step) => step.name === "Check out reviewed pull request",
+  );
+  assert.ok(hostedCheckout, "the hosted Android regression must check out the PR");
+  assert.equal(hostedCheckout.with?.["fetch-depth"], 0);
+  assert.equal(hostedCheckout.with?.["persist-credentials"], false);
+  const hostedValidation = hostedRenameJob.steps.find(
+    (step) => step.name === "Run renamed Android preview evidence regression",
+  );
+  assert.ok(hostedValidation, "the hosted Android regression must run its fixture");
+  assert.deepEqual(hostedValidation.env, {
+    ANDROID_PREVIEW_BASE_SHA:
+      "${{ github.event.pull_request.base.sha }}",
+    ANDROID_PREVIEW_HEAD_SHA:
+      "${{ github.event.pull_request.head.sha }}",
+    REVIEWED_REF: "${{ github.ref }}",
+  });
+  assert.match(
+    hostedValidation.run,
+    /git cat-file -e "\$\{ANDROID_PREVIEW_BASE_SHA\}\^\{commit\}"[\s\S]*git cat-file -e "\$\{ANDROID_PREVIEW_HEAD_SHA\}\^\{commit\}"/,
+    "the hosted regression must verify both pull-request commits are available",
+  );
+  assert.match(
+    hostedValidation.run,
+    /git diff[\s\S]*--name-only[\s\S]*--find-renames[\s\S]*"\$\{base_sha\}\.\.\.\$\{head_sha\}"[\s\S]*validation-record\.md[\s\S]*android-preview-preflight\.json/,
+    "the hosted regression must exercise Git rename detection over base and head",
+  );
+  assert.match(
+    hostedValidation.run,
+    /validate:android-preview-evidence --[\s\S]*"\$record_path" "\$preflight_path"/,
+    "the hosted regression must pass each destination record and matching sidecar to the checker",
+  );
+  assert.match(
+    hostedValidation.run,
+    /Changed records checked: \*\*\$\{#changed_records\[@\]\}\*\*/,
+    "the hosted regression must write the reviewer-visible summary",
+  );
+  assert.match(
+    hostedValidation.run,
+    /record_count=.*grep -Fc[\s\S]*link_count=.*grep -Fc[\s\S]*grep -Fxc/,
+    "the hosted regression must enforce one section, one link, and one checker input per destination",
+  );
+  assert.match(
+    hostedValidation.run,
+    /Hosted renamed Android preview evidence regression passed\./,
+    "the hosted regression must report a fixed success diagnostic",
+  );
+
   const blockedRecord = `# Android SDK 57 preview validation record
 
 **Result: BLOCKED — no physical Android handoff was available**

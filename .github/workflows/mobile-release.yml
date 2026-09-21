@@ -480,6 +480,216 @@ jobs:
 
           exit "$overall_status"
 
+  android-preview-rename-regression:
+    # This hosted fixture exercises the same checkout and Git diff boundary as
+    # the review job, but with two renamed record/sidecar pairs so a hosted
+    # runner catches shallow checkout and rename-detection regressions.
+    name: Hosted Android preview rename regression
+    if: ${{ github.event_name == 'pull_request' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out reviewed pull request
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Run renamed Android preview evidence regression
+        env:
+          ANDROID_PREVIEW_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          ANDROID_PREVIEW_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          REVIEWED_REF: ${{ github.ref }}
+        run: |
+          set -euo pipefail
+          source scripts/workflow-output-safety.sh
+
+          # Confirm the real pull-request checkout contains both sides of the
+          # comparison before using a separate synthetic history below.
+          git cat-file -e "${ANDROID_PREVIEW_BASE_SHA}^{commit}"
+          git cat-file -e "${ANDROID_PREVIEW_HEAD_SHA}^{commit}"
+          git diff --quiet "${ANDROID_PREVIEW_BASE_SHA}...${ANDROID_PREVIEW_HEAD_SHA}" -- || true
+
+          fixture_root="$RUNNER_TEMP/android-preview-rename-regression"
+          rm -rf -- "$fixture_root"
+          mkdir -p -- "$fixture_root/bin"
+          cd "$fixture_root"
+          git init --quiet
+          git config user.email "hosted-regression@example.invalid"
+          git config user.name "Hosted Android preview regression"
+
+          write_pair() {
+            local timestamp="$1"
+            local record_path="artifacts/chat-app/test-results/encrypted-room-recovery/android/${timestamp}/validation-record.md"
+            local preflight_path="artifacts/chat-app/test-results/encrypted-room-recovery/android/${timestamp}/android-preview-preflight.json"
+            mkdir -p -- "$(dirname "$record_path")"
+            cat > "$record_path" <<'EOF'
+          # Android SDK 57 preview validation record
+
+          **Result: BLOCKED — no physical Android handoff was available**
+
+          ## Metadata
+
+          | Field | Result |
+          | --- | --- |
+          | Device model | **BLOCKED** — no physical Android device was available |
+          | Android version | **BLOCKED** — no physical Android device was available |
+          | Expo Go version | **BLOCKED** — no Expo Go session was available |
+
+          ## Boundary results
+
+          | Boundary | Status | Evidence |
+          | --- | --- | --- |
+          | Public manifest reachability | PASS | public manifest HTTP 200 (128 bytes) |
+          | Local handoff probe (manifest and bundle) | NOT_RUN | Local manifest/bundle probe not run — no successful probe result was recorded |
+          | Expo Go launch on physical Android | **BLOCKED** | No physical phone was available. |
+          | Server-side native request evidence | **BLOCKED** | No native Android request was available. |
+          EOF
+            cat > "$preflight_path" <<'EOF'
+          {
+            "schema": "android-preview-handoff-preflight/v1",
+            "platform": "android",
+            "boundaries": {
+              "publicManifestReachability": {
+                "status": "PASS",
+                "evidence": "public manifest HTTP 200 (128 bytes)"
+              },
+              "localHandoffProbe": {
+                "status": "NOT_RUN",
+                "evidence": "Local manifest/bundle probe not run — no successful probe result was recorded"
+              },
+              "expoGoLaunch": {
+                "status": "NOT_ASSESSED",
+                "evidence": "Requires a physical Android phone running stock Expo Go."
+              },
+              "serverNativeRequestEvidence": {
+                "status": "NOT_ASSESSED",
+                "evidence": "Requires filtered Metro or API evidence from that physical Expo Go session."
+              }
+            }
+          }
+          EOF
+          }
+
+          printf 'hosted regression fixture\n' > README.md
+          write_pair 20260915T120000Z
+          write_pair 20260915T121000Z
+          git add --all
+          git commit --quiet -m "base Android preview evidence"
+          base_sha="$(git rev-parse HEAD)"
+
+          mkdir -p -- artifacts/chat-app/test-results/encrypted-room-recovery/android/20260920T120000Z
+          mkdir -p -- artifacts/chat-app/test-results/encrypted-room-recovery/android/20260920T121000Z
+          git mv \
+            artifacts/chat-app/test-results/encrypted-room-recovery/android/20260915T120000Z/validation-record.md \
+            artifacts/chat-app/test-results/encrypted-room-recovery/android/20260920T120000Z/validation-record.md
+          git mv \
+            artifacts/chat-app/test-results/encrypted-room-recovery/android/20260915T120000Z/android-preview-preflight.json \
+            artifacts/chat-app/test-results/encrypted-room-recovery/android/20260920T120000Z/android-preview-preflight.json
+          git mv \
+            artifacts/chat-app/test-results/encrypted-room-recovery/android/20260915T121000Z/validation-record.md \
+            artifacts/chat-app/test-results/encrypted-room-recovery/android/20260920T121000Z/validation-record.md
+          git mv \
+            artifacts/chat-app/test-results/encrypted-room-recovery/android/20260915T121000Z/android-preview-preflight.json \
+            artifacts/chat-app/test-results/encrypted-room-recovery/android/20260920T121000Z/android-preview-preflight.json
+          git commit --quiet -am "rename Android preview evidence"
+          head_sha="$(git rev-parse HEAD)"
+
+          checker_args_log="$fixture_root/checker-args.log"
+          checker_name="check-android-preview-evidence"
+          mkdir -p -- "$fixture_root/artifacts/chat-app/scripts"
+          mkdir -p -- "$fixture_root/scripts"
+          cp -R "$GITHUB_WORKSPACE/scripts/." "$fixture_root/scripts/"
+          cp -R "$GITHUB_WORKSPACE/artifacts/chat-app/scripts/." \
+            "$fixture_root/artifacts/chat-app/scripts/"
+          cp "$GITHUB_WORKSPACE/artifacts/chat-app/package.json" \
+            "$fixture_root/artifacts/chat-app/package.json"
+          cat > "$fixture_root/bin/pnpm" <<'EOF'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          [[ "${1:-}" == "run" && "${2:-}" == "validate:android-preview-evidence" && "${3:-}" == "--" ]]
+          shift 3
+          printf '%s\t%s\n' "${1:?missing record}" "${2:?missing preflight}" >> "$ANDROID_PREVIEW_ARGS_LOG"
+          exec bash "$ANDROID_PREVIEW_CHECKER" "$@"
+          EOF
+          chmod +x "$fixture_root/bin/pnpm"
+
+          diff_output="$(
+            git diff \
+              --name-only \
+              --find-renames \
+              --diff-filter=ACDMRT \
+              "${base_sha}...${head_sha}" \
+              -- \
+              "artifacts/chat-app/test-results/encrypted-room-recovery/android/**/validation-record.md" \
+              "artifacts/chat-app/test-results/encrypted-room-recovery/android/**/android-preview-preflight.json"
+          )"
+          changed_record_candidates=()
+          changed_preflight_paths=()
+          while IFS= read -r changed_path; do
+            [[ -n "$changed_path" ]] || continue
+            case "$changed_path" in
+              */validation-record.md)
+                changed_record_candidates+=("$changed_path")
+                ;;
+              */android-preview-preflight.json)
+                changed_record_candidates+=("${changed_path%/android-preview-preflight.json}/validation-record.md")
+                changed_preflight_paths+=("$changed_path")
+                ;;
+            esac
+          done <<< "$diff_output"
+          mapfile -t changed_records < <(
+            printf '%s\n' "${changed_record_candidates[@]}" | LC_ALL=C sort -u
+          )
+          [[ "${#changed_records[@]}" -eq 2 ]]
+          printf '%s\n' "${changed_records[@]}" | grep -Fxq \
+            "artifacts/chat-app/test-results/encrypted-room-recovery/android/20260920T120000Z/validation-record.md"
+          printf '%s\n' "${changed_records[@]}" | grep -Fxq \
+            "artifacts/chat-app/test-results/encrypted-room-recovery/android/20260920T121000Z/validation-record.md"
+
+          summary_header="## Hosted Android preview rename regression"
+          {
+            echo "$summary_header"
+            echo
+            echo "- Checked ref: \`$(sanitize_workflow_text "$REVIEWED_REF")\`"
+            echo "- Pull request base: \`$ANDROID_PREVIEW_BASE_SHA\`"
+            echo "- Pull request head: \`$ANDROID_PREVIEW_HEAD_SHA\`"
+            echo "- Changed records checked: **${#changed_records[@]}**"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          export PATH="$fixture_root/bin:$PATH"
+          export ANDROID_PREVIEW_ARGS_LOG="$checker_args_log"
+          export ANDROID_PREVIEW_CHECKER="$fixture_root/scripts/$checker_name.sh"
+          export GITHUB_SERVER_URL GITHUB_REPOSITORY
+          for record_path in "${changed_records[@]}"; do
+            preflight_path="${record_path%/validation-record.md}/android-preview-preflight.json"
+            printf '%s\n' "${changed_preflight_paths[@]}" | grep -Fxq "$preflight_path"
+            validation_output="$(
+              bash "$GITHUB_WORKSPACE/scripts/run-untrusted-checker.sh" \
+                pnpm run validate:android-preview-evidence -- \
+                "$record_path" "$preflight_path"
+            )"
+            grep -Fq -- "Android preview evidence validation passed:" <<< "$validation_output"
+            record_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/blob/${ANDROID_PREVIEW_HEAD_SHA}/${record_path}"
+            {
+              echo
+              echo "### [${record_path}](${record_url})"
+              echo "- Validation: **PASS**"
+              echo "- Record result: **BLOCKED (valid)**"
+            } >> "$GITHUB_STEP_SUMMARY"
+          done
+
+          for record_path in "${changed_records[@]}"; do
+            record_count="$(grep -Fc -- "### [${record_path}]" "$GITHUB_STEP_SUMMARY")"
+            link_count="$(grep -Fc -- "/${record_path})" "$GITHUB_STEP_SUMMARY")"
+            [[ "$record_count" -eq 1 ]]
+            [[ "$link_count" -eq 1 ]]
+            preflight_path="${record_path%/validation-record.md}/android-preview-preflight.json"
+            [[ "$(grep -Fxc -- "$record_path	$preflight_path" "$checker_args_log")" -eq 1 ]]
+          done
+
+          [[ "$(wc -l < "$checker_args_log")" -eq 2 ]]
+          echo "Hosted renamed Android preview evidence regression passed."
+
   ios-preview-evidence:
     # Keep this display name synchronized with the required check in the repository ruleset.
     name: iOS preview evidence
