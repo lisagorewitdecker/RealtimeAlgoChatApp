@@ -28,6 +28,22 @@ A still-running earlier bundle keeps logging and fetching assets while Metro ser
 requests seen before a session's bundle 200 prove nothing about that bundle. Count them separately and never let them turn a
 bundle-then-abnormal-close trace into a pass. (A completion review rejected the first version of the probe for exactly this.)
 
+## Replit simulator reloads can create a transient pre-bundle session
+
+The Replit iPhone simulator can open an Expo Go inspector connection, close it
+with code 1006 before requesting a bundle, then connect again a few seconds
+later and fetch the real iOS bundle. The first connection is reload setup, not
+the app session to classify.
+
+**Why:** repeated armed main-workspace runs finalized as INCONCLUSIVE on the
+first close even though the replacement session fetched an iOS bundle moments
+later.
+
+**How to apply:** a live classifier must keep listening through a pre-bundle
+close until the device budget expires or a replacement session arrives. A
+bundle followed by an abnormal close still decides the startup-crash verdict
+immediately.
+
 ## Verification limits in task environments
 
 Task environments have no simulator attached (public domains return a placeholder), so a probe can only be proven with
