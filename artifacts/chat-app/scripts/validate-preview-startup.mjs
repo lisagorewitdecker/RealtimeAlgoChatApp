@@ -193,7 +193,106 @@ function findUnrecognizedLoaderFailure(output) {
   );
 }
 
+function stripAnsiEscapeSequences(value) {
+  const escapeCodePoint = 0x1b;
+  const bellCodePoint = 0x07;
+  let cursor = 0;
+  const characters = [];
+
+  while (cursor < value.length) {
+    const currentCodePoint = value.charCodeAt(cursor);
+    if (currentCodePoint !== escapeCodePoint) {
+      characters.push(value[cursor]);
+      cursor += 1;
+      continue;
+    }
+
+    const nextCodePoint = value.charCodeAt(cursor + 1);
+    if (nextCodePoint === 0x5b) {
+      cursor += 2;
+      while (
+        cursor < value.length &&
+        value.charCodeAt(cursor) >= 0x30 &&
+        value.charCodeAt(cursor) <= 0x3f
+      ) {
+        cursor += 1;
+      }
+      while (
+        cursor < value.length &&
+        value.charCodeAt(cursor) >= 0x20 &&
+        value.charCodeAt(cursor) <= 0x2f
+      ) {
+        cursor += 1;
+      }
+      if (
+        cursor < value.length &&
+        value.charCodeAt(cursor) >= 0x40 &&
+        value.charCodeAt(cursor) <= 0x7e
+      ) {
+        cursor += 1;
+      }
+      continue;
+    }
+
+    if (nextCodePoint === 0x5d) {
+      cursor += 2;
+      while (cursor < value.length) {
+        const codePoint = value.charCodeAt(cursor);
+        if (codePoint === bellCodePoint) {
+          cursor += 1;
+          break;
+        }
+        if (codePoint === 0x9c) {
+          cursor += 1;
+          break;
+        }
+        if (
+          codePoint === escapeCodePoint &&
+          value.charCodeAt(cursor + 1) === 0x5c
+        ) {
+          cursor += 2;
+          break;
+        }
+        if (
+          codePoint === escapeCodePoint &&
+          value.charCodeAt(cursor + 1) === 0x9c
+        ) {
+          cursor += 2;
+          break;
+        }
+        cursor += 1;
+      }
+      continue;
+    }
+
+    cursor += 1;
+    while (cursor < value.length) {
+      const codePoint = value.charCodeAt(cursor);
+      cursor += 1;
+      if (codePoint >= 0x30 && codePoint <= 0x7e) {
+        break;
+      }
+    }
+  }
+
+  return characters.join("");
+}
+
 function sanitizeStartupDiagnostic(value, maxLength) {
+  const withoutAnsiSequences = stripAnsiEscapeSequences(value);
+  const characters = [];
+  for (let index = 0; index < withoutAnsiSequences.length; index += 1) {
+    const character = withoutAnsiSequences[index];
+    const codeUnit = withoutAnsiSequences.charCodeAt(index);
+    characters.push(
+      codeUnit <= 0x1f || (codeUnit >= 0x7f && codeUnit <= 0x9f)
+        ? " "
+        : character,
+    );
+  }
+  const withoutControlChars = characters.join("");
+
+  return withoutControlChars
   return value
     .replace(ANSI_PATTERN, "")
     .split("")
@@ -205,6 +304,17 @@ function sanitizeStartupDiagnostic(value, maxLength) {
     .replace(/\s+/g, " ")
     .trim()
     .slice(0, maxLength);
+}
+
+function isWhitespaceCodeUnit(codeUnit) {
+  return (
+    codeUnit === 0x09 ||
+    codeUnit === 0x0a ||
+    codeUnit === 0x0b ||
+    codeUnit === 0x0c ||
+    codeUnit === 0x0d ||
+    codeUnit === 0x20
+  );
 }
 
 function redactStartupAuthorization(value) {
@@ -231,6 +341,19 @@ function redactKnownStartupFailureSecrets(value) {
 }
 
 function normalizeLoaderFailureForMatching(value) {
+  const withoutAnsiSequences = stripAnsiEscapeSequences(value);
+  const trailingBell = String.fromCharCode(0x07);
+  let nonWhitespaceEnd = withoutAnsiSequences.length;
+  while (
+    nonWhitespaceEnd > 0 &&
+    isWhitespaceCodeUnit(withoutAnsiSequences.charCodeAt(nonWhitespaceEnd - 1))
+  ) {
+    nonWhitespaceEnd -= 1;
+  }
+  const trimmedSuffix = withoutAnsiSequences.slice(0, nonWhitespaceEnd);
+  return trimmedSuffix.endsWith(trailingBell)
+    ? trimmedSuffix.slice(0, -1)
+    : trimmedSuffix;
   return value
     .replace(ANSI_PATTERN, "")
     .replace(TRAILING_BELL_PATTERN, "");
