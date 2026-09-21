@@ -132,3 +132,4 @@
 - [Tagged wrapper test doubles](tagged-wrapper-test-doubles.md) — a wrapper stand-in must render its own tagged host and suites query through within(); prove it with a typecheck-clean mutant under both Jest projects.
 - [Preview evidence byte pairing](preview-evidence-byte-pairing.md) — when a preview sidecar is present, Markdown evidence must preserve the producer’s exact redacted byte-bearing strings.
 - [Launch-evidence staleness](launch-evidence-staleness.md) — a probe result is current only if decided at/after the launcher’s start record; the preflight’s own dev server runs in pass-through mode.
+- [Summary order assertions](summary-order-assertions.md) — verify emitted heading sequences directly; comparing positions derived from already-sorted inputs cannot detect reordered output.

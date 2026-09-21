@@ -3858,7 +3858,7 @@ fi`,
     "the failed summary must not expose record evidence text",
   );
 
-  const multiRecord = runAndroidPreviewJob("multi-record", [
+  const mixedRecordDefinitions = [
     {
       timestamp: "20260915T120000Z",
       baseText: blockedRecord,
@@ -3883,7 +3883,16 @@ fi`,
       ),
       preflight: mismatchedPreflight,
     },
-  ]);
+  ];
+  const multiRecord = runAndroidPreviewJob(
+    "multi-record",
+    mixedRecordDefinitions,
+  );
+  const multiRecordReversed = runAndroidPreviewJob(
+    "multi-record-reversed",
+    mixedRecordDefinitions,
+    { diffOrder: "reverse" },
+  );
   assert.notEqual(
     multiRecord.result.status,
     0,
@@ -3901,6 +3910,19 @@ fi`,
       [multiRecord.recordPaths[2], multiRecord.preflightPaths[2]],
     ],
     "each present changed Android preflight sidecar must be passed to the checker even after a deleted record",
+  );
+  assert.equal(
+    multiRecordReversed.result.status,
+    multiRecord.result.status,
+    "reordering the pull request diff must preserve the overall blocking status",
+  );
+  assert.deepEqual(
+    multiRecordReversed.checkerArgs,
+    [
+      [multiRecordReversed.recordPaths[0], multiRecordReversed.preflightPaths[0]],
+      [multiRecordReversed.recordPaths[2], multiRecordReversed.preflightPaths[2]],
+    ],
+    "reordering the pull request diff must not change which present records are checked",
   );
   for (const recordPath of multiRecord.recordPaths) {
     const escapedPath = recordPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -3933,6 +3955,64 @@ fi`,
       `the multi-record summary must include the validation result for ${recordPath}`,
     );
   }
+  for (const [recordIndex, recordPath] of multiRecordReversed.recordPaths.entries()) {
+    const escapedPath = recordPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const expectedRevision =
+      recordIndex === 1
+        ? multiRecordReversed.baseSha
+        : multiRecordReversed.headSha;
+    const recordLinkPattern = new RegExp(
+      `\\[${escapedPath}\\]\\(https://github\\.example/example/chat-app/blob/${expectedRevision}/${escapedPath}\\)`,
+      "g",
+    );
+    const recordSectionPattern = new RegExp(
+      `### \\[${escapedPath}\\]\\(https://github\\.example/example/chat-app/blob/${expectedRevision}/${escapedPath}\\)[\\s\\S]*?(?=\\n### |$)`,
+      "g",
+    );
+    assert.equal(
+      multiRecordReversed.summary.match(recordLinkPattern)?.length ?? 0,
+      1,
+      `the reversed mixed summary must include exactly one stable link for ${recordPath}`,
+    );
+    assert.equal(
+      multiRecordReversed.summary.match(recordSectionPattern)?.length ?? 0,
+      1,
+      `the reversed mixed summary must include exactly one validation section for ${recordPath}`,
+    );
+  }
+  const reversedSummarySectionPaths = [
+    ...multiRecordReversed.summary.matchAll(/^### \[([^\]]+)\]\(/gm),
+  ].map(([, recordPath]) => recordPath);
+  assert.deepEqual(
+    reversedSummarySectionPaths,
+    [...multiRecordReversed.recordPaths].sort(),
+    "the reversed mixed Android summary must emit every section in deterministic path order",
+  );
+  assert.equal(
+    multiRecordReversed.summary.match(/- Validation: \*\*PASS\*\*/g)?.length ?? 0,
+    1,
+    "the reversed mixed summary must preserve the valid record result",
+  );
+  assert.equal(
+    multiRecordReversed.summary.match(/- Validation: \*\*FAIL\*\*/g)?.length ?? 0,
+    2,
+    "the reversed mixed summary must preserve the deleted and invalid failures",
+  );
+  assert.match(
+    multiRecordReversed.summary,
+    /- Record result: \*\*BLOCKED \(valid\)\*\*/,
+    "the reversed mixed summary must preserve the valid BLOCKED record result",
+  );
+  assert.match(
+    multiRecordReversed.summary,
+    /changed Android preview validation record is missing from the checked-out commit\./,
+    "the reversed mixed summary must preserve the deleted-record result",
+  );
+  assert.match(
+    multiRecordReversed.summary,
+    /preflight JSON public manifest boundary does not match the Markdown record\./,
+    "the reversed mixed summary must preserve the invalid-record result",
+  );
   assert.match(
     multiRecord.summary,
     new RegExp(
