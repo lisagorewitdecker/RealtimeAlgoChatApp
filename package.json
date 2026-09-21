@@ -50,3 +50,55 @@
     "yaml": "^2.9.0"
   }
 }
+{
+  "name": "workspace",
+  "version": "0.0.0",
+  "license": "MIT",
+  "engines": {
+    "node": ">=24.0.0 <25.0.0"
+  },
+  "scripts": {
+    "preinstall": "sh -c 'rm -f package-lock.json yarn.lock; case \"$npm_config_user_agent\" in pnpm/*) ;; *) echo \"Use pnpm instead\" >&2; exit 1 ;; esac'",
+    "build": "pnpm run typecheck && pnpm -r --if-present run build",
+    "typecheck:libs": "tsc --build",
+    "typecheck": "pnpm run typecheck:libs && pnpm -r --filter \"./artifacts/**\" --filter \"./scripts\" --if-present run typecheck && pnpm --filter @workspace/api-server run typecheck:e2e",
+    "prepare": "node lib/api-spec/scripts/install-repository-git-hooks.mjs",
+    "hooks:dispatcher:install": "node lib/api-spec/scripts/install-repository-git-hooks.mjs --install-dispatcher",
+    "hooks:dispatcher:status": "node lib/api-spec/scripts/install-repository-git-hooks.mjs --dispatcher-status",
+    "hooks:dispatcher:status:json": "node lib/api-spec/scripts/install-repository-git-hooks.mjs --dispatcher-status --json",
+    "hooks:dispatcher:uninstall": "node lib/api-spec/scripts/install-repository-git-hooks.mjs --uninstall-dispatcher",
+    "validate:package-manifests": "node scripts/validate-package-manifests.mjs",
+    "validate:staged-codegen-backups": "node lib/api-spec/scripts/check-staged-codegen-backups.mjs",
+    "validate:api-codegen": "pnpm --filter @workspace/api-spec run check-generated",
+    "sync:api-break-guidance": "node lib/api-spec/scripts/sync-contract-guidance.mjs",
+    "validate:api-break-guidance": "node lib/api-spec/scripts/sync-contract-guidance.mjs --check",
+    "validate:api-compatibility": "node lib/api-spec/scripts/check-contract-compatibility.mjs",
+    "validate:android-preview-evidence": "bash scripts/check-android-preview-evidence.sh",
+    "test:android-preview-evidence": "bash scripts/tests/check-android-preview-evidence.test.sh",
+    "validate:ios-preview-evidence": "bash scripts/check-ios-preview-evidence.sh",
+    "test:ios-preview-evidence": "bash scripts/tests/check-ios-preview-evidence.test.sh",
+    "save:ios-preview-evidence": "pnpm --filter @workspace/chat-app run save:ios-preview-evidence",
+    "save:android-preview-evidence": "pnpm --filter @workspace/chat-app run save:android-preview-evidence",
+    "validate:native-large-text-evidence": "bash scripts/check-native-large-text-evidence.sh",
+    "validate:github-workflows": "status=0; for workflow in .github/workflows/*.yml; do actionlint -config-file .github/actionlint.yaml -ignore 'runtime \"node20\" is deprecated in GitHub Actions' -shellcheck= -oneline \"$workflow\" || status=$?; done; exit \"$status\"",
+    "validate:mobile-release-workflow": "actionlint -shellcheck= -oneline .github/workflows/mobile-release.yml",
+    "test:native-large-text-evidence": "bash scripts/tests/check-native-large-text-evidence.test.sh",
+    "test:native-summary-check": "node --test scripts/tests/publish-native-evidence-summary-check.test.mjs",
+    "validate:mockup-clean": "pnpm --filter @workspace/mockup-sandbox run typecheck:clean",
+    "test:unit": "node --test scripts/tests/shell-cleanup-boundary-contract.test.mjs && node --test artifacts/api-server/tests/profileIdentity.test.ts && pnpm --filter @workspace/api-server run test:clerk-retry && node --test scripts/tests/verify-sentry-native-event.test.mjs && node --test scripts/tests/sentry-trigger-contract.test.mjs && node --test scripts/tests/api-codegen-workflow-contract.test.mjs && node --test scripts/tests/api-codegen-event-probe.test.mjs && node --test scripts/tests/ethicalcheck-workflow.test.mjs && pnpm run validate:github-workflows && pnpm run validate:mobile-release-workflow && node --test scripts/tests/mobile-release-caller-contract.test.mjs && node --test scripts/tests/idle-profile-browser-evidence-contract.test.mjs && node --test scripts/tests/native-evidence-summary-regression-workflow.test.mjs && node --test scripts/tests/preview-startup-summary-regression-workflow.test.mjs && pnpm --filter @workspace/api-spec run test:compatibility && pnpm --filter @workspace/scripts run test:android-preflight && pnpm --filter @workspace/scripts run test:ios-preflight && pnpm --filter @workspace/scripts run test:ios-runner && bash scripts/tests/check-ios-native-large-text-readiness.test.sh && bash scripts/tests/check-android-native-large-text-readiness.test.sh && bash scripts/tests/native-review-record-template.test.sh && bash scripts/tests/check-android-preview-evidence.test.sh && bash scripts/tests/check-ios-preview-evidence.test.sh && node --test scripts/tests/validate-junit-xml.test.mjs && pnpm run test:native-large-text-evidence && bash scripts/tests/check-native-large-text-evidence-concurrent-status.test.sh && bash scripts/tests/check-native-large-text-evidence-fresh-checkout.test.sh && bash scripts/tests/validate-branding-command.test.sh && bash scripts/tests/validate-package-manifests.test.sh && node --test scripts/tests/mobile-release-summary-contract.test.mjs && node --test scripts/tests/root-contract-checks-workflow.test.mjs && node --test scripts/tests/ios-runner-real-macos-workflow.test.mjs"
+  },
+  "private": true,
+  "devDependencies": {
+    "@kjanat/actionlint": "1.17.0",
+    "markdown-it": "14.3.0",
+    "prettier": "^3.9.6",
+    "typescript": "~5.9.3"
+  },
+  "dependencies": {
+    "@babel/generator": "7.29.7",
+    "@replit/object-storage": "^1.0.0",
+    "image-size": "link:vendor/image-size-secure",
+    "semver": "6.3.1",
+    "yaml": "^2.9.0"
+  }
+}
