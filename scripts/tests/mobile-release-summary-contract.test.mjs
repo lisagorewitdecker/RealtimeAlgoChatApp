@@ -5691,6 +5691,9 @@ const identifierNames = new Set(
     .map(([name]) => name),
 );
 identifierNames.add("NATIVE_SMOKE_BUILD_ID");
+const readinessWorkflowCommand = "::warning::native-readiness-control-input";
+const encodedReadinessWorkflowCommand =
+  readinessWorkflowCommand.replaceAll("::", "&#58;&#58;");
 
 function assertNoSentinels(text, description, allowedNames = new Set()) {
   for (const [name, sentinel] of Object.entries(sentinelEnvironment)) {
@@ -5888,6 +5891,9 @@ function getGateRuns() {
       bootedDevices:
         "iPhone 14 (00000000-0000-0000-0000-000000000000) (Booted)",
     }),
+    hostileWrongModel: runGate("hostile-wrong-model", 2, {
+      bootedDevices: `iPhone 14 ${readinessWorkflowCommand} (00000000-0000-0000-0000-000000000000) (Booted)`,
+    }),
     supportedModel: runGate("supported-model", 1, {
       bootedDevices:
         "iPhone SE (3rd generation) (00000000-0000-0000-0000-000000000000) (Booted)",
@@ -5910,6 +5916,10 @@ test("iOS gate keeps private values out of logs and the readiness report while r
     wrongModel: {
       status: "BLOCKED",
       diagnostic: "Expected iPhone SE (3rd generation); found: iPhone 14",
+    },
+    hostileWrongModel: {
+      status: "BLOCKED",
+      diagnostic: `Expected iPhone SE (3rd generation); found: iPhone 14 ${readinessWorkflowCommand}`,
     },
     supportedModel: { status: "READY", diagnostic: null },
   };
@@ -5934,8 +5944,12 @@ test("iOS gate keeps private values out of logs and the readiness report while r
       `${run.name}: readiness report should be ${status}\n${readiness}`,
     );
     if (diagnostic) {
+      const readinessDiagnostic = diagnostic.replaceAll(
+        "::",
+        "&#58;&#58;",
+      );
       assert.ok(
-        readiness.includes(diagnostic),
+        readiness.includes(readinessDiagnostic),
         `${run.name}: readiness report should list the fixed diagnostic\n${readiness}`,
       );
       assert.match(
@@ -5943,11 +5957,22 @@ test("iOS gate keeps private values out of logs and the readiness report while r
         new RegExp(
           String.raw`### Blocking prerequisites[\s\S]*\n` +
             String.raw`(` + "```" + String.raw`+)\n` +
-            diagnostic.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") +
+            readinessDiagnostic.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") +
             String.raw`\n\1`,
         ),
         `${run.name}: readiness diagnostic should be in a literal code block`,
       );
+      if (diagnostic.includes(readinessWorkflowCommand)) {
+        assert.ok(
+          readiness.includes(encodedReadinessWorkflowCommand),
+          `${run.name}: readiness report should encode workflow-command sentinels`,
+        );
+        assert.doesNotMatch(
+          readiness,
+          /::warning::/,
+          `${run.name}: readiness report must not contain a live workflow command`,
+        );
+      }
     }
     assertNoSentinels(readiness, `${run.name}: ios-readiness.md`);
 
@@ -6300,6 +6325,13 @@ test("workflow summaries show candidate build IDs without exposing private value
       diagnostic: "Expected iPhone SE (3rd generation); found: iPhone 14",
     },
     {
+      name: "blocked-readiness-sentinel",
+      run: runs.hostileWrongModel,
+      outcome: "failure",
+      status: "BLOCKED",
+      diagnostic: `Expected iPhone SE (3rd generation); found: iPhone 14 ${readinessWorkflowCommand}`,
+    },
+    {
       name: "ready",
       run: runs.supportedModel,
       outcome: "success",
@@ -6352,8 +6384,12 @@ test("workflow summaries show candidate build IDs without exposing private value
       `${scenario.name}: iOS summary should report ${scenario.status}\n${iosSummary}`,
     );
     if (scenario.diagnostic) {
+      const summaryDiagnostic = scenario.diagnostic.replaceAll(
+        "::",
+        "&#58;&#58;",
+      );
       assert.ok(
-        iosSummary.includes(scenario.diagnostic),
+        iosSummary.includes(summaryDiagnostic),
         `${scenario.name}: iOS summary should surface the fixed readiness diagnostic\n${iosSummary}`,
       );
       assert.match(
@@ -6361,11 +6397,22 @@ test("workflow summaries show candidate build IDs without exposing private value
         new RegExp(
           String.raw`### Readiness diagnostics[\s\S]*\n` +
             String.raw`(` + "```" + String.raw`+)\n` +
-            scenario.diagnostic.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") +
+            summaryDiagnostic.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") +
             String.raw`\n\1`,
         ),
         `${scenario.name}: readiness diagnostic should stay in a literal code block`,
       );
+      if (scenario.diagnostic.includes(readinessWorkflowCommand)) {
+        assert.ok(
+          iosSummary.includes(encodedReadinessWorkflowCommand),
+          `${scenario.name}: iOS summary should contain the encoded workflow-command sentinel`,
+        );
+        assert.doesNotMatch(
+          iosSummary,
+          /::warning::/,
+          `${scenario.name}: iOS summary must not contain a live workflow command`,
+        );
+      }
     }
     // Both the copied fragment and the fallback branch must have produced the
     // branding section, otherwise the no-sentinel checks above were vacuous.
