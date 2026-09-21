@@ -655,6 +655,109 @@ describe("sandbox AI tab in a browser", () => {
     }
   }, 15_000);
 
+  it("preserves the latest native WebView files through background reconnect", async () => {
+    const nativeContext = await browser.newContext({
+      viewport: { width: 375, height: 667 },
+      isMobile: true,
+      hasTouch: true,
+      userAgent:
+        "Mozilla/5.0 (Linux; Android 15; Pixel 9 Build/AP3A.241105.008; wv) AppleWebKit/537.36 Version/4.0 Chrome/131.0.0.0 Mobile Safari/537.36",
+    });
+    const page = await openSandbox({
+      context: nativeContext,
+      installClock: true,
+    });
+
+    try {
+      await acceptDisclosure(page);
+      await page.click('.tab[data-tab="html"]');
+      await page.fill("#htmlEditor", "<main>before background</main>");
+      await page.click('.tab[data-tab="css"]');
+      await page.fill("#cssEditor", "main { color: gray; }");
+      await page.click('.tab[data-tab="js"]');
+      await page.fill("#jsEditor", "document.body.dataset.state = 'before';");
+      await page.click('.tab[data-tab="ai"]');
+
+      const interrupted = await ask(page, "Explain the latest native files.");
+
+      // The editor can receive newer content before the native host is
+      // backgrounded. Retry must read these current controls, not the first
+      // request's snapshot.
+      await page.click('.tab[data-tab="html"]');
+      await page.fill("#htmlEditor", "<main>latest after resume</main>");
+      await page.click('.tab[data-tab="css"]');
+      await page.fill("#cssEditor", "main { color: tomato; }");
+      await page.click('.tab[data-tab="js"]');
+      await page.fill("#jsEditor", "document.body.dataset.state = 'latest';");
+      await page.click('.tab[data-tab="ai"]');
+
+      await page.evaluate(() => {
+        const browserGlobal = globalThis as unknown as {
+          document: { dispatchEvent: (event: unknown) => boolean };
+          Event: new (type: string) => unknown;
+        };
+        Object.defineProperty(browserGlobal.document, "visibilityState", {
+          configurable: true,
+          value: "hidden",
+        });
+        browserGlobal.document.dispatchEvent(
+          new browserGlobal.Event("visibilitychange"),
+        );
+        (globalThis as unknown as SandboxBrowserWindow).__socket.disconnect();
+      });
+      expect(await status(page)).toBe(
+        "Connection lost — the reply was interrupted. Retry when the room reconnects.",
+      );
+      expect(await page.locator("#aiRetryBtn").isVisible()).toBe(true);
+      expect(await page.locator("#aiRetryBtn").isDisabled()).toBe(true);
+
+      // Resuming the native host reconnects the socket first, but the retry
+      // remains gated until the room has joined again.
+      await page.evaluate(() => {
+        const browserGlobal = globalThis as unknown as {
+          document: { dispatchEvent: (event: unknown) => boolean };
+          Event: new (type: string) => unknown;
+        };
+        Object.defineProperty(browserGlobal.document, "visibilityState", {
+          configurable: true,
+          value: "visible",
+        });
+        browserGlobal.document.dispatchEvent(
+          new browserGlobal.Event("visibilitychange"),
+        );
+        (globalThis as unknown as SandboxBrowserWindow).__socket.connect();
+      });
+      expect(await page.locator("#aiRetryBtn").isDisabled()).toBe(true);
+      await fire(page, "room-joined", {});
+      expect(await page.locator("#aiRetryBtn").isDisabled()).toBe(false);
+      expect(await status(page)).toBe(
+        "Connection restored — you can retry your question.",
+      );
+
+      await page.click("#aiRetryBtn");
+      const retryRequest = (await emitsOf(page, "assistant-request")).at(-1)!
+        .payload as {
+        requestId: string;
+        prompt: string;
+        files: { html: string; css: string; js: string };
+        disclosureAcknowledged: boolean;
+      };
+      expect(retryRequest).toMatchObject({
+        prompt: "Explain the latest native files.",
+        files: {
+          html: "<main>latest after resume</main>",
+          css: "main { color: tomato; }",
+          js: "document.body.dataset.state = 'latest';",
+        },
+        disclosureAcknowledged: true,
+      });
+      expect(retryRequest.requestId).not.toBe(interrupted);
+      expect(await page.locator("#aiRetryBtn").isHidden()).toBe(true);
+    } finally {
+      await nativeContext.close();
+    }
+  }, 15_000);
+
   it("refuses to send empty prompts or files over the server limits", async () => {
     const page = await openSandbox();
     await acceptDisclosure(page);
