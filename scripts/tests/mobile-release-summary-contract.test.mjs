@@ -3983,6 +3983,78 @@ fi`,
     "a multi-record summary must not expose evidence text from either record",
   );
 
+  const allDeleted = runAndroidPreviewJob("all-deleted", [
+    {
+      timestamp: "20260915T120000Z",
+      baseText: blockedRecord,
+      text: blockedRecord,
+      preflight: blockedPreflight,
+      deleted: true,
+    },
+    {
+      timestamp: "20260915T121000Z",
+      baseText: blockedRecord,
+      text: blockedRecord,
+      preflight: blockedPreflight,
+      deleted: true,
+    },
+  ]);
+  assert.notEqual(
+    allDeleted.result.status,
+    0,
+    "an Android preview change containing only deleted records must remain blocking",
+  );
+  assert.equal(
+    allDeleted.checkerInvoked,
+    false,
+    "an all-deleted Android preview change must not invoke the record checker",
+  );
+  assert.deepEqual(
+    allDeleted.checkerArgs,
+    [],
+    "an all-deleted Android preview change must not produce checker arguments",
+  );
+  assert.match(
+    allDeleted.summary,
+    /- Changed records checked: \*\*2\*\*/,
+    "the all-deleted summary must report the exact number of deleted records",
+  );
+  for (const recordPath of allDeleted.recordPaths) {
+    const escapedPath = recordPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const recordLinkPattern = new RegExp(
+      `\\[${escapedPath}\\]\\(https://github\\.example/example/chat-app/blob/${allDeleted.baseSha}/${escapedPath}\\)`,
+      "g",
+    );
+    const recordSectionPattern = new RegExp(
+      `### \\[${escapedPath}\\]\\(https://github\\.example/example/chat-app/blob/${allDeleted.baseSha}/${escapedPath}\\)[\\s\\S]*?(?=\\n### |$)`,
+      "g",
+    );
+    assert.equal(
+      allDeleted.summary.match(recordLinkPattern)?.length ?? 0,
+      1,
+      `each deleted Android record must have one base-revision link: ${recordPath}`,
+    );
+    assert.equal(
+      allDeleted.summary.match(recordSectionPattern)?.length ?? 0,
+      1,
+      `each deleted Android record must have one validation section: ${recordPath}`,
+    );
+    assert.match(
+      allDeleted.summary,
+      new RegExp(
+        `### \\[${escapedPath}\\]\\(https://github\\.example/example/chat-app/blob/${allDeleted.baseSha}/${escapedPath}\\)[\\s\\S]*?- Validation: \\*\\*FAIL\\*\\*[\\s\\S]*?Missing-boundary reason[\\s\\S]*?changed Android preview validation record is missing from the checked-out commit\\.`,
+      ),
+      `each deleted Android record must report the fixed missing-record reason: ${recordPath}`,
+    );
+  }
+  assert.equal(
+    allDeleted.summary.match(
+      /changed Android preview validation record is missing from the checked-out commit\./g,
+    )?.length ?? 0,
+    allDeleted.recordPaths.length,
+    "the all-deleted summary must report one fixed missing-record reason per deleted record",
+  );
+
   const changedSidecarOnlyPreflight = `${blockedPreflight}\n`;
   const mixedModeDefinitions = [
     {
