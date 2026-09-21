@@ -342,6 +342,18 @@ export function createLaunchEvidenceClassifier(options = {}) {
         );
       }
       if (!session.bundle) {
+        const windowStart = state.metroReadyAt ?? state.startedAt;
+        const deviceBudgetElapsed =
+          nowMs != null &&
+          windowStart != null &&
+          nowMs - windowStart >= deviceTimeoutMs;
+        // Expo Go can briefly connect and close its inspector while reloading,
+        // then establish the real app session and request the bundle a few
+        // seconds later. Keep the live probe open for that replacement session
+        // instead of finalizing on the transient pre-bundle connection.
+        if (!final && !deviceBudgetElapsed) {
+          return { decided: false, observation: observation() };
+        }
         return decided(
           inconclusive,
           `The Expo Go iOS inspector connection closed abnormally (code ${code}) before any iOS Expo Go bundle HTTP 200 was logged.` +

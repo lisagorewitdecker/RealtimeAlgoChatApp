@@ -316,6 +316,29 @@ test("the latest Expo Go iOS session decides", () => {
   assert.equal(crashedAfterRunning.observation.expoGoIosConnections, 2);
 });
 
+test("a transient pre-bundle inspector close waits for the replacement session", () => {
+  const classifier = createLaunchEvidenceClassifier({
+    startedAt: 0,
+    deviceTimeoutMs: 10_000,
+    settleTimeoutMs: 1_000,
+  });
+  classifier.observe(READY, 100);
+  classifier.observe(CONNECT, 1_000);
+  classifier.observe(CLOSE_1006, 1_100);
+
+  assert.equal(classifier.evaluate(1_100).decided, false);
+
+  classifier.observe(CONNECT, 2_000);
+  classifier.observe(BUNDLE, 2_200);
+  classifier.observe(APP_LOG, 2_300);
+
+  const result = classifier.evaluate(3_200);
+  assert.equal(result.decided, true);
+  assert.equal(result.status, running);
+  assert.equal(result.observation.expoGoIosConnections, 2);
+  assert.equal(result.observation.iosBundleHttp200, 1);
+});
+
 test("only an iOS Expo Go bundle 200 counts as the bundle", () => {
   const result = classifyLaunchEvidence(
     log(
