@@ -46,6 +46,8 @@
  *      without reaching the simulated store submission boundary.
  *  15. Successful native downloads with malformed artifact URLs keep both
  *      platform statuses fixed while omitting unsafe report links.
+ *  16. A failed continue-on-error download remains blocked when its visible
+ *      step conclusion is successful, and the diagnostic explains why.
  *
  * The static rules catch code paths no scenario exercises; the behavioral runs
  * inject sentinel values for every secret-backed variable and prove the real
@@ -2279,6 +2281,11 @@ test("hosted native evidence regression exercises real artifact download continu
     "${{ steps.download-controlled-android.outcome }}",
   );
   assert.equal(
+    blockerStep?.env?.IOS_DOWNLOAD_CONCLUSION,
+    "${{ steps.download-controlled-ios.conclusion }}",
+    "the controlled fixture must model the successful visible conclusion separately from the failed outcome",
+  );
+  assert.equal(
     checkerStep?.["continue-on-error"],
     true,
     "the checker must publish its blocked summary before the assertion step",
@@ -2299,6 +2306,20 @@ test("hosted native evidence regression exercises real artifact download continu
   assert.match(
     blockerStep?.run ?? "",
     /Rerun the failed native job or make its artifact available/,
+  );
+  assert.match(
+    blockerStep?.run ?? "",
+    /continue-on-error failure[\s\S]*visible conclusion is success/,
+    "the controlled fixture must verify the outcome/conclusion distinction",
+  );
+  const checkerSource = readFileSync(
+    path.join(workspaceRoot, nativeEvidenceCheckerScript),
+    "utf8",
+  );
+  assert.match(
+    checkerSource,
+    /continue-on-error lets the job continue[\s\S]*underlying outcome, which was not success/,
+    "the controlled fixture must verify the checker explains why the visible success does not unblock promotion",
   );
 });
 

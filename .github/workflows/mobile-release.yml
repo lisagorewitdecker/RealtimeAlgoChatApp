@@ -1025,13 +1025,14 @@ jobs:
         env:
           CHECK_RESULT: ${{ steps.controlled-artifact-check.outcome }}
           IOS_DOWNLOAD_RESULT: ${{ steps.download-controlled-ios.outcome }}
+          IOS_DOWNLOAD_CONCLUSION: ${{ steps.download-controlled-ios.conclusion }}
           ANDROID_DOWNLOAD_RESULT: ${{ steps.download-controlled-android.outcome }}
           CONTROLLED_SUMMARY_PATH: ${{ runner.temp }}/native-evidence-summary-controlled.md
         shell: bash
         run: |
           set -euo pipefail
-          if [[ "$IOS_DOWNLOAD_RESULT" != "failure" ]]; then
-            echo "The controlled iOS artifact download unexpectedly succeeded." >&2
+          if [[ "$IOS_DOWNLOAD_RESULT" != "failure" || "$IOS_DOWNLOAD_CONCLUSION" != "success" ]]; then
+            echo "The controlled iOS artifact download did not model a continue-on-error failure: its outcome must be failure while its visible conclusion is success." >&2
             exit 1
           fi
           if [[ "$ANDROID_DOWNLOAD_RESULT" != "success" ]]; then
@@ -1077,6 +1078,8 @@ jobs:
 
           require_contains "$ios_section" "- Status: **FAIL**"
           require_contains "$ios_section" "- Artifact download: **FAIL**"
+          require_contains "$ios_section" "continue-on-error lets the job continue"
+          require_contains "$ios_section" "underlying outcome, which was not success"
           require_contains "$ios_section" "Rerun the iOS native large-text job"
           require_not_contains "$ios_section" "$RUNNER_TEMP/native-evidence-summary-downloads/android"
 

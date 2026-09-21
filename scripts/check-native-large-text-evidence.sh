@@ -236,7 +236,7 @@ record_download_status() {
   fi
 
   SUMMARY_DOWNLOAD_STATUS["$platform"]="FAIL"
-  issue "$platform" "The ${label} native evidence artifact download did not complete. The artifact may have expired; the downloaded ${label} evidence is unavailable; rerun the release gate after the artifact is available."
+  issue "$platform" "The ${label} native evidence artifact download did not complete. The download step may appear successful because continue-on-error lets the job continue; this check uses its underlying outcome, which was not success. The artifact may have expired; the downloaded ${label} evidence is unavailable; rerun the release gate after the artifact is available."
 }
 
 download_result_for_platform() {
