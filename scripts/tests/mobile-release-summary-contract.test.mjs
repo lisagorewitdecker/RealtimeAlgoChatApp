@@ -4868,6 +4868,9 @@ test("iOS preview evidence covers renamed records and blocks malformed changes",
     ] of recordDefinitions.entries()) {
       if (definitionDeletesRecord) {
         rmSync(baseRecordPaths[index]);
+        if (basePreflight !== undefined) {
+          rmSync(basePreflightPaths[index]);
+        }
       } else if (renameRecord) {
         mkdirSync(path.dirname(recordPaths[index]), { recursive: true });
         renameSync(baseRecordPaths[index], recordPaths[index]);
@@ -5340,6 +5343,79 @@ PRIVATE_IOS_EVIDENCE_MARKER
       `https://github\\.example/example/chat-app/blob/${deleted.headSha}/${deleted.recordPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`,
     ),
     "a deleted iOS record must not link to the missing pull request head path",
+  );
+
+  const deletedAndPresentIos = runIosPreviewJob("deleted-and-present", {
+    recordText: [
+      {
+        baseTimestamp: "20260915T120000Z",
+        timestamp: "20260915T120000Z",
+        baseText: blockedRecord,
+        text: blockedRecord,
+        basePreflight: iosBlockedPreflight,
+        preflight: iosBlockedPreflight,
+        deleteRecord: true,
+      },
+      {
+        baseTimestamp: "20260915T120500Z",
+        timestamp: "20260915T120500Z",
+        baseText: blockedRecord,
+        text: blockedRecord.replace(
+          "No physical phone was available.",
+          "PRIVATE_IOS_PRESENT_RECORD_EVIDENCE No physical phone was available.",
+        ),
+        basePreflight: iosBlockedPreflight,
+        preflight: iosBlockedPreflight,
+      },
+    ],
+  });
+  assert.notEqual(
+    deletedAndPresentIos.result.status,
+    0,
+    "a deleted iOS record must keep the release summary blocked",
+  );
+  assert.match(
+    deletedAndPresentIos.summary,
+    /- Changed records checked: \*\*2\*\*/,
+    "the deleted and present iOS summary must count both changed records",
+  );
+  const deletedIosPath = deletedAndPresentIos.recordPaths[0];
+  const presentIosPath = deletedAndPresentIos.recordPaths[1];
+  const deletedIosBaseLink = `https://github.example/example/chat-app/blob/${deletedAndPresentIos.baseSha}/${deletedIosPath}`;
+  const presentIosHeadLink = `https://github.example/example/chat-app/blob/${deletedAndPresentIos.headSha}/${presentIosPath}`;
+  const deletedIosSection = `### [${deletedIosPath}](${deletedIosBaseLink})`;
+  const presentIosSection = `### [${presentIosPath}](${presentIosHeadLink})`;
+  assert.equal(
+    deletedAndPresentIos.summary.split(deletedIosBaseLink).length - 1,
+    1,
+    "a deleted iOS record must have exactly one link to its base revision",
+  );
+  assert.equal(
+    deletedAndPresentIos.summary.split(presentIosHeadLink).length - 1,
+    1,
+    "a present iOS record must have exactly one link to the pull request head",
+  );
+  assert.equal(
+    deletedAndPresentIos.summary.split(deletedIosSection).length - 1,
+    1,
+    "a deleted record and its deleted sidecar must produce one iOS summary section",
+  );
+  assert.equal(
+    deletedAndPresentIos.summary.split(presentIosSection).length - 1,
+    1,
+    "a present iOS record must produce one summary section",
+  );
+  assert.doesNotMatch(
+    deletedAndPresentIos.summary,
+    new RegExp(
+      `https://github\\.example/example/chat-app/blob/${deletedAndPresentIos.headSha}/${deletedIosPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`,
+    ),
+    "a deleted iOS record must not use the pull request head link",
+  );
+  assert.doesNotMatch(
+    deletedAndPresentIos.summary,
+    /PRIVATE_IOS_PRESENT_RECORD_EVIDENCE/,
+    "the iOS summary must not expose present-record evidence markers",
   );
 
   const malformedIosPreflight =
