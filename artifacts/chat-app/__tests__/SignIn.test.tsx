@@ -279,6 +279,7 @@ describe("default sign in", () => {
     // Apple mark on Apple's black with white lettering.
     const appleButton = getByLabelText("Continue with Apple");
     expect(StyleSheet.flatten(appleButton.props.style).backgroundColor).toBe("#000000");
+    expect(StyleSheet.flatten(appleButton.props.style).borderWidth).toBe(1);
     const appleText = getByText("Continue with Apple");
     expect(StyleSheet.flatten(appleText.props.style).color).toBe("#FFFFFF");
     expect(StyleSheet.flatten(appleText.props.style).fontSize).toBeCloseTo(21);

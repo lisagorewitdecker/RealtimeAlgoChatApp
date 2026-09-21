@@ -92,6 +92,7 @@ describe("Continue with Apple", () => {
 
     const appleButton = getByLabelText("Continue with Apple");
     expect(StyleSheet.flatten(appleButton.props.style).backgroundColor).toBe("#000000");
+    expect(StyleSheet.flatten(appleButton.props.style).borderWidth).toBe(1);
     expect(StyleSheet.flatten(getByText("Continue with Apple").props.style).color).toBe("#FFFFFF");
     expect(getByLabelText("Continue with Google")).toBeTruthy();
     expect(getByLabelText("Continue with X")).toBeTruthy();
