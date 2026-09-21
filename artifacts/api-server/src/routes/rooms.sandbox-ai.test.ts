@@ -734,6 +734,29 @@ describe("sandbox AI tab in a browser", () => {
         "Connection restored — you can retry your question.",
       );
 
+      // Events from the interrupted request can arrive after the room has
+      // joined again. They must not consume the restored retry or write stale
+      // output into the native WebView.
+      await fire(page, "assistant-chunk", {
+        requestId: interrupted,
+        text: "stale chunk after resume",
+      });
+      await fire(page, "assistant-done", {
+        requestId: interrupted,
+        cancelled: false,
+      });
+      await fire(page, "assistant-error", {
+        requestId: interrupted,
+        code: "SERVICE_ERROR",
+        message: "Stale failure after resume.",
+      });
+      expect(await page.locator("#aiOutput").textContent()).toBe("");
+      expect(await status(page)).toBe(
+        "Connection restored — you can retry your question.",
+      );
+      expect(await page.locator("#aiRetryBtn").isVisible()).toBe(true);
+      expect(await page.locator("#aiRetryBtn").isDisabled()).toBe(false);
+
       await page.click("#aiRetryBtn");
       const retryRequest = (await emitsOf(page, "assistant-request")).at(-1)!
         .payload as {
@@ -752,6 +775,27 @@ describe("sandbox AI tab in a browser", () => {
         disclosureAcknowledged: true,
       });
       expect(retryRequest.requestId).not.toBe(interrupted);
+      expect(await page.locator("#aiRetryBtn").isHidden()).toBe(true);
+
+      // The same delayed events must remain ignored after the new retry has
+      // started, rather than replacing its busy state or output.
+      await fire(page, "assistant-chunk", {
+        requestId: interrupted,
+        text: "stale chunk during retry",
+      });
+      await fire(page, "assistant-done", {
+        requestId: interrupted,
+        cancelled: false,
+      });
+      await fire(page, "assistant-error", {
+        requestId: interrupted,
+        code: "SERVICE_ERROR",
+        message: "Stale failure during retry.",
+      });
+      expect(await page.locator("#aiOutput").textContent()).toBe("");
+      expect(await status(page)).toBe(
+        "Sending your files and question to the AI service…",
+      );
       expect(await page.locator("#aiRetryBtn").isHidden()).toBe(true);
     } finally {
       await nativeContext.close();
