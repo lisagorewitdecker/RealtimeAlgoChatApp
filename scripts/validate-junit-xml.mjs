@@ -22,19 +22,108 @@ const MAX_ELEMENT_DEPTH = 64;
 const NAME_START_PATTERN = /[A-Za-z_:]/;
 const NAME_PATTERN = /[-A-Za-z0-9._:]/;
 const WHITESPACE_PATTERN = /\s/;
+const DECIMAL_PATTERN = /^[0-9]+$/;
+const HEXADECIMAL_PATTERN = /^[0-9A-Fa-f]+$/;
+
+// A report carries no document type declaration, so no entity can be declared
+// for it. Only the five entities XML predefines may appear by name.
+const PREDEFINED_ENTITIES = new Set(["amp", "lt", "gt", "quot", "apos"]);
+
+// `<?xml version="1.0" encoding="UTF-8"?>` and the narrower forms the native
+// runners emit. Anything else using the reserved `xml` target is rejected.
+const XML_DECLARATION_PATTERN =
+  /^xml\s+version\s*=\s*("1\.[0-9]+"|'1\.[0-9]+')(\s+encoding\s*=\s*("[A-Za-z][-A-Za-z0-9._]*"|'[A-Za-z][-A-Za-z0-9._]*'))?(\s+standalone\s*=\s*("(?:yes|no)"|'(?:yes|no)'))?\s*$/;
+
+function isLegalXmlCodePoint(codePoint) {
+  return (
+    codePoint === 0x9 ||
+    codePoint === 0xa ||
+    codePoint === 0xd ||
+    (codePoint >= 0x20 && codePoint <= 0xd7ff) ||
+    (codePoint >= 0xe000 && codePoint <= 0xfffd) ||
+    (codePoint >= 0x10000 && codePoint <= 0x10ffff)
+  );
+}
+
+/**
+ * Consumes the reference beginning at `start` (an `&`) in `text` and returns
+ * the index just past its `;`, or -1 when the reference is not well-formed.
+ */
+function readReference(text, start) {
+  const semicolon = text.indexOf(";", start + 1);
+  if (semicolon === -1 || semicolon === start + 1) {
+    return -1;
+  }
+  const body = text.slice(start + 1, semicolon);
+
+  if (body[0] === "#") {
+    const hexadecimal = body[1] === "x";
+    const digits = hexadecimal ? body.slice(2) : body.slice(1);
+    const digitPattern = hexadecimal ? HEXADECIMAL_PATTERN : DECIMAL_PATTERN;
+    if (!digitPattern.test(digits)) {
+      return -1;
+    }
+    const codePoint = Number.parseInt(digits, hexadecimal ? 16 : 10);
+    if (!Number.isSafeInteger(codePoint) || !isLegalXmlCodePoint(codePoint)) {
+      return -1;
+    }
+    return semicolon + 1;
+  }
+
+  if (!NAME_START_PATTERN.test(body[0] ?? "")) {
+    return -1;
+  }
+  for (let index = 1; index < body.length; index += 1) {
+    if (!NAME_PATTERN.test(body[index])) {
+      return -1;
+    }
+  }
+  if (!PREDEFINED_ENTITIES.has(body)) {
+    return -1;
+  }
+  return semicolon + 1;
+}
+
+/** Reports whether every reference in an attribute value is well-formed. */
+function attributeValueIsWellFormed(value) {
+  if (value.includes("<")) {
+    return false;
+  }
+  let index = 0;
+  while (index < value.length) {
+    if (value[index] !== "&") {
+      index += 1;
+      continue;
+    }
+    const next = readReference(value, index);
+    if (next === -1) {
+      return false;
+    }
+    index = next;
+  }
+  return true;
+}
 
 /**
  * Scans `reportText` for XML well-formedness and for a JUnit testsuite
  * element.
  *
- * The scan checks document structure only: balanced and correctly nested
- * elements, a single root, quoted attribute values, and terminated comments,
- * CDATA sections, and processing instructions. Character-level legality inside
- * text content is not enforced, because captured device logs legitimately
- * carry control bytes that say nothing about whether the upload is complete.
+ * The scan enforces the well-formedness rules a truncated, hand-assembled, or
+ * hostile upload breaks: balanced and correctly nested elements, a single
+ * root, quoted attribute values with no raw `<`, references that resolve to a
+ * predefined entity or a legal character, terminated comments with no internal
+ * `--`, terminated CDATA sections, processing instructions that do not reuse
+ * the reserved `xml` target, an XML declaration only at the start of the
+ * document, and no `]]>` in ordinary text.
+ *
+ * Raw control characters in text and CDATA are deliberately tolerated. Real
+ * device logs carry terminal escape bytes, and their presence says nothing
+ * about whether the upload is complete; rejecting them would block a release
+ * on captured log formatting rather than on missing evidence.
  *
  * A document type declaration is rejected. The native runners never emit one,
- * so its presence means the file did not come from the expected producer.
+ * so its presence means the file did not come from the expected producer, and
+ * without one no entity beyond the predefined five can be declared.
  *
  * @param {string} reportText
  * @returns {typeof JUNIT_REPORT_VALID | typeof JUNIT_REPORT_NOT_WELL_FORMED | typeof JUNIT_REPORT_NO_TESTSUITE}
@@ -114,7 +203,7 @@ export function inspectJUnitReportText(reportText) {
       if (valueEnd === -1) {
         return null;
       }
-      if (text.slice(index + 1, valueEnd).includes("<")) {
+      if (!attributeValueIsWellFormed(text.slice(index + 1, valueEnd))) {
         return null;
       }
       index = valueEnd + 1;
@@ -126,7 +215,22 @@ export function inspectJUnitReportText(reportText) {
 
     if (character !== "<") {
       // Only whitespace may appear outside the root element.
-      if (openElements.length === 0 && !WHITESPACE_PATTERN.test(character)) {
+      if (openElements.length === 0) {
+        if (!WHITESPACE_PATTERN.test(character)) {
+          return JUNIT_REPORT_NOT_WELL_FORMED;
+        }
+        index += 1;
+        continue;
+      }
+      if (character === "&") {
+        const next = readReference(text, index);
+        if (next === -1) {
+          return JUNIT_REPORT_NOT_WELL_FORMED;
+        }
+        index = next;
+        continue;
+      }
+      if (character === "]" && text.startsWith("]]>", index)) {
         return JUNIT_REPORT_NOT_WELL_FORMED;
       }
       index += 1;
@@ -136,6 +240,10 @@ export function inspectJUnitReportText(reportText) {
     if (text.startsWith("<!--", index)) {
       const commentEnd = text.indexOf("-->", index + 4);
       if (commentEnd === -1) {
+        return JUNIT_REPORT_NOT_WELL_FORMED;
+      }
+      const commentBody = text.slice(index + 4, commentEnd);
+      if (commentBody.includes("--") || commentBody.endsWith("-")) {
         return JUNIT_REPORT_NOT_WELL_FORMED;
       }
       index = commentEnd + 3;
@@ -158,6 +266,32 @@ export function inspectJUnitReportText(reportText) {
       const instructionEnd = text.indexOf("?>", index + 2);
       if (instructionEnd === -1) {
         return JUNIT_REPORT_NOT_WELL_FORMED;
+      }
+      const instruction = text.slice(index + 2, instructionEnd);
+      const targetEnd = (() => {
+        if (!NAME_START_PATTERN.test(instruction[0] ?? "")) {
+          return -1;
+        }
+        let cursor = 1;
+        while (cursor < instruction.length && NAME_PATTERN.test(instruction[cursor])) {
+          cursor += 1;
+        }
+        return cursor;
+      })();
+      if (targetEnd === -1) {
+        return JUNIT_REPORT_NOT_WELL_FORMED;
+      }
+      const target = instruction.slice(0, targetEnd);
+      const remainder = instruction.slice(targetEnd);
+      if (remainder.length > 0 && !WHITESPACE_PATTERN.test(remainder[0])) {
+        return JUNIT_REPORT_NOT_WELL_FORMED;
+      }
+      if (target.toLowerCase() === "xml") {
+        // The reserved target is the XML declaration, which may appear only as
+        // the very first thing in the document.
+        if (index !== 0 || !XML_DECLARATION_PATTERN.test(instruction)) {
+          return JUNIT_REPORT_NOT_WELL_FORMED;
+        }
       }
       index = instructionEnd + 2;
       continue;

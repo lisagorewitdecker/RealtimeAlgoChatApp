@@ -1199,10 +1199,23 @@ truncated_sentry_maestro_marker='truncated-sentry-maestro-marker-private'
   printf '<testsuite tests="1" failures="1">\n'
   printf '  <failure message="%s">\n' "$truncated_sentry_maestro_marker"
 } > "$truncated_junit_root/android/20260909T120000Z/sentry-maestro-results.xml"
-if truncated_junit_output="$(bash "$CHECKER" "$truncated_junit_root" 2>&1)"; then
+truncated_junit_summary_path="$TEST_ROOT/truncated-junit-summary.md"
+if truncated_junit_output="$(
+  GITHUB_STEP_SUMMARY="$truncated_junit_summary_path" \
+    bash "$CHECKER" "$truncated_junit_root" 2>&1
+)"; then
   echo "truncated JUnit evidence case unexpectedly passed" >&2
   exit 1
 fi
+truncated_junit_summary="$(cat "$truncated_junit_summary_path")"
+assert_contains "$truncated_junit_summary" \
+  "The JUnit result at $truncated_junit_root/ios/20260909T120000Z/maestro-results.xml is not well-formed XML."
+assert_contains "$truncated_junit_summary" \
+  "The controlled Sentry probe JUnit result at $truncated_junit_root/android/20260909T120000Z/sentry-maestro-results.xml is not well-formed XML."
+assert_not_contains_private_fixture "$truncated_junit_summary" \
+  "$truncated_maestro_marker" "truncated JUnit step summary"
+assert_not_contains_private_fixture "$truncated_junit_summary" \
+  "$truncated_sentry_maestro_marker" "truncated JUnit step summary"
 assert_contains "$truncated_junit_output" \
   "The JUnit result at $truncated_junit_root/ios/20260909T120000Z/maestro-results.xml is not well-formed XML. Upload the complete Maestro JUnit output."
 assert_contains "$truncated_junit_output" \
@@ -1225,10 +1238,23 @@ printf 'Maestro aborted before writing a report. Raw log: <testsuite tests="1"> 
   > "$marker_text_junit_root/ios/20260909T120000Z/maestro-results.xml"
 printf '%s <testsuite name="sentry-probe"/>\n' "$marker_text_sentry_maestro_marker" \
   > "$marker_text_junit_root/android/20260909T120000Z/sentry-maestro-results.xml"
-if marker_text_junit_output="$(bash "$CHECKER" "$marker_text_junit_root" 2>&1)"; then
+marker_text_junit_summary_path="$TEST_ROOT/marker-text-junit-summary.md"
+if marker_text_junit_output="$(
+  GITHUB_STEP_SUMMARY="$marker_text_junit_summary_path" \
+    bash "$CHECKER" "$marker_text_junit_root" 2>&1
+)"; then
   echo "marker-only JUnit evidence case unexpectedly passed" >&2
   exit 1
 fi
+marker_text_junit_summary="$(cat "$marker_text_junit_summary_path")"
+assert_contains "$marker_text_junit_summary" \
+  "The JUnit result at $marker_text_junit_root/ios/20260909T120000Z/maestro-results.xml is not well-formed XML."
+assert_contains "$marker_text_junit_summary" \
+  "The controlled Sentry probe JUnit result at $marker_text_junit_root/android/20260909T120000Z/sentry-maestro-results.xml is not well-formed XML."
+assert_not_contains_private_fixture "$marker_text_junit_summary" \
+  "$marker_text_maestro_marker" "marker-only JUnit step summary"
+assert_not_contains_private_fixture "$marker_text_junit_summary" \
+  "$marker_text_sentry_maestro_marker" "marker-only JUnit step summary"
 assert_contains "$marker_text_junit_output" \
   "The JUnit result at $marker_text_junit_root/ios/20260909T120000Z/maestro-results.xml is not well-formed XML. Upload the complete Maestro JUnit output."
 assert_contains "$marker_text_junit_output" \
