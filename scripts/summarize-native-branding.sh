@@ -3,6 +3,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=scripts/workflow-output-safety.sh
 source "$SCRIPT_DIR/workflow-output-safety.sh"
 
 PLATFORM="${1:?Usage: summarize-native-branding.sh <ios|android>}"

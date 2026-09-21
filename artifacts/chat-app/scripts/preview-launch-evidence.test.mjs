@@ -24,6 +24,7 @@ import {
   mergeDebugNamespaces,
   parseProbeTimestamp,
   readDevServerStart,
+  stripAnsi,
 } from "./preview-launch-evidence.mjs";
 
 const SCRIPT = resolve(import.meta.dirname, "preview-launch-evidence.mjs");
@@ -65,6 +66,11 @@ const SENTINEL_PATTERN = /SENTINEL|sentinel-host|Logged in as/;
 function log(...lines) {
   return `${lines.join("\n")}\n`;
 }
+
+test("stripAnsi removes ANSI escape sequences from device log lines", () => {
+  assert.equal(stripAnsi("\u001b[31miOS  LOG  hello\u001b[0m"), "iOS  LOG  hello");
+  assert.equal(stripAnsi("plain text"), "plain text");
+});
 
 function assertRedacted(result) {
   const serialized = JSON.stringify(result);
@@ -716,7 +722,7 @@ test("a dev server that exits before any evidence is reported with its exit stat
 });
 
 test("--disarm removes the marker and --report without a result fails clearly", { timeout: 60_000 }, async () => {
-  await withStateDir(async (stateDir, launch) => {
+  await withStateDir(async (stateDir) => {
     await runScript(["--arm", "--state-dir", stateDir]);
     const marker = JSON.parse(await readFile(join(stateDir, PROBE_MARKER_FILENAME), "utf8"));
     assert.equal(marker.deviceTimeoutMs, DEFAULT_DEVICE_TIMEOUT_MS);
@@ -772,7 +778,7 @@ test("probe records with duplicate JSON fields are rejected before they are read
 });
 
 test("--log-file classifies captured workflow output and exits non-zero unless RUNNING", { timeout: 60_000 }, async () => {
-  await withStateDir(async (stateDir, launch) => {
+  await withStateDir(async (stateDir) => {
     const crashLog = join(stateDir, "crash.log");
     await writeFile(crashLog, log(SIGNED_IN, READY, CONNECT, BUNDLE, BUNDLED, CLOSE_1006));
     const crash = await runScript(["--log-file", crashLog]);

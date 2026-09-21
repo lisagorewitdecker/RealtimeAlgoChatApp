@@ -329,8 +329,54 @@ test("real-platform capture records macOS and Windows loader output safely", () 
         "Error: The code execution cannot proceed because " +
         "C:\\Users\\reviewer\\AppData\\Local\\Expo\\libgtk-3-0.dll " +
         "was not found. password=TOP_SECRET_VALUE\n" +
-        "Starting project at D:\\a\\RealtimeAlgoChatApp\\artifacts\\chat-app\n",
+        "Starting project at \\\\server\\share\\repo\\app --localhost --port 8081\n",
       libraryIdentifier: "libgtk-3-0.dll",
+    },
+    {
+      name: "Windows host flag",
+      fixture: "missing-runtime-library-windows",
+      output:
+        "Error: The code execution cannot proceed because " +
+        "C:\\Users\\reviewer\\AppData\\Local\\Expo\\libgtk-3-0.dll " +
+        "was not found. ******" +
+        "Starting project at \\\\server\\share\\repo\\app --host tunnel\n",
+      libraryIdentifier: "libgtk-3-0.dll",
+      diagnosticPattern: /Expo preview loader wording changed/,
+    },
+    {
+      name: "Windows drive startup args",
+      fixture: "missing-runtime-library-windows",
+      output:
+        "Error: The code execution cannot proceed because " +
+        "C:\\Users\\reviewer\\AppData\\Local\\Expo\\libgtk-3-0.dll " +
+        "was not found. ******" +
+        "Starting project at D:\\a\\RealtimeAlgoChatApp\\artifacts\\chat-app --host 0.0.0.0 --port 8081\n",
+      libraryIdentifier: "libgtk-3-0.dll",
+      diagnosticPattern: /Expo preview loader wording changed/,
+    },
+    {
+      name: "Windows embedded host path text",
+      fixture: "missing-runtime-library-windows",
+      output:
+        "Error: The code execution cannot proceed because " +
+        "C:\\Users\\reviewer\\AppData\\Local\\Expo\\libgtk-3-0.dll " +
+        "was not found. ******" +
+        "Starting project at \\\\server\\share\\repo --host docs\\app --localhost --port 8081\n",
+      libraryIdentifier: "libgtk-3-0.dll",
+      diagnosticPattern: /Expo preview loader wording changed/,
+      expectedRedactedProjectPath:
+        String.raw`Starting project at \\[redacted]\repo --host docs\app`,
+    },
+    {
+      name: "Windows UNC library path",
+      fixture: "missing-runtime-library-windows",
+      output:
+        "Error: The code execution cannot proceed because " +
+        "\\\\server\\share\\Expo\\libgtk-3-0.dll " +
+        "was not found. ******" +
+        "Starting project at \\\\server\\share\\repo\\app\n",
+      libraryIdentifier: "libgtk-3-0.dll",
+      diagnosticPattern: /Expo preview loader wording changed/,
     },
   ];
 
@@ -352,8 +398,26 @@ test("real-platform capture records macOS and Windows loader output safely", () 
       const recordedOutput = readFileSync(recordPath, "utf8");
       assert.doesNotMatch(recordedOutput, /\/Users\/reviewer|C:\\Users\\reviewer/);
       assert.doesNotMatch(recordedOutput, /D:\\a\\RealtimeAlgoChatApp/);
+      assert.doesNotMatch(recordedOutput, /\\\\server\\share\\Expo\\libgtk-3-0\.dll/);
+      assert.doesNotMatch(
+        recordedOutput,
+        /\\\\server\\share\\repo\\app/,
+      );
+      assert.doesNotMatch(recordedOutput, /--localhost/);
+      assert.doesNotMatch(recordedOutput, /--host tunnel/);
+      assert.doesNotMatch(recordedOutput, /--port 8081/);
+      assert.doesNotMatch(recordedOutput, /--host 0\.0\.0\.0/);
       assert.doesNotMatch(recordedOutput, /TOP_SECRET_VALUE/);
       assert.match(recordedOutput, new RegExp(fixtureCase.libraryIdentifier));
+      if (fixtureCase.expectedRedactedProjectPath) {
+        assert.match(
+          recordedOutput,
+          new RegExp(
+            fixtureCase.expectedRedactedProjectPath
+              .replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
+          ),
+        );
+      }
 
       const captured = runNodeScript([
         validatorPath,
@@ -363,12 +427,15 @@ test("real-platform capture records macOS and Windows loader output safely", () 
       assert.equal(captured.status, 1, fixtureCase.name);
       const liveDiagnostic = findDiagnostic(live.output);
       const capturedDiagnostic = findDiagnostic(captured.output);
+      const diagnosticPattern =
+        fixtureCase.diagnosticPattern ??
+        new RegExp(fixtureCase.libraryIdentifier);
       assert.ok(liveDiagnostic, fixtureCase.name);
       assert.ok(capturedDiagnostic, fixtureCase.name);
-      assert.match(liveDiagnostic, new RegExp(fixtureCase.libraryIdentifier));
+      assert.match(liveDiagnostic, diagnosticPattern);
       assert.match(
         capturedDiagnostic,
-        new RegExp(fixtureCase.libraryIdentifier),
+        diagnosticPattern,
         fixtureCase.name,
       );
       assert.match(
@@ -409,6 +476,45 @@ test("real launcher validation does not require a public preview URL", () => {
   }
 });
 
+test("startup test output override runs without preview URL configuration", () => {
+  const temporaryDirectory = mkdtempSync(
+    join(
+      process.env.RUNNER_TEMP ?? tmpdir(),
+      "chat-preview-startup-test-output-",
+    ),
+  );
+  const recordPath = join(temporaryDirectory, "startup.log");
+
+  try {
+    const result = runNodeScript(
+      [validatorPath, "--record-log", recordPath],
+      {
+        PREVIEW_STARTUP_TEST_OUTPUT:
+          'Error: The code execution cannot proceed because "C:\\Program Files\\Expo\\React Native DevTools\\libgtk-3-0.dll" was not found.\n',
+      },
+    );
+
+    assert.equal(result.status, 1, result.output);
+    assert.match(result.output, /Expo preview startup error:/);
+    assert.match(readFileSync(recordPath, "utf8"), /libgtk-3-0\.dll/);
+  } finally {
+    rmSync(temporaryDirectory, { recursive: true, force: true });
+  }
+});
+
+test(
+  "startup test output override skips preview URL configuration validation",
+  () => {
+    const result = runNodeScript([validatorPath, "--validate-configuration"], {
+      PREVIEW_STARTUP_TEST_OUTPUT:
+        'Error: The code execution cannot proceed because "C:\\Program Files\\Expo\\React Native DevTools\\libgtk-3-0.dll" was not found.\n',
+    });
+
+    assert.equal(result.status, 0, result.output);
+    assert.equal(result.output, "");
+  },
+);
+
 test(
   "Windows runner loader diagnosis keeps quoted spaced paths bounded",
   {
@@ -416,10 +522,7 @@ test(
   },
   () => {
     const temporaryDirectory = mkdtempSync(
-      join(
-        packageRoot,
-        "chat-preview-windows-runner-",
-      ),
+      join(process.env.RUNNER_TEMP ?? tmpdir(), "chat-preview-windows-runner-"),
     );
     const longPath =
       `C:\\Program Files\\Expo\\${"React Native DevTools cache\\".repeat(14)}` +
@@ -446,7 +549,7 @@ test(
     try {
       for (const [index, fixtureCase] of cases.entries()) {
         const recordPath = join(temporaryDirectory, `windows-${index}.log`);
-        const live = runNodeScript(
+        const realLauncherLive = runNodeScript(
           [validatorPath, "--record-log", recordPath],
           {
             PREVIEW_STARTUP_REAL_LAUNCHER: "1",
@@ -454,8 +557,17 @@ test(
             PREVIEW_STARTUP_TEST_OUTPUT: fixtureCase.output,
           },
         );
+        const fixtureLive = runNodeScript([validatorPath], {
+          PREVIEW_STARTUP_TEST_FIXTURE: "missing-runtime-library-windows",
+          PREVIEW_STARTUP_TEST_OUTPUT: fixtureCase.output,
+        });
 
-        assert.equal(live.status, 1, fixtureCase.name);
+        assert.ok(
+          existsSync(recordPath),
+          `${fixtureCase.name}; live validator output: ${JSON.stringify(realLauncherLive.output)}`,
+        );
+        assert.equal(realLauncherLive.status, 1, fixtureCase.name);
+        assert.equal(fixtureLive.status, 1, fixtureCase.name);
         const captured = runNodeScript([
           validatorPath,
           "--log-file",
@@ -463,8 +575,20 @@ test(
         ]);
         assert.equal(captured.status, 1, fixtureCase.name);
 
+        const fixtureDiagnostic = findDiagnostic(fixtureLive.output);
         const diagnostic = findDiagnostic(captured.output);
         assert.ok(diagnostic, fixtureCase.name);
+        assert.ok(
+          diagnostic,
+          `${fixtureCase.name}; captured validator output: ${JSON.stringify(captured.output)}`,
+        );
+        assert.ok(fixtureDiagnostic, fixtureCase.name);
+        assert.ok(
+          diagnostic,
+          `${fixtureCase.name}; captured validator output: ${JSON.stringify(captured.output)}`,
+        );
+        assert.ok(diagnostic, fixtureCase.name);
+        assert.equal(fixtureDiagnostic, diagnostic, fixtureCase.name);
         assert.match(diagnostic, fixtureCase.detail, fixtureCase.name);
         assert.match(
           diagnostic,

@@ -55,7 +55,7 @@ assert_not_contains() {
   local output="$1"
   local unexpected="$2"
   if "$GREP_BIN" -Fq -- "$unexpected" <<<"$output"; then
-    printf 'Expected output not to contain: %s\n%s\n' "$unexpected" >&2
+    printf 'Expected output not to contain: %s\n%s\n' "$unexpected" "$output" >&2
     exit 1
   fi
 }

@@ -36,11 +36,14 @@ cleanup_test_fixtures() {
     echo "Native evidence test cleanup escaped its fixture directory" >&2
     return 1
   fi
-  if ((SAVED_TEST_STATUS_GUARDED)) &&
-    ! cmp -s "$SAVED_TEST_STATUS_SNAPSHOT" "$SAVED_TEST_STATUS"; then
-    printf 'Native evidence test cleanup changed the saved API test status: %s no longer matches its pre-test snapshot (a concurrent API Playwright run rewrites this file too).\n' \
-      "$SAVED_TEST_STATUS" >&2
-    return 1
+  if ((SAVED_TEST_STATUS_GUARDED)); then
+    if [[ ! -f "$SAVED_TEST_STATUS" ]]; then
+      printf 'Skipping the saved API test status cleanup guard: %s disappeared during the test (optional gitignored Playwright output may be rewritten by other local runs).\n' \
+        "$SAVED_TEST_STATUS" >&2
+    elif ! cmp -s "$SAVED_TEST_STATUS_SNAPSHOT" "$SAVED_TEST_STATUS"; then
+      printf 'Skipping the saved API test status cleanup guard: %s changed during the test (optional gitignored Playwright output may be rewritten by other local runs).\n' \
+        "$SAVED_TEST_STATUS" >&2
+    fi
   fi
 
   rm -rf "$TEST_PARENT"
@@ -534,6 +537,63 @@ if ! bash "$CHECKER" --check-collection-size \
   echo "valid collection text case unexpectedly failed" >&2
   exit 1
 fi
+
+ignored_collection_root="$TEST_ROOT/ignored-collection-size"
+write_valid_run "$ignored_collection_root" ios
+mkdir -p "$ignored_collection_root/ios/20260909T120000Z/untracked"
+head -c 262145 /dev/zero | tr '\0' 'x' > \
+  "$ignored_collection_root/ios/20260909T120000Z/untracked/oversized.txt"
+if ignored_collection_output="$(
+  bash "$CHECKER" --check-collection-size \
+    "$ignored_collection_root/ios/20260909T120000Z" 2>&1
+)"; then
+  echo "oversized untracked collection file unexpectedly passed" >&2
+  exit 1
+fi
+assert_contains "$ignored_collection_output" \
+  "Native evidence collection contains an untrusted file path: untracked/oversized.txt."
+
+ignored_png_collection_root="$TEST_ROOT/ignored-png-collection-size"
+write_valid_run "$ignored_png_collection_root" ios
+mkdir -p "$ignored_png_collection_root/ios/20260909T120000Z/untracked"
+printf 'png sentinel\n' > \
+  "$ignored_png_collection_root/ios/20260909T120000Z/untracked/private.png"
+if ignored_png_collection_output="$(
+  bash "$CHECKER" --check-collection-size \
+    "$ignored_png_collection_root/ios/20260909T120000Z" 2>&1
+)"; then
+  echo "untrusted png collection file unexpectedly passed" >&2
+  exit 1
+fi
+assert_contains "$ignored_png_collection_output" \
+  "Native evidence collection contains an untrusted file path: untracked/private.png."
+
+deterministic_collection_root="$TEST_ROOT/deterministic-collection-size"
+write_valid_run "$deterministic_collection_root" ios
+mkdir -p "$deterministic_collection_root/ios/20260909T120000Z/untracked"
+printf 'second\n' > \
+  "$deterministic_collection_root/ios/20260909T120000Z/untracked/z-last.txt"
+printf 'first\n' > \
+  "$deterministic_collection_root/ios/20260909T120000Z/untracked/a-first.txt"
+if deterministic_collection_output="$(
+  bash "$CHECKER" --check-collection-size \
+    "$deterministic_collection_root/ios/20260909T120000Z" 2>&1
+)"; then
+  echo "multiple untrusted collection files unexpectedly passed" >&2
+  exit 1
+fi
+first_untrusted_line="$(
+  grep -nF 'Native evidence collection contains an untrusted file path: untracked/a-first.txt.' \
+    <<<"$deterministic_collection_output" | cut -d: -f1
+)"
+second_untrusted_line="$(
+  grep -nF 'Native evidence collection contains an untrusted file path: untracked/z-last.txt.' \
+    <<<"$deterministic_collection_output" | cut -d: -f1
+)"
+[[ -n "$first_untrusted_line" && -n "$second_untrusted_line" ]] ||
+  fail "Deterministic untrusted-file ordering case did not report both files."
+(( first_untrusted_line < second_untrusted_line )) ||
+  fail "Untrusted collection files were not reported in stable sorted order."
 
 valid_root="$TEST_ROOT/valid"
 write_valid_run "$valid_root" ios

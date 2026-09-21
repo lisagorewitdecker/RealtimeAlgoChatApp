@@ -1,5 +1,13 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
@@ -15,6 +23,99 @@ const workflowPath = path.join(
 );
 const workflow = YAML.parse(readFileSync(workflowPath, "utf8"));
 const workflowText = readFileSync(workflowPath, "utf8");
+const validatorPath = path.join(
+  workspaceRoot,
+  "artifacts/chat-app/scripts/validate-preview-startup.mjs",
+);
+
+function extractWorkflowHereDoc(variableName) {
+  const match = workflowText.match(
+    new RegExp(
+      `cat > "\\$${variableName}" <<'EOF'\\n([\\s\\S]*?)\\n\\s*EOF`,
+    ),
+  );
+  assert.ok(match, `workflow is missing the ${variableName} here-doc`);
+  const body = match[1];
+  const indents = body
+    .split("\n")
+    .filter((line) => line.length > 0)
+    .map((line) => line.match(/^ */)?.[0].length ?? 0);
+  const sharedIndent = indents.length > 0 ? Math.min(...indents) : 0;
+  return (
+    body
+      .split("\n")
+      .map((line) => line.slice(sharedIndent))
+      .join("\n") + "\n\n"
+  );
+}
+
+function runValidator(env) {
+  const temporaryDirectory = mkdtempSync(
+    path.join(os.tmpdir(), "preview-startup-summary-workflow-"),
+  );
+  const summaryPath = path.join(temporaryDirectory, "summary.md");
+  const result = spawnSync(process.execPath, [validatorPath], {
+    cwd: workspaceRoot,
+    env: { ...process.env, GITHUB_STEP_SUMMARY: summaryPath, ...env },
+    encoding: "utf8",
+  });
+
+  try {
+    const summary = existsSync(summaryPath)
+      ? readFileSync(summaryPath, "utf8")
+      : "";
+    return {
+      ...result,
+      summary,
+    };
+  } finally {
+    rmSync(temporaryDirectory, { recursive: true, force: true });
+  }
+}
+
+function runWorkflowVerificationStep() {
+  const temporaryDirectory = mkdtempSync(
+    path.join(os.tmpdir(), "preview-startup-summary-step-"),
+  );
+  const scriptPath = path.join(temporaryDirectory, "verify-hosted-summary.sh");
+  const githubStepSummaryPath = path.join(temporaryDirectory, "summary.md");
+  const verificationStep = workflow.jobs["verify-hosted-summary"].steps.find(
+    (step) =>
+      step.name === "Verify healthy and failing preview startup summaries",
+  );
+  assert.equal(
+    typeof verificationStep?.run,
+    "string",
+    "hosted preview summary workflow must retain its verification script",
+  );
+  writeFileSync(scriptPath, verificationStep.run);
+
+  const result = spawnSync(
+    "bash",
+    ["-euo", "pipefail", "-c", ". \"$1\"", "bash", scriptPath],
+    {
+      cwd: workspaceRoot,
+      env: {
+        ...process.env,
+        GITHUB_STEP_SUMMARY: githubStepSummaryPath,
+        REVIEWED_REF: "preview-startup-summary-regression-test-ref",
+      },
+      encoding: "utf8",
+    },
+  );
+
+  try {
+    const summary = existsSync(githubStepSummaryPath)
+      ? readFileSync(githubStepSummaryPath, "utf8")
+      : "";
+    return {
+      ...result,
+      summary,
+    };
+  } finally {
+    rmSync(temporaryDirectory, { recursive: true, force: true });
+  }
+}
 
 test("hosted preview startup summary regression checks the reviewed revision", () => {
   assert.deepEqual(Object.keys(workflow.on), [
@@ -74,7 +175,7 @@ test("hosted preview startup summary regression checks the reviewed revision", (
   );
   assert.match(
     verification,
-    /PREVIEW_STARTUP_TEST_FIXTURE=missing-runtime-library-long-path/,
+    /GITHUB_STEP_SUMMARY="\$failure_summary_path"\s+\\\s*\n\s+PREVIEW_STARTUP_TEST_FIXTURE=missing-runtime-library-long-path/,
   );
   assert.match(verification, /Expo preview startup output is healthy:/);
   assert.match(
@@ -216,4 +317,56 @@ test("hosted preview timing evidence covers every supported runner profile", () 
 test("hosted preview startup checks remain read-only", () => {
   assert.doesNotMatch(workflowText, /self-hosted/);
   assert.doesNotMatch(workflowText, /\b(publish|deploy|submit)\b/i);
+});
+
+test("hosted preview startup workflow summary matches validator output exactly", () => {
+  const result = runValidator({
+    PREVIEW_STARTUP_TEST_FIXTURE: "missing-runtime-library-long-path",
+  });
+  const lines = result.summary.split("\n");
+
+  assert.equal(result.status, 1, `${result.stdout}${result.stderr}`);
+  assert.equal(lines.length, 7, `${result.stdout}${result.stderr}`);
+  assert.equal(lines[0], "### Expo preview startup");
+  assert.equal(lines[1], "");
+  assert.equal(lines[2], "**Status:** FAIL");
+  assert.equal(lines[3], "");
+  assert.equal(lines[5], "");
+  assert.equal(lines[6], "");
+  assert.match(
+    lines[4],
+    /^\*\*Diagnosis:\*\* Expo preview startup error: Error: \/opt\/expo\/react-native-devtools: error while loading shared libraries: [^\r\n]*\(missing runtime library: [^\r\n]*libgtk-3\.so\.0\)[ \t]*$/,
+  );
+});
+
+test("hosted preview startup workflow invalid-setting summary matches validator output exactly", () => {
+  const result = runValidator({
+    PREVIEW_PUBLIC_URL: "https://[preview-setting-secret",
+    PREVIEW_PUBLIC_TIMEOUT_MS: "25",
+    PREVIEW_STARTUP_TIMEOUT_MS: "2000",
+    PREVIEW_STARTUP_TEST_FIXTURE: "handoff-server",
+    REPLIT_EXPO_DEV_DOMAIN: "fallback-preview.example.test",
+  });
+
+  assert.equal(result.status, 1, `${result.stdout}${result.stderr}`);
+  assert.equal(
+    result.summary,
+    extractWorkflowHereDoc("expected_setting_summary_path"),
+  );
+});
+
+test("hosted preview startup workflow step succeeds end-to-end", () => {
+  const result = runWorkflowVerificationStep();
+
+  assert.equal(result.status, 0, `${result.stdout}${result.stderr}`);
+  assert.match(result.summary, /## Reviewed preview startup revision/);
+  assert.match(result.summary, /## Preview startup summary regression/);
+  assert.match(
+    result.summary,
+    /Healthy captured startup: \*\*PASS\*\* \(success output retained; no failure section\)/,
+  );
+  assert.match(
+    result.summary,
+    /Malformed preview setting: \*\*PASS\*\* \(configuration diagnosis retained; private material excluded\)/,
+  );
 });

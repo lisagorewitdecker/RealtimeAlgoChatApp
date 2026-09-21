@@ -1354,6 +1354,129 @@ test("idle-profile registration check blocks release and reports its result", ()
   );
 });
 
+test("native hosted release jobs skip cleanly when release configuration is absent", () => {
+  const configJob = workflow.jobs["native-release-configuration"];
+  assert.ok(
+    configJob,
+    "release workflow must define a native release configuration job",
+  );
+  assert.equal(
+    configJob.environment.name,
+    "mobile-release",
+    "native release configuration must read from the protected release environment",
+  );
+  assert.equal(
+    configJob.outputs?.ios_release_configured,
+    "${{ steps.native-release-config.outputs.ios_release_configured }}",
+  );
+  assert.equal(
+    configJob.outputs?.android_release_configured,
+    "${{ steps.native-release-config.outputs.android_release_configured }}",
+  );
+
+  const configStep = configJob.steps.find(
+    (step) => step.name === "Determine native release secret configuration",
+  );
+  assert.ok(
+    configStep,
+    "native release configuration job must determine whether hosted release secrets are present",
+  );
+  assert.equal(configStep.id, "native-release-config");
+  assert.equal(configStep.env.EAS_TOKEN, "${{ secrets.EAS_TOKEN }}");
+  assert.equal(
+    configStep.env.GITHUB_EVENT_NAME,
+    "${{ github.event_name }}",
+    "native release configuration must distinguish optional manual dispatches from strict release events",
+  );
+  assert.equal(
+    configStep.env.NATIVE_SMOKE_IOS_APP_ID,
+    "${{ secrets.NATIVE_SMOKE_IOS_APP_ID }}",
+  );
+  assert.equal(
+    configStep.env.NATIVE_SMOKE_ANDROID_APP_ID,
+    "${{ secrets.NATIVE_SMOKE_ANDROID_APP_ID }}",
+  );
+  assert.equal(configStep.env.NATIVE_SMOKE_EMAIL, "${{ secrets.NATIVE_SMOKE_EMAIL }}");
+  assert.equal(
+    configStep.env.NATIVE_SMOKE_PASSWORD,
+    "${{ secrets.NATIVE_SMOKE_PASSWORD }}",
+  );
+  assert.equal(
+    configStep.env.SENTRY_AUTH_TOKEN,
+    "${{ secrets.SENTRY_AUTH_TOKEN }}",
+  );
+  assert.equal(
+    configStep.env.NATIVE_SMOKE_IOS_SENTRY_RELEASE,
+    "${{ secrets.NATIVE_SMOKE_IOS_SENTRY_RELEASE }}",
+  );
+  assert.equal(
+    configStep.env.NATIVE_SMOKE_IOS_SENTRY_DIST,
+    "${{ secrets.NATIVE_SMOKE_IOS_SENTRY_DIST }}",
+  );
+  assert.equal(
+    configStep.env.NATIVE_SMOKE_ANDROID_SENTRY_RELEASE,
+    "${{ secrets.NATIVE_SMOKE_ANDROID_SENTRY_RELEASE }}",
+  );
+  assert.equal(
+    configStep.env.NATIVE_SMOKE_ANDROID_SENTRY_DIST,
+    "${{ secrets.NATIVE_SMOKE_ANDROID_SENTRY_DIST }}",
+  );
+  assert.equal(
+    configStep.env.NATIVE_SMOKE_IOS_BUILD_ID,
+    "${{ env.NATIVE_SMOKE_IOS_BUILD_ID }}",
+  );
+  assert.equal(
+    configStep.env.NATIVE_SMOKE_ANDROID_BUILD_ID,
+    "${{ env.NATIVE_SMOKE_ANDROID_BUILD_ID }}",
+  );
+  assert.match(
+    configStep.run,
+    /echo "ios_release_configured=\$ios_release_configured" >> "\$GITHUB_OUTPUT"/,
+  );
+  assert.match(
+    configStep.run,
+    /echo "android_release_configured=\$android_release_configured" >> "\$GITHUB_OUTPUT"/,
+  );
+  assert.match(
+    configStep.run,
+    /if \[\[ "\$\{GITHUB_EVENT_NAME:-\}" != "workflow_dispatch" && \( "\$ios_release_configured" != "true" \|\| "\$android_release_configured" != "true" \) \]\]; then/,
+    "strict tag and reusable-call runs must fail when native release configuration is incomplete",
+  );
+
+  const androidPreflight = workflow.jobs["android-prerequisite-preflight"];
+  assert.equal(
+    androidPreflight.if,
+    "${{ github.event_name != 'pull_request' && needs.native-release-configuration.outputs.android_release_configured == 'true' }}",
+    "android runner preflight must skip unless Android release configuration is present",
+  );
+  assert.ok(
+    androidPreflight.needs.includes("native-release-configuration"),
+    "android runner preflight must depend on the shared native release configuration job",
+  );
+
+  const nativeIos = workflow.jobs["native-ios"];
+  assert.equal(
+    nativeIos.if,
+    "${{ github.event_name != 'pull_request' && needs.native-release-configuration.outputs.ios_release_configured == 'true' }}",
+    "native-ios must skip unless iOS release configuration is present",
+  );
+  assert.ok(
+    nativeIos.needs.includes("native-release-configuration"),
+    "native-ios must depend on the shared native release configuration job",
+  );
+
+  const nativeAndroid = workflow.jobs["native-android"];
+  assert.equal(
+    nativeAndroid.if,
+    "${{ github.event_name != 'pull_request' && needs.native-release-configuration.outputs.android_release_configured == 'true' }}",
+    "native-android must skip unless Android release configuration is present",
+  );
+  assert.ok(
+    nativeAndroid.needs.includes("native-release-configuration"),
+    "native-android must depend on the shared native release configuration job",
+  );
+});
+
 test("idle-profile summary reports fixed browser target outages without leaking URLs", () => {
   const idleJob = workflow.jobs["idle-profile-registration"];
   const chatPreflightStep = idleJob.steps.find(

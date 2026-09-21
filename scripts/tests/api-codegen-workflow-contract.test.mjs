@@ -3,8 +3,11 @@ import { execFileSync, spawnSync } from "node:child_process";
 import {
   appendFileSync,
   copyFileSync,
+  existsSync,
+  lstatSync,
   mkdtempSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
   rmSync,
   symlinkSync,
@@ -173,7 +176,7 @@ test("API codegen workflow checks out full history for generated-client validati
   );
   assert.equal(
     checkoutStep.with?.ref,
-    "${{ github.event.pull_request.head.sha || github.sha }}",
+    "${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}",
     "the API codegen workflow checkout must use the submitted pull request head so fork reports describe the revision being reviewed instead of a synthetic merge ref",
   );
   assert.equal(
@@ -297,11 +300,46 @@ function createGeneratedClientFixture() {
       copyFileSync(source, destination);
     }
 
-    symlinkSync(
-      path.join(workspaceRoot, "node_modules"),
-      path.join(fixtureRoot, "node_modules"),
-      "dir",
-    );
+    const mirrorNodeModules = (relativePath) => {
+      const source = path.join(workspaceRoot, relativePath, "node_modules");
+      if (!existsSync(source)) {
+        return;
+      }
+      const destination = path.join(fixtureRoot, relativePath, "node_modules");
+      mkdirSync(destination, { recursive: true });
+
+      const linkEntry = (sourceEntry, fixtureEntry) => {
+        const sourceStats = lstatSync(sourceEntry);
+        if (path.basename(sourceEntry).startsWith(".pnpm-task-run-state")) {
+          mkdirSync(fixtureEntry, { recursive: true });
+          return;
+        }
+        if (
+          path.basename(sourceEntry).startsWith("@") &&
+          sourceStats.isDirectory()
+        ) {
+          mkdirSync(fixtureEntry, { recursive: true });
+          for (const scopedEntry of readdirSync(sourceEntry)) {
+            linkEntry(
+              path.join(sourceEntry, scopedEntry),
+              path.join(fixtureEntry, scopedEntry),
+            );
+          }
+          return;
+        }
+        symlinkSync(
+          sourceEntry,
+          fixtureEntry,
+          sourceStats.isDirectory() ? "dir" : "file",
+        );
+      };
+
+      for (const entry of readdirSync(source)) {
+        linkEntry(path.join(source, entry), path.join(destination, entry));
+      }
+    };
+
+    mirrorNodeModules("");
     for (const packagePath of [
       "lib/api-client-react",
       "lib/api-spec",
@@ -309,11 +347,7 @@ function createGeneratedClientFixture() {
       "lib/db",
       "lib/integrations-anthropic-ai",
     ]) {
-      symlinkSync(
-        path.join(workspaceRoot, packagePath, "node_modules"),
-        path.join(fixtureRoot, packagePath, "node_modules"),
-        "dir",
-      );
+      mirrorNodeModules(packagePath);
     }
 
     return fixtureRoot;
@@ -533,7 +567,7 @@ test("generated-client drift evidence is published where reviewers need no log a
   );
   assert.equal(
     driftEvidenceStep.env?.API_CODEGEN_DRIFT_HEAD_SHA,
-    "${{ github.event.pull_request.head.sha || github.sha }}",
+    "${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}",
     "the published evidence must use the same fork-safe submitted revision as checkout, with a push fallback",
   );
 

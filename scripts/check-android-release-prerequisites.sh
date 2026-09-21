@@ -14,8 +14,9 @@ if [[ "$SCRIPT_DIR" == "$SCRIPT_PATH" ]]; then
   SCRIPT_DIR="."
 fi
 SCRIPT_DIR="$(cd -- "$SCRIPT_DIR" && pwd)"
+# shellcheck source=scripts/workflow-output-safety.sh
 source "$SCRIPT_DIR/workflow-output-safety.sh"
-# shellcheck source=android-runner-pins.sh
+# shellcheck source=scripts/android-runner-pins.sh
 source "$SCRIPT_DIR/android-runner-pins.sh"
 
 failures=()

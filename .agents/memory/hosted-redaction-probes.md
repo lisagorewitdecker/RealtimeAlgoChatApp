@@ -32,7 +32,6 @@ out of the log.
 **How to apply:** Keep the fixture run layout deterministic for the test
 harness, use a temporary fixture root, and make the release gate depend on the
 hosted regression result.
-
 For hosted tamper checks, capture the entire untrusted-checker wrapper stream
 before printing it, verify the wrapper's matching stop/resume markers, and scan
 both that log and the reviewer summary for workflow commands and private

@@ -36,6 +36,13 @@ import {
   writeHandoffPreflight,
 } from "./validate-preview-startup.mjs";
 
+function hasControlCharacters(value) {
+  return Array.from(value).some((character) => {
+    const codePoint = character.codePointAt(0);
+    return codePoint !== undefined && (codePoint <= 0x1f || codePoint === 0x7f);
+  });
+}
+
 const previewEnvironment = {
   PREVIEW_PUBLIC_URL: "https://preview.example.test/expo",
 };
@@ -49,6 +56,24 @@ const PREVIEW_TIMEOUT_PREFLIGHT =
 const LIVE_PREVIEW_MARKERS = [
   "scripts/validate-preview-startup.test.mjs",
 ];
+const ANSI_ESCAPE = String.fromCharCode(27);
+const ANSI_ESCAPE_PATTERN = new RegExp(
+  `${ANSI_ESCAPE}\\[[0-?]*[ -/]*[@-~]`,
+);
+const ANSI_CSI_FRAGMENT_PATTERN = /\[[0-9;?]+[ -/]*[@-~]/;
+
+function assertHasNoControlCharacters(value, message = "unexpected control characters") {
+  const hasControlCharacters = [...value].some((char) => {
+    const code = char.charCodeAt(0);
+    return (code <= 0x1f && code !== 0x09 && code !== 0x0a && code !== 0x0d) || code === 0x7f;
+  });
+  assert.equal(hasControlCharacters, false, message);
+}
+
+function assertHasNoAnsiSequences(value) {
+  assert.doesNotMatch(value, ANSI_ESCAPE_PATTERN);
+  assert.doesNotMatch(value, ANSI_CSI_FRAGMENT_PATTERN);
+}
 
 test("CI summaries identify a failed public-manifest handoff without raw details", () => {
   const summary = formatStartupFailureSummary(
@@ -223,7 +248,8 @@ test("keeps the missing library when a DevTools wrapper precedes the loader line
         error.message,
         /Expo preview startup error: .*libgtk-3\.so\.0/,
       );
-      assert.doesNotMatch(error.message, /[\u0000-\u001f\u007f]/);
+      assertHasNoControlCharacters(error.message);
+      assertHasNoAnsiSequences(error.message);
       assert.ok(
         error.message.length <= 512,
         "startup diagnostic exceeded its bounded length",
@@ -237,7 +263,6 @@ test("validates captured startup logs with a bounded, sanitized library diagnost
   const longLibraryPath =
     `/opt/${"nested-directory/".repeat(30)}libgtk-3.so.0`;
   const capturedOutput = [
-    "\u001b[31mReact Native DevTools launcher failed to start\u001b[0m",
     `\u001b[31mError while loading shared libraries: ${longLibraryPath}: cannot open shared object file\u0007\u001b[0m`,
     "unrelated captured output ".repeat(200),
   ].join("\n");
@@ -252,7 +277,9 @@ test("validates captured startup logs with a bounded, sanitized library diagnost
       diagnostic.length <= 512,
       "captured startup diagnostic exceeded its bounded length",
     );
-    assert.doesNotMatch(diagnostic, /[\u0000-\u001f\u007f]/);
+    assert.equal(hasControlCharacters(diagnostic), false);
+    assertHasNoControlCharacters(diagnostic);
+    assertHasNoAnsiSequences(diagnostic);
     assert.doesNotMatch(diagnostic, /unrelated captured output/);
   } finally {
     rmSync(validation.directory, { recursive: true, force: true });
@@ -269,7 +296,8 @@ test("reports a DevTools failure without inventing a missing library", () => {
     (error) => {
       assert.match(error.message, /Expo preview startup error: .*DevTools/);
       assert.doesNotMatch(error.message, /missing runtime library/i);
-      assert.doesNotMatch(error.message, /[\u0000-\u001f\u007f]/);
+      assertHasNoControlCharacters(error.message);
+      assertHasNoAnsiSequences(error.message);
       assert.ok(
         error.message.length <= 512,
         "startup diagnostic exceeded its bounded length",
@@ -330,6 +358,39 @@ function findLivePreviewWorkIndex(command) {
     liveValidatorIndex ?? Number.POSITIVE_INFINITY,
   );
 }
+test("keeps the primary startup failure when a later loader line is present", () => {
+  const output = [
+    "\u001b[31mReact Native DevTools launcher failed to start: primary failure detail\u001b[0m",
+    "\u001b[31mError while loading shared libraries: libgtk-3.so.0: cannot open shared object file\u001b[0m",
+  ].join("\n");
+
+  assert.throws(
+    () => validatePreviewOutput(output),
+    (error) => {
+      assert.match(error.message, /Expo preview startup error: .*primary failure detail/);
+      assert.doesNotMatch(error.message, /missing runtime library/i);
+      assert.doesNotMatch(error.message, /loader wording changed/i);
+      return true;
+    },
+  );
+});
+
+test("prefers the real startup failure over unrelated loader-like output", () => {
+  const output = [
+    "React Native DevTools launcher failed to start: preview bundle crashed",
+    "dyld[12345]: Library not loaded: '/opt/homebrew/lib/libgtk-3.dylib\" trailing unrelated loader text",
+  ].join("\n");
+
+  assert.throws(
+    () => validatePreviewOutput(output),
+    (error) => {
+      assert.match(error.message, /Expo preview startup error: .*preview bundle crashed/);
+      assert.doesNotMatch(error.message, /loader wording changed/i);
+      assert.doesNotMatch(error.message, /missing runtime library/i);
+      return true;
+    },
+  );
+});
 
 test(
   "workflow entry points reject malformed and non-positive preview timeouts before live work",

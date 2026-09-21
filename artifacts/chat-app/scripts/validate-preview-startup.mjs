@@ -56,6 +56,10 @@ const packageRequire = createRequire(
 );
 const EXPO_GO_LAUNCH_CRASH_FAILURE_PREFIX =
   "Expo Go iOS launch evidence is BUNDLE_ONLY_THEN_CLOSED";
+const ANSI_ESCAPE = String.fromCharCode(27);
+const BELL = String.fromCharCode(7);
+const ANSI_PATTERN = new RegExp(`${ANSI_ESCAPE}\\[[0-?]*[ -/]*[@-~]`, "g");
+const TRAILING_BELL_PATTERN = new RegExp(`${BELL}\\s*$`, "g");
 const HANDOFF_FAILURE_PHASES = Object.freeze([
   {
     label: "public manifest",
@@ -233,7 +237,7 @@ const STARTUP_TEST_FIXTURES = new Set([
 const MISSING_LIBRARY_PATH = String.raw`[A-Za-z0-9._+~ /\\:[\]-]`;
 const MISSING_LIBRARY_CAPTURE = String.raw`(?:(["'])([^"'\u0000-\u001f\u007f]+)\1|(${MISSING_LIBRARY_PATH}+?))`;
 const MISSING_LIBRARY_DYLD_CAPTURE = String.raw`(?:(["'])([^"'\u0000-\u001f\u007f]+)\1|(${MISSING_LIBRARY_PATH}+))`;
-const MISSING_LIBRARY_BASENAME = /(?:^|[\\/])[^/\\\s:]+\.(?:dylib|so(?:\.\d+)?|dll)$/i;
+const MISSING_LIBRARY_BASENAME = /(?:^|[\\/])[^/\\\s:]+\.(?:dylib|so(?:\.\d+)*|dll)$/i;
 const MISSING_LIBRARY_PATTERNS = [
   new RegExp(
     String.raw`error while loading shared libraries:\s*${MISSING_LIBRARY_CAPTURE}\s*:\s*cannot open shared object file(?:\s*:\s*no such file or directory)?\s*$`,
@@ -368,15 +372,120 @@ function findUnrecognizedLoaderFailure(output) {
   );
 }
 
+function stripAnsiEscapeSequences(value) {
+  const escapeCodePoint = 0x1b;
+  const bellCodePoint = 0x07;
+  let cursor = 0;
+  const characters = [];
+
+  while (cursor < value.length) {
+    const currentCodePoint = value.charCodeAt(cursor);
+    if (currentCodePoint !== escapeCodePoint) {
+      characters.push(value[cursor]);
+      cursor += 1;
+      continue;
+    }
+
+    const nextCodePoint = value.charCodeAt(cursor + 1);
+    if (nextCodePoint === 0x5b) {
+      cursor += 2;
+      while (
+        cursor < value.length &&
+        value.charCodeAt(cursor) >= 0x30 &&
+        value.charCodeAt(cursor) <= 0x3f
+      ) {
+        cursor += 1;
+      }
+      while (
+        cursor < value.length &&
+        value.charCodeAt(cursor) >= 0x20 &&
+        value.charCodeAt(cursor) <= 0x2f
+      ) {
+        cursor += 1;
+      }
+      if (
+        cursor < value.length &&
+        value.charCodeAt(cursor) >= 0x40 &&
+        value.charCodeAt(cursor) <= 0x7e
+      ) {
+        cursor += 1;
+      }
+      continue;
+    }
+
+    if (nextCodePoint === 0x5d) {
+      cursor += 2;
+      while (cursor < value.length) {
+        const codePoint = value.charCodeAt(cursor);
+        if (codePoint === bellCodePoint) {
+          cursor += 1;
+          break;
+        }
+        if (codePoint === 0x9c) {
+          cursor += 1;
+          break;
+        }
+        if (
+          codePoint === escapeCodePoint &&
+          value.charCodeAt(cursor + 1) === 0x5c
+        ) {
+          cursor += 2;
+          break;
+        }
+        if (
+          codePoint === escapeCodePoint &&
+          value.charCodeAt(cursor + 1) === 0x9c
+        ) {
+          cursor += 2;
+          break;
+        }
+        cursor += 1;
+      }
+      continue;
+    }
+
+    cursor += 1;
+    while (cursor < value.length) {
+      const codePoint = value.charCodeAt(cursor);
+      cursor += 1;
+      if (codePoint >= 0x30 && codePoint <= 0x7e) {
+        break;
+      }
+    }
+  }
+
+  return characters.join("");
+}
+
 function sanitizeStartupDiagnostic(value, maxLength) {
-  return value
-    // eslint-disable-next-line no-control-regex
-    .replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, "")
-    // eslint-disable-next-line no-control-regex
-    .replace(/[\u0000-\u001f\u007f]/g, " ")
+  const withoutAnsiSequences = stripAnsiEscapeSequences(value);
+  const characters = [];
+  for (let index = 0; index < withoutAnsiSequences.length; index += 1) {
+    const character = withoutAnsiSequences[index];
+    const codeUnit = withoutAnsiSequences.charCodeAt(index);
+    characters.push(
+      codeUnit <= 0x1f || (codeUnit >= 0x7f && codeUnit <= 0x9f)
+        ? " "
+        : character,
+    );
+  }
+  const withoutControlChars = characters.join("");
+
+  return withoutControlChars
     .replace(/\s+/g, " ")
     .trim()
     .slice(0, maxLength);
+}
+
+function isWhitespaceCodeUnit(codeUnit) {
+  return (
+    codeUnit === 0x09 ||
+    codeUnit === 0x0a ||
+    codeUnit === 0x0b ||
+    codeUnit === 0x0c ||
+    codeUnit === 0x0d ||
+    codeUnit === 0x20
+  );
 }
 
 function redactStartupAuthorization(value) {
@@ -403,11 +512,19 @@ function redactKnownStartupFailureSecrets(value) {
 }
 
 function normalizeLoaderFailureForMatching(value) {
-  return value
-    // eslint-disable-next-line no-control-regex
-    .replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, "")
-    // eslint-disable-next-line no-control-regex
-    .replace(/\u0007\s*$/g, "");
+  const withoutAnsiSequences = stripAnsiEscapeSequences(value);
+  const trailingBell = String.fromCharCode(0x07);
+  let nonWhitespaceEnd = withoutAnsiSequences.length;
+  while (
+    nonWhitespaceEnd > 0 &&
+    isWhitespaceCodeUnit(withoutAnsiSequences.charCodeAt(nonWhitespaceEnd - 1))
+  ) {
+    nonWhitespaceEnd -= 1;
+  }
+  const trimmedSuffix = withoutAnsiSequences.slice(0, nonWhitespaceEnd);
+  return trimmedSuffix.endsWith(trailingBell)
+    ? trimmedSuffix.slice(0, -1)
+    : trimmedSuffix;
 }
 
 function findMissingLibrary(output) {
@@ -448,17 +565,26 @@ function compactStartupLibraryPath(path) {
   return `${path.slice(0, preservedPrefixLength)}${ellipsis}${path.slice(separatorIndex)}`;
 }
 
+function isGenericDevToolsWrapperFailure(value) {
+  return /(?:react native )?devtools.{0,120}(?:launcher|loader|binary).{0,120}(?:failed to start|exited|terminated|error|failed|unable|cannot|could not|status)(?:\s+with\s+(?:code|status)\s+\d+)?\s*$/i.test(
+    value,
+  );
+}
+
 function formatStartupFailure(output) {
   const failure = findStartupFailure(output);
   const loaderFailure = findLoaderFailure(output);
   if (failure) {
-    const isLoaderFailure = Boolean(loaderFailure);
-    const safeFailure = isLoaderFailure
-      ? redactKnownStartupFailureSecrets(failure)
-      : failure;
     const missingLibrary = loaderFailure
       ? findMissingLibrary(loaderFailure)
       : null;
+    const isLoaderFailure =
+      loaderFailure === failure ||
+      (Boolean(missingLibrary) && isGenericDevToolsWrapperFailure(failure));
+    const usesLoaderDiagnosis = isLoaderFailure && Boolean(missingLibrary);
+    const safeFailure = isLoaderFailure
+      ? redactKnownStartupFailureSecrets(loaderFailure)
+      : failure;
     if (isLoaderFailure && !missingLibrary) {
       return `${STARTUP_DIAGNOSTIC_PREFIX}${LOADER_COMPATIBILITY_MAINTENANCE_MESSAGE}`;
     }
@@ -469,7 +595,7 @@ function formatStartupFailure(output) {
     );
     const redactedFailureDetail = redactStartupAuthorization(fullFailureDetail);
     const libraryDetail =
-      missingLibrary &&
+      usesLoaderDiagnosis &&
       (!fullFailureDetail.includes(missingLibrary) ||
         missingLibrary.length > MAX_STARTUP_LIBRARY_DETAIL_LENGTH)
         ? ` (missing runtime library: ${compactStartupLibraryPath(missingLibrary)})`
@@ -514,6 +640,48 @@ function sanitizeStartupSummaryDiagnostic(value) {
 }
 
 function sanitizeRecordedStartupOutput(value) {
+  const sanitizeWindowsPath = (path) => {
+    const libraryName = path.match(
+      /[^/\\\s]+?\.(?:dylib|so(?:\.\d+)*|dll)\b/i,
+    )?.[0];
+    const redactedPrefix = path.startsWith("\\\\")
+      ? "\\\\[redacted]"
+      : `${path.slice(0, 3)}[redacted]`;
+    if (!libraryName) return redactedPrefix;
+    const suffix = path.slice(path.indexOf(libraryName) + libraryName.length);
+    return `${redactedPrefix}\\${libraryName}${suffix}`;
+  };
+  const sanitizeWindowsProjectPath = (path) => {
+    const pathSegments = path.split("\\").filter(Boolean);
+    const preservedSegments = pathSegments.slice(-2).join("\\");
+    const redactedPrefix = path.startsWith("\\\\")
+      ? "\\\\[redacted]"
+      : `${path.slice(0, 3)}[redacted]`;
+    if (!preservedSegments) return redactedPrefix;
+    return `${redactedPrefix}\\${preservedSegments}`;
+  };
+  const stripTrailingStartupProjectFlags = (path) => {
+    let trimmedPath = path;
+    let removedFlag = true;
+    while (removedFlag) {
+      removedFlag = false;
+      if (/\s+--localhost$/.test(trimmedPath)) {
+        trimmedPath = trimmedPath.replace(/\s+--localhost$/, "");
+        removedFlag = true;
+        continue;
+      }
+      if (/\s+--host\s+[^\s\\]+$/.test(trimmedPath)) {
+        trimmedPath = trimmedPath.replace(/\s+--host\s+[^\s\\]+$/, "");
+        removedFlag = true;
+        continue;
+      }
+      if (/\s+--port\s+\d+$/.test(trimmedPath)) {
+        trimmedPath = trimmedPath.replace(/\s+--port\s+\d+$/, "");
+        removedFlag = true;
+      }
+    }
+    return trimmedPath;
+  };
   const sanitizedLines = value
     .split(/\r?\n/)
     .map((line) =>
@@ -521,22 +689,22 @@ function sanitizeRecordedStartupOutput(value) {
         .replace(/\/(?:Users|home)\/[^\r\n]+/g, (path) => {
           const prefix = path.startsWith("/Users/") ? "/Users/" : "/home/";
           const libraryName = path.match(
-            /[^/\\\s]+?\.(?:dylib|so(?:\.\d+)?|dll)\b/i,
+            /[^/\\\s]+?\.(?:dylib|so(?:\.\d+)*|dll)\b/i,
           )?.[0];
           if (!libraryName) return `${prefix}[redacted]`;
           const suffix = path.slice(path.indexOf(libraryName) + libraryName.length);
           return `${prefix}[redacted]/${libraryName}${suffix}`;
         })
         .replace(
-          /[A-Za-z]:\\(?:Users|home|a)\\[^\r\n]+/g,
-          (path) => {
-            const libraryName = path.match(
-              /[^/\\\s]+?\.(?:dylib|so(?:\.\d+)?|dll)\b/i,
-            )?.[0];
-            if (!libraryName) return `${path.slice(0, 3)}[redacted]`;
-            const suffix = path.slice(path.indexOf(libraryName) + libraryName.length);
-            return `${path.slice(0, 3)}[redacted]\\${libraryName}${suffix}`;
+          /Starting project at ((?:[A-Za-z]:\\|\\\\[^\\\r\n]+\\[^\\\r\n]+\\)[^\\"\r\n]+(?:\\[^\\"\r\n]+)*)/g,
+          (_, path) => {
+            const startupProjectPath = stripTrailingStartupProjectFlags(path);
+            return `Starting project at ${sanitizeWindowsProjectPath(startupProjectPath)}`;
           },
+        )
+        .replace(
+          /[A-Za-z]:\\(?:Users|home)\\[^"\r\n]+|[A-Za-z]:\\[^"\r\n]*?[^/\\\s]+\.(?:dylib|so(?:\.\d+)*|dll)\b[^"\r\n]*|\\\\[^\\\r\n]+\\[^\\\r\n]+\\[^"\r\n]*?[^/\\\s]+\.(?:dylib|so(?:\.\d+)*|dll)\b[^"\r\n]*/g,
+          sanitizeWindowsPath,
         )
         .slice(0, MAX_RECORDED_STARTUP_LINE_LENGTH),
     )
@@ -1111,7 +1279,20 @@ export function getPublicPreviewManifestUrl(environment = process.env) {
   return url;
 }
 
+function usesStartupTestFixture(
+  environment = process.env,
+  { includeOutputOverride = true } = {},
+) {
+  return (
+    STARTUP_TEST_FIXTURES.has(environment.PREVIEW_STARTUP_TEST_FIXTURE) ||
+    (includeOutputOverride && environment.PREVIEW_STARTUP_TEST_OUTPUT != null)
+  );
+}
+
 export function validatePreviewConfiguration(environment = process.env) {
+  if (usesStartupTestFixture(environment)) {
+    return;
+  }
   getPublicPreviewManifestUrl(environment);
 }
 
@@ -1531,6 +1712,7 @@ async function validateLivePreview(
         EXPO_GO_LAUNCH_RECOVERY_HINT,
     );
   }
+  const useStartupTestFixture = usesStartupTestFixture(process.env);
   const port = await findFreePort();
   const timing = {
     schema: PREVIEW_TIMING_SCHEMA,
@@ -1565,7 +1747,7 @@ async function validateLivePreview(
   const output = [];
   const pnpmCommand = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
   const startupCommand =
-    STARTUP_TEST_FIXTURES.has(process.env.PREVIEW_STARTUP_TEST_FIXTURE)
+    useStartupTestFixture
       ? {
           command: process.execPath,
           args: [
@@ -1614,19 +1796,32 @@ async function validateLivePreview(
   const stopChild = () => {
     if (stopRequested) return;
     stopRequested = true;
-    const processGroupId = child.pid;
+    const childPid = child.pid;
+    const processGroupId = process.platform === "win32" ? undefined : childPid;
+    const terminateWindowsChild = (signal) => {
+      if (!childPid) {
+        child.kill(signal);
+        return;
+      }
+      const processTreeKiller = spawn(
+        "taskkill.exe",
+        ["/PID", String(childPid), "/T", "/F"],
+        { stdio: "ignore", windowsHide: true },
+      );
+      processTreeKiller.once("error", () => {
+        if (child.exitCode === null) {
+          child.kill(signal);
+        }
+      });
+      processTreeKiller.unref();
+    };
     if (child.exitCode !== null) return;
     child.once("close", () => {
       clearTimeout(closeTimer);
       closeTimer = undefined;
     });
-    if (process.platform === "win32" && processGroupId) {
-      const processTreeKiller = spawn(
-        "taskkill.exe",
-        ["/PID", String(processGroupId), "/T", "/F"],
-        { stdio: "ignore", windowsHide: true },
-      );
-      processTreeKiller.unref();
+    if (process.platform === "win32") {
+      terminateWindowsChild("SIGTERM");
     } else if (!processGroupId) {
       child.kill("SIGTERM");
     } else {
@@ -1637,15 +1832,11 @@ async function validateLivePreview(
       }
     }
     closeTimer = setTimeout(() => {
-      if (!processGroupId) return;
       try {
         if (process.platform === "win32") {
-          const processTreeKiller = spawn(
-            "taskkill.exe",
-            ["/PID", String(processGroupId), "/T", "/F"],
-            { stdio: "ignore", windowsHide: true },
-          );
-          processTreeKiller.unref();
+          terminateWindowsChild("SIGKILL");
+        } else if (!processGroupId) {
+          child.kill("SIGKILL");
         } else {
           process.kill(-processGroupId, "SIGKILL");
         }
@@ -1967,7 +2158,7 @@ async function main() {
   );
 }
 
-if (fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
+if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
   const cliArgs = process.argv.slice(2);
   main().catch(async (error) => {
     if (isStartupValidationInvocation(cliArgs)) {
