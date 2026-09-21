@@ -44,6 +44,8 @@
  *      and still publishes the fixed redacted platform recovery summary.
  *  14. A failed native privacy check still writes a BLOCKED publish summary
  *      without reaching the simulated store submission boundary.
+ *  15. Successful native downloads with malformed artifact URLs keep both
+ *      platform statuses fixed while omitting unsafe report links.
  *
  * The static rules catch code paths no scenario exercises; the behavioral runs
  * inject sentinel values for every secret-backed variable and prove the real
@@ -6851,6 +6853,78 @@ test("unsafe download metadata cannot alter fixed platform recovery actions", ()
     summary,
     /attacker\.example|::error::|::warning::|unsafe-download-metadata-shell-marker/,
     "unsafe shell and Markdown control text must stay out of the recovery summary",
+  );
+});
+
+test("successful downloads cannot turn unsafe artifact URLs into report links", () => {
+  const summaryPath = path.join(
+    testRoot,
+    "unsafe-successful-download-summary.md",
+  );
+  const result = spawnSync(
+    bashPath,
+    [
+      path.join(
+        workspaceRoot,
+        "scripts/tests/native-evidence-summary-regression-fixture.sh",
+      ),
+      bashPath,
+      path.join(workspaceRoot, nativeEvidenceCheckerScript),
+    ],
+    {
+      cwd: workspaceRoot,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        GITHUB_STEP_SUMMARY: summaryPath,
+        REVIEWED_REF: "refs/heads/fixture",
+        NATIVE_EVIDENCE_HOSTILE_SUCCESS_METADATA: "1",
+      },
+    },
+  );
+  assert.equal(
+    result.status,
+    0,
+    `successful hostile-download fixture should pass its fixed release checks\n${result.stdout}${result.stderr}`,
+  );
+
+  const summary = readFileSync(summaryPath, "utf8");
+  for (const platform of ["iOS", "Android"]) {
+    const section = summary.match(
+      new RegExp(
+        `## ${platform} native large-text evidence[\\s\\S]*?(?=## (?:Android|$) native large-text evidence|$)`,
+      ),
+    )?.[0];
+    assert.ok(section, `the summary should include the ${platform} section`);
+    assert.match(section, /- Status: \*\*PASS\*\*/);
+    assert.match(section, /- Artifact download: \*\*PASS\*\*/);
+    assert.match(
+      section,
+      /- Detailed evidence report: \*\*Unavailable\*\*/,
+      `${platform} must not receive a report link for an unsafe URL`,
+    );
+    assert.doesNotMatch(
+      section,
+      /- Detailed evidence report: \[[^\]]+\]\(/,
+      `${platform} must not emit any Markdown report link`,
+    );
+  }
+
+  for (const [streamName, stream] of [
+    ["stdout", result.stdout],
+    ["stderr", result.stderr],
+    ["summary", summary],
+  ]) {
+    assert.doesNotMatch(
+      stream,
+      /https?:\/\/|attacker\.example|::error::|::warning::|unsafe-download-metadata-shell-marker/,
+      `hostile URLs and control text must not reach ${streamName}`,
+    );
+  }
+  assert.match(
+    result.stdout,
+    /Native large-text evidence completeness check passed for iOS and Android\./,
+    "the checker must retain its fixed successful status",
   );
 });
 
