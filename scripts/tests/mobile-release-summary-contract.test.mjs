@@ -2302,6 +2302,92 @@ test("hosted native evidence regression exercises real artifact download continu
   );
 });
 
+test("hosted native evidence regression preserves iOS when Android artifact is missing", () => {
+  const regressionJob = workflow.jobs["native-evidence-summary-regression"];
+  const uploadStep = regressionJob.steps.find(
+    (step) =>
+      step.name ===
+      "Store controlled iOS artifact for missing Android scenario",
+  );
+  const iosDownloadStep = regressionJob.steps.find(
+    (step) =>
+      step.name === "Download controlled iOS artifact before Android failure",
+  );
+  const androidDownloadStep = regressionJob.steps.find(
+    (step) => step.name === "Download controlled missing Android artifact",
+  );
+  const checkerStep = regressionJob.steps.find(
+    (step) => step.name === "Run checker after controlled Android artifact outage",
+  );
+  const blockerStep = regressionJob.steps.find(
+    (step) =>
+      step.name ===
+      "Confirm controlled Android outage blocks promotion and preserves both sections",
+  );
+
+  assert.equal(
+    uploadStep?.uses,
+    pinnedUploadArtifactAction,
+    "the controlled iOS fixture must use the pinned upload action",
+  );
+  assert.equal(
+    iosDownloadStep?.uses,
+    pinnedDownloadArtifactAction,
+    "the Android outage scenario must download iOS with the pinned action",
+  );
+  assert.equal(
+    androidDownloadStep?.uses,
+    pinnedDownloadArtifactAction,
+    "the missing Android scenario must use the pinned download action",
+  );
+  assert.equal(
+    iosDownloadStep?.["continue-on-error"],
+    true,
+    "the iOS download must preserve its successful result before the Android failure",
+  );
+  assert.equal(
+    androidDownloadStep?.["continue-on-error"],
+    true,
+    "the missing Android download must preserve its failure for the checker",
+  );
+  assert.equal(
+    checkerStep?.env?.NATIVE_IOS_EVIDENCE_DOWNLOAD_RESULT,
+    "${{ steps.download-controlled-ios-android-outage.outcome }}",
+  );
+  assert.equal(
+    checkerStep?.env?.NATIVE_ANDROID_EVIDENCE_DOWNLOAD_RESULT,
+    "${{ steps.download-controlled-android-outage.outcome }}",
+  );
+  assert.equal(
+    checkerStep?.["continue-on-error"],
+    true,
+    "the Android outage checker must publish its blocked summary before assertions",
+  );
+  assert.equal(
+    blockerStep?.if,
+    "${{ always() }}",
+    "the Android outage assertion must run after the checker blocks promotion",
+  );
+  assert.match(
+    blockerStep?.run ?? "",
+    /iOS artifact download did not continue successfully before the Android failure/,
+  );
+  assert.match(
+    blockerStep?.run ?? "",
+    /The controlled Android artifact download unexpectedly succeeded/,
+  );
+  assert.match(
+    blockerStep?.run ?? "",
+    /\$NATIVE_ANDROID_RECOVERY_LINE/,
+    "the Android outage must retain the shared recovery wording",
+  );
+  assert.match(
+    blockerStep?.run ?? "",
+    /iOS completed before the Android failure/,
+    "the published summary must retain the independent iOS continuation result",
+  );
+});
+
 test("hosted release validation exercises nested evidence readers without publishing contents", () => {
   const regressionJob = workflow.jobs["native-evidence-tamper-regression"];
   assert.ok(
@@ -7686,7 +7772,7 @@ test("native evidence checker output is isolated from workflow commands", () => 
 
   assert.equal(
     checkerCallers.length,
-    10,
+    11,
     "every native evidence checker caller must be inventoried by this contract",
   );
   assert.equal(
@@ -7961,7 +8047,7 @@ test("hosted native evidence summaries record the checked revision before untrus
 
   assert.equal(
     summaryCheckerCallers.length,
-    8,
+    9,
     "every hosted native evidence summary caller must be covered",
   );
 
