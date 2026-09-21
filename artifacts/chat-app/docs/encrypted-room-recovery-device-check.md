@@ -84,12 +84,7 @@ For either option:
    1,000 lines in this file: a truncation notice plus the newest 999 request
    lines once the limit is reached. Each new request replaces the oldest
    retained request line. Console diagnostics continue for every request after
-   the file reaches that limit. To retain the evidence directly in the timestamped
-   record instead, set
-   `EXPO_DEV_REQUEST_EVIDENCE_FILE` to
-   `test-results/encrypted-room-recovery/android/<UTC timestamp>/logs/metro-request-evidence.txt`
-   before restarting. This path is relative to the Chat App package root used
-   by the managed workflow. The file's lines contain only status, timing,
+   the file reaches that limit. The file's lines contain only status, timing,
    `platform`, a client class, `user-agent=[redacted]`, and a coarse resource
    class; they never contain a host, URL, query string, credentials, account
    data, or message content. After the workflow reports that Metro is ready,
@@ -112,15 +107,26 @@ For either option:
    message content cropped or blurred. Treat the launch as observed only when
    both the phone screen and
    server-side request evidence are available. A native request has no
-   browser `OPTIONS` preflight. Filter the retained file to the native Android
-   marker before adding it to the record:
+   browser `OPTIONS` preflight. After the phone session, create the timestamped
+   handoff directory and save the retained Metro file plus its filtered native
+   Android evidence with one command:
 
    ```sh
-   grep 'platform=android client=Expo Go' \
-     artifacts/chat-app/test-results/encrypted-room-recovery/android/<UTC timestamp>/logs/metro-request-evidence.txt \
-     | grep -v ' OPTIONS ' \
-     > artifacts/chat-app/test-results/encrypted-room-recovery/android/<UTC timestamp>/logs/native-android-request-evidence.txt
+   pnpm run save:android-preview-evidence -- \
+     --timestamp "$(date -u +%Y%m%dT%H%M%SZ)"
    ```
+
+   The command reads the retained `.expo/dev-request-evidence.log` by default,
+   or the path in `EXPO_DEV_REQUEST_EVIDENCE_FILE`; `--source <path>` can
+   override either. Use `--handoff-dir
+   artifacts/chat-app/test-results/encrypted-room-recovery/android/<UTC timestamp>`
+   when the timestamp directory already exists. It creates the `logs/`
+   directory, copies only lines that match the redacted Metro contract into
+   `metro-request-evidence.txt`, and writes
+   `native-android-request-evidence.txt` with only
+   `platform=android client=Expo Go` requests, excluding `OPTIONS`. Missing or
+   non-redacted source evidence fails before anything is saved. Do not set a
+   handoff path outside the Android evidence directory.
 
    Reference `logs/native-android-request-evidence.txt` in the
    **Server-side native request evidence** row. Copy only the marker
@@ -140,9 +146,14 @@ For either option:
    The JSON contains status and byte-count summaries only. It does not contain
    the manifest URL, launch-asset URL, QR payload, credentials, account data,
    or message content. Copy its four boundary values into the record template
-   below. `expoGoLaunch=NOT_ASSESSED` and
-   `serverNativeRequestEvidence=NOT_ASSESSED` are expected until a physical
-   Android phone supplies those results.
+   below. `serverNativeRequestEvidence=NOT_ASSESSED` is expected until a
+   physical Android phone supplies that result. `expoGoLaunch` is copied from
+   the Expo Go iOS launch-evidence probe (see the iOS procedure in
+   `native-room-key-persistence-device-check.md`): `NOT_RUN` when the probe was
+   never armed, `STALE` when its result predates the current dev server, or
+   the probe status with `decided_at`, `age`, and counts. It describes the iOS
+   simulator session, not an Android phone, so the Android launch row still
+   comes from the phone.
 
 6. Append `validation-record.md` under
    `test-results/encrypted-room-recovery/android/<UTC timestamp>/`. Include
@@ -212,9 +223,12 @@ The check enforces these boundaries:
   status `PASS`. The checker scans printable image metadata and OCR text
   rendered in the image pixels for account identifiers, message fields, token
   markers, and host or URL details without echoing matched content. The
-  reviewer must still inspect the saved image and confirm the redaction review;
-  a missing, empty, truncated, or non-image screenshot path does not count as
-  evidence.
+  reviewer must still inspect the saved image and confirm the redaction review.
+  The pull request's Android evidence summary reports the screenshot path and
+  whether metadata and pixel inspection completed. If pixel inspection could
+  not run, the summary marks the screenshot for manual attention without
+  including OCR output or matched fixture text. A missing, empty, truncated,
+  or non-image screenshot path does not count as evidence.
 - A `BLOCKED` record is valid only when a boundary row explicitly identifies
   the unavailable physical phone, native request, or other missing device
   route. Public reachability may remain `PASS`, but it cannot change the

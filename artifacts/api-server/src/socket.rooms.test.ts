@@ -19,6 +19,7 @@ const mockLoadEncryptedSandboxState = vi.hoisted(() => vi.fn());
 const mockSaveEncryptedMessage = vi.hoisted(() => vi.fn());
 const mockSaveEncryptedSandboxState = vi.hoisted(() => vi.fn());
 const mockSaveRoomEnvelope = vi.hoisted(() => vi.fn());
+const mockStreamSandboxAssistant = vi.hoisted(() => vi.fn());
 
 vi.mock("@clerk/express", () => ({
   verifyToken: mockVerifyToken,
@@ -48,6 +49,10 @@ vi.mock("./lib/e2eePersistence", () => ({
   saveRoomEnvelope: mockSaveRoomEnvelope,
 }));
 
+vi.mock("./lib/sandboxAssistant", () => ({
+  streamSandboxAssistant: mockStreamSandboxAssistant,
+}));
+
 import {
   disconnectBannedUser,
   getRooms,
@@ -55,6 +60,7 @@ import {
   setRoomActiveForModeration,
   setupSocketIO,
 } from "./socket.js";
+import { createRoomAccessCapability } from "./lib/roomAccess.js";
 
 let httpServer: HttpServer;
 let socketServer: ReturnType<typeof setupSocketIO>;
@@ -62,6 +68,7 @@ let serverUrl: string;
 const clients: ClientSocket[] = [];
 
 beforeEach(async () => {
+  process.env["SESSION_SECRET"] = "socket-rooms-test-session-secret";
   mockVerifyToken.mockReset().mockImplementation(async (token: string) => {
     if (token === "token-ada") return { sub: "user-ada" };
     if (token === "token-ben") return { sub: "user-ben" };
@@ -100,6 +107,7 @@ beforeEach(async () => {
   mockSaveEncryptedMessage.mockReset().mockResolvedValue(undefined);
   mockSaveEncryptedSandboxState.mockReset().mockResolvedValue(undefined);
   mockSaveRoomEnvelope.mockReset().mockResolvedValue(undefined);
+  mockStreamSandboxAssistant.mockReset();
 
   httpServer = createServer();
   socketServer = setupSocketIO(httpServer);
@@ -126,6 +134,22 @@ function createRoomClient(token?: string, username = "Member") {
     transports: ["websocket"],
   });
   clients.push(client);
+  return client;
+}
+
+async function createSandboxClient(roomId: string) {
+  const token = createRoomAccessCapability({
+    roomId,
+    userId: "user-ada",
+    username: "Ada",
+    avatarEmoji: "👩‍💻",
+    purpose: "sandbox",
+  });
+  const client = createRoomClient(token);
+  await waitForEvent(client, "connect");
+  const joined = waitForEvent(client, "room-joined");
+  client.emit("join-room", { roomId });
+  await joined;
   return client;
 }
 
@@ -172,6 +196,87 @@ async function expectNoEvent(
 }
 
 describe("room Socket.IO lifecycle", () => {
+  it("abandons disconnected assistant work and settles the next request after reconnect", async () => {
+    const roomId = `assistant-abandoned-${Date.now()}`;
+    const firstClient = await createSandboxClient(roomId);
+    const firstChunks: Array<{ requestId: string; text: string }> = [];
+    const firstErrors: unknown[] = [];
+    const firstDoneEvents: Array<{ requestId: string; cancelled: boolean }> = [];
+    firstClient.on("assistant-chunk", (event) => firstChunks.push(event));
+    firstClient.on("assistant-error", (event) => firstErrors.push(event));
+    firstClient.on("assistant-done", (event) => firstDoneEvents.push(event));
+
+    let firstSignal: AbortSignal | undefined;
+    let firstOnText: ((text: string) => void) | undefined;
+    let resolveFirstStream: (() => void) | undefined;
+    mockStreamSandboxAssistant.mockImplementationOnce(
+      ({ signal, onText }: {
+        signal: AbortSignal;
+        onText: (text: string) => void;
+      }) =>
+        new Promise<void>((resolve) => {
+          firstSignal = signal;
+          firstOnText = onText;
+          resolveFirstStream = resolve;
+        }),
+    );
+
+    firstClient.emit("assistant-request", {
+      requestId: "assistant-abandoned-request",
+      roomId,
+      prompt: "Explain the layout.",
+      files: { html: "<button>Go</button>", css: "", js: "" },
+      disclosureAcknowledged: true,
+    });
+    await vi.waitFor(() => expect(firstSignal).toBeDefined());
+
+    const disconnected = waitForEvent(firstClient, "disconnect");
+    firstClient.disconnect();
+    await disconnected;
+    await vi.waitFor(() => expect(firstSignal?.aborted).toBe(true));
+    expect(firstDoneEvents).toEqual([]);
+
+    firstOnText?.("late chunk");
+    resolveFirstStream?.();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(firstChunks).toEqual([]);
+    expect(firstErrors).toEqual([]);
+
+    const secondClient = await createSandboxClient(roomId);
+    const secondChunks: Array<{ requestId: string; text: string }> = [];
+    const secondErrors: unknown[] = [];
+    secondClient.on("assistant-chunk", (event) => secondChunks.push(event));
+    secondClient.on("assistant-error", (event) => secondErrors.push(event));
+    const secondDone = waitForEvent<{
+      requestId: string;
+      cancelled: boolean;
+    }>(secondClient, "assistant-done");
+    mockStreamSandboxAssistant.mockImplementationOnce(
+      async ({ onText }: { onText: (text: string) => void }) => {
+        onText("fresh reply");
+      },
+    );
+    secondClient.emit("assistant-request", {
+      requestId: "assistant-follow-up-request",
+      roomId,
+      prompt: "Explain the layout again.",
+      files: { html: "<button>Go</button>", css: "", js: "" },
+      disclosureAcknowledged: true,
+    });
+
+    await expect(secondDone).resolves.toEqual({
+      requestId: "assistant-follow-up-request",
+      cancelled: false,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(secondChunks).toEqual([
+      { requestId: "assistant-follow-up-request", text: "fresh reply" },
+    ]);
+    expect(secondErrors).toEqual([]);
+    expect(mockStreamSandboxAssistant).toHaveBeenCalledTimes(2);
+  });
+
   it("lists rooms only while they remain active", async () => {
     const roomId = `active-room-${Date.now()}`;
     const client = createRoomClient("token-ada");

@@ -1,15 +1,21 @@
 import React from "react";
-import { act, fireEvent, render, waitFor, within } from "@testing-library/react-native";
+import { act, fireEvent, render, waitFor } from "@testing-library/react-native";
 import { StyleSheet } from "react-native";
 import SignUpScreen from "../app/(auth)/sign-up";
+import { withinKeyboardAwareScrollViewCompat } from "../test-utils/keyboardAwareScrollViewCompatMock";
 
 const mockCreate = jest.fn();
 const mockPrepareEmailVerification = jest.fn();
 const mockAttemptEmailVerification = jest.fn();
 const mockSetActive = jest.fn();
 
+const mockStartAppleOAuthFlow = jest.fn();
+
 jest.mock("@clerk/expo", () => ({
-  useOAuth: () => ({ startOAuthFlow: jest.fn() }),
+  useOAuth: ({ strategy }: { strategy: string }) => ({
+    startOAuthFlow:
+      strategy === "oauth_apple" ? mockStartAppleOAuthFlow : jest.fn(),
+  }),
 }));
 
 jest.mock("@clerk/expo/legacy", () => ({
@@ -41,19 +47,11 @@ jest.mock("react-native-safe-area-context", () => ({
   useSafeAreaInsets: () => ({ top: 24, bottom: 12, left: 0, right: 0 }),
 }));
 
-jest.mock("@/components/KeyboardAwareScrollViewCompat", () => {
-  const RN = require("react-native");
-  const mockReact = require("react");
-  return {
-    KeyboardAwareScrollViewCompat: ({
-      children,
-      ...props
-    }: {
-      children: React.ReactNode;
-      [key: string]: unknown;
-    }) => mockReact.createElement(RN.ScrollView, props, children),
-  };
-});
+// The shared stand-in tags its host element so the suite can prove the form
+// renders inside the compat component, not merely inside some scroll view.
+jest.mock("@/components/KeyboardAwareScrollViewCompat", () =>
+  jest.requireActual("../test-utils/keyboardAwareScrollViewCompatMock"),
+);
 
 jest.mock("@/hooks/useColors", () => ({
   useColors: () => ({
@@ -68,6 +66,63 @@ jest.mock("@/hooks/useColors", () => ({
     radius: 10,
   }),
 }));
+
+describe("Continue with Apple", () => {
+  beforeEach(() => {
+    mockStartAppleOAuthFlow.mockReset().mockResolvedValue({
+      createdSessionId: "session-apple",
+      setActive: mockSetActive,
+    });
+    mockSetActive.mockReset().mockResolvedValue(undefined);
+  });
+
+  it("activates the created Clerk session", async () => {
+    const { getByLabelText } = render(<SignUpScreen />);
+
+    fireEvent.press(getByLabelText("Continue with Apple"));
+
+    await waitFor(() => {
+      expect(mockStartAppleOAuthFlow).toHaveBeenCalledTimes(1);
+      expect(mockSetActive).toHaveBeenCalledWith({ session: "session-apple" });
+    });
+  });
+
+  it("uses the Apple-branded button alongside the other social providers", () => {
+    const { getByLabelText, getByText } = render(<SignUpScreen />);
+
+    const appleButton = getByLabelText("Continue with Apple");
+    expect(StyleSheet.flatten(appleButton.props.style).backgroundColor).toBe("#000000");
+    expect(StyleSheet.flatten(appleButton.props.style).borderWidth).toBe(1);
+    expect(StyleSheet.flatten(getByText("Continue with Apple").props.style).color).toBe("#FFFFFF");
+    expect(getByLabelText("Continue with Google")).toBeTruthy();
+    expect(getByLabelText("Continue with X")).toBeTruthy();
+  });
+
+  it("surfaces the Clerk error when the Apple flow fails", async () => {
+    mockStartAppleOAuthFlow.mockRejectedValue({
+      errors: [{ longMessage: "Apple sign-up was cancelled." }],
+    });
+    const { getByLabelText, findByText } = render(<SignUpScreen />);
+
+    fireEvent.press(getByLabelText("Continue with Apple"));
+
+    expect(await findByText("Apple sign-up was cancelled.")).toBeTruthy();
+    expect(mockSetActive).not.toHaveBeenCalled();
+  });
+
+  it("reports an incomplete flow instead of activating nothing", async () => {
+    mockStartAppleOAuthFlow.mockResolvedValue({
+      createdSessionId: null,
+      setActive: mockSetActive,
+    });
+    const { getByLabelText, findByText } = render(<SignUpScreen />);
+
+    fireEvent.press(getByLabelText("Continue with Apple"));
+
+    expect(await findByText("Unable to create your account. Please try again.")).toBeTruthy();
+    expect(mockSetActive).not.toHaveBeenCalled();
+  });
+});
 
 describe("email account signup", () => {
   beforeEach(() => {
@@ -123,12 +178,18 @@ describe("email account signup", () => {
   });
 
   it("keeps every field reachable above the keyboard with the shared keyboard-aware scroll wrapper", async () => {
-    const { getByTestId, getByLabelText, findByPlaceholderText } = render(<SignUpScreen />);
+    const view = render(<SignUpScreen />);
+    const { findByPlaceholderText } = view;
 
     // Same wrapper and settings as sign-in: the on-screen keyboard (always
     // visible on Android) scrolls the focused field into view instead of
-    // covering it, and taps on the buttons still land while it is open.
-    const scroll = getByTestId("sign-up-scroll");
+    // covering it, and taps on the buttons still land while it is open. The
+    // scroll element and the fields are looked up inside the compat
+    // component's host element: a plain ScrollView carrying the same testID
+    // and props would pass the prop expectations while phones lose
+    // keyboard-aware scrolling on this form.
+    const form = withinKeyboardAwareScrollViewCompat(view);
+    const scroll = form.getByTestId("sign-up-scroll");
     expect(scroll.props.keyboardShouldPersistTaps).toBe("handled");
     expect(scroll.props.keyboardDismissMode).toBe("interactive");
     expect(scroll.props.bottomOffset).toBe(68);
@@ -144,17 +205,18 @@ describe("email account signup", () => {
     expect(content.paddingTop).toBe(24 + 28);
     expect(content.paddingBottom).toBe(12 + 28);
 
-    const fields = within(scroll);
-    expect(fields.getByPlaceholderText("Email address")).toBeTruthy();
-    expect(fields.getByPlaceholderText("Password")).toBeTruthy();
+    expect(form.getByPlaceholderText("Email address")).toBeTruthy();
+    expect(form.getByPlaceholderText("Password")).toBeTruthy();
+    expect(form.getByLabelText("Create account")).toBeTruthy();
 
     // The verification step renders inside the same wrapper.
-    fireEvent.changeText(fields.getByPlaceholderText("Email address"), "ada@example.com");
-    fireEvent.changeText(fields.getByPlaceholderText("Password"), "correct horse battery staple");
+    fireEvent.changeText(form.getByPlaceholderText("Email address"), "ada@example.com");
+    fireEvent.changeText(form.getByPlaceholderText("Password"), "correct horse battery staple");
     await act(async () => {
-      fireEvent.press(getByLabelText("Create account"));
+      fireEvent.press(form.getByLabelText("Create account"));
     });
     await findByPlaceholderText("Email verification code");
-    expect(within(getByTestId("sign-up-scroll")).getByPlaceholderText("Email verification code")).toBeTruthy();
+    expect(form.getByPlaceholderText("Email verification code")).toBeTruthy();
+    expect(form.getByLabelText("Verify email")).toBeTruthy();
   });
 });

@@ -17,10 +17,10 @@ if [[ "$SCRIPT_DIR" == "$SCRIPT_PATH" ]]; then
   SCRIPT_DIR="."
 fi
 SCRIPT_DIR="$(cd -- "$SCRIPT_DIR" && pwd)"
-
-PNPM_VERSION="10.26.1"
-JAVA_MINIMUM_MAJOR=17
-SIMULATOR_NAME="iPhone SE (3rd generation)"
+# shellcheck source=scripts/workflow-output-safety.sh
+source "$SCRIPT_DIR/workflow-output-safety.sh"
+# shellcheck source=ios-runner-contract.sh
+source "$SCRIPT_DIR/ios-runner-contract.sh"
 
 failures=()
 
@@ -51,7 +51,9 @@ write_summary() {
     if ((${#failures[@]})); then
       echo
       echo "### Blocking prerequisites"
-      printf -- '- %s\n' "${failures[@]}"
+      for failure in "${failures[@]}"; do
+        printf -- '- %s\n' "$(sanitize_workflow_text "$failure")"
+      done
     fi
   } >&2
 
@@ -63,7 +65,9 @@ write_summary() {
       if ((${#failures[@]})); then
         echo
         echo "### Blocking prerequisites"
-        printf -- '- %s\n' "${failures[@]}"
+        printf -- '%s\n' "${failures[@]}" |
+          sanitize_workflow_stream |
+          render_markdown_code_block
       fi
     } >>"$GITHUB_STEP_SUMMARY"
   fi
@@ -78,14 +82,14 @@ if [[ "$host_arch" != "arm64" && "$host_arch" != "aarch64" && "$host_arch" != "x
   record_failure "The iOS release runner must use arm64 or x86_64."
 fi
 
-for command in xcrun pnpm java maestro; do
+for command in $IOS_RUNNER_REQUIRED_COMMANDS; do
   check_command "$command"
 done
 
 if command -v pnpm >/dev/null 2>&1; then
   pnpm_version="$(pnpm --version 2>/dev/null | head -n 1 || true)"
-  if [[ "$pnpm_version" != "$PNPM_VERSION" ]]; then
-    record_failure "Required pnpm ${PNPM_VERSION}; found ${pnpm_version:-unknown}."
+  if [[ "$pnpm_version" != "$IOS_RUNNER_PNPM_VERSION" ]]; then
+    record_failure "Required pnpm ${IOS_RUNNER_PNPM_VERSION}; found ${pnpm_version:-unknown}."
   fi
 fi
 
@@ -96,7 +100,7 @@ if command -v java >/dev/null 2>&1; then
       head -n 1
   )"
   if [[ -z "$java_version" ]]; then
-    record_failure "Could not determine the installed Java version; Java 17 or newer is required."
+    record_failure "Could not determine the installed Java version; Java ${IOS_RUNNER_JAVA_MINIMUM_MAJOR} or newer is required."
   else
     java_major="${java_version%%.*}"
     if [[ "$java_major" == "1" ]]; then
@@ -104,9 +108,9 @@ if command -v java >/dev/null 2>&1; then
       java_major="${java_major%%.*}"
     fi
     if ! [[ "$java_major" =~ ^[0-9]+$ ]]; then
-      record_failure "Could not determine the installed Java major version; Java 17 or newer is required."
-    elif ((java_major < JAVA_MINIMUM_MAJOR)); then
-      record_failure "Java 17 or newer is required; found Java ${java_version}."
+      record_failure "Could not determine the installed Java major version; Java ${IOS_RUNNER_JAVA_MINIMUM_MAJOR} or newer is required."
+    elif ((java_major < IOS_RUNNER_JAVA_MINIMUM_MAJOR)); then
+      record_failure "Java ${IOS_RUNNER_JAVA_MINIMUM_MAJOR} or newer is required; found Java ${java_version}."
     fi
   fi
 fi
@@ -124,7 +128,7 @@ if command -v xcrun >/dev/null 2>&1; then
     simulator_check_complete=1
     device_udid="$(
       sed -n \
-        's/^[[:space:]]*iPhone SE (3rd generation) (\([0-9A-F-]\{8,\}\)) (Booted)[[:space:]]*$/\1/p' \
+        's/^[[:space:]]*'"$IOS_RUNNER_SIMULATOR_NAME"' (\([0-9A-F-]\{8,\}\)) (Booted)[[:space:]]*$/\1/p' \
         <<<"$booted_devices" |
         head -n 1
     )"
@@ -134,31 +138,25 @@ if command -v xcrun >/dev/null 2>&1; then
 fi
 
 if ((simulator_check_complete)) && [[ -z "$device_udid" ]]; then
-  record_failure "A booted ${SIMULATOR_NAME} is required on the iOS runner."
+  record_failure "A booted ${IOS_RUNNER_SIMULATOR_NAME} is required on the iOS runner."
 fi
 
-for value in \
-  NATIVE_SMOKE_IOS_APP_ID \
-  NATIVE_SMOKE_EMAIL \
-  NATIVE_SMOKE_PASSWORD \
-  SENTRY_AUTH_TOKEN \
-  NATIVE_SMOKE_IOS_SENTRY_RELEASE \
-  NATIVE_SMOKE_IOS_SENTRY_DIST \
-  NATIVE_SMOKE_IOS_BUILD_ID; do
+for value in $IOS_RUNNER_REQUIRED_RELEASE_VALUES; do
   check_environment_value "$value"
 done
 
-if [[ -n "$device_udid" && -n "${NATIVE_SMOKE_IOS_APP_ID:-}" ]] &&
+candidate_app_id="${!IOS_RUNNER_CANDIDATE_APP_ID_ENVIRONMENT_VALUE:-}"
+if [[ -n "$device_udid" && -n "$candidate_app_id" ]] &&
   command -v xcrun >/dev/null 2>&1; then
   app_container="$(
     xcrun simctl get_app_container \
       "$device_udid" \
-      "$NATIVE_SMOKE_IOS_APP_ID" \
+      "$candidate_app_id" \
       app 2>/dev/null || true
   )"
   if [[ -z "$app_container" || ! -f "$app_container/Info.plist" ]]; then
     record_failure "The release candidate is not installed on the prepared iOS simulator."
-  elif ! LC_ALL=C grep -aR -Fq "SENTRY_RELEASE_PREFLIGHT_PASSED_V1" "$app_container"; then
+  elif ! LC_ALL=C grep -aR -Fq "$IOS_RUNNER_CANDIDATE_PREFLIGHT_MARKER" "$app_container"; then
     record_failure "The installed iOS candidate does not contain crash-reporting preflight evidence. Rebuild it with SENTRY_DSN or EXPO_PUBLIC_SENTRY_DSN configured."
   fi
 fi

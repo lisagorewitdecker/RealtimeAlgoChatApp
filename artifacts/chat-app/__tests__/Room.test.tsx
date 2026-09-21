@@ -513,6 +513,62 @@ describe("room ban handling", () => {
 
     expect(view.getByTestId("room-message-gap-warning")).toBeTruthy();
     expect(view.getByText("Some messages could not be recovered")).toBeTruthy();
+    fireEvent.press(view.getByTestId("room-message-gap-dismiss"));
+    expect(view.queryByTestId("room-message-gap-warning")).toBeNull();
+  });
+
+  it("keeps the reconnect gap warning visible after recovered messages arrive", () => {
+    const view = render(<RoomScreen />);
+    const existingMessage = {
+      id: "existing",
+      content: "Before the gap",
+      userId: "user-ada",
+      username: "Ada",
+      timestamp: 1,
+      type: "text" as const,
+    };
+    const recoveredMessage = {
+      id: "recovered-newest",
+      content: "Newest recovered message",
+      userId: "user-ada",
+      username: "Ada",
+      timestamp: 2,
+      type: "text" as const,
+    };
+
+    act(() => {
+      mockHandlers.get("room-joined")?.({
+        messages: [existingMessage],
+        users: [],
+      });
+      mockHandlers.get("connect")?.();
+      mockHandlers.get("room-joined")?.({
+        messages: [recoveredMessage],
+        users: [],
+        replayAfterMessageId: "expired-cursor",
+        replayGap: true,
+      });
+    });
+
+    const recoveryRequest = socketEmits("recover-messages").at(-1)?.[1];
+    act(() => {
+      mockHandlers.get("message-recovery-page")?.({
+        requestId: recoveryRequest.requestId,
+        messages: [],
+        hasMore: false,
+        nextCursor: {
+          id: recoveredMessage.id,
+          timestamp: recoveredMessage.timestamp,
+        },
+      });
+    });
+
+    expect(view.getByTestId("message-recovered-newest")).toBeTruthy();
+    expect(view.getByTestId("room-message-gap-warning")).toBeTruthy();
+    expect(view.getByTestId("room-message-gap-dismiss")).toBeTruthy();
+
+    fireEvent.press(view.getByTestId("room-message-gap-dismiss"));
+    expect(view.queryByTestId("room-message-gap-warning")).toBeNull();
   });
 
   it("explains when device-key registration is taking unusually long", () => {
@@ -829,20 +885,78 @@ describe("room ban handling", () => {
     expect(mockCaptureMessage).toHaveBeenCalledTimes(1);
   });
 
-  it("identifies a rejected saved-key load retry without reporting private values", async () => {
+  it("reports a new save outage after recovery without flooding either episode", async () => {
+    const privateRetryError =
+      "room-42 key=PRIVATE_KEY_BYTES ciphertext=PRIVATE_CIPHERTEXT";
+    mockRoomKeyPersistenceFailures.set("room-42", {
+      roomId: "room-42",
+      kind: "save",
+      message: privateRetryError,
+    });
+    mockRetryRoomKeyPersistence
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(true)
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(false);
+    const view = render(<RoomScreen />);
+
+    for (let retry = 0; retry < 5; retry += 1) {
+      await act(async () => {
+        fireEvent.press(view.getByTestId("retry-room-key-save-button"));
+      });
+    }
+
+    expect(mockCaptureMessage.mock.calls).toEqual([
+      [
+        "Room key persistence retry failed",
+        {
+          level: "warning",
+          tags: { recovery_operation: "save" },
+        },
+      ],
+      [
+        "Room key persistence retry failed",
+        {
+          level: "warning",
+          tags: { recovery_operation: "save" },
+        },
+      ],
+    ]);
+    expect(JSON.stringify(mockCaptureMessage.mock.calls)).not.toContain(
+      privateRetryError,
+    );
+    expect(JSON.stringify(mockCaptureMessage.mock.calls)).not.toContain("room-42");
+    expect(JSON.stringify(mockCaptureMessage.mock.calls)).not.toContain(
+      "PRIVATE_KEY_BYTES",
+    );
+    expect(JSON.stringify(mockCaptureMessage.mock.calls)).not.toContain(
+      "PRIVATE_CIPHERTEXT",
+    );
+  });
+
+  it("keeps load recovery available when retrying the saved-key read rejects", async () => {
     mockGetRoomKey.mockReturnValue(null);
     mockRoomKeyPersistenceFailures.set("room-42", {
       roomId: "room-42",
       kind: "load",
       message: "This device could not read its saved encryption keys.",
     });
-    mockRetryRoomKeyPersistence.mockResolvedValueOnce(false);
+    mockRetryRoomKeyPersistence.mockRejectedValueOnce(
+      new Error("room-42 key=PRIVATE_UNREADABLE_KEY"),
+    );
     const view = render(<RoomScreen />);
 
     await act(async () => {
       fireEvent.press(view.getByTestId("retry-room-key-save-button"));
     });
 
+    expect(view.getByTestId("room-key-storage-warning")).toBeTruthy();
+    expect(view.getByText("Saved encryption key could not be read")).toBeTruthy();
+    expect(view.getByText("Retry reading key")).toBeTruthy();
+    expect(view.getByTestId("retry-room-key-save-button").props.disabled).not.toBe(
+      true,
+    );
     expect(mockCaptureMessage).toHaveBeenCalledWith(
       "Room key persistence retry failed",
       {

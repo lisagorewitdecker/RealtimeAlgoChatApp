@@ -5,7 +5,15 @@
  * RealtimeAlgoChatApp Studio API — secure rooms, profiles, and E2EE collaboration
  * OpenAPI spec version: 0.2.0
  */
+import type { HealthStatusReason } from './healthStatusReason';
 
 export interface HealthStatus {
   status: string;
+  /** Sanitized category for the readiness failure */
+  reason?: HealthStatusReason;
+  /**
+     * Elapsed time for the readiness check in milliseconds
+     * @minimum 0
+     */
+  elapsedMs?: number;
 }

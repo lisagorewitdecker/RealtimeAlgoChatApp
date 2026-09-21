@@ -95,3 +95,21 @@ request was closed and its branch deleted.
 - Pull request #264 was closed without merging.
 - Branch `task-474-check-run-evidence-20260918` was deleted.
 - The temporary probe worktree and browser probe script were removed.
+
+## Revalidation on 2026-09-19
+
+The published evidence was independently revalidated without creating another
+branch or pull request:
+
+- A public, unauthenticated `GET
+  https://api.github.com/repos/lisagorewitdecker/RealtimeAlgoChatApp/check-runs/105713584242`
+  returned `200 OK` and the same 762-character summary.
+- The public response still contained the changed generated path, the bounded
+  fenced `diff` report, and
+  `pnpm --filter @workspace/api-spec run codegen`.
+- A fresh signed-out browser session rendered the same heading, command, path,
+  and diff on the GitHub Actions Checks page. It showed the Sign in controls
+  and did not use the job log.
+- An authenticated GitHub connection was used only to compare the public
+  payload with the repository's live check-run record; no privileged job-log
+  endpoint was accessed.

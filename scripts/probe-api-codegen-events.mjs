@@ -1,16 +1,24 @@
 #!/usr/bin/env node
 
-import { mkdirSync, writeFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { mkdirSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { dirname, extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import YAML from "yaml";
 
 const DEFAULTS = {
   baseBranch: "development",
   generatedFile: "lib/api-client-react/src/generated/api.schemas.ts",
+  compatibilityFile: "lib/api-spec/openapi.yaml",
   workflow: ".github/workflows/api-codegen.yml",
   pollSeconds: 10,
   timeoutSeconds: 900,
+  recordFormat: "markdown",
 };
+
+const RETRYABLE_GET_STATUS_CODES = new Set([408, 429, 500, 502, 503, 504]);
+const DEFAULT_GET_RETRY_DEADLINE_MS = 30_000;
+const DEFAULT_GET_RETRY_BASE_DELAY_MS = 250;
+const DEFAULT_GET_RETRY_MAX_DELAY_MS = 2_000;
 
 function encodePath(path) {
   return path.split("/").map(encodeURIComponent).join("/");
@@ -33,37 +41,268 @@ function describeResponseBody(body) {
   return message ? `: ${message}` : "";
 }
 
+function getResponseHeader(response, name) {
+  return (
+    response.headers?.get?.(name) ??
+    response.headers?.[name] ??
+    response.headers?.[name.toLowerCase()] ??
+    null
+  );
+}
+
+function getRetryAfterMs(response, nowMs) {
+  const value = getResponseHeader(response, "retry-after");
+  if (value === undefined || value === null || value === "") {
+    return null;
+  }
+  const seconds = Number(value);
+  if (Number.isFinite(seconds) && seconds >= 0) {
+    return seconds * 1000;
+  }
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) ? Math.max(0, timestamp - nowMs) : null;
+}
+
+function isRetryableGetResponse(response, nowMs) {
+  if (RETRYABLE_GET_STATUS_CODES.has(response.status)) {
+    return true;
+  }
+  return (
+    response.status === 403 &&
+    (getResponseHeader(response, "x-ratelimit-remaining") === "0" ||
+      getRetryAfterMs(response, nowMs) !== null)
+  );
+}
+
+class GitHubRequestTimeoutError extends GitHubApiError {
+  constructor(path) {
+    super(`GitHub GET ${path} exceeded its retry deadline`, 408, path);
+    this.name = "GitHubRequestTimeoutError";
+  }
+}
+
+class GitHubTransportError extends Error {
+  constructor(cause) {
+    super(cause?.message ?? "GitHub request failed");
+    this.name = "GitHubTransportError";
+    this.cause = cause;
+  }
+}
+
+class GitHubResponseBodyError extends Error {
+  constructor(cause) {
+    super(cause?.message ?? "GitHub response body could not be read");
+    this.name = "GitHubResponseBodyError";
+    this.cause = cause;
+  }
+}
+
+async function readResponseText(response) {
+  try {
+    return await response.text();
+  } catch (error) {
+    throw new GitHubResponseBodyError(error);
+  }
+}
+
+async function readResponseJson(response) {
+  try {
+    return await response.json();
+  } catch (error) {
+    if (error instanceof SyntaxError) {
+      throw error;
+    }
+    throw new GitHubResponseBodyError(error);
+  }
+}
+
+function unwrapRequestError(error) {
+  return error instanceof GitHubTransportError ||
+    error instanceof GitHubResponseBodyError
+    ? error.cause
+    : error;
+}
+
 export class GitHubClient {
-  constructor({ token, apiUrl = "https://api.github.com", fetchImpl = fetch }) {
+  constructor({
+    token,
+    apiUrl = "https://api.github.com",
+    fetchImpl = fetch,
+    sleepImpl = wait,
+    nowImpl = Date.now,
+    retryDeadlineMs = DEFAULT_GET_RETRY_DEADLINE_MS,
+    retryBaseDelayMs = DEFAULT_GET_RETRY_BASE_DELAY_MS,
+    retryMaxDelayMs = DEFAULT_GET_RETRY_MAX_DELAY_MS,
+  }) {
     this.fetchImpl = fetchImpl;
+    this.sleepImpl = sleepImpl;
+    this.nowImpl = nowImpl;
+    this.retryDeadlineMs = retryDeadlineMs;
+    this.retryBaseDelayMs = retryBaseDelayMs;
+    this.retryMaxDelayMs = retryMaxDelayMs;
     this.token = token;
     this.apiUrl = apiUrl.replace(/\/+$/, "");
   }
 
-  async request(path, { method = "GET", body, allowNotFound = false } = {}) {
-    const response = await this.fetchImpl(`${this.apiUrl}${path}`, {
-      method,
-      headers: {
-        Accept: "application/vnd.github+json",
-        Authorization: `Bearer ${this.token}`,
-        "X-GitHub-Api-Version": "2022-11-28",
-        ...(body ? { "Content-Type": "application/json" } : {}),
-      },
-      ...(body ? { body: JSON.stringify(body) } : {}),
-    });
+  async fetchWithDeadline(
+    url,
+    requestInit,
+    deadlineAt,
+    path,
+    consumeResponse,
+  ) {
+    if (deadlineAt === undefined) {
+      const response = await this.fetchImpl(url, requestInit);
+      return consumeResponse(response);
+    }
 
-    if (response.status === 404 && allowNotFound) {
-      return null;
+    const remainingMs = deadlineAt - this.nowImpl();
+    if (remainingMs <= 0) {
+      throw new GitHubRequestTimeoutError(path);
     }
-    if (!response.ok) {
-      const text = await response.text();
-      throw new GitHubApiError(
-        `GitHub ${method} ${path} failed with HTTP ${response.status}${describeResponseBody(text)}`,
-        response.status,
-        path,
-      );
+
+    const controller = new AbortController();
+    let timer;
+    const fetchPromise = Promise.resolve()
+      .then(() =>
+        this.fetchImpl(url, { ...requestInit, signal: controller.signal }),
+      )
+      .catch((error) => {
+        throw new GitHubTransportError(error);
+      })
+      .then((response) => consumeResponse(response));
+    const timeoutPromise = new Promise((_, reject) => {
+      timer = setTimeout(() => {
+        controller.abort();
+        reject(new GitHubRequestTimeoutError(path));
+      }, remainingMs);
+    });
+    try {
+      return await Promise.race([fetchPromise, timeoutPromise]);
+    } finally {
+      clearTimeout(timer);
     }
-    return response.status === 204 ? undefined : response.json();
+  }
+
+  async waitBeforeRetry(deadlineAt, attempt, retryAfterMs = null) {
+    const remainingMs = deadlineAt - this.nowImpl();
+    if (remainingMs <= 0) {
+      return false;
+    }
+    const backoffMs = Math.min(
+      this.retryMaxDelayMs,
+      this.retryBaseDelayMs * 2 ** attempt,
+    );
+    const delayMs = Math.min(
+      remainingMs,
+      Math.max(backoffMs, retryAfterMs ?? 0),
+    );
+    if (delayMs <= 0) {
+      return false;
+    }
+    await this.sleepImpl(delayMs);
+    return this.nowImpl() < deadlineAt;
+  }
+
+  async request(
+    path,
+    { method = "GET", body, allowNotFound = false, deadlineAt } = {},
+  ) {
+    const safeGet = method === "GET";
+    const retryDeadline = safeGet
+      ? (deadlineAt ?? this.nowImpl() + this.retryDeadlineMs)
+      : undefined;
+    let attempt = 0;
+
+    while (true) {
+      if (safeGet && this.nowImpl() >= retryDeadline) {
+        throw new GitHubRequestTimeoutError(path);
+      }
+      const requestInit = {
+        method,
+        headers: {
+          Accept: "application/vnd.github+json",
+          Authorization: `Bearer ${this.token}`,
+          "X-GitHub-Api-Version": "2022-11-28",
+          ...(body ? { "Content-Type": "application/json" } : {}),
+        },
+        ...(body ? { body: JSON.stringify(body) } : {}),
+      };
+      let outcome;
+      const consumeResponse = async (response) => {
+        if (response.status === 404 && allowNotFound) {
+          return { kind: "value", value: null };
+        }
+        if (!response.ok) {
+          return {
+            kind: "http-error",
+            response,
+            text: await readResponseText(response),
+          };
+        }
+        return {
+          kind: "value",
+          value:
+            response.status === 204
+              ? undefined
+              : await readResponseJson(response),
+        };
+      };
+      try {
+        outcome = await this.fetchWithDeadline(
+          `${this.apiUrl}${path}`,
+          requestInit,
+          retryDeadline,
+          path,
+          consumeResponse,
+        );
+      } catch (error) {
+        if (
+          !safeGet ||
+          (!(error instanceof GitHubTransportError) &&
+            !(error instanceof GitHubResponseBodyError)) ||
+          error instanceof GitHubRequestTimeoutError ||
+          this.nowImpl() >= retryDeadline
+        ) {
+          throw unwrapRequestError(error);
+        }
+        if (!(await this.waitBeforeRetry(retryDeadline, attempt))) {
+          throw unwrapRequestError(error);
+        }
+        attempt += 1;
+        continue;
+      }
+
+      if (outcome.kind === "value") {
+        return outcome.value;
+      }
+      if (outcome.kind === "http-error") {
+        const { response, text } = outcome;
+        const shouldRetry =
+          safeGet &&
+          isRetryableGetResponse(response, this.nowImpl()) &&
+          this.nowImpl() < retryDeadline;
+        if (shouldRetry) {
+          const retryAfterMs = getRetryAfterMs(response, this.nowImpl());
+          if (
+            await this.waitBeforeRetry(
+              retryDeadline,
+              attempt,
+              retryAfterMs,
+            )
+          ) {
+            attempt += 1;
+            continue;
+          }
+        }
+        throw new GitHubApiError(
+          `GitHub ${method} ${path} failed with HTTP ${response.status}${describeResponseBody(text)}`,
+          response.status,
+          path,
+        );
+      }
+      throw new Error("GitHub request returned an unknown response outcome");
+    }
   }
 
   getRef(repository, ref) {
@@ -152,7 +391,7 @@ export class GitHubClient {
     return this.request(`/repos/${repository}/pulls/${number}`);
   }
 
-  listWorkflowRuns(repository, workflow, branch) {
+  listWorkflowRuns(repository, workflow, branch, options = {}) {
     const workflowIdentifier = workflow.split("/").at(-1);
     return this.request(
       `/repos/${repository}/actions/workflows/${encodeURIComponent(
@@ -160,11 +399,12 @@ export class GitHubClient {
       )}/runs?event=pull_request&branch=${encodeURIComponent(
         branch,
       )}&per_page=100`,
+      options,
     );
   }
 
-  getWorkflowRun(repository, runId) {
-    return this.request(`/repos/${repository}/actions/runs/${runId}`);
+  getWorkflowRun(repository, runId, options = {}) {
+    return this.request(`/repos/${repository}/actions/runs/${runId}`, options);
   }
 
   listJobs(repository, runId) {
@@ -197,6 +437,10 @@ export function parseArgs(argv) {
       options.dryRun = true;
       continue;
     }
+    if (argument === "--overwrite") {
+      options.overwrite = true;
+      continue;
+    }
     const optionValues = {
       "--repo": "repository",
       "--base": "baseBranch",
@@ -204,6 +448,9 @@ export function parseArgs(argv) {
       "--workflow": "workflow",
       "--branch": "branch",
       "--output": "output",
+      "--record-output": "recordOutput",
+      "--record-dir": "recordDir",
+      "--record-format": "recordFormat",
     };
     const optionName = optionValues[argument];
     if (optionName) {
@@ -211,6 +458,9 @@ export function parseArgs(argv) {
         throw new Error(`${argument} requires a value`);
       }
       options[optionName] = next;
+      if (optionName === "recordFormat") {
+        options.recordFormatExplicit = true;
+      }
       index += 1;
       continue;
     }
@@ -228,6 +478,148 @@ export function parseArgs(argv) {
   }
 
   return { options, showHelp };
+}
+
+function formatRecordTimestamp(value) {
+  return value
+    .toISOString()
+    .replace(/[-:]/g, "")
+    .replace(/\.\d{3}Z$/, "Z");
+}
+
+function validateRecordFormat(format) {
+  if (format !== "markdown" && format !== "json") {
+    throw new Error(`record format must be "markdown" or "json"`);
+  }
+  return format;
+}
+
+function recordFormatForPath(path, requestedFormat) {
+  if (requestedFormat) {
+    return validateRecordFormat(requestedFormat);
+  }
+  return extname(path).toLowerCase() === ".json" ? "json" : "markdown";
+}
+
+function markdownLink(label, url) {
+  return url ? `[${label}](${url})` : label;
+}
+
+export function formatMarkdownEvidence(result) {
+  const lines = [
+    "# API generated-client pull-request event probe",
+    "",
+    "**Result: PASS — the hosted probe captured four pull-request events and confirmed cleanup.**",
+    "",
+    "This record contains reviewable GitHub metadata only. It does not include the",
+    "temporary pull-request description or its declaration values.",
+    "",
+    "## Metadata",
+    "",
+    "| Field | Value |",
+    "| --- | --- |",
+    `| Checked at (UTC) | ${result.checkedAt ?? "Not recorded"} |`,
+    `| Repository | \`${result.repository}\` |`,
+    `| Probe branch | \`${result.branch}\` |`,
+    `| Probe pull request | ${markdownLink(`#${result.pullRequest.number}`, result.pullRequest.url)} (closed unmerged) |`,
+    "",
+    "## Acceptance result",
+    "",
+    "| Event | Workflow run | Check-generated job | Failed step | Compatibility |",
+    "| --- | --- | --- | --- | --- |",
+  ];
+
+  for (const event of result.events ?? []) {
+    lines.push(
+      `| ${event.event} | ${markdownLink(`#${event.workflowRun.id}`, event.workflowRun.url)} | ${markdownLink(`${event.job.name} (#${event.job.id})`, event.job.url)} | \`${event.step.name}\`: **${event.step.conclusion}** | \`${event.compatibility.name}\`: **${event.compatibility.conclusion}** |`,
+    );
+  }
+
+  lines.push(
+    "",
+    "## Cleanup",
+    "",
+    `- Pull request closed without merging: **${result.cleanup?.pullRequestClosed === true ? "confirmed" : "not confirmed"}**.`,
+    `- Temporary branch deleted: **${result.cleanup?.branchDeleted === true ? "confirmed" : "not confirmed"}**.`,
+    `- Cleanup failures: **${result.cleanup?.failures?.length ? result.cleanup.failures.join("; ") : "none"}**.`,
+    "",
+  );
+  return lines.join("\n");
+}
+
+export function serializeEvidenceRecord(result, format) {
+  const validatedFormat = validateRecordFormat(format);
+  return validatedFormat === "json"
+    ? `${JSON.stringify(result, null, 2)}\n`
+    : `${formatMarkdownEvidence(result)}\n`;
+}
+
+function writeSafely(path, content, overwrite) {
+  mkdirSync(dirname(path), { recursive: true });
+  if (!overwrite) {
+    try {
+      writeFileSync(path, content, {
+        encoding: "utf8",
+        mode: 0o600,
+        flag: "wx",
+      });
+    } catch (error) {
+      if (error.code === "EEXIST") {
+        throw new Error(
+          `refusing to overwrite existing evidence record ${path}; pass --overwrite to replace it`,
+        );
+      }
+      throw error;
+    }
+    return;
+  }
+
+  const temporaryPath = `${path}.tmp-${process.pid}-${Date.now()}`;
+  try {
+    writeFileSync(temporaryPath, content, {
+      encoding: "utf8",
+      mode: 0o600,
+      flag: "wx",
+    });
+    renameSync(temporaryPath, path);
+  } catch (error) {
+    try {
+      // Best effort cleanup; preserve the original error.
+      unlinkSync(temporaryPath);
+    } catch {
+      // The temporary file was either never created or was already removed.
+    }
+    throw error;
+  }
+}
+
+export function writeEvidenceRecord(path, result, format, overwrite = false) {
+  const outputPath = resolve(path);
+  writeSafely(
+    outputPath,
+    serializeEvidenceRecord(result, format),
+    overwrite,
+  );
+  return outputPath;
+}
+
+export function resolveRecordOutput(options, checkedAt) {
+  if (options.recordOutput && options.recordDir) {
+    throw new Error("--record-output and --record-dir cannot be used together");
+  }
+  if (options.recordOutput) {
+    return resolve(options.recordOutput);
+  }
+  if (options.recordDir) {
+    const format = validateRecordFormat(options.recordFormat);
+    return resolve(
+      join(
+        options.recordDir,
+        `api-codegen-event-probe-${formatRecordTimestamp(checkedAt)}.${format === "json" ? "json" : "md"}`,
+      ),
+    );
+  }
+  return undefined;
 }
 
 export function buildStaleGeneratedContent(content, marker) {
@@ -263,7 +655,7 @@ export function findMatchingWorkflowRun(
     )[0];
 }
 
-export function getRequiredFailure(run, jobs) {
+function getGeneratedClientJob(run, jobs) {
   const job = (jobs?.jobs ?? []).find(
     (candidate) => candidate.name === "Check generated API clients",
   );
@@ -272,6 +664,11 @@ export function getRequiredFailure(run, jobs) {
       `workflow run ${run.id} did not contain the "Check generated API clients" job`,
     );
   }
+  return job;
+}
+
+export function getRequiredFailure(run, jobs) {
+  const job = getGeneratedClientJob(run, jobs);
   const step = (job.steps ?? []).find(
     (candidate) => candidate.name === "Verify generated API clients",
   );
@@ -299,17 +696,39 @@ export function getRequiredFailure(run, jobs) {
   };
 }
 
-function workflowRunEvidence(event, run, requiredFailure) {
+function getCompatibilityResult(run, jobsResponse, expectedConclusion) {
+  const job = getGeneratedClientJob(run, jobsResponse);
+  const step = job.steps?.find(
+    (candidate) => candidate.name === "Check API contract compatibility",
+  );
+  if (!step || step.conclusion !== expectedConclusion) {
+    throw new Error(
+      `workflow run ${run.id} did not report API compatibility as ${expectedConclusion}`,
+    );
+  }
+  return {
+    name: step.name,
+    conclusion: step.conclusion,
+  };
+}
+
+function workflowRunEvidence(event, run, jobsResponse, compatibilityConclusion) {
   return {
     event,
     workflowRun: {
       id: run.id,
       url: run.html_url,
       event: run.event,
+      headSha: run.head_sha,
       status: run.status,
       conclusion: run.conclusion,
     },
-    ...requiredFailure,
+    ...getRequiredFailure(run, jobsResponse),
+    compatibility: getCompatibilityResult(
+      run,
+      jobsResponse,
+      compatibilityConclusion,
+    ),
   };
 }
 
@@ -338,6 +757,7 @@ async function waitForWorkflowRun(
       repository,
       workflow,
       branch,
+      { deadlineAt: deadline },
     );
     candidate = findMatchingWorkflowRun(response.workflow_runs, {
       branch,
@@ -347,7 +767,9 @@ async function waitForWorkflowRun(
       excludedRunIds,
     });
     if (candidate) {
-      const current = await client.getWorkflowRun(repository, candidate.id);
+      const current = await client.getWorkflowRun(repository, candidate.id, {
+        deadlineAt: deadline,
+      });
       if (current.status === "completed") {
         return current;
       }
@@ -376,18 +798,64 @@ function makeInitialBody(branch, marker) {
 }
 
 function makeEditedBody(initialBody, marker) {
-  return `${initialBody}\n\nEdited-event marker: ${marker}`;
+  return [
+    initialBody,
+    "",
+    `Edited-event marker: ${marker}`,
+    "API_BREAKING_CHANGE_JUSTIFICATION: Hosted description-edit compatibility probe.",
+    "API_BREAKING_CHANGE_MIGRATION_PLAN: Restore the temporary operation identifier after the hosted probe.",
+  ].join("\n");
 }
 
-async function createStaleCommit(
+export function buildBreakingCompatibilityContent(content) {
+  const document = YAML.parseDocument(content);
+  if (document.errors.length > 0) {
+    throw new Error(
+      `invalid compatibility fixture YAML: ${document.errors[0].message}`,
+    );
+  }
+  const operationIdNode = document.getIn(
+    ["paths", "/rooms", "post", "operationId"],
+    true,
+  );
+  if (operationIdNode?.value !== "createRoom") {
+    throw new Error(
+      "expected compatibility fixture operationId: createRoom in the /rooms POST operation",
+    );
+  }
+  document.setIn(
+    ["paths", "/rooms", "post", "operationId"],
+    "createRoomHostedProbe",
+  );
+  return document.toString();
+}
+
+async function createProbeCommit(
   client,
-  { repository, parentSha, generatedFile, content, marker },
+  {
+    repository,
+    parentSha,
+    generatedFile,
+    generatedContent,
+    compatibilityFile,
+    compatibilityContent,
+    marker,
+  },
 ) {
   const parentCommit = await client.getCommit(repository, parentSha);
-  const staleContent = buildStaleGeneratedContent(content, marker);
-  const blob = await client.createBlob(
+  const generatedBlob = await client.createBlob(
     repository,
-    Buffer.from(staleContent, "utf8").toString("base64"),
+    Buffer.from(
+      buildStaleGeneratedContent(generatedContent, marker),
+      "utf8",
+    ).toString("base64"),
+  );
+  const compatibilityBlob = await client.createBlob(
+    repository,
+    Buffer.from(
+      buildBreakingCompatibilityContent(compatibilityContent),
+      "utf8",
+    ).toString("base64"),
   );
   const tree = await client.createTree(
     repository,
@@ -396,7 +864,13 @@ async function createStaleCommit(
         path: generatedFile,
         mode: "100644",
         type: "blob",
-        sha: blob.sha,
+        sha: generatedBlob.sha,
+      },
+      {
+        path: compatibilityFile,
+        mode: "100644",
+        type: "blob",
+        sha: compatibilityBlob.sha,
       },
     ],
     parentCommit.tree.sha,
@@ -465,9 +939,12 @@ async function cleanupProbe(client, repository, { branch, pullRequestNumber }) {
 
 export async function runProbe(client, options, dependencies = {}) {
   const now = dependencies.now ?? (() => new Date());
+  const checkedAt = now().toISOString();
   const repository = repositoryFromOptions(options);
   const baseBranch = options.baseBranch ?? DEFAULTS.baseBranch;
   const generatedFile = options.generatedFile ?? DEFAULTS.generatedFile;
+  const compatibilityFile =
+    options.compatibilityFile ?? DEFAULTS.compatibilityFile;
   const workflow = options.workflow ?? DEFAULTS.workflow;
   const branch = options.branch ?? makeBranchName();
   const marker = `${branch}-${now().toISOString()}`;
@@ -490,23 +967,45 @@ export async function runProbe(client, options, dependencies = {}) {
 
     const baseRef = await client.getRef(repository, `heads/${baseBranch}`);
     const baseSha = baseRef.object.sha;
-    const source = await client.getContent(
+    const generatedSource = await client.getContent(
       repository,
       generatedFile,
       baseBranch,
     );
-    if (Array.isArray(source) || source.encoding !== "base64") {
+    const compatibilitySource = await client.getContent(
+      repository,
+      compatibilityFile,
+      baseBranch,
+    );
+    if (
+      Array.isArray(generatedSource) ||
+      generatedSource.encoding !== "base64"
+    ) {
       throw new Error(`expected ${generatedFile} to be a base64 file response`);
     }
-    const content = Buffer.from(
-      source.content.replace(/\s/g, ""),
+    if (
+      Array.isArray(compatibilitySource) ||
+      compatibilitySource.encoding !== "base64"
+    ) {
+      throw new Error(
+        `expected ${compatibilityFile} to be a base64 file response`,
+      );
+    }
+    const generatedContent = Buffer.from(
+      generatedSource.content.replace(/\s/g, ""),
       "base64",
     ).toString("utf8");
-    const initialCommit = await createStaleCommit(client, {
+    const compatibilityContent = Buffer.from(
+      compatibilitySource.content.replace(/\s/g, ""),
+      "base64",
+    ).toString("utf8");
+    const initialCommit = await createProbeCommit(client, {
       repository,
       parentSha: baseSha,
       generatedFile,
-      content,
+      generatedContent,
+      compatibilityFile,
+      compatibilityContent,
       marker: `${marker}-opened`,
     });
     await client.createRef(repository, branch, initialCommit.sha);
@@ -531,23 +1030,19 @@ export async function runProbe(client, options, dependencies = {}) {
       timeoutMs: options.timeoutSeconds * 1000,
       pollMs: options.pollSeconds * 1000,
     });
+    const openedJobs = await client.listJobs(repository, openedRun.id);
     const events = [
-      workflowRunEvidence(
-        "opened",
-        openedRun,
-        getRequiredFailure(
-          openedRun,
-          await client.listJobs(repository, openedRun.id),
-        ),
-      ),
+      workflowRunEvidence("opened", openedRun, openedJobs, "failure"),
     ];
 
     const synchronizeAt = now().toISOString();
-    const synchronizeCommit = await createStaleCommit(client, {
+    const synchronizeCommit = await createProbeCommit(client, {
       repository,
       parentSha: initialCommit.sha,
       generatedFile,
-      content,
+      generatedContent,
+      compatibilityFile,
+      compatibilityContent,
       marker: `${marker}-synchronize`,
     });
     await client.updateRef(repository, branch, synchronizeCommit.sha);
@@ -562,14 +1057,16 @@ export async function runProbe(client, options, dependencies = {}) {
       timeoutMs: options.timeoutSeconds * 1000,
       pollMs: options.pollSeconds * 1000,
     });
+    const synchronizeJobs = await client.listJobs(
+      repository,
+      synchronizeRun.id,
+    );
     events.push(
       workflowRunEvidence(
         "synchronize",
         synchronizeRun,
-        getRequiredFailure(
-          synchronizeRun,
-          await client.listJobs(repository, synchronizeRun.id),
-        ),
+        synchronizeJobs,
+        "failure",
       ),
     );
 
@@ -591,15 +1088,9 @@ export async function runProbe(client, options, dependencies = {}) {
       timeoutMs: options.timeoutSeconds * 1000,
       pollMs: options.pollSeconds * 1000,
     });
+    const reopenedJobs = await client.listJobs(repository, reopenedRun.id);
     events.push(
-      workflowRunEvidence(
-        "reopened",
-        reopenedRun,
-        getRequiredFailure(
-          reopenedRun,
-          await client.listJobs(repository, reopenedRun.id),
-        ),
-      ),
+      workflowRunEvidence("reopened", reopenedRun, reopenedJobs, "failure"),
     );
 
     const editedAt = now().toISOString();
@@ -617,17 +1108,12 @@ export async function runProbe(client, options, dependencies = {}) {
       timeoutMs: options.timeoutSeconds * 1000,
       pollMs: options.pollSeconds * 1000,
     });
+    const editedJobs = await client.listJobs(repository, editedRun.id);
     events.push(
-      workflowRunEvidence(
-        "edited",
-        editedRun,
-        getRequiredFailure(
-          editedRun,
-          await client.listJobs(repository, editedRun.id),
-        ),
-      ),
+      workflowRunEvidence("edited", editedRun, editedJobs, "success"),
     );
     result = {
+      checkedAt,
       repository,
       branch,
       pullRequest: {
@@ -694,7 +1180,11 @@ Options:
   --branch NAME                 Temporary branch name
   --poll-seconds N              Poll interval (default: 10)
   --timeout-seconds N           Timeout for each hosted run (default: 900)
-  --output PATH                 Write the successful JSON record to this file
+  --output PATH                 Write the successful JSON result to this file
+  --record-output PATH          Write a reviewable Markdown or JSON evidence record
+  --record-dir DIR              Write a UTC-dated evidence record inside DIR
+  --record-format FORMAT        markdown or json (default: markdown for --record-dir)
+  --overwrite                   Allow replacing an existing output or evidence record
   --dry-run                     Print the plan without calling GitHub
   --help                        Show this help
 `;
@@ -716,7 +1206,12 @@ async function main() {
           branch,
           baseBranch: options.baseBranch,
           generatedFile: options.generatedFile,
+          compatibilityFile: options.compatibilityFile,
           workflow: options.workflow,
+          recordOutput: options.recordOutput,
+          recordDir: options.recordDir,
+          recordFormat: options.recordFormat,
+          overwrite: options.overwrite === true,
           cleanup: "close pull request and confirm branch deletion",
         },
         null,
@@ -737,9 +1232,21 @@ async function main() {
   const result = await runProbe(client, { ...options, repository, branch });
   const serialized = `${JSON.stringify(result, null, 2)}\n`;
   if (options.output) {
-    const outputPath = resolve(options.output);
-    mkdirSync(dirname(outputPath), { recursive: true });
-    writeFileSync(outputPath, serialized, { encoding: "utf8", mode: 0o600 });
+    writeSafely(resolve(options.output), serialized, options.overwrite === true);
+  }
+  const recordPath = resolveRecordOutput(options, new Date(result.checkedAt));
+  if (recordPath) {
+    const recordFormat = recordFormatForPath(
+      recordPath,
+      options.recordFormatExplicit ? options.recordFormat : undefined,
+    );
+    writeEvidenceRecord(
+      recordPath,
+      result,
+      recordFormat,
+      options.overwrite === true,
+    );
+    console.error(`Wrote API codegen event evidence record: ${recordPath}`);
   }
   console.log(serialized);
 }

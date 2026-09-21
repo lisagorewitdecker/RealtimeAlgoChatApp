@@ -7,6 +7,7 @@ WORKSPACE_ROOT="$(cd -- "$SCRIPT_DIR/../.." && pwd)"
 PREFLIGHT="$WORKSPACE_ROOT/scripts/check-android-release-prerequisites.sh"
 PINS="$WORKSPACE_ROOT/scripts/android-runner-pins.sh"
 PROVISION="$WORKSPACE_ROOT/scripts/provision-android-runner.sh"
+WORKFLOW="$WORKSPACE_ROOT/.github/workflows/mobile-release.yml"
 PROCEDURE="$WORKSPACE_ROOT/artifacts/chat-app/docs/native-large-text-device-check.md"
 BASH_BIN="$(command -v bash)"
 ENV_BIN="$(command -v env)"
@@ -15,7 +16,12 @@ LN_BIN="$(command -v ln)"
 MKTEMP_BIN="$(command -v mktemp)"
 RM_BIN="$(command -v rm)"
 GREP_BIN="$(command -v grep)"
+CP_BIN="$(command -v cp)"
+SED_BIN="$(command -v sed)"
+SHA256SUM_BIN="$(command -v sha256sum)"
+TAR_BIN="$(command -v tar)"
 
+# shellcheck source=scripts/android-runner-pins.sh
 source "$PINS"
 
 fail() {
@@ -29,6 +35,13 @@ fail() {
   fail "Android runner SHA-256 pin is not a 64-character lowercase digest."
 [[ "$ANDROID_BUILD_TOOLS_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] ||
   fail "Android build-tools version pin is not a semantic version."
+child_environment="$(bash -lc 'source "$1"; env' -- "$PINS")"
+grep -Fqx -- "ANDROID_RUNNER_VERSION=$ANDROID_RUNNER_VERSION" <<<"$child_environment" ||
+  fail "Android runner version pin is not exported to child shell environments."
+grep -Fqx -- "ANDROID_RUNNER_SHA256=$ANDROID_RUNNER_SHA256" <<<"$child_environment" ||
+  fail "Android runner SHA-256 pin is not exported to child shell environments."
+grep -Fqx -- "ANDROID_BUILD_TOOLS_VERSION=$ANDROID_BUILD_TOOLS_VERSION" <<<"$child_environment" ||
+  fail "Android build-tools pin is not exported to child shell environments."
 
 grep -Fq -- 'source "$SCRIPT_DIR/android-runner-pins.sh"' "$PROVISION" ||
   fail "Android runner bootstrap does not source the shared pin contract."
@@ -42,6 +55,23 @@ grep -Fq -- \
   '"$SDK_ROOT/build-tools/$ANDROID_BUILD_TOOLS_VERSION/aapt2"' \
   "$PREFLIGHT" ||
   fail "Android release preflight does not check the pinned build-tools path."
+
+android_branding_step="$(
+  sed -n \
+    '/^      - name: Inspect installed Android native branding/,/^      - name:/p' \
+    "$WORKFLOW"
+)"
+grep -Fq -- 'source scripts/android-runner-pins.sh' <<<"$android_branding_step" ||
+  fail "Android release branding inspection does not source the shared pin contract."
+grep -Fq -- \
+  'aapt2_path="$sdk_root/build-tools/$ANDROID_BUILD_TOOLS_VERSION/aapt2"' \
+  <<<"$android_branding_step" ||
+  fail "Android release branding inspection does not select the pinned build-tools path."
+if grep -Eq \
+  'command -v aapt2|find "\$sdk_root/build-tools"|sort -V|tail -n 1' \
+  <<<"$android_branding_step"; then
+  fail "Android release branding inspection falls back to an unpinned build-tools directory."
+fi
 
 runner_procedure="$(
   sed -n \
@@ -96,6 +126,14 @@ make_utilities() {
   if [[ "$include_timeout" == "yes" ]]; then
     "$LN_BIN" -s "$(command -v timeout)" "$directory/timeout"
   fi
+}
+
+make_runner_archive_utilities() {
+  local directory="$1"
+  "$MKDIR_BIN" -p "$directory"
+  for command in curl dirname gzip mkdir mktemp rm sha256sum tar uname; do
+    "$LN_BIN" -s "$(command -v "$command")" "$directory/$command"
+  done
 }
 
 make_runner_commands() {
@@ -334,6 +372,83 @@ assert_contains "$missing_output" "Required command is missing: sdkmanager"
 assert_contains "$missing_output" "Required Android SDK tool is missing: aapt2."
 assert_contains "$missing_output" "Required release value is missing: NATIVE_SMOKE_APP_ID"
 assert_not_contains "$missing_output" "secret-value-must-not-print"
+
+# Use the real Linux download, SHA-256, and tar commands against a local
+# disposable archive. The copied pin contract keeps this test offline while
+# still exercising the production provisioning script and its exact pin lookup.
+runner_archive_payload="$test_root/runner-archive-payload"
+"$MKDIR_BIN" -p "$runner_archive_payload"
+printf 'runner fixture\n' >"$runner_archive_payload/runner-marker"
+runner_archive="$test_root/actions-runner-linux-x64-${ANDROID_RUNNER_VERSION}.tar.gz"
+"$TAR_BIN" --create --gzip --file "$runner_archive" \
+  -C "$runner_archive_payload" runner-marker
+runner_archive_sha256="$("$SHA256SUM_BIN" "$runner_archive" | sed 's/ .*//')"
+
+runner_fixture_scripts="$test_root/runner-fixture-scripts"
+"$MKDIR_BIN" -p "$runner_fixture_scripts"
+"$CP_BIN" "$PINS" "$runner_fixture_scripts/android-runner-pins.sh"
+"$CP_BIN" "$PROVISION" "$runner_fixture_scripts/provision-android-runner.sh"
+"$SED_BIN" \
+  -i "s/^ANDROID_RUNNER_SHA256=.*/ANDROID_RUNNER_SHA256=\"$runner_archive_sha256\"/" \
+  "$runner_fixture_scripts/android-runner-pins.sh"
+runner_fixture_utilities="$test_root/runner-fixture-utilities"
+make_runner_archive_utilities "$runner_fixture_utilities"
+runner_fixture_path="$runner_fixture_utilities"
+
+run_runner_archive_case() {
+  local name="$1"
+  local expected_status="$2"
+  local fixture_scripts="$3"
+  local runner_root="$4"
+  local output status
+  if output="$("$ENV_BIN" -i \
+    PATH="$runner_fixture_path" \
+    HOME="$test_root/runner-home" \
+    ANDROID_RUNNER_ROOT="$runner_root" \
+    ANDROID_RUNNER_ARCHIVE_URL="file://$runner_archive" \
+    RUNNER_CREDENTIAL_SENTINEL=runner-credential-must-not-print \
+    "$BASH_BIN" "$fixture_scripts/provision-android-runner.sh" --install-runner 2>&1
+  )"; then
+    status=0
+  else
+    status=$?
+  fi
+  if [[ "$status" -ne "$expected_status" ]]; then
+    printf '%s: expected exit %s, got %s\n%s\n' \
+      "$name" "$expected_status" "$status" "$output" >&2
+    exit 1
+  fi
+  printf '%s: PASS\n' "$name"
+  printf '%s\n' "$output"
+}
+
+runner_match_root="$test_root/runner-match"
+runner_match_output="$(
+  run_runner_archive_case runner-archive-match 0 \
+    "$runner_fixture_scripts" "$runner_match_root"
+)"
+assert_contains "$runner_match_output" "Android runner archive installed at"
+assert_not_contains "$runner_match_output" "runner-credential-must-not-print"
+[[ -f "$runner_match_root/runner-marker" ]] ||
+  fail "A matching runner archive was not extracted."
+
+runner_mismatch_scripts="$test_root/runner-mismatch-scripts"
+"$MKDIR_BIN" -p "$runner_mismatch_scripts"
+"$CP_BIN" "$PROVISION" "$runner_mismatch_scripts/provision-android-runner.sh"
+"$CP_BIN" "$PINS" "$runner_mismatch_scripts/android-runner-pins.sh"
+"$SED_BIN" \
+  -i 's/^ANDROID_RUNNER_SHA256=.*/ANDROID_RUNNER_SHA256="0000000000000000000000000000000000000000000000000000000000000000"/' \
+  "$runner_mismatch_scripts/android-runner-pins.sh"
+runner_mismatch_root="$test_root/runner-mismatch"
+runner_mismatch_output="$(
+  run_runner_archive_case runner-archive-mismatch 1 \
+    "$runner_mismatch_scripts" "$runner_mismatch_root"
+)"
+assert_contains "$runner_mismatch_output" \
+  "SHA-256 mismatch for the pinned Android runner archive; nothing was extracted."
+assert_not_contains "$runner_mismatch_output" "runner-credential-must-not-print"
+[[ ! -e "$runner_mismatch_root/runner-marker" ]] ||
+  fail "A mismatched runner archive was extracted."
 
 cleanup_test_fixtures
 trap - EXIT

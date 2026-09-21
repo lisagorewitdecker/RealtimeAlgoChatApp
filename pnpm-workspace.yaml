@@ -75,7 +75,7 @@ catalog:
   react: 19.2.3
   # Must be this exact version because Expo SDK 57 requires it.
   react-dom: 19.2.3
-  tailwind-merge: ^3.6.0
+  tailwind-merge: ^3.7.0
   tailwindcss: ^4.3.3
   tsx: ^4.23.12
   vite: ^7.3.6
@@ -94,8 +94,12 @@ peerDependencyRules:
     "@clerk/shared>react-dom": 19.2.3
 
 packageExtensions:
-  # react-native-worklets dynamically loads this Babel package without declaring it.
-  react-native-worklets@0.10.1:
+  # react-native-worklets dynamically loads this Babel package without declaring
+  # it (0.10.0, the version Expo Go iOS 57.0.5 embeds, does not declare it; see
+  # artifacts/chat-app/expo-go-native-modules.json). A range key keeps the
+  # extension applying across the 0.10.x pins; the root @babel/generator
+  # dependency is the second, independent resolution path.
+  react-native-worklets@0.10.x:
     dependencies:
       '@babel/generator': ^7.29.2
 overrides:

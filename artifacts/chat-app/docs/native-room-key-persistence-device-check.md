@@ -35,11 +35,15 @@ published build is not a substitute.
    ```
 
    This preflight checks the public Expo manifest endpoint through the managed
-   `REPLIT_EXPO_DEV_DOMAIN` with the iOS Expo manifest header and then probes
-   the iOS manifest and bundle locally.
+   `REPLIT_EXPO_DEV_DOMAIN` with the iOS Expo manifest header, probes the iOS
+   manifest and bundle locally, and copies the latest Expo Go launch-evidence
+   probe result (see the probe section below) as the `expoGoLaunch` boundary.
    Copy its four boundary values into the record template below. The public
    result is reachability evidence only; it is not evidence that Expo Go opened
-   on an iPhone.
+   on an iPhone. `expo_go_launch=NOT_RUN` means the probe was never armed and
+   `STALE` means its result predates the current dev server; both pass the
+   preflight but leave the launch row `BLOCKED`, while a current
+   `BUNDLE_ONLY_THEN_CLOSED` fails it.
 3. Do not start the phone session unless
    `public_manifest_reachability=PASS`. A non-200 public manifest response is a
    public-edge failure: repair or restart the managed workflow and rerun the
@@ -100,10 +104,49 @@ published build is not a substitute.
    downloaded the iOS bundle (HTTP 200, ~16 MB), then the inspector connection
    closed with code 1006 about 4 s later with no `iOS LOG`, asset, lazy-bundle,
    or API request, and the simulator showed the iOS home screen. Result:
-   `Expo Go launch` = FAIL (app quits during startup in Expo Go 57 iOS —
-   tracked as a follow-up task), `Server-side native request evidence` = PASS
-   (`platform=ios` bundle request with an Expo Go client, user agent redacted).
-   Physical iPhone and Android rows were not assessed in that session.
+   `Expo Go launch` = FAIL (app quits during startup in Expo Go 57 iOS),
+   `Server-side native request evidence` = PASS (`platform=ios` bundle request
+   with an Expo Go client, user agent redacted). Physical iPhone and Android
+   rows were not assessed in that session.
+
+   Cause (established 2026-09-19 from the served bundle and the Expo Go
+   sources, without a simulator session): Expo Go iOS 57.0.5 was built with
+   `react-native-worklets` 0.10.0 and `react-native-reanimated` 4.5.0, while
+   SDK 57's `bundledNativeModules.json` — and therefore `expo install --check`
+   — asks for 0.10.1 / 4.5.1. Worklets compares only major.minor between its
+   JavaScript and native halves, and 0.10.1 changed the argument list of a JSI
+   binding that runs while the bundle is evaluated
+   (`createSerializableNonWorkletFunction`, three arguments in 0.10.0, two in
+   0.10.1), so the SDK-default JavaScript makes the 0.10.0 native module inside
+   Expo Go read a missing argument: a native crash before
+   `AppRegistry.runApplication`, hence no red box, no `iOS LOG`, no asset or
+   API request, and the inspector close 1006. Expo Go 57.0.6 and later embed
+   0.10.1 / 4.5.1 (expo/expo commit f076696a, 2026-07-27); the mismatch
+   crashes in either direction. The app therefore pins both packages to the
+   versions inside the targeted Expo Go build (`expo-go-native-modules.json`,
+   `targetExpoGoIosVersion` = 57.0.5), `expo.install.exclude` keeps
+   `expo install --check` quiet about that deliberate pin, and
+   `pnpm run validate:preview-runtime` fails when the pins, the exclusion
+   list, and the targeted build stop agreeing. Verified from the workspace on
+   2026-09-19: the iOS bundle served after the pin (HTTP 200, ~15.8 MB)
+   carries worklets 0.10.0 / reanimated 4.5.0 and compiles with Hermes;
+   typecheck and the Jest suites pass on the pinned versions.
+
+   Platform results after the pin: Replit iPhone simulator — NOT YET
+   OBSERVED (the fix was prepared in a task environment with no simulator
+   attached; run the launch-evidence probe below from a workspace with the
+   iPhone simulator open and expect `RUNNING`); physical iPhone — NOT
+   ASSESSED, and note that App Store Expo Go is 57.0.9 (2026-09-19), which
+   embeds the 0.10.1 / 4.5.1 native parts, so a phone on the store build
+   crashes the same way against the pinned JavaScript; Android — NOT ASSESSED
+   (check the Android Expo Go build's embedded versions before a session).
+   Expo Go shows its own version in its Settings tab. To move the app to a
+   different Expo Go build: set `targetExpoGoIosVersion`, change the two pins
+   in `package.json` to that build's row (add the row from
+   `apps/expo-go/ios/Podfile.lock` in the expo/expo repository if it is
+   missing), remove the `expo.install.exclude` entries that no longer differ
+   from the SDK default, run `pnpm install`, and restart the Expo workflow;
+   the validator names every piece that is left behind.
 6. Save `validation-record.md` under
    `test-results/encrypted-room-recovery/ios/<UTC timestamp>/`. Keep all four
    rows below even when one is `FAIL`, `BLOCKED`, or `NOT_ASSESSED`. A public
@@ -117,23 +160,26 @@ published build is not a substitute.
 ### iOS preview handoff record template
 
 Copy this table into the timestamped `validation-record.md` and replace each
-status and evidence note. The first two rows come from the public/local
-preflight; the last two require the physical iPhone session and filtered
-server-side logs.
+status and evidence note. The first three rows come from the preflight JSON:
+the public and local probes it runs itself, and the `expoGoLaunch` boundary it
+copies from the latest launch-evidence probe result (next section). The last
+row requires filtered server-side logs from the physical iPhone session.
 
 | Handoff boundary | Status | Evidence |
 | --- | --- | --- |
 | Public manifest reachability | PASS / FAIL | Preflight `publicManifestReachability` result; status and byte count only |
 | Local handoff probe (manifest and bundle) | PASS / FAIL / NOT_RUN | Preflight `localHandoffProbe` result; no URL or launch payload |
-| Expo Go launch on physical iPhone | PASS / FAIL / BLOCKED | iPhone screen reached the landing screen, or the exact phone error |
+| Expo Go launch on physical iPhone | PASS / FAIL / BLOCKED | Preflight `expoGoLaunch` result: the probe status with `decided_at`, `age`, and counts only. `RUNNING` = PASS; `BUNDLE_ONLY_THEN_CLOSED` = FAIL; `NO_DEVICE`, `NOT_RUN`, or `STALE` = BLOCKED; `INCONCLUSIVE` = investigate, never PASS. Add the phone screen outcome when a device was watched |
 | Server-side native request evidence | PASS / FAIL / BLOCKED | Reference `logs/native-ios-request-evidence.txt`; copy only the filtered `platform=ios; client=Expo Go; user-agent=[redacted]` marker, with no host, URL, account, or message data |
 
 The local handoff probe is a workspace request against Metro. It proves that
 the manifest and bundle can be fetched locally, not that Expo Go launched on a
-phone. The server-side native request row is the separate proof that the
-iPhone made the request. A public-edge `FAIL` means the phone handoff should
-not start; it is not a substitute for, or evidence of, a missing phone
-session.
+phone. The `expoGoLaunch` row is the launch-evidence probe's verdict copied by
+the preflight, so a missing (`NOT_RUN`) or outdated (`STALE`) probe result is
+visible in the record instead of being pasted in by hand. The server-side
+native request row is the separate proof that the iPhone made the request. A
+public-edge `FAIL` means the phone handoff should not start; it is not a
+substitute for, or evidence of, a missing phone session.
 
 ### Expo Go iOS launch-evidence probe
 
@@ -171,12 +217,40 @@ script's `--launch` mode; unarmed, that is a transparent pass-through.
    pnpm --filter @workspace/chat-app run probe:preview-launch -- --report
    ```
 
+4. Run the preview-startup preflight (step 2 of the procedure above). It reads
+   the same result file and writes it as the `expoGoLaunch` boundary of the
+   record JSON and the `expo_go_launch=` console line, so the handoff record
+   gets the launch verdict without copying the summary by hand:
+   - A result decided at or after the latest managed dev server start is
+     copied as its probe status with `decided_at`, `age`, and the counts
+     (`metro_ready`, `expo_go_ios_connections`, `ios_bundle_http_200`,
+     `inspector_close_code`, `bundle_to_close_seconds`, `ios_client_log_lines`,
+     `expo_go_asset_requests`, `ios_lines_before_bundle`, `request_log_lines`,
+     `dev_server_exit`). The `reason=` text and log lines are never copied.
+   - `NOT_RUN` means no result file exists (the probe is opt-in; the preflight
+     still passes). Arm the probe and restart the workflow once.
+   - `STALE` means the result predates the latest managed start of the
+     `artifacts/chat-app: expo` workflow (every managed start is recorded in
+     `.expo/preview-dev-server-start.json`; a result without any start record
+     is also `STALE`). The preflight still passes, but the row must not be
+     recorded as PASS: arm the probe again so the current dev server is
+     classified.
+   - `BUNDLE_ONLY_THEN_CLOSED` from the current start fails the preflight
+     (`Expo Go launch evidence` phase), so a known startup crash blocks the
+     handoff; every other status only shows up in the record.
+   - The preflight starts its own throwaway dev server with
+     `PREVIEW_LAUNCH_PROBE_PASSTHROUGH=1`, which the launcher treats as a
+     pass-through: it does not consume an armed marker or rewrite the start or
+     result records. A corrupt result or start record fails the preflight
+     before Metro starts, naming the file but never echoing its contents.
+
 | `preview_launch_evidence` | Meaning | Handoff row |
 | --- | --- | --- |
 | `NO_DEVICE` | No `app=host.exp.Exponent` inspector connection within the device budget (Android Expo Go, DevTools, browser, and curl traffic do not count). Check the simulator is open on the preview and the manifest is signed in. | `Expo Go launch` = BLOCKED |
 | `BUNDLE_ONLY_THEN_CLOSED` | Expo Go iOS fetched the bundle (HTTP 200, `platform=ios client=Expo Go`), then the inspector connection closed abnormally (any code other than 1000/1001, e.g. 1006) with no `iOS  LOG` line or asset request in between: the app quit during startup. | `Expo Go launch` = FAIL, `Server-side native request evidence` = PASS |
 | `RUNNING` | The connection stayed open through the settle budget after the bundle and at least one iOS client log line or asset request followed, with no error-level client log. | `Expo Go launch` = PASS |
 | `INCONCLUSIVE` | Anything else; `reason=` names what was missing (normal close 1000/1001 = reload, close after app output, no bundle 200 in the window, error-level client logs, or no app output). Do not record a PASS. | Investigate first |
+| `NOT_RUN` / `STALE` (preflight only) | No result file, or a result older than the latest managed dev server start. Not a probe verdict: the current dev server has not been classified. | `Expo Go launch` = BLOCKED until the probe is rerun |
 
 The summary carries only statuses, counts, close codes, and seconds
 (`expo_go_ios_connections`, `ios_bundle_http_200`, `inspector_close_code`,
@@ -194,10 +268,15 @@ startup failure into `RUNNING`.
 If the simulator's app instance survives the restart instead of relaunching,
 the result is `INCONCLUSIVE` with "no iOS Expo Go bundle HTTP 200 was logged";
 arm again and reopen the preview (or reload the app) during the device budget
-so a fresh bundle fetch is observed. Until the Expo Go 57 iOS startup crash
-follow-up lands, the expected result on the Replit iPhone simulator is
-`BUNDLE_ONLY_THEN_CLOSED`, and the probe must keep reporting it (non-zero
-exit) rather than passing.
+so a fresh bundle fetch is observed. With the Expo Go native-module pin in
+place (step 5 above), the expected result on the Replit iPhone simulator is
+`RUNNING`; the 2026-09-17 session produced `BUNDLE_ONLY_THEN_CLOSED` because
+the bundle carried worklets 0.10.1 against Expo Go 57.0.5's 0.10.0 native
+module. A new `BUNDLE_ONLY_THEN_CLOSED` means the JavaScript and the Expo Go
+native parts have diverged again — compare `targetExpoGoIosVersion` in
+`expo-go-native-modules.json` with the Expo Go build in the simulator before
+suspecting the app — and the probe keeps reporting it (non-zero exit) rather
+than passing.
 
 Run the focused checker before committing a timestamped record:
 

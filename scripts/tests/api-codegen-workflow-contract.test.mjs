@@ -3,8 +3,11 @@ import { execFileSync, spawnSync } from "node:child_process";
 import {
   appendFileSync,
   copyFileSync,
+  existsSync,
+  lstatSync,
   mkdtempSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
   rmSync,
   symlinkSync,
@@ -70,11 +73,38 @@ const driftEvidenceStep = steps.find(
 const generatedClientFixturePath = "lib/api-client-react/src/generated/api.ts";
 const pushTrigger = workflow.on?.push;
 const pullRequestTrigger = workflow.on?.pull_request;
+const generatedClientValidationFixturePaths = [
+  "package.json",
+  "pnpm-workspace.yaml",
+  "replit.md",
+  ".gitignore",
+  ".githooks/pre-commit",
+  "tsconfig.base.json",
+  "tsconfig.json",
+  ".github/pull_request_template.md",
+  ".github/workflows/api-codegen.yml",
+  "scripts/run-untrusted-checker.sh",
+  "lib/api-spec",
+  "lib/api-client-react/package.json",
+  "lib/api-client-react/tsconfig.json",
+  "lib/api-client-react/src",
+  "lib/api-zod/package.json",
+  "lib/api-zod/tsconfig.json",
+  "lib/api-zod/src",
+  "lib/db/package.json",
+  "lib/db/tsconfig.json",
+  "lib/db/src",
+  "lib/integrations-anthropic-ai/package.json",
+  "lib/integrations-anthropic-ai/tsconfig.json",
+  "lib/integrations-anthropic-ai/src",
+];
 
 function resolveRootPackageScript(command) {
   const match = String(command)
     .trim()
-    .match(/^pnpm(?:\s+run)?\s+([^\s]+)$/);
+    .match(
+      /^(?:bash\s+scripts\/run-untrusted-checker\.sh\s+)?pnpm(?:\s+run)?\s+([^\s]+)$/,
+    );
   assert.ok(
     match,
     `expected a single root pnpm package script command, received: ${command}`,
@@ -146,6 +176,11 @@ test("API codegen workflow checks out full history for generated-client validati
     checkoutStep.uses,
     "actions/checkout@v4",
     "the API codegen workflow checkout step must use actions/checkout",
+  );
+  assert.equal(
+    checkoutStep.with?.ref,
+    "${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}",
+    "the API codegen workflow checkout must use the submitted pull request head so fork reports describe the revision being reviewed instead of a synthetic merge ref",
   );
   assert.equal(
     checkoutStep.with?.["fetch-depth"],
@@ -243,7 +278,15 @@ function createGeneratedClientFixture() {
   try {
     const files = execFileSync(
       "git",
-      ["ls-files", "--cached", "--others", "--exclude-standard", "-z"],
+      [
+        "ls-files",
+        "--cached",
+        "--others",
+        "--exclude-standard",
+        "-z",
+        "--",
+        ...generatedClientValidationFixturePaths,
+      ],
       {
         cwd: workspaceRoot,
         encoding: "utf8",
@@ -260,21 +303,54 @@ function createGeneratedClientFixture() {
       copyFileSync(source, destination);
     }
 
-    symlinkSync(
-      path.join(workspaceRoot, "node_modules"),
-      path.join(fixtureRoot, "node_modules"),
-      "dir",
-    );
+    const mirrorNodeModules = (relativePath) => {
+      const source = path.join(workspaceRoot, relativePath, "node_modules");
+      if (!existsSync(source)) {
+        return;
+      }
+      const destination = path.join(fixtureRoot, relativePath, "node_modules");
+      mkdirSync(destination, { recursive: true });
+
+      const linkEntry = (sourceEntry, fixtureEntry) => {
+        const sourceStats = lstatSync(sourceEntry);
+        if (path.basename(sourceEntry).startsWith(".pnpm-task-run-state")) {
+          mkdirSync(fixtureEntry, { recursive: true });
+          return;
+        }
+        if (
+          path.basename(sourceEntry).startsWith("@") &&
+          sourceStats.isDirectory()
+        ) {
+          mkdirSync(fixtureEntry, { recursive: true });
+          for (const scopedEntry of readdirSync(sourceEntry)) {
+            linkEntry(
+              path.join(sourceEntry, scopedEntry),
+              path.join(fixtureEntry, scopedEntry),
+            );
+          }
+          return;
+        }
+        symlinkSync(
+          sourceEntry,
+          fixtureEntry,
+          sourceStats.isDirectory() ? "dir" : "file",
+        );
+      };
+
+      for (const entry of readdirSync(source)) {
+        linkEntry(path.join(source, entry), path.join(destination, entry));
+      }
+    };
+
+    mirrorNodeModules("");
     for (const packagePath of [
       "lib/api-client-react",
       "lib/api-spec",
       "lib/api-zod",
+      "lib/db",
+      "lib/integrations-anthropic-ai",
     ]) {
-      symlinkSync(
-        path.join(workspaceRoot, packagePath, "node_modules"),
-        path.join(fixtureRoot, packagePath, "node_modules"),
-        "dir",
-      );
+      mirrorNodeModules(packagePath);
     }
 
     return fixtureRoot;
@@ -285,6 +361,12 @@ function createGeneratedClientFixture() {
 }
 
 function runRootValidation(fixtureRoot) {
+  const childEnv = { ...process.env };
+  // Node's test runner adds NODE_TEST_CONTEXT to descendants. Without
+  // clearing it, nested contract tests emit the runner's binary event stream
+  // instead of their normal output and the fixture never reaches codegen.
+  delete childEnv.NODE_TEST_CONTEXT;
+
   try {
     return {
       status: 0,
@@ -293,6 +375,7 @@ function runRootValidation(fixtureRoot) {
         encoding: "utf8",
         timeout: 240_000,
         stdio: ["ignore", "pipe", "pipe"],
+        env: childEnv,
       }),
     };
   } catch (error) {
@@ -485,6 +568,11 @@ test("generated-client drift evidence is published where reviewers need no log a
     /pull_request\.head\.sha/,
     "the check run must be attached to the pull request head commit reviewers are looking at",
   );
+  assert.equal(
+    driftEvidenceStep.env?.API_CODEGEN_DRIFT_HEAD_SHA,
+    "${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}",
+    "the published evidence must use the same fork-safe submitted revision as checkout, with a push fallback",
+  );
 
   assert.match(
     generatedCheckerSource,
@@ -646,5 +734,10 @@ test("API compatibility workflow command resolves to the maintained contract che
     resolveRootPackageScript(compatibilityStep.run),
     "node lib/api-spec/scripts/check-contract-compatibility.mjs",
     "the compatibility workflow must invoke the repository's maintained contract compatibility checker through the root package script",
+  );
+  assert.equal(
+    compatibilityStep.run,
+    "bash scripts/run-untrusted-checker.sh pnpm validate:api-compatibility",
+    "the compatibility workflow must protect checker output from workflow-command interpretation",
   );
 });

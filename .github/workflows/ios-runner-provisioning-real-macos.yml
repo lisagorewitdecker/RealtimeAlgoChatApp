@@ -1,0 +1,101 @@
+name: iOS runner provisioning real macOS
+
+# scripts/provision-ios-runner.sh is otherwise exercised only on Linux through
+# stubs. A GitHub-hosted Mac has Apple's /bin/bash 3.2, a real Xcode, xcrun,
+# simctl, and launchctl, so this job runs the provisioning harness under that
+# bash and then the script's own --dry-run, which performs the real Xcode and
+# simctl detection, runtime listing, and simulator lookup without registering
+# a runner, reading a registration token, or installing services. Breakage
+# surfaces here instead of on the owner's Mac, where nobody can debug it from
+# the workspace.
+
+on:
+  pull_request:
+    branches: ["main"]
+    paths:
+      - ".github/workflows/ios-runner-provisioning-real-macos.yml"
+      - "scripts/provision-ios-runner.sh"
+      - "scripts/ios-runner-contract.sh"
+      - "scripts/check-ios-runner-dry-run-report.sh"
+      - "scripts/workflow-output-safety.sh"
+      - "scripts/run-untrusted-checker.sh"
+      - "scripts/tests/provision-ios-runner.test.sh"
+      - "scripts/tests/check-ios-runner-dry-run-report.test.sh"
+  push:
+    branches: ["main"]
+    paths:
+      - ".github/workflows/ios-runner-provisioning-real-macos.yml"
+      - "scripts/provision-ios-runner.sh"
+      - "scripts/ios-runner-contract.sh"
+      - "scripts/check-ios-runner-dry-run-report.sh"
+      - "scripts/workflow-output-safety.sh"
+      - "scripts/run-untrusted-checker.sh"
+      - "scripts/tests/provision-ios-runner.test.sh"
+      - "scripts/tests/check-ios-runner-dry-run-report.test.sh"
+  schedule:
+    # Weekly, so a macos-latest image change (a new Xcode that drops the
+    # iPhone SE device type, or a reformatted simctl listing) is noticed
+    # before the owner's next provisioning run.
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-runner-provisioning-real-macos-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  dry-run-on-hosted-mac:
+    name: Dry-run the Mac setup script on a GitHub-hosted Mac
+    runs-on: macos-latest
+    timeout-minutes: 20
+    env:
+      # Apple's stock bash 3.2, not a Homebrew bash that may lead the PATH.
+      PROVISION_TEST_BASH: /bin/bash
+    steps:
+      - name: Check out reviewed revision
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Describe the hosted Mac
+        run: |
+          set -euo pipefail
+          /bin/bash --version | head -n 1
+          sw_vers
+          xcode-select -p
+          xcrun simctl list runtimes available
+          xcrun simctl list devicetypes | grep -F 'iPhone SE' || echo "this Xcode offers no iPhone SE device type"
+
+      - name: Run the provisioning harness under /bin/bash 3.2
+        run: |
+          set -euo pipefail
+          bash scripts/run-untrusted-checker.sh /bin/bash scripts/tests/provision-ios-runner.test.sh
+          bash scripts/run-untrusted-checker.sh /bin/bash scripts/tests/check-ios-runner-dry-run-report.test.sh
+
+      - name: Dry-run the setup script against the real Xcode
+        env:
+          # The hosted runner exports its own RUNNER_NAME; the dry run must
+          # plan the release runner's name against an empty runner root. No
+          # registration token exists in this job and --no-github keeps the
+          # GitHub CLI out of the run.
+          RUNNER_NAME: ios-release-mac
+          RUNNER_ROOT: ${{ runner.temp }}/provision-ios-runner-root
+          DRY_RUN_TRANSCRIPT: ${{ runner.temp }}/provision-ios-runner-dry-run.log
+        run: |
+          set -euo pipefail
+          unset RUNNER_TOKEN
+          bash scripts/run-untrusted-checker.sh /bin/bash -o pipefail -c \
+            '/bin/bash ./scripts/provision-ios-runner.sh --dry-run --no-github </dev/null 2>&1 | tee "$1"' \
+            provision-ios-runner-dry-run "$DRY_RUN_TRANSCRIPT"
+
+      - name: Check the readiness report and quote it in the job summary
+        if: ${{ !cancelled() }}
+        env:
+          DRY_RUN_TRANSCRIPT: ${{ runner.temp }}/provision-ios-runner-dry-run.log
+        run: |
+          set -euo pipefail
+          /bin/bash scripts/check-ios-runner-dry-run-report.sh "$DRY_RUN_TRANSCRIPT" --summary "$GITHUB_STEP_SUMMARY"

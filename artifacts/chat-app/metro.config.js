@@ -30,20 +30,26 @@ if (requestLogEnabled) {
     fs.mkdirSync(path.dirname(evidencePath), { recursive: true });
     fs.writeFileSync(evidencePath, "", "utf8");
     let requestEvidenceFileAvailable = true;
-    appendRequestEvidence = createEvidenceAppender((contents) => {
-      if (!requestEvidenceFileAvailable) return false;
-      try {
-        fs.writeFileSync(evidencePath, contents, "utf8");
-        return true;
-      } catch (error) {
+    appendRequestEvidence = createEvidenceAppender(
+      async (contents) => {
+        if (!requestEvidenceFileAvailable) return false;
+        // External readers poll this file while writes are queued behind it.
+        // Write a sibling temp file and rename it into place so a reader can
+        // never observe the truncate-then-rewrite window as an empty or
+        // partial evidence file.
+        const temporaryPath = `${evidencePath}.tmp`;
+        await fs.promises.writeFile(temporaryPath, contents, "utf8");
+        await fs.promises.rename(temporaryPath, evidencePath);
+      },
+      undefined,
+      (error) => {
         requestEvidenceFileAvailable = false;
         console.warn(
           `[dev-request] Redacted evidence file became unavailable; ` +
             `continuing with console output (${error.code ?? "unknown error"}).`,
         );
-        return false;
-      }
-    });
+      },
+    );
   } catch (error) {
     console.warn(
       `[dev-request] Could not open the redacted evidence file; ` +
@@ -66,7 +72,8 @@ if (requestLogEnabled) {
           const evidence = formatRequestEvidence(req, res, startedAt);
           console.log(evidence);
           if (appendRequestEvidence) {
-            appendRequestEvidence(evidence);
+            // File persistence is deliberately queued and must not delay Metro.
+            void appendRequestEvidence(evidence);
           }
         });
         return wrapped(req, res, next);

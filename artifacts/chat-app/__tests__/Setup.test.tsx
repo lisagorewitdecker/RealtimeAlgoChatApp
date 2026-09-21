@@ -2,6 +2,7 @@ import React from "react";
 import { fireEvent, render } from "@testing-library/react-native";
 import { StyleSheet } from "react-native";
 import SetupScreen from "../app/setup";
+import { withinKeyboardAwareScrollViewCompat } from "../test-utils/keyboardAwareScrollViewCompatMock";
 
 const mockSetUsername = jest.fn();
 const mockReplace = jest.fn();
@@ -27,19 +28,11 @@ jest.mock("react-native-safe-area-context", () => ({
   useSafeAreaInsets: () => ({ top: 20, bottom: 16, left: 0, right: 0 }),
 }));
 
-jest.mock("@/components/KeyboardAwareScrollViewCompat", () => {
-  const RN = require("react-native");
-  const mockReact = require("react");
-  return {
-    KeyboardAwareScrollViewCompat: ({
-      children,
-      ...props
-    }: {
-      children: React.ReactNode;
-      [key: string]: unknown;
-    }) => mockReact.createElement(RN.ScrollView, props, children),
-  };
-});
+// The shared stand-in tags its host element so the suite can prove the form
+// renders inside the compat component, not merely inside some scroll view.
+jest.mock("@/components/KeyboardAwareScrollViewCompat", () =>
+  jest.requireActual("../test-utils/keyboardAwareScrollViewCompatMock"),
+);
 
 jest.mock("@/contexts/AppContext", () => ({
   useApp: () => ({ setUsername: mockSetUsername }),
@@ -73,16 +66,25 @@ describe("setup large-text reachability", () => {
   });
 
   it("keeps the scaled input and submit action in a keyboard-aware scroll view", () => {
-    const { getByPlaceholderText, getByTestId, getByText } = render(<SetupScreen />);
+    const view = render(<SetupScreen />);
 
-    const scroll = getByTestId("setup-scroll");
+    // The scroll element, the input and the submit button are looked up inside
+    // the compat component's host element: a plain ScrollView carrying the
+    // same testID and props would pass the prop expectations while phones
+    // lose keyboard-aware scrolling on this form. This suite runs under the
+    // iOS and Android Jest projects, so both platforms are covered.
+    const form = withinKeyboardAwareScrollViewCompat(view);
+    const scroll = form.getByTestId("setup-scroll");
     expect(scroll.props.keyboardShouldPersistTaps).toBe("handled");
+    expect(scroll.props.keyboardDismissMode).toBe("interactive");
+    expect(scroll.props.bottomOffset).toBe(72);
     expect(StyleSheet.flatten(scroll.props.contentContainerStyle).flexGrow).toBe(1);
-    expect(getByPlaceholderText("How should your team know you?").props.style.fontSize)
+    expect(form.getByPlaceholderText("How should your team know you?").props.style.fontSize)
       .toBeCloseTo(22.4);
-    expect(getByText("Enter workspace").props.style.fontSize).toBeCloseTo(22.4);
+    expect(form.getByTestId("setup-submit-button")).toBeTruthy();
+    expect(form.getByText("Enter workspace").props.style.fontSize).toBeCloseTo(22.4);
 
-    fireEvent.changeText(getByPlaceholderText("How should your team know you?"), "Ada");
-    expect(getByText("Enter workspace")).toBeTruthy();
+    fireEvent.changeText(form.getByPlaceholderText("How should your team know you?"), "Ada");
+    expect(form.getByText("Enter workspace")).toBeTruthy();
   });
 });
