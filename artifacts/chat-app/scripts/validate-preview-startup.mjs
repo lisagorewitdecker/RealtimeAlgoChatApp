@@ -29,6 +29,10 @@ const MAX_STARTUP_LIBRARY_DETAIL_LENGTH = 192;
 const MAX_RECORDED_STARTUP_OUTPUT_LENGTH = 16_384;
 const MAX_RECORDED_STARTUP_LINE_LENGTH = 1_024;
 const STARTUP_DIAGNOSTIC_PREFIX = "Expo preview startup error: ";
+const ANSI_ESCAPE = String.fromCharCode(27);
+const BELL = String.fromCharCode(7);
+const ANSI_PATTERN = new RegExp(`${ANSI_ESCAPE}\\[[0-?]*[ -/]*[@-~]`, "g");
+const TRAILING_BELL_PATTERN = new RegExp(`${BELL}\\s*$`, "g");
 const HANDOFF_FAILURE_PHASES = Object.freeze([
   {
     label: "public manifest",
@@ -189,15 +193,120 @@ function findUnrecognizedLoaderFailure(output) {
   );
 }
 
+function stripAnsiEscapeSequences(value) {
+  const escapeCodePoint = 0x1b;
+  const bellCodePoint = 0x07;
+  let cursor = 0;
+  const characters = [];
+
+  while (cursor < value.length) {
+    const currentCodePoint = value.charCodeAt(cursor);
+    if (currentCodePoint !== escapeCodePoint) {
+      characters.push(value[cursor]);
+      cursor += 1;
+      continue;
+    }
+
+    const nextCodePoint = value.charCodeAt(cursor + 1);
+    if (nextCodePoint === 0x5b) {
+      cursor += 2;
+      while (
+        cursor < value.length &&
+        value.charCodeAt(cursor) >= 0x30 &&
+        value.charCodeAt(cursor) <= 0x3f
+      ) {
+        cursor += 1;
+      }
+      while (
+        cursor < value.length &&
+        value.charCodeAt(cursor) >= 0x20 &&
+        value.charCodeAt(cursor) <= 0x2f
+      ) {
+        cursor += 1;
+      }
+      if (
+        cursor < value.length &&
+        value.charCodeAt(cursor) >= 0x40 &&
+        value.charCodeAt(cursor) <= 0x7e
+      ) {
+        cursor += 1;
+      }
+      continue;
+    }
+
+    if (nextCodePoint === 0x5d) {
+      cursor += 2;
+      while (cursor < value.length) {
+        const codePoint = value.charCodeAt(cursor);
+        if (codePoint === bellCodePoint) {
+          cursor += 1;
+          break;
+        }
+        if (codePoint === 0x9c) {
+          cursor += 1;
+          break;
+        }
+        if (
+          codePoint === escapeCodePoint &&
+          value.charCodeAt(cursor + 1) === 0x5c
+        ) {
+          cursor += 2;
+          break;
+        }
+        if (
+          codePoint === escapeCodePoint &&
+          value.charCodeAt(cursor + 1) === 0x9c
+        ) {
+          cursor += 2;
+          break;
+        }
+        cursor += 1;
+      }
+      continue;
+    }
+
+    cursor += 1;
+    while (cursor < value.length) {
+      const codePoint = value.charCodeAt(cursor);
+      cursor += 1;
+      if (codePoint >= 0x30 && codePoint <= 0x7e) {
+        break;
+      }
+    }
+  }
+
+  return characters.join("");
+}
+
 function sanitizeStartupDiagnostic(value, maxLength) {
-  return value
-    // eslint-disable-next-line no-control-regex
-    .replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, "")
-    // eslint-disable-next-line no-control-regex
-    .replace(/[\u0000-\u001f\u007f]/g, " ")
+  const withoutAnsiSequences = stripAnsiEscapeSequences(value);
+  const characters = [];
+  for (let index = 0; index < withoutAnsiSequences.length; index += 1) {
+    const character = withoutAnsiSequences[index];
+    const codeUnit = withoutAnsiSequences.charCodeAt(index);
+    characters.push(
+      codeUnit <= 0x1f || (codeUnit >= 0x7f && codeUnit <= 0x9f)
+        ? " "
+        : character,
+    );
+  }
+  const withoutControlChars = characters.join("");
+
+  return withoutControlChars
     .replace(/\s+/g, " ")
     .trim()
     .slice(0, maxLength);
+}
+
+function isWhitespaceCodeUnit(codeUnit) {
+  return (
+    codeUnit === 0x09 ||
+    codeUnit === 0x0a ||
+    codeUnit === 0x0b ||
+    codeUnit === 0x0c ||
+    codeUnit === 0x0d ||
+    codeUnit === 0x20
+  );
 }
 
 function redactStartupAuthorization(value) {
@@ -224,11 +333,19 @@ function redactKnownStartupFailureSecrets(value) {
 }
 
 function normalizeLoaderFailureForMatching(value) {
-  return value
-    // eslint-disable-next-line no-control-regex
-    .replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, "")
-    // eslint-disable-next-line no-control-regex
-    .replace(/\u0007\s*$/g, "");
+  const withoutAnsiSequences = stripAnsiEscapeSequences(value);
+  const trailingBell = String.fromCharCode(0x07);
+  let nonWhitespaceEnd = withoutAnsiSequences.length;
+  while (
+    nonWhitespaceEnd > 0 &&
+    isWhitespaceCodeUnit(withoutAnsiSequences.charCodeAt(nonWhitespaceEnd - 1))
+  ) {
+    nonWhitespaceEnd -= 1;
+  }
+  const trimmedSuffix = withoutAnsiSequences.slice(0, nonWhitespaceEnd);
+  return trimmedSuffix.endsWith(trailingBell)
+    ? trimmedSuffix.slice(0, -1)
+    : trimmedSuffix;
 }
 
 function findMissingLibrary(output) {

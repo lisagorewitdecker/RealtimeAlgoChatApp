@@ -115,3 +115,107 @@ jobs:
           oas-url: ${{ vars.ETHICALCHECK_OAS_URL }}
           # The email address to which the penetration test report will be sent.
           email: ${{ secrets.ETHICALCHECK_REPORT_EMAIL }}
+        env:
+          ETHICALCHECK_OAS_URL: ${{ vars.ETHICALCHECK_OAS_URL }}
+          ETHICALCHECK_REPORT_EMAIL: ${{ secrets.ETHICALCHECK_REPORT_EMAIL }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${ETHICALCHECK_OAS_URL}" || -z "${ETHICALCHECK_REPORT_EMAIL}" ]]; then
+            echo "::warning::Skipping EthicalCheck scan because ETHICALCHECK_OAS_URL variable or ETHICALCHECK_REPORT_EMAIL secret is not configured."
+            exit 0
+          fi
+
+          echo "::add-mask::${ETHICALCHECK_REPORT_EMAIL}"
+
+          payload="$(python3 - <<'PY'
+          import json
+          import os
+          print(json.dumps({
+              "openAPISpec": os.environ["ETHICALCHECK_OAS_URL"],
+              "email": os.environ["ETHICALCHECK_REPORT_EMAIL"],
+              "source": "Github-Action",
+          }))
+          PY
+          )"
+
+          response_path="$(mktemp)"
+          trap 'rm -f "$response_path"' EXIT
+
+          http_status="$(
+            curl --silent --show-error --location --request POST 'https://pentest.apisec.ai/api/v1/pentest' \
+              --header 'Content-Type: application/json' \
+              --data-raw "${payload}" \
+              --output "${response_path}" \
+              --write-out '%{http_code}'
+          )"
+
+          if [[ ! "${http_status}" =~ ^2[0-9][0-9]$ ]]; then
+            echo "::error::EthicalCheck request failed with HTTP status ${http_status}."
+            exit 1
+          fi
+
+          python3 - "${response_path}" "${http_status}" <<'PY'
+          import json
+          import pathlib
+          import re
+          import sys
+
+          response_path = pathlib.Path(sys.argv[1])
+          http_status = sys.argv[2]
+          response_body = response_path.read_text(encoding="utf-8").strip()
+
+          if not response_body:
+              raise SystemExit(
+                  f"EthicalCheck returned HTTP {http_status} without a response body that confirms the scan request."
+              )
+
+          try:
+              response = json.loads(response_body)
+          except json.JSONDecodeError as error:
+              raise SystemExit(
+                  f"EthicalCheck returned HTTP {http_status} with a non-JSON response: {error}"
+              ) from error
+
+          success = response.get("success")
+          code = response.get("code")
+          message = response.get("message")
+          status = response.get("status")
+          accepted_pattern = re.compile(
+              r"\b(?:accepted|initiated|queued|started|submitted|success(?:ful(?:ly)?)?)\b",
+              re.IGNORECASE,
+          )
+          negative_pattern = re.compile(
+              r"\b(?:not|no|un|fail(?:ed|ure)?|error|reject(?:ed|ion)?|den(?:y|ied)|invalid)\b",
+              re.IGNORECASE,
+          )
+
+          def confirms_acceptance(value):
+              return (
+                  isinstance(value, str)
+                  and accepted_pattern.search(value)
+                  and not negative_pattern.search(value)
+              )
+
+          def signals_failure(value):
+              return isinstance(value, str) and negative_pattern.search(value)
+
+          if signals_failure(message) or signals_failure(status):
+              raise SystemExit(
+                  "EthicalCheck response reported a failure in its message or status fields."
+              )
+
+          if success is True:
+              raise SystemExit(0)
+          if isinstance(code, int) and 200 <= code < 300:
+              raise SystemExit(0)
+          if confirms_acceptance(message):
+              raise SystemExit(0)
+          if isinstance(status, int) and 200 <= status < 300:
+              raise SystemExit(0)
+          if confirms_acceptance(status):
+              raise SystemExit(0)
+
+          raise SystemExit(
+              "EthicalCheck response did not confirm scan acceptance via success, code, message, or status fields."
+          )
+          PY
