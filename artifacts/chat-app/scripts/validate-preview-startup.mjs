@@ -1373,12 +1373,19 @@ export async function requestPublicPreviewManifest(
   return { outcome, signedInDeveloper };
 }
 
+class InvalidLaunchAssetUrlError extends Error {
+  constructor() {
+    super("Expo Go manifest launch asset URL is invalid.");
+    this.name = "InvalidLaunchAssetUrlError";
+  }
+}
+
 function localBundleUrl(port, launchAssetUrl) {
   let parsedUrl;
   try {
     parsedUrl = new URL(launchAssetUrl);
   } catch {
-    throw new Error("Expo Go manifest launch asset URL is invalid.");
+    throw new InvalidLaunchAssetUrlError();
   }
 
   return `http://127.0.0.1:${port}${parsedUrl.pathname}${parsedUrl.search}`;
@@ -1536,6 +1543,7 @@ export async function requestLocalHandoffProbe(
           publicPreviewRecoveryMessage(),
         ].join(" "),
       );
+      if (error instanceof InvalidLaunchAssetUrlError) break;
       const remainingMs = deadline - Date.now();
       if (remainingMs <= 0) break;
       if (remainingMs <= LOCAL_HANDOFF_RETRY_PAUSE_MS) {

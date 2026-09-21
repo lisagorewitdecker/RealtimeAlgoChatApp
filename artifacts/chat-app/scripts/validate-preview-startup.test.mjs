@@ -899,6 +899,39 @@ test("local handoff probe keeps missing launch assets in the Expo Go handoff fai
   });
 });
 
+test("local handoff probe rejects malformed launch asset URLs before retrying", async () => {
+  const malformedLaunchAssetUrl = "not-a-url/private-fixture-sentinel";
+  const unrelatedFixtureData = "unrelated-fixture-sentinel";
+
+  await withLocalManifestServer(
+    {
+      extra: { unrelatedFixtureData },
+      launchAsset: { url: malformedLaunchAssetUrl },
+    },
+    async (port, _observedPlatforms, observedRequests) => {
+      await assert.rejects(
+        requestLocalHandoffProbe(port, 1_000, "ios"),
+        (error) => {
+          assert.match(
+            error.message,
+            /Local Expo Go manifest\/bundle probe failed:/,
+          );
+          assert.match(error.message, /manifest HTTP 200/);
+          assert.match(error.message, /bundle request did not complete/);
+          assert.match(error.message, /launch asset URL is invalid/);
+          assert.doesNotMatch(error.message, /Expo preview startup error:/);
+          assert.doesNotMatch(error.message, /private-fixture-sentinel/);
+          return true;
+        },
+      );
+      assert.deepEqual(
+        observedRequests.map(({ path }) => path),
+        ["/"],
+      );
+    },
+  );
+});
+
 test("local handoff probe keeps invalid manifest JSON in the Expo Go handoff failure", async () => {
   await withLocalManifestServer(
     undefined,
