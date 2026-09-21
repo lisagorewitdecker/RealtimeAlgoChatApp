@@ -1181,6 +1181,89 @@ assert_contains "$parser_error_junit_output" \
 assert_not_contains "$parser_error_junit_output" "$parser_error_maestro_marker"
 assert_not_contains "$parser_error_junit_output" "$parser_error_sentry_maestro_marker"
 
+# A JUnit upload that stops partway through is not well-formed XML. Both result
+# paths report the structural reason only; the partial report's own text never
+# reaches the log or the summary.
+truncated_junit_root="$TEST_ROOT/truncated-junit"
+write_valid_run "$truncated_junit_root" ios
+write_valid_run "$truncated_junit_root" android
+truncated_maestro_marker='truncated-maestro-marker-private'
+truncated_sentry_maestro_marker='truncated-sentry-maestro-marker-private'
+{
+  printf '<?xml version="1.0" encoding="UTF-8"?>\n'
+  printf '<testsuites name="maestro" tests="1" failures="1">\n'
+  printf '  <testsuite name="native-large-text" tests="1" failures="1">\n'
+  printf '    <testcase name="%s">\n' "$truncated_maestro_marker"
+} > "$truncated_junit_root/ios/20260909T120000Z/maestro-results.xml"
+{
+  printf '<testsuite tests="1" failures="1">\n'
+  printf '  <failure message="%s">\n' "$truncated_sentry_maestro_marker"
+} > "$truncated_junit_root/android/20260909T120000Z/sentry-maestro-results.xml"
+if truncated_junit_output="$(bash "$CHECKER" "$truncated_junit_root" 2>&1)"; then
+  echo "truncated JUnit evidence case unexpectedly passed" >&2
+  exit 1
+fi
+assert_contains "$truncated_junit_output" \
+  "The JUnit result at $truncated_junit_root/ios/20260909T120000Z/maestro-results.xml is not well-formed XML. Upload the complete Maestro JUnit output."
+assert_contains "$truncated_junit_output" \
+  "The controlled Sentry probe JUnit result at $truncated_junit_root/android/20260909T120000Z/sentry-maestro-results.xml is not well-formed XML."
+assert_not_contains_private_fixture "$truncated_junit_output" \
+  "$truncated_maestro_marker" "truncated JUnit diagnostic"
+assert_not_contains_private_fixture "$truncated_junit_output" \
+  "$truncated_sentry_maestro_marker" "truncated JUnit diagnostic"
+
+# A captured log that merely mentions a testsuite element is not a report.
+# Matching the element name alone accepted these, so both result paths keep a
+# regression that the surrounding text is rejected on structure.
+marker_text_junit_root="$TEST_ROOT/marker-text-junit"
+write_valid_run "$marker_text_junit_root" ios
+write_valid_run "$marker_text_junit_root" android
+marker_text_maestro_marker='maestro-log-dump-marker-private'
+marker_text_sentry_maestro_marker='sentry-log-dump-marker-private'
+printf 'Maestro aborted before writing a report. Raw log: <testsuite tests="1"> %s\n' \
+  "$marker_text_maestro_marker" \
+  > "$marker_text_junit_root/ios/20260909T120000Z/maestro-results.xml"
+printf '%s <testsuite name="sentry-probe"/>\n' "$marker_text_sentry_maestro_marker" \
+  > "$marker_text_junit_root/android/20260909T120000Z/sentry-maestro-results.xml"
+if marker_text_junit_output="$(bash "$CHECKER" "$marker_text_junit_root" 2>&1)"; then
+  echo "marker-only JUnit evidence case unexpectedly passed" >&2
+  exit 1
+fi
+assert_contains "$marker_text_junit_output" \
+  "The JUnit result at $marker_text_junit_root/ios/20260909T120000Z/maestro-results.xml is not well-formed XML. Upload the complete Maestro JUnit output."
+assert_contains "$marker_text_junit_output" \
+  "The controlled Sentry probe JUnit result at $marker_text_junit_root/android/20260909T120000Z/sentry-maestro-results.xml is not well-formed XML."
+assert_not_contains_private_fixture "$marker_text_junit_output" \
+  "$marker_text_maestro_marker" "marker-only JUnit diagnostic"
+assert_not_contains_private_fixture "$marker_text_junit_output" \
+  "$marker_text_sentry_maestro_marker" "marker-only JUnit diagnostic"
+
+# Complete reports from the native runners keep passing on both result paths:
+# an XML declaration, a comment, a testsuites root, self-closing testcases, and
+# CDATA log output are all normal Maestro output.
+valid_junit_root="$TEST_ROOT/valid-junit"
+write_valid_run "$valid_junit_root" ios
+write_valid_run "$valid_junit_root" android
+for valid_junit_platform in ios android; do
+  cat > "$valid_junit_root/$valid_junit_platform/20260909T120000Z/maestro-results.xml" <<'XML'
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Maestro JUnit output -->
+<testsuites name="maestro" tests="2" failures="0">
+  <testsuite name="native-large-text" tests="2" failures="0" time="12.5">
+    <testcase name="opens the room" classname="flow" time="6.25"/>
+    <testcase name="sends a message" classname="flow" time="6.25">
+      <system-out><![CDATA[log line with <brackets> & an ampersand]]></system-out>
+    </testcase>
+  </testsuite>
+</testsuites>
+XML
+  printf '<testsuite name="sentry-probe" tests="1" failures="0"/>\n' \
+    > "$valid_junit_root/$valid_junit_platform/20260909T120000Z/sentry-maestro-results.xml"
+done
+valid_junit_output="$(bash "$CHECKER" "$valid_junit_root" 2>&1)"
+assert_not_contains "$valid_junit_output" "maestro-results.xml"
+assert_not_contains "$valid_junit_output" "sentry-maestro-results.xml"
+
 # A duplicate only silences the checks for that field; the remaining
 # single-declaration fields are still validated by value.
 partial_duplicate_root="$TEST_ROOT/partial-duplicate"

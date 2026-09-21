@@ -60,6 +60,7 @@ test("hosted summary regression checks only the reviewed ref", () => {
     "scripts/check-native-large-text-evidence.sh",
     "scripts/find-duplicate-json-object-keys.mjs",
     "scripts/read-bounded-text.mjs",
+    "scripts/validate-junit-xml.mjs",
     "scripts/run-untrusted-checker.sh",
     "scripts/publish-native-evidence-summary-check.mjs",
     "scripts/tests/publish-native-evidence-summary-check.test.mjs",

@@ -356,6 +356,61 @@ notice() {
   printf '[%s] %s\n' "$platform" "$*" >&2
 }
 
+# Returns a Maestro JUnit report's structural verdict. The validator reads the
+# report within the shared evidence size bound and reports one fixed token, so
+# neither report contents nor parser internals can reach this script.
+junit_report_status() {
+  local report_path="$1"
+  "$NODE_BINARY" --input-type=module - \
+    "$report_path" \
+    "$ROOT_DIR/scripts/validate-junit-xml.mjs" 2>/dev/null <<'NODE'
+import { pathToFileURL } from "node:url";
+
+const [, , reportPath, validatorModulePath] = process.argv;
+const { inspectJUnitReportFile } = await import(
+  pathToFileURL(validatorModulePath).href
+);
+process.stdout.write(inspectJUnitReportFile(reportPath));
+NODE
+}
+
+# Fails the platform when a JUnit report is not well-formed XML or carries no
+# testsuite element. Every diagnostic is a fixed sentence plus the report path:
+# a truncated upload and a file whose body merely mentions a testsuite are
+# reported by structure alone, never by quoting what the file contains.
+validate_junit_report() {
+  local platform="$1"
+  local report_path="$2"
+  local label="$3"
+  local remediation="$4"
+  local status=""
+  local suffix=""
+
+  if [[ -n "$remediation" ]]; then
+    suffix=" ${remediation}"
+  fi
+
+  if ! status="$(junit_report_status "$report_path")"; then
+    status="unreadable"
+  fi
+
+  case "$status" in
+    valid) ;;
+    no-testsuite)
+      issue "$platform" "${label} at ${report_path} is not a recognizable testsuite report.${suffix}"
+      ;;
+    too-large)
+      issue "$platform" "${label} at ${report_path} exceeds the release evidence size limit.${suffix}"
+      ;;
+    not-well-formed)
+      issue "$platform" "${label} at ${report_path} is not well-formed XML.${suffix}"
+      ;;
+    *)
+      issue "$platform" "${label} at ${report_path} could not be validated as XML.${suffix}"
+      ;;
+  esac
+}
+
 metadata_value() {
   local metadata_path="$1"
   local key="$2"
@@ -725,14 +780,14 @@ validate_platform() {
     issue "$platform" "The native branding report at ${run_dir}/native-branding-check.md is not PASS. Resolve the native metadata failure and rerun the release gate."
   fi
 
-  if [[ -s "$run_dir/maestro-results.xml" ]] &&
-    ! grep -Eq '<testsuite([[:space:]>])' "$run_dir/maestro-results.xml"; then
-    issue "$platform" "The JUnit result at ${run_dir}/maestro-results.xml is not a recognizable testsuite report. Upload the complete Maestro JUnit output."
+  if [[ -s "$run_dir/maestro-results.xml" ]]; then
+    validate_junit_report "$platform" "$run_dir/maestro-results.xml" \
+      "The JUnit result" "Upload the complete Maestro JUnit output."
   fi
 
-  if [[ -s "$run_dir/sentry-maestro-results.xml" ]] &&
-    ! grep -Eq '<testsuite([[:space:]>])' "$run_dir/sentry-maestro-results.xml"; then
-    issue "$platform" "The controlled Sentry probe JUnit result at ${run_dir}/sentry-maestro-results.xml is not a recognizable testsuite report."
+  if [[ -s "$run_dir/sentry-maestro-results.xml" ]]; then
+    validate_junit_report "$platform" "$run_dir/sentry-maestro-results.xml" \
+      "The controlled Sentry probe JUnit result" ""
   fi
 
   if [[ -s "$run_dir/runner-metadata.txt" ]]; then

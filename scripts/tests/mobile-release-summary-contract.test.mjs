@@ -297,6 +297,10 @@ const nonEvidenceJsonParseArguments = {
     "manifestBody",
   ]),
   "scripts/validate-mockup-clean.mjs": new Set(["listOutput"]),
+  // Tracked package manifests are repository source, not evidence produced by
+  // a release run, so this reader is outside the evidence duplicate-field
+  // contract.
+  "scripts/validate-package-manifests.mjs": new Set(["source"]),
 };
 
 const shellHereDocPattern =
@@ -3192,6 +3196,7 @@ test("the native shell evidence check keeps its dynamic helper closure", () => {
   for (const helperPath of [
     "scripts/find-duplicate-json-object-keys.mjs",
     "scripts/read-bounded-text.mjs",
+    "scripts/validate-junit-xml.mjs",
   ]) {
     assert.ok(
       closure.has(path.join(workspaceRoot, helperPath)),

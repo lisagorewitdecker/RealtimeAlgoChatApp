@@ -66,6 +66,7 @@ cp "$ROOT_DIR/scripts/check-native-large-text-evidence.sh" \
   "$ROOT_DIR/scripts/native-release-recovery-contract.sh" \
   "$ROOT_DIR/scripts/find-duplicate-json-object-keys.mjs" \
   "$ROOT_DIR/scripts/read-bounded-text.mjs" \
+  "$ROOT_DIR/scripts/validate-junit-xml.mjs" \
   "$fresh_checkout/scripts/"
 cp "$ROOT_DIR/scripts/tests/native-large-text-evidence-fixture.sh" \
   "$fresh_checkout/scripts/tests/"

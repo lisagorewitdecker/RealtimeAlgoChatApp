@@ -60,11 +60,20 @@ run_case() {
 
   mkdir -p "$fixture_root/scripts/tests" "$fixture_root/$PLAYWRIGHT_OUTPUT_RELATIVE_DIR"
   cp "$ROOT_DIR/package.json" "$fixture_root/package.json"
+  # The suite runs entirely inside the fixture root, so every script it
+  # resolves from its own location has to travel with it: the checker, the
+  # checker's helpers, the shared fixture builder, the tamper-output verifier,
+  # and the untrusted-checker wrapper.
   cp "$ROOT_DIR/scripts/check-native-large-text-evidence.sh" \
     "$ROOT_DIR/scripts/native-release-recovery-contract.sh" \
+    "$ROOT_DIR/scripts/verify-native-tamper-output.sh" \
+    "$ROOT_DIR/scripts/run-untrusted-checker.sh" \
     "$ROOT_DIR/scripts/find-duplicate-json-object-keys.mjs" \
     "$ROOT_DIR/scripts/read-bounded-text.mjs" \
+    "$ROOT_DIR/scripts/validate-junit-xml.mjs" \
     "$fixture_root/scripts/"
+  cp "$ROOT_DIR/scripts/tests/native-large-text-evidence-fixture.sh" \
+    "$fixture_root/scripts/tests/"
   cp "$ROOT_DIR/$SUITE_RELATIVE_PATH" "$fixture_root/$SUITE_RELATIVE_PATH"
 
   saved_status="$fixture_root/$PLAYWRIGHT_OUTPUT_RELATIVE_DIR/.last-run.json"

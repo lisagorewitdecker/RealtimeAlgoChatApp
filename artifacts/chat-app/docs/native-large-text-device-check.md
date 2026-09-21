@@ -718,6 +718,12 @@ A failed or blocked pass record, a pass record that does not declare
 `run_mode=release-gate` (including diagnostic-only iOS runs), a non-PASS
 branding or Sentry report, or an empty artifact blocks release review.
 
+Both JUnit artifacts must also be well-formed XML holding a `testsuite`
+element. A truncated upload, or a captured log that merely mentions a
+`testsuite` element, is rejected on structure alone: the diagnostic names the
+file path and the structural reason, and never quotes what the file contains.
+Open the uploaded report itself to see why the run stopped.
+
 `runner-check.txt` is host diagnostic evidence only. If it is the only file
 available for a platform, the check reports that the platform is blocked rather
 than treating the diagnostic as reviewed device evidence. Complete the run on
