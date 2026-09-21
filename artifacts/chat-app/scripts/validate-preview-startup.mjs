@@ -293,14 +293,6 @@ function sanitizeStartupDiagnostic(value, maxLength) {
   const withoutControlChars = characters.join("");
 
   return withoutControlChars
-  return value
-    .replace(ANSI_PATTERN, "")
-    .split("")
-    .map((char) => {
-      const code = char.charCodeAt(0);
-      return code <= 0x1f || code === 0x7f ? " " : char;
-    })
-    .join("")
     .replace(/\s+/g, " ")
     .trim()
     .slice(0, maxLength);
@@ -354,9 +346,6 @@ function normalizeLoaderFailureForMatching(value) {
   return trimmedSuffix.endsWith(trailingBell)
     ? trimmedSuffix.slice(0, -1)
     : trimmedSuffix;
-  return value
-    .replace(ANSI_PATTERN, "")
-    .replace(TRAILING_BELL_PATTERN, "");
 }
 
 function findMissingLibrary(output) {
