@@ -1090,7 +1090,7 @@ test("missing mobile release Node versions identify the affected job and require
   );
 });
 
-test("blank and whitespace-only mobile release Node versions identify the affected job and required configuration", () => {
+test("blank mobile release Node versions identify the affected job and required configuration", () => {
   const nodeRange = rootPackage.engines.node;
   const jobId = "native-ios";
   const yamlBlankNodeVersion = YAML.parse("node-version:\n")["node-version"];
@@ -1100,7 +1100,7 @@ test("blank and whitespace-only mobile release Node versions identify the affect
     "the blank YAML fixture must exercise YAML's native null value",
   );
 
-  for (const configuredVersion of ["", yamlBlankNodeVersion, "   "]) {
+  for (const configuredVersion of ["", yamlBlankNodeVersion]) {
     const fixture = structuredClone(workflow);
     const setupNodeStep = fixture.jobs[jobId].steps.find((step) =>
       String(step.uses ?? "").startsWith("actions/setup-node@"),
@@ -1133,6 +1133,36 @@ test("blank and whitespace-only mobile release Node versions identify the affect
       `the blank Node version ${JSON.stringify(configuredVersion)} must be rejected`,
     );
   }
+});
+
+test("whitespace-only mobile release Node versions identify the affected job and required configuration", () => {
+  const fixture = structuredClone(workflow);
+  const nodeRange = rootPackage.engines.node;
+  const jobId = "native-ios";
+  const whitespaceOnlyNodeVersion = "   ";
+  const setupNodeStep = fixture.jobs[jobId].steps.find((step) =>
+    String(step.uses ?? "").startsWith("actions/setup-node@"),
+  );
+  assert.ok(
+    setupNodeStep,
+    `${jobId} fixture must configure Node with actions/setup-node`,
+  );
+  setupNodeStep.with["node-version"] = whitespaceOnlyNodeVersion;
+
+  assert.throws(
+    () => assertMobileReleaseNodeVersions(fixture, nodeRange),
+    (error) => {
+      assert.ok(
+        error.message.includes(`mobile-release job "${jobId}"`),
+        "the whitespace-only failure must identify the mobile release job",
+      );
+      assert.ok(
+        error.message.includes("must configure node-version"),
+        "the whitespace-only failure must explain that node-version is required",
+      );
+      return true;
+    },
+  );
 });
 
 test("combined mobile release Node diagnostics report every affected job and correction", () => {
