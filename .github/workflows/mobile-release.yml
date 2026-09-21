@@ -2768,6 +2768,10 @@ jobs:
       android_native_evidence_artifact_url: ${{ needs.native-android.outputs.native_evidence_artifact_url }}
       ios_native_evidence_digest_manifest: ${{ needs.native-ios.outputs.native_evidence_digest_manifest }}
       android_native_evidence_digest_manifest: ${{ needs.native-android.outputs.native_evidence_digest_manifest }}
+      ios_native_evidence_archive_url: ${{ github.server_url }}/${{ github.repository }}/releases/download/native-evidence-${{ github.run_id }}-${{ github.run_attempt }}/native-release-report-ios.md
+      android_native_evidence_archive_url: ${{ github.server_url }}/${{ github.repository }}/releases/download/native-evidence-${{ github.run_id }}-${{ github.run_attempt }}/native-release-report-android.md
+      ios_native_evidence_archive_result: ${{ steps.upload-ios-native-archive.outcome }}
+      android_native_evidence_archive_result: ${{ steps.upload-android-native-archive.outcome }}
     needs:
       - mobile-release-node-range
       - mobile-release-credentials
@@ -2779,6 +2783,8 @@ jobs:
       - native-evidence-summary-regression
       - native-evidence-tamper-regression
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - name: Check out release candidate
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -2831,6 +2837,62 @@ jobs:
           name: native-large-text-android
           path: test-results/native-large-text/android
 
+      - name: Prepare redacted native release reports
+        id: prepare-native-archive
+        if: ${{ always() }}
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          archive_root="$RUNNER_TEMP/native-release-report-archive"
+          rm -rf -- "$archive_root"
+          mkdir -p -- "$archive_root"
+          bash scripts/archive-native-release-report.sh ios \
+            test-results/native-large-text "$archive_root/native-release-report-ios.md"
+          bash scripts/archive-native-release-report.sh android \
+            test-results/native-large-text "$archive_root/native-release-report-android.md"
+
+      - name: Create durable native evidence archive
+        id: create-native-archive
+        if: ${{ always() && steps.prepare-native-archive.outcome == 'success' }}
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release create "native-evidence-${{ github.run_id }}-${{ github.run_attempt }}" \
+            --repo "${{ github.repository }}" \
+            --target "${{ github.sha }}" \
+            --title "Native evidence archive ${{ github.run_id }}-${{ github.run_attempt }}" \
+            --notes "Redacted native release reports for long-lived release review." \
+            --prerelease \
+            --latest=false
+
+      - name: Upload iOS durable native evidence report
+        id: upload-ios-native-archive
+        if: ${{ always() && steps.create-native-archive.outcome == 'success' }}
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release upload "native-evidence-${{ github.run_id }}-${{ github.run_attempt }}" \
+            "$RUNNER_TEMP/native-release-report-archive/native-release-report-ios.md" \
+            --repo "${{ github.repository }}" \
+            --clobber
+
+      - name: Upload Android durable native evidence report
+        id: upload-android-native-archive
+        if: ${{ always() && steps.create-native-archive.outcome == 'success' }}
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release upload "native-evidence-${{ github.run_id }}-${{ github.run_attempt }}" \
+            "$RUNNER_TEMP/native-release-report-archive/native-release-report-android.md" \
+            --repo "${{ github.repository }}" \
+            --clobber
+
       - name: Validate native evidence completeness
         id: evidence-completeness
         if: ${{ always() }}
@@ -2843,6 +2905,10 @@ jobs:
           NATIVE_ANDROID_EVIDENCE_DIGEST_MANIFEST: ${{ needs.native-android.outputs.native_evidence_digest_manifest }}
           NATIVE_IOS_EVIDENCE_DOWNLOAD_RESULT: ${{ steps.download-ios-native-smoke.outcome == 'success' && 'success' || steps.retry-ios-native-smoke.outcome }}
           NATIVE_ANDROID_EVIDENCE_DOWNLOAD_RESULT: ${{ steps.download-android-native-smoke.outcome == 'success' && 'success' || steps.retry-android-native-smoke.outcome }}
+          NATIVE_IOS_EVIDENCE_ARCHIVE_URL: ${{ github.server_url }}/${{ github.repository }}/releases/download/native-evidence-${{ github.run_id }}-${{ github.run_attempt }}/native-release-report-ios.md
+          NATIVE_ANDROID_EVIDENCE_ARCHIVE_URL: ${{ github.server_url }}/${{ github.repository }}/releases/download/native-evidence-${{ github.run_id }}-${{ github.run_attempt }}/native-release-report-android.md
+          NATIVE_IOS_EVIDENCE_ARCHIVE_RESULT: ${{ steps.upload-ios-native-archive.outcome }}
+          NATIVE_ANDROID_EVIDENCE_ARCHIVE_RESULT: ${{ steps.upload-android-native-archive.outcome }}
         shell: bash
         run: |
           set -euo pipefail
@@ -3128,6 +3194,10 @@ jobs:
           NATIVE_ANDROID_EVIDENCE_DIGEST_MANIFEST: ${{ needs.mobile-release-gate.outputs.android_native_evidence_digest_manifest }}
           NATIVE_IOS_EVIDENCE_DOWNLOAD_RESULT: ${{ steps.download-publish-ios-native-smoke.outcome == 'success' && 'success' || steps.retry-publish-ios-native-smoke.outcome }}
           NATIVE_ANDROID_EVIDENCE_DOWNLOAD_RESULT: ${{ steps.download-publish-android-native-smoke.outcome == 'success' && 'success' || steps.retry-publish-android-native-smoke.outcome }}
+          NATIVE_IOS_EVIDENCE_ARCHIVE_URL: ${{ needs.mobile-release-gate.outputs.ios_native_evidence_archive_url }}
+          NATIVE_ANDROID_EVIDENCE_ARCHIVE_URL: ${{ needs.mobile-release-gate.outputs.android_native_evidence_archive_url }}
+          NATIVE_IOS_EVIDENCE_ARCHIVE_RESULT: ${{ needs.mobile-release-gate.outputs.ios_native_evidence_archive_result }}
+          NATIVE_ANDROID_EVIDENCE_ARCHIVE_RESULT: ${{ needs.mobile-release-gate.outputs.android_native_evidence_archive_result }}
         shell: bash
         run: |
           set -euo pipefail

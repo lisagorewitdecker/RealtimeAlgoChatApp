@@ -106,6 +106,8 @@ const iosPreflightScript = "scripts/check-ios-release-prerequisites.sh";
 const androidPreflightScript = "scripts/check-android-release-prerequisites.sh";
 const nativeEvidenceCheckerScript =
   "scripts/check-native-large-text-evidence.sh";
+const nativeReleaseArchiveScript =
+  "scripts/archive-native-release-report.sh";
 const untrustedCheckerWrapperScript = "scripts/run-untrusted-checker.sh";
 const workflowOutputSafetyScript = "scripts/workflow-output-safety.sh";
 const nativeBrandingSummaryScript = "scripts/summarize-native-branding.sh";
@@ -7396,6 +7398,151 @@ test("partial native reruns keep each platform linked to its own artifact", () =
     [...rerunSummary.matchAll(/\[native-branding-check\.md\]\(/g)].length,
     2,
     "the rerun summary should record exactly one fixed report link per platform",
+  );
+});
+
+test("native reports use a durable redacted archive before artifact expiry", () => {
+  const gate = workflow.jobs["mobile-release-gate"];
+  assert.deepEqual(
+    gate.permissions,
+    { contents: "write" },
+    "the archive job must have only the repository permission needed for release assets",
+  );
+
+  const prepareStep = gate.steps.find(
+    (step) => step.id === "prepare-native-archive",
+  );
+  const createStep = gate.steps.find(
+    (step) => step.id === "create-native-archive",
+  );
+  const iosUploadStep = gate.steps.find(
+    (step) => step.id === "upload-ios-native-archive",
+  );
+  const androidUploadStep = gate.steps.find(
+    (step) => step.id === "upload-android-native-archive",
+  );
+  const evidenceStep = gate.steps.find(
+    (step) => step.id === "evidence-completeness",
+  );
+  assert.match(
+    prepareStep?.run ?? "",
+    new RegExp(nativeReleaseArchiveScript.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
+    "the release gate must prepare reports through the redacting archive boundary",
+  );
+  assert.equal(
+    createStep?.env?.GH_TOKEN,
+    "${{ github.token }}",
+    "only the release-asset creation step may receive the GitHub write token",
+  );
+  assert.equal(
+    iosUploadStep?.env?.GH_TOKEN,
+    "${{ github.token }}",
+    "the iOS release-asset upload must use the GitHub write token",
+  );
+  assert.equal(
+    androidUploadStep?.env?.GH_TOKEN,
+    "${{ github.token }}",
+    "the Android release-asset upload must use the GitHub write token",
+  );
+  assert.match(
+    evidenceStep?.env?.NATIVE_IOS_EVIDENCE_ARCHIVE_URL ?? "",
+    /releases\/download\/native-evidence-\$\{\{ github\.run_id \}\}-\$\{\{ github\.run_attempt \}\}\/native-release-report-ios\.md/,
+    "the iOS summary must receive its deterministic durable archive location",
+  );
+  assert.match(
+    evidenceStep?.env?.NATIVE_ANDROID_EVIDENCE_ARCHIVE_URL ?? "",
+    /releases\/download\/native-evidence-\$\{\{ github\.run_id \}\}-\$\{\{ github\.run_attempt \}\}\/native-release-report-android\.md/,
+    "the Android summary must receive its deterministic durable archive location",
+  );
+
+  const archiveRoot = mkdtempSync(path.join(testRoot, "native-report-archive-"));
+  const fixtureBuilderPath = path.join(
+    workspaceRoot,
+    "scripts/tests/native-large-text-evidence-fixture.sh",
+  );
+  const buildId = "private-candidate-build-id";
+  const fixtureResult = spawnSync(
+    bashPath,
+    [
+      "-c",
+      'source "$1"; write_native_large_text_evidence_fixture "$2" ios "$3"',
+      "native-report-archive-fixture",
+      fixtureBuilderPath,
+      archiveRoot,
+      buildId,
+    ],
+    { cwd: workspaceRoot, encoding: "utf8" },
+  );
+  assert.equal(fixtureResult.status, 0, fixtureResult.stderr);
+
+  const outputPath = path.join(archiveRoot, "native-release-report-ios.md");
+  const archiveResult = spawnSync(
+    bashPath,
+    [path.join(workspaceRoot, nativeReleaseArchiveScript), "ios", archiveRoot, outputPath],
+    { cwd: workspaceRoot, encoding: "utf8" },
+  );
+  assert.equal(archiveResult.status, 0, archiveResult.stderr);
+  const archivedReport = readFileSync(outputPath, "utf8");
+  assert.match(archivedReport, /- Platform: \*\*ios\*\*/);
+  assert.match(archivedReport, /- Status: \*\*PASS\*\*/);
+  assert.doesNotMatch(
+    archivedReport,
+    /private-candidate-build-id|Candidate build ID|fingerprint|account|password|token|secret|credential/i,
+    "the durable archive must exclude candidate and private source values",
+  );
+
+  rmSync(archiveRoot, { recursive: true, force: true });
+});
+
+test("archive failures block native evidence without publishing dead locations", () => {
+  for (const platform of ["ios", "android"]) {
+    const upload = workflow.jobs[`native-${platform}`].steps.find(
+      (step) => step.id === `upload-${platform}-native-smoke`,
+    );
+    assert.equal(
+      upload?.with?.["retention-days"],
+      90,
+      `${platform}: native report artifacts must use the maximum bounded retention window`,
+    );
+  }
+
+  const evidenceRoot = path.join(testRoot, "failed-native-report-archive");
+  const summaryPath = path.join(
+    testRoot,
+    "failed-native-report-archive-summary.md",
+  );
+  const iosArchiveUrl =
+    "https://github.example/example/chat-app/releases/download/native-evidence-123-1/native-release-report-ios.md";
+  const result = spawnSync(
+    bashPath,
+    [
+      path.join(workspaceRoot, nativeEvidenceCheckerScript),
+      evidenceRoot,
+    ],
+    {
+      cwd: workspaceRoot,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        GITHUB_STEP_SUMMARY: summaryPath,
+        NATIVE_IOS_EVIDENCE_ARCHIVE_URL: iosArchiveUrl,
+        NATIVE_IOS_EVIDENCE_ARCHIVE_RESULT: "failure",
+        NATIVE_ANDROID_EVIDENCE_ARCHIVE_RESULT: "skipped",
+      },
+    },
+  );
+  assert.notEqual(
+    result.status,
+    0,
+    "a failed durable archive must keep native release evidence blocked",
+  );
+  const summary = readFileSync(summaryPath, "utf8");
+  assert.match(summary, /- Durable archive: \*\*FAIL\*\*/);
+  assert.match(summary, /- Durable evidence report: \*\*Unavailable\*\*/);
+  assert.doesNotMatch(
+    summary,
+    new RegExp(iosArchiveUrl.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
+    "a failed archive must not publish its dead release-asset location",
   );
 });
 

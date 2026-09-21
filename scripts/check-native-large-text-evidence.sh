@@ -10,6 +10,7 @@ declare -A SUMMARY_ISSUES=([ios]="" [android]="")
 declare -A SUMMARY_NOTICES=([ios]="" [android]="")
 declare -A SUMMARY_RUN_DIR=([ios]="" [android]="")
 declare -A SUMMARY_DOWNLOAD_STATUS=([ios]="" [android]="")
+declare -A SUMMARY_ARCHIVE_STATUS=([ios]="" [android]="")
 declare -A SUMMARY_NATIVE_SCREENSHOT_COUNT=([ios]=0 [android]=0)
 declare -A SUMMARY_NATIVE_EMPTY_COUNT=([ios]=0 [android]=0)
 declare -A SUMMARY_CALL_SCREENSHOT_COUNT=([ios]=0 [android]=0)
@@ -155,6 +156,65 @@ summary_artifact_url() {
   if [[ "$artifact_url" =~ ^https://[A-Za-z0-9.-]+/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/actions/runs/[0-9]+/artifacts/[0-9]+$ ]]; then
     printf '%s' "$artifact_url"
   fi
+}
+
+native_archive_url() {
+  local platform="$1"
+  if [[ "$platform" == "ios" ]]; then
+    printf '%s' "${NATIVE_IOS_EVIDENCE_ARCHIVE_URL:-}"
+  else
+    printf '%s' "${NATIVE_ANDROID_EVIDENCE_ARCHIVE_URL:-}"
+  fi
+}
+
+native_archive_status() {
+  if [[ "$1" == "ios" ]]; then
+    printf '%s' "${NATIVE_IOS_EVIDENCE_ARCHIVE_RESULT:-}"
+  else
+    printf '%s' "${NATIVE_ANDROID_EVIDENCE_ARCHIVE_RESULT:-}"
+  fi
+}
+
+summary_archive_url() {
+  local platform="$1"
+  local archive_url
+  local archive_result
+
+  [[ -n "${SUMMARY_RUN_DIR[$platform]}" ]] || return 0
+  archive_result="$(native_archive_status "$platform")"
+  [[ "$archive_result" == "success" ]] || return 0
+  archive_url="$(native_archive_url "$platform")"
+
+  # This URL is assembled from trusted GitHub context after the release asset
+  # upload succeeds. Keep the accepted shape narrow so no report content or
+  # runtime text can become a Markdown destination.
+  if [[ "$archive_url" =~ ^https://[A-Za-z0-9.-]+/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/releases/download/native-evidence-[0-9]+-[0-9]+/native-release-report-${platform}\.md$ ]]; then
+    printf '%s' "$archive_url"
+  fi
+}
+
+record_archive_status() {
+  local platform="$1"
+  local label="$2"
+  local archive_result
+  local archive_url
+
+  archive_result="$(native_archive_status "$platform")"
+  [[ -n "$archive_result" ]] || return 0
+
+  if [[ "$archive_result" == "success" ]]; then
+    archive_url="$(native_archive_url "$platform")"
+    if [[ ! "$archive_url" =~ ^https://[A-Za-z0-9.-]+/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/releases/download/native-evidence-[0-9]+-[0-9]+/native-release-report-${platform}\.md$ ]]; then
+      SUMMARY_ARCHIVE_STATUS["$platform"]="FAIL"
+      issue "$platform" "The ${label} native evidence archive upload reported success, but its durable archive location was unavailable or unsafe. The release is blocked until the archive can be reviewed at a validated location."
+      return
+    fi
+    SUMMARY_ARCHIVE_STATUS["$platform"]="PASS"
+    return 0
+  fi
+
+  SUMMARY_ARCHIVE_STATUS["$platform"]="FAIL"
+  issue "$platform" "The ${label} native evidence durable archive upload did not complete. No archive link will be published; rerun the release gate after the approved archive is available."
 }
 
 record_download_status() {
@@ -1029,7 +1089,9 @@ write_evidence_summary() {
   local safe_run_dir
   local safe_finding
   local evidence_artifact_url
+  local evidence_archive_url
   local download_status
+  local archive_status
 
   for platform in ios android; do
     if [[ "$platform" == "ios" ]]; then
@@ -1051,7 +1113,9 @@ write_evidence_summary() {
     call_empty_count="${SUMMARY_CALL_EMPTY_COUNT[$platform]}"
     safe_run_dir="$(summary_safe_text "$run_dir")"
     evidence_artifact_url="$(summary_artifact_url "$platform")"
+    evidence_archive_url="$(summary_archive_url "$platform")"
     download_status="${SUMMARY_DOWNLOAD_STATUS[$platform]}"
+    archive_status="${SUMMARY_ARCHIVE_STATUS[$platform]}"
 
     {
       echo "## ${label} native large-text evidence"
@@ -1061,6 +1125,14 @@ write_evidence_summary() {
         echo "- Artifact download: **${download_status}**"
         if [[ "$download_status" == "FAIL" ]]; then
           echo "- Artifact link check: **EXPIRED OR UNAVAILABLE**"
+        fi
+      fi
+      if [[ -n "$archive_status" ]]; then
+        echo "- Durable archive: **${archive_status}**"
+        if [[ -n "$evidence_archive_url" ]]; then
+          echo "- Durable evidence report: [native-release-report-${platform}.md](${evidence_archive_url})"
+        else
+          echo "- Durable evidence report: **Unavailable**"
         fi
       fi
       if [[ -n "$run_dir" ]]; then
@@ -1108,6 +1180,8 @@ if [[ "$REQUIRE_APPROVAL" == "1" ]]; then
 fi
 record_download_status ios "iOS"
 record_download_status android "Android"
+record_archive_status ios "iOS"
+record_archive_status android "Android"
 validate_platform ios
 validate_platform android
 write_evidence_summary
