@@ -46,6 +46,13 @@ describe("throwTestAndCleanupFailures", () => {
 
 describe("key-reset recovery Playwright diagnostics", () => {
   const apiServerDirectory = fileURLToPath(new URL("..", import.meta.url));
+  // Budget for spawning `pnpm exec playwright test` with a real Chromium for
+  // the diagnostic contracts below: about 6 s on an idle workspace, and
+  // completion validation runs other suites alongside this one. It covers
+  // process startup only; the 250 ms diagnostic timeouts under test are the
+  // spec's own.
+  const diagnosticRunTimeoutMs = 30_000;
+  const diagnosticTestTimeoutMs = diagnosticRunTimeoutMs + 15_000;
   const recoveryPhases = [
     {
       phase: "sign in creator and create encrypted room",
@@ -191,7 +198,7 @@ describe("key-reset recovery Playwright diagnostics", () => {
                  .join(","),
               E2E_RECOVERY_DIAGNOSTIC_CLEANUP: "database",
             },
-            timeout: 15_000,
+            timeout: diagnosticRunTimeoutMs,
           },
         );
         const report = `${result.stdout}\n${result.stderr}`;
@@ -216,7 +223,7 @@ describe("key-reset recovery Playwright diagnostics", () => {
         rmSync(outputDirectory, { recursive: true, force: true });
       }
     },
-    20_000,
+    diagnosticTestTimeoutMs,
   );
 
   it.each([
@@ -264,7 +271,7 @@ describe("key-reset recovery Playwright diagnostics", () => {
               E2E_RECOVERY_DIAGNOSTIC_PHASES: phase.phase,
               E2E_RECOVERY_DIAGNOSTIC_CLEANUP: cleanup,
             },
-            timeout: 15_000,
+            timeout: diagnosticRunTimeoutMs,
           },
         );
         const report = `${result.stdout}\n${result.stderr}`;
@@ -282,7 +289,7 @@ describe("key-reset recovery Playwright diagnostics", () => {
         rmSync(outputDirectory, { recursive: true, force: true });
       }
     },
-    20_000,
+    diagnosticTestTimeoutMs,
   );
 
   it.each([
@@ -335,7 +342,7 @@ describe("key-reset recovery Playwright diagnostics", () => {
               E2E_RECOVERY_DIAGNOSTIC_PHASES_SUCCEED: "1",
               E2E_RECOVERY_DIAGNOSTIC_CLEANUP: cleanup,
             },
-            timeout: 15_000,
+            timeout: diagnosticRunTimeoutMs,
           },
         );
         const report = `${result.stdout}\n${result.stderr}`;
@@ -356,7 +363,7 @@ describe("key-reset recovery Playwright diagnostics", () => {
         rmSync(outputDirectory, { recursive: true, force: true });
       }
     },
-    20_000,
+    diagnosticTestTimeoutMs,
   );
 
   it(
@@ -391,7 +398,7 @@ describe("key-reset recovery Playwright diagnostics", () => {
               E2E_RECOVERY_DIAGNOSTIC_PHASES_SUCCEED: "1",
               E2E_RECOVERY_DIAGNOSTIC_CLEANUP: "database,pool",
             },
-            timeout: 15_000,
+            timeout: diagnosticRunTimeoutMs,
           },
         );
         const report = `${result.stdout}\n${result.stderr}`;
@@ -417,6 +424,6 @@ describe("key-reset recovery Playwright diagnostics", () => {
         rmSync(outputDirectory, { recursive: true, force: true });
       }
     },
-    20_000,
+    diagnosticTestTimeoutMs,
   );
 });

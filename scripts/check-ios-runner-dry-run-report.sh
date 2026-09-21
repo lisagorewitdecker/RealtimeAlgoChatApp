@@ -212,7 +212,23 @@ quoted_block() {
   local title="$1" text="$2" fence bounded lines bytes note=""
   lines="$(printf '%s\n' "$text" | wc -l | tr -d ' ')"
   bytes="$(printf '%s\n' "$text" | wc -c | tr -d ' ')"
-  bounded="$(printf '%s\n' "$text" | head -n "$SUMMARY_MAX_LINES" | head -c "$SUMMARY_MAX_BYTES" | sanitize_workflow_stream)"
+  # One awk stage applies both bounds and reads its input to the end. A
+  # `head -n | head -c` chain exits as soon as its bound is met, and under
+  # `pipefail` the producer still writing into the closed pipe turns the whole
+  # command into a SIGPIPE failure (exit 141), which depends on scheduling and
+  # so surfaced only under load.
+  bounded="$(printf '%s\n' "$text" | LC_ALL=C awk -v max_lines="$SUMMARY_MAX_LINES" -v max_bytes="$SUMMARY_MAX_BYTES" '
+    NR > max_lines { next }
+    {
+      line = $0 "\n"
+      if (bytes + length(line) <= max_bytes) {
+        printf "%s", line
+        bytes += length(line)
+      } else if (bytes < max_bytes) {
+        printf "%s", substr(line, 1, max_bytes - bytes)
+        bytes = max_bytes
+      }
+    }' | sanitize_workflow_stream)"
   if ((lines > SUMMARY_MAX_LINES || bytes > SUMMARY_MAX_BYTES)); then
     note=" (truncated to ${SUMMARY_MAX_LINES} lines and ${SUMMARY_MAX_BYTES} bytes)"
   fi
