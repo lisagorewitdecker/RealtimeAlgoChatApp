@@ -48,6 +48,24 @@ const validatorPath = join(
   "validate-preview-startup.mjs",
 );
 const packageRoot = join(import.meta.dirname, "..");
+const ANSI_ESCAPE = String.fromCharCode(27);
+const ANSI_ESCAPE_PATTERN = new RegExp(
+  `${ANSI_ESCAPE}\\[[0-?]*[ -/]*[@-~]`,
+);
+const ANSI_CSI_FRAGMENT_PATTERN = /\[[0-9;?]+[ -/]*[@-~]/;
+
+function assertHasNoControlCharacters(value, message = "unexpected control characters") {
+  const hasControlCharacters = [...value].some((char) => {
+    const code = char.charCodeAt(0);
+    return (code <= 0x1f && code !== 0x09 && code !== 0x0a && code !== 0x0d) || code === 0x7f;
+  });
+  assert.equal(hasControlCharacters, false, message);
+}
+
+function assertHasNoAnsiSequences(value) {
+  assert.doesNotMatch(value, ANSI_ESCAPE_PATTERN);
+  assert.doesNotMatch(value, ANSI_CSI_FRAGMENT_PATTERN);
+}
 
 test("CI summaries identify a failed public-manifest handoff without raw details", () => {
   const summary = formatStartupFailureSummary(
@@ -179,7 +197,8 @@ test("keeps the missing library when a DevTools wrapper precedes the loader line
         error.message,
         /Expo preview startup error: .*libgtk-3\.so\.0/,
       );
-      assert.equal(hasControlCharacters(error.message), false);
+      assertHasNoControlCharacters(error.message);
+      assertHasNoAnsiSequences(error.message);
       assert.ok(
         error.message.length <= 512,
         "startup diagnostic exceeded its bounded length",
@@ -208,6 +227,8 @@ test("validates captured startup logs with a bounded, sanitized library diagnost
       "captured startup diagnostic exceeded its bounded length",
     );
     assert.equal(hasControlCharacters(diagnostic), false);
+    assertHasNoControlCharacters(diagnostic);
+    assertHasNoAnsiSequences(diagnostic);
     assert.doesNotMatch(diagnostic, /unrelated captured output/);
   } finally {
     rmSync(validation.directory, { recursive: true, force: true });
@@ -224,7 +245,8 @@ test("reports a DevTools failure without inventing a missing library", () => {
     (error) => {
       assert.match(error.message, /Expo preview startup error: .*DevTools/);
       assert.doesNotMatch(error.message, /missing runtime library/i);
-      assert.equal(hasControlCharacters(error.message), false);
+      assertHasNoControlCharacters(error.message);
+      assertHasNoAnsiSequences(error.message);
       assert.ok(
         error.message.length <= 512,
         "startup diagnostic exceeded its bounded length",
