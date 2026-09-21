@@ -804,7 +804,7 @@ test("an API outage during polling still runs cleanup after the probe fails", as
       return {
         encoding: "base64",
         content: Buffer.from(
-          "export const generated = true;\noperationId: createRoom\n",
+          "paths:\n  /rooms:\n    post:\n      operationId: createRoom\n",
         ).toString("base64"),
       };
     },

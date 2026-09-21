@@ -185,6 +185,7 @@ make_runner_commands "$ready_commands" "17.0.13" "$IOS_RUNNER_PNPM_VERSION"
 ready_path="$ready_commands:$utilities"
 
 secret_values="
+eas-token-secret-sentinel
 ios-app-id-secret-sentinel
 smoke-email-secret-sentinel
 smoke-password-secret-sentinel
@@ -200,6 +201,7 @@ ready_output="$(
     IOS_DEVICE_MODE=ready \
     IOS_CANDIDATE_MODE=installed \
     IOS_APP_CONTAINER="$candidate_container" \
+    EAS_TOKEN=eas-token-secret-sentinel \
     NATIVE_SMOKE_IOS_APP_ID=ios-app-id-secret-sentinel \
     NATIVE_SMOKE_EMAIL=smoke-email-secret-sentinel \
     NATIVE_SMOKE_PASSWORD=smoke-password-secret-sentinel \
@@ -295,6 +297,7 @@ padded_device_output="$(
     IOS_DEVICE_MODE=padded \
     IOS_CANDIDATE_MODE=installed \
     IOS_APP_CONTAINER="$candidate_container" \
+    EAS_TOKEN=eas-token-secret-sentinel \
     NATIVE_SMOKE_IOS_APP_ID=ios-app-id-secret-sentinel \
     NATIVE_SMOKE_EMAIL=smoke-email-secret-sentinel \
     NATIVE_SMOKE_PASSWORD=smoke-password-secret-sentinel \
