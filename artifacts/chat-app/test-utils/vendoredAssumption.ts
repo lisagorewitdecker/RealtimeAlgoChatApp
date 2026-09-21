@@ -2,7 +2,8 @@
  * Shared failure format for the suites that render expo-router's vendored
  * navigation code instead of a stand-in (__tests__/VendoredBottomTabBar.test.tsx
  * for the classic bottom tab bar, __tests__/VendoredNativeTabsView.test.tsx
- * for the iOS 26 native tabs). Those suites exist so an Expo SDK upgrade that
+ * for the iOS 26 native tabs' insets, __tests__/NativeTabBarAppearance.test.tsx
+ * for their appearance). Those suites exist so an Expo SDK upgrade that
  * swaps the vendored copy fails loudly; the failure has to say which vendored
  * file changed, which assumption the app relies on, and what to re-verify on
  * a phone before the app code is adjusted to the new behaviour.

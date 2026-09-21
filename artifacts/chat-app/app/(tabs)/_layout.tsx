@@ -56,8 +56,9 @@ type NativeTabBarAppearance = Pick<
  * With both toggles off none of these are passed, so the tabs keep their
  * default Liquid Glass look and system tints (and the system setting still
  * solidifies the glass on its own). The mapping was checked against
- * expo-router's iOS appearance builders (`__tests__/NativeTabBarAppearance.test.tsx`
- * runs the real ones) and react-native-screens' appearance coordinator; no
+ * expo-router's vendored navigator, iOS appearance builders and native tabs
+ * view (`__tests__/NativeTabBarAppearance.test.tsx` renders this layout
+ * through the real ones) and react-native-screens' appearance coordinator; no
  * iOS 26 device is reachable from this workspace, so how UIKit draws the
  * resulting bar is still owed an on-device look. Two things in particular:
  * whether the custom background is drawn full-width or as a filled capsule,
