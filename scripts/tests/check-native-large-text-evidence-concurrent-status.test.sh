@@ -6,10 +6,17 @@ SUITE_RELATIVE_PATH="scripts/tests/check-native-large-text-evidence.test.sh"
 PLAYWRIGHT_OUTPUT_RELATIVE_DIR="artifacts/api-server/test-results"
 TEST_PARENT="$(mktemp -d)"
 TEST_ROOT="$TEST_PARENT/fixtures"
+CLEANUP_GUARD="$TEST_PARENT/cleanup-must-not-escape-fixtures"
 mkdir -p "$TEST_ROOT"
+printf 'keep\n' >"$CLEANUP_GUARD"
 
 cleanup_test_fixtures() {
   find "$TEST_PARENT" -name '*.stop' -exec sh -c ': > "$1"' _ {} \; 2>/dev/null || true
+  rm -rf "$TEST_ROOT"
+  if [[ ! -f "$CLEANUP_GUARD" ]]; then
+    echo "Concurrent saved-status native evidence test cleanup escaped its fixture directory" >&2
+    return 1
+  fi
   rm -rf "$TEST_PARENT"
 }
 
