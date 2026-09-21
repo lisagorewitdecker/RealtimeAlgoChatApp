@@ -173,6 +173,195 @@ jobs:
             echo "- Revalidation status: \`$revalidation_status\`"
           } >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Refresh and verify the versioned loader evidence
+        shell: bash
+        env:
+          REAL_CAPTURE_PATH: ${{ runner.temp }}/expo-startup-${{ matrix.os }}.log
+        run: |
+          set -euo pipefail
+          case "${{ matrix.os }}" in
+            macos-latest) capture_platform="macos" ;;
+            windows-latest) capture_platform="windows" ;;
+            *)
+              echo "Unexpected real-platform runner: ${{ matrix.os }}" >&2
+              exit 1
+              ;;
+          esac
+
+          capture_directory="$RUNNER_TEMP/preview-loader-captures"
+          refreshed_fixture="$RUNNER_TEMP/preview-startup-runtime-library-fixture.mjs"
+          incomplete_directory="$RUNNER_TEMP/preview-loader-captures-incomplete"
+          mkdir -p "$capture_directory" "$incomplete_directory"
+
+          # The real launcher log is validated and redacted above. The
+          # refresh command consumes one complete JSON artifact per platform;
+          # use the checked-in sample inventory as the deterministic baseline
+          # for the other cases while recording the runner's installed
+          # versions in every artifact. This keeps the hosted check focused
+          # on the refresh contract rather than on manufacturing loader
+          # wording from a healthy launcher run.
+          CAPTURE_DIR="$capture_directory" \
+          CAPTURE_PLATFORM="$capture_platform" \
+          REAL_CAPTURE_PATH="$REAL_CAPTURE_PATH" \
+          node --input-type=module <<'NODE'
+          import { createRequire } from "node:module";
+          import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
+          import { join, resolve } from "node:path";
+
+          import {
+            CAPTURED_LOADER_SAMPLES,
+            fixtureOutput,
+          } from "./artifacts/chat-app/scripts/preview-startup-runtime-library-fixture.mjs";
+
+          const captureDirectory = process.env.CAPTURE_DIR;
+          const capturePlatform = process.env.CAPTURE_PLATFORM;
+          const realCapturePath = process.env.REAL_CAPTURE_PATH;
+          const packageRequire = createRequire(
+            resolve("artifacts/chat-app/package.json"),
+          );
+          const installedPackageVersion = (packageName) =>
+            JSON.parse(
+              readFileSync(
+                packageRequire.resolve(`${packageName}/package.json`),
+                "utf8",
+              ),
+            ).version;
+          const tooling = {
+            expoCli: installedPackageVersion("@expo/cli"),
+            reactNative: installedPackageVersion("react-native"),
+          };
+          const realCapture = readFileSync(realCapturePath, "utf8");
+          if (realCapture.length === 0) {
+            throw new Error("The real launcher capture is empty.");
+          }
+
+          mkdirSync(captureDirectory, { recursive: true });
+          for (const platform of ["linux", "macos", "windows"]) {
+            const samples = Object.fromEntries(
+              CAPTURED_LOADER_SAMPLES
+                .filter((sample) => sample.platform === platform)
+                .map((sample) => [sample.fixture, fixtureOutput[sample.fixture]]),
+            );
+            if (platform === capturePlatform) {
+              const firstFixture = Object.keys(samples)[0];
+              samples[firstFixture] = `${samples[firstFixture]}${realCapture}`;
+            }
+            writeFileSync(
+              join(captureDirectory, `${platform}.json`),
+              JSON.stringify({ platform, ...tooling, samples }, null, 2) + "\n",
+              "utf8",
+            );
+          }
+          NODE
+
+          refresh_output="$(
+            pnpm --filter @workspace/chat-app run refresh:preview-loader-evidence \
+              --capture-dir "$capture_directory" \
+              --output "$refreshed_fixture" 2>&1
+          )"
+          if ! grep -Fq -- "Refreshed" <<<"$refresh_output" ||
+            ! grep -Fq -- "linux, macos, windows" <<<"$refresh_output"; then
+            echo "The hosted loader evidence refresh did not report all platforms." >&2
+            printf '%s\n' "$refresh_output" >&2
+            exit 1
+          fi
+
+          CAPTURE_PLATFORM="$capture_platform" \
+          REFRESHED_FIXTURE="$refreshed_fixture" \
+          node --input-type=module <<'NODE'
+          import { createRequire } from "node:module";
+          import { readFileSync } from "node:fs";
+          import { resolve } from "node:path";
+          import { CAPTURED_LOADER_SAMPLES } from "./artifacts/chat-app/scripts/preview-startup-runtime-library-fixture.mjs";
+
+          const refreshedSource = readFileSync(process.env.REFRESHED_FIXTURE, "utf8");
+          if (!refreshedSource.includes("export const CAPTURED_EXPO_TOOLING")) {
+            throw new Error("The refreshed fixture is missing tooling metadata.");
+          }
+          for (const platform of ["linux", "macos", "windows"]) {
+            if (!refreshedSource.includes(`"platform": "${platform}"`)) {
+              throw new Error(`The refreshed fixture is missing ${platform} samples.`);
+            }
+          }
+          const refreshedTooling = JSON.parse(
+            refreshedSource
+              .match(/export const CAPTURED_EXPO_TOOLING = Object\.freeze\(([\s\S]*?)\);/)?.[1] ??
+              "null",
+          );
+          const packageRequire = createRequire(
+            resolve("artifacts/chat-app/package.json"),
+          );
+          const installedPackageVersion = (packageName) =>
+            JSON.parse(
+              readFileSync(
+                packageRequire.resolve(`${packageName}/package.json`),
+                "utf8",
+              ),
+            ).version;
+          const installedTooling = {
+            expoCli: installedPackageVersion("@expo/cli"),
+            reactNative: installedPackageVersion("react-native"),
+          };
+          if (
+            refreshedTooling?.expoCli !== installedTooling.expoCli ||
+            refreshedTooling?.reactNative !== installedTooling.reactNative
+          ) {
+            throw new Error("The refreshed tooling metadata does not match installed packages.");
+          }
+          if (CAPTURED_LOADER_SAMPLES.length < 3) {
+            throw new Error("The loader inventory does not contain all platform groups.");
+          }
+          NODE
+
+          fixture_path="artifacts/chat-app/scripts/preview-startup-runtime-library-fixture.mjs"
+          before_digest="$(
+            FIXTURE_PATH="$fixture_path" node --input-type=module <<'NODE'
+          import { createHash } from "node:crypto";
+          import { readFileSync } from "node:fs";
+          process.stdout.write(
+            createHash("sha256")
+              .update(readFileSync(process.env.FIXTURE_PATH))
+              .digest("hex"),
+          );
+          NODE
+          )"
+          cp "$capture_directory/linux.json" "$incomplete_directory/linux.json"
+          cp "$capture_directory/macos.json" "$incomplete_directory/macos.json"
+
+          set +e
+          missing_platform_output="$(
+            pnpm --filter @workspace/chat-app run refresh:preview-loader-evidence \
+              --capture-dir "$incomplete_directory" 2>&1
+          )"
+          missing_platform_status=$?
+          set -e
+          if [[ "$missing_platform_status" -eq 0 ]] ||
+            ! grep -Fq -- "Could not read windows capture" <<<"$missing_platform_output"; then
+            echo "The incomplete hosted loader capture did not identify the missing Windows platform." >&2
+            printf '%s\n' "$missing_platform_output" >&2
+            exit 1
+          fi
+          after_digest="$(
+            FIXTURE_PATH="$fixture_path" node --input-type=module <<'NODE'
+          import { createHash } from "node:crypto";
+          import { readFileSync } from "node:fs";
+          process.stdout.write(
+            createHash("sha256")
+              .update(readFileSync(process.env.FIXTURE_PATH))
+              .digest("hex"),
+          );
+          NODE
+          )"
+          if [[ "$before_digest" != "$after_digest" ]]; then
+            echo "The failed hosted refresh changed the existing fixture." >&2
+            exit 1
+          fi
+
+          {
+            echo "- Loader evidence refresh: **PASS** (metadata and Linux/macOS/Windows samples generated)"
+            echo "- Incomplete capture guard: **PASS** (missing Windows reported; fixture unchanged)"
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Upload redacted launcher capture
         if: always()
         uses: actions/upload-artifact@v4

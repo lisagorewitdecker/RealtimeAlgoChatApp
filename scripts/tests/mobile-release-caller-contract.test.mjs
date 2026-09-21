@@ -1,5 +1,14 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import {
+  copyFileSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
@@ -17,10 +26,21 @@ const workflow = YAML.parse(
     "utf8",
   ),
 );
+const workflowText = readFileSync(
+  path.join(workspaceRoot, ".github/workflows/mobile-release.yml"),
+  "utf8",
+);
 const callerDocumentation = readFileSync(
   path.join(
     workspaceRoot,
     "artifacts/chat-app/docs/native-large-text-device-check.md",
+  ),
+  "utf8",
+);
+const invalidNodeRangeHostedDocumentation = readFileSync(
+  path.join(
+    workspaceRoot,
+    "artifacts/chat-app/docs/mobile-release-invalid-node-range-hosted-check-20260917.md",
   ),
   "utf8",
 );
@@ -62,6 +82,11 @@ const pinnedCheckoutAction =
 const pinnedSetupNodeAction =
   "actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020";
 const setupNodeToolCacheSemverVersion = "6.3.1";
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 function resolveWorkflowEnvExpression(value, workflowEnv, jobEnv, stepEnv) {
   const match = String(value).trim().match(/^\$\{\{\s*env\.([A-Z0-9_]+)\s*\}\}$/);
   if (!match) {
@@ -188,6 +213,180 @@ test("Node engine range validation rejects malformed and unsupported syntax", ()
       `the invalid range ${JSON.stringify(range)} must be rejected`,
     );
   }
+});
+
+test("malformed mobile release workflow expressions fail with line-specific diagnostics", () => {
+  const fixtureRoot = mkdtempSync(
+    path.join(tmpdir(), "mobile-release-actionlint-expression-"),
+  );
+  try {
+    // actionlint discovers repository configuration from the workflow's
+    // nearest .git directory, so keep the fixture shaped like a repository.
+    const fixtureWorkflowsDir = path.join(fixtureRoot, ".github/workflows");
+    mkdirSync(fixtureWorkflowsDir, { recursive: true });
+    mkdirSync(path.join(fixtureRoot, ".git"));
+    copyFileSync(
+      path.join(workspaceRoot, ".github/actionlint.yaml"),
+      path.join(fixtureRoot, ".github/actionlint.yaml"),
+    );
+
+    const malformedExpression = "run-name: ${{ github.ref == }}";
+    const fixtureSource = `${workflowText}\n# malformed expression fixture\n${malformedExpression}\n`;
+    const fixturePath = path.join(fixtureWorkflowsDir, "mobile-release.yml");
+    writeFileSync(fixturePath, fixtureSource);
+    const malformedLine =
+      fixtureSource
+        .split("\n")
+        .findIndex((line) => line === malformedExpression) + 1;
+    assert.ok(malformedLine > 0, "the malformed fixture line must be present");
+
+    const lint = spawnSync(
+      "pnpm",
+      ["exec", "actionlint", "-shellcheck=", "-oneline", fixturePath],
+      { cwd: workspaceRoot, encoding: "utf8" },
+    );
+    const diagnostics = `${lint.stdout}${lint.stderr}`;
+    assert.equal(lint.status, 1, diagnostics);
+    assert.match(
+      diagnostics,
+      new RegExp(`${escapeRegExp(fixturePath)}:${malformedLine}:\\d+:`),
+      "the diagnostic must identify the malformed workflow path and line",
+    );
+    assert.match(
+      diagnostics,
+      /unexpected end of input while parsing variable access.*\[expression\]/,
+      "the diagnostic must explain how the expression is malformed",
+    );
+  } finally {
+    rmSync(fixtureRoot, { recursive: true, force: true });
+  }
+});
+
+test("hosted invalid-Node probe preflights capabilities before creating a temporary ref", () => {
+  const preflightStart = invalidNodeRangeHostedDocumentation.indexOf(
+    "## Repeatable probe preflight",
+  );
+  const metadataStart = invalidNodeRangeHostedDocumentation.indexOf(
+    "\n## Metadata",
+    preflightStart,
+  );
+  assert.ok(preflightStart >= 0, "the hosted probe must document its preflight");
+  assert.ok(
+    metadataStart > preflightStart,
+    "the hosted probe preflight must be a bounded documentation section",
+  );
+
+  const preflight = invalidNodeRangeHostedDocumentation.slice(
+    preflightStart,
+    metadataStart,
+  );
+  const capabilityRequests = [
+    /GET .*\/branches\/main/,
+    /POST .*\/actions\/workflows\/mobile-release\.yml\/dispatches/,
+    /GET .*\/actions\/runs\/<run_id>/,
+    /GET .*\/actions\/runs\/<run_id>\/jobs/,
+    /GET .*\/check-runs\/<check_run_id>\/annotations/,
+    /GET .*\/actions\/jobs\/<job_id>\/logs/,
+  ];
+  for (const request of capabilityRequests) {
+    assert.match(
+      preflight,
+      request,
+      `the hosted probe preflight must cover ${request}`,
+    );
+  }
+
+  const refCreation = preflight.indexOf("create/push-ref");
+  assert.ok(refCreation >= 0, "the preflight must identify temporary ref creation");
+  for (const request of capabilityRequests) {
+    const requestMatch = preflight.match(request);
+    assert.ok(requestMatch, `missing capability request ${request}`);
+    assert.ok(
+      requestMatch.index < refCreation,
+      `capability request ${request} must happen before temporary ref creation`,
+    );
+  }
+
+  assert.match(
+    preflight,
+    /publish=false/,
+    "the capability dispatch must use the non-publishing path",
+  );
+  assert.match(
+    preflight,
+    /node_range_override=not-a-valid-node-range/,
+    "the capability dispatch must use the known fail-early Node fixture",
+  );
+  assert.match(
+    preflight,
+    /fails before the credential preflight, native runners, browser release work, or\npublish job can start/,
+    "the fail-early fixture must prevent release work from starting",
+  );
+  assert.match(
+    preflight,
+    /dispatch start time, the authenticated connection actor, the baseline commit\nSHA/,
+    "the procedure must record deterministic dispatch-correlation facts",
+  );
+  assert.match(
+    preflight,
+    /`workflow_dispatch` event,\nbaseline ref and SHA, actor, and `created_at` at or after the recorded start/,
+    "run discovery must match the dispatch event, ref, actor, SHA, and time",
+  );
+  assert.match(
+    preflight,
+    /Reject zero matches and reject multiple matches; never guess/,
+    "ambiguous or missing run matches must fail closed",
+  );
+  assert.match(
+    preflight,
+    /following redirects/,
+    "the raw-log capability check must follow the API redirect",
+  );
+  assert.match(
+    preflight,
+    /final response status/,
+    "the raw-log capability check must classify the final response",
+  );
+  assert.match(
+    preflight,
+    /raw job-log download: unavailable \(Actions log scope\)/,
+    "missing raw-log scope must be classified without treating the probe as failed",
+  );
+  assert.match(
+    preflight,
+    /annotation-only evidence/,
+    "the probe must select annotation-only evidence when logs are unavailable",
+  );
+  assert.match(
+    preflight,
+    /owner-provided,\s+log-capable\s+path/,
+    "the procedure must identify the owner-provided path for summary-byte evidence",
+  );
+  assert.match(
+    preflight,
+    /trap cleanup_ref EXIT INT TERM/,
+    "temporary ref cleanup must cover normal completion and interruptions",
+  );
+  assert.match(
+    preflight,
+    /delete refs\/heads\/<temporary-ref>/,
+    "the cleanup guard must delete a created temporary ref",
+  );
+  assert.match(
+    preflight,
+    /returns 404/,
+    "the cleanup guard must verify that the temporary ref is gone",
+  );
+  assert.match(
+    preflight,
+    /cleanup failure is itself evidence/,
+    "cleanup failures must remain visible instead of hiding the setup error",
+  );
+  assert.doesNotMatch(
+    preflight,
+    /(?:echo|printf)[^\n]*(?:TOKEN|token)/,
+    "the preflight must not print credentials",
+  );
 });
 
 function documentedCallerJob() {
@@ -549,6 +748,7 @@ test("credential preflight reports every missing required caller key together wi
       jobId === "mobile-release-configuration" ||
       jobId === "android-preview-evidence" ||
       jobId === "ios-preview-evidence" ||
+      jobId === "native-evidence-summary-regression" ||
       jobId === "mobile-publish"
     ) {
       continue;
@@ -637,6 +837,26 @@ test("invalid Node range guard blocks release jobs before setup or publish work"
     /NODE_RANGE/,
     "the failure must include the offending range",
   );
+  assert.match(
+    rejectStep?.run,
+    /printf '::error title=Invalid Node range::package\.json engines\.node: %s\\n' "\$annotation_node_range"/,
+    "the failed guard must publish the package.json engines.node range as an API-readable check annotation",
+  );
+  assert.match(
+    rejectStep?.run,
+    /if \(\(\$\{#safe_node_range\} > 256\)\); then[\s\S]*safe_node_range="\$\{safe_node_range:0:253\}\.\.\."/,
+    "the API-readable Node range annotation must be bounded",
+  );
+  assert.match(
+    rejectStep?.run,
+    /annotation_node_range="\$\{safe_node_range\/\/%\/%25\}"[\s\S]*annotation_node_range="\$\{annotation_node_range\/\/\$\x27\\r\x27\/%0D\}"[\s\S]*annotation_node_range="\$\{annotation_node_range\/\/\$\x27\\n\x27\/%0A\}"/,
+    "the API-readable Node range annotation must escape percent, CR, and LF workflow command data",
+  );
+  assert.ok(
+    rejectStep.run.indexOf("printf '::error title=Invalid Node range") <
+      rejectStep.run.indexOf('echo "## Mobile release Node range"'),
+    "the API-readable annotation must be emitted before the step summary is written",
+  );
   for (const [jobId, job] of Object.entries(workflow.jobs ?? {})) {
     if (
       jobId === "mobile-release-node-range" ||
@@ -660,7 +880,7 @@ test("invalid Node range guard blocks release jobs before setup or publish work"
   );
   assert.match(
     String(workflow.jobs?.["mobile-release-gate"]?.if),
-    /needs\.mobile-release-configuration\.result == 'success'/,
+    /needs\.native-release-configuration\.result == 'success'/,
     "the release gate must not start before mobile release configuration is evaluated",
   );
   assert.match(
@@ -682,6 +902,78 @@ test("invalid Node range guard blocks release jobs before setup or publish work"
     rejectStep?.run,
     /secrets\./,
     "the invalid-range diagnostic must not read or expose release secrets",
+  );
+});
+
+test("invalid Node range annotation safely encodes multiline workflow input", () => {
+  const guard = workflow.jobs?.["mobile-release-node-range"];
+  const rejectStep = guard?.steps?.find(
+    (step) => step.name === "Reject invalid Node range before release checks",
+  );
+  assert.ok(rejectStep, "the invalid-range rejection step must exist");
+
+  const fixtureRoot = mkdtempSync(
+    path.join(tmpdir(), "mobile-release-node-range-annotation-"),
+  );
+  const summaryPath = path.join(fixtureRoot, "summary.md");
+  const outputPath = path.join(fixtureRoot, "output");
+  const fixtureRange = "bad%range\nnext::range\rfinal";
+  try {
+    const result = spawnSync("bash", ["-c", rejectStep.run], {
+      cwd: workspaceRoot,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        GITHUB_OUTPUT: outputPath,
+        GITHUB_STEP_SUMMARY: summaryPath,
+        NODE_RANGE: fixtureRange,
+        RESOLVE_RESULT: "failure",
+        REVIEWED_REF: "refs/heads/fixture",
+      },
+    });
+    assert.equal(
+      result.status,
+      1,
+      "the rejection step must fail after emitting the invalid-range evidence",
+    );
+    const annotation = result.stdout
+      .split("\n")
+      .find((line) => line.startsWith("::error title=Invalid Node range::"));
+    assert.equal(
+      annotation,
+      "::error title=Invalid Node range::package.json engines.node: bad%25range%0Anext&#58;&#58;range final",
+      "the check annotation must remain one command line while preserving safe evidence",
+    );
+    assert.doesNotMatch(
+      annotation,
+      /bad%range|next::range/,
+      "the annotation must not contain raw percent or workflow-command delimiters",
+    );
+  } finally {
+    rmSync(fixtureRoot, { recursive: true, force: true });
+  }
+});
+
+test("hosted invalid Node range record links the API-readable guard evidence", () => {
+  assert.match(
+    invalidNodeRangeHostedDocumentation,
+    /\[Validate mobile release Node range\]\(https:\/\/github\.com\/lisagorewitdecker\/RealtimeAlgoChatApp\/actions\/runs\/35282160003\/job\/105406330915\)/,
+    "the hosted record must link the guard job where reviewers can inspect its annotations",
+  );
+  assert.match(
+    invalidNodeRangeHostedDocumentation,
+    /API-readable check annotation/,
+    "the hosted record must identify the API-readable annotation evidence",
+  );
+  assert.match(
+    invalidNodeRangeHostedDocumentation,
+    /\[guard workflow annotation source\]\(\.\.\/\.\.\/\.\.\/\.github\/workflows\/mobile-release\.yml\)/,
+    "the hosted record must link the workflow source that emits the annotation",
+  );
+  assert.match(
+    invalidNodeRangeHostedDocumentation,
+    /package\.json engines\.node: not-a-valid-node-range/,
+    "the hosted record must preserve the label and offending range in its evidence description",
   );
 });
 
@@ -798,7 +1090,7 @@ test("missing mobile release Node versions identify the affected job and require
   );
 });
 
-test("blank and whitespace-only mobile release Node versions identify the affected job and required configuration", () => {
+test("blank mobile release Node versions identify the affected job and required configuration", () => {
   const nodeRange = rootPackage.engines.node;
   const jobId = "native-ios";
   const yamlBlankNodeVersion = YAML.parse("node-version:\n")["node-version"];
@@ -808,7 +1100,7 @@ test("blank and whitespace-only mobile release Node versions identify the affect
     "the blank YAML fixture must exercise YAML's native null value",
   );
 
-  for (const configuredVersion of ["", yamlBlankNodeVersion, "   "]) {
+  for (const configuredVersion of ["", yamlBlankNodeVersion]) {
     const fixture = structuredClone(workflow);
     const setupNodeStep = fixture.jobs[jobId].steps.find((step) =>
       String(step.uses ?? "").startsWith("actions/setup-node@"),
@@ -841,6 +1133,36 @@ test("blank and whitespace-only mobile release Node versions identify the affect
       `the blank Node version ${JSON.stringify(configuredVersion)} must be rejected`,
     );
   }
+});
+
+test("whitespace-only mobile release Node versions identify the affected job and required configuration", () => {
+  const fixture = structuredClone(workflow);
+  const nodeRange = rootPackage.engines.node;
+  const jobId = "native-ios";
+  const whitespaceOnlyNodeVersion = "   ";
+  const setupNodeStep = fixture.jobs[jobId].steps.find((step) =>
+    String(step.uses ?? "").startsWith("actions/setup-node@"),
+  );
+  assert.ok(
+    setupNodeStep,
+    `${jobId} fixture must configure Node with actions/setup-node`,
+  );
+  setupNodeStep.with["node-version"] = whitespaceOnlyNodeVersion;
+
+  assert.throws(
+    () => assertMobileReleaseNodeVersions(fixture, nodeRange),
+    (error) => {
+      assert.ok(
+        error.message.includes(`mobile-release job "${jobId}"`),
+        "the whitespace-only failure must identify the mobile release job",
+      );
+      assert.ok(
+        error.message.includes("must configure node-version"),
+        "the whitespace-only failure must explain that node-version is required",
+      );
+      return true;
+    },
+  );
 });
 
 test("combined mobile release Node diagnostics report every affected job and correction", () => {
@@ -931,6 +1253,77 @@ test("combined mobile release Node diagnostics report every affected job and cor
   );
 });
 
+test("combined mobile release Node diagnostics report every invalid declaration in one job", () => {
+  const fixture = structuredClone(workflow);
+  const nodeRange = rootPackage.engines.node;
+  const jobId = "native-ios";
+  const malformedVersion = "lts";
+  const outOfRangeVersion = "23";
+  const job = fixture.jobs[jobId];
+  const setupNodeStep = job.steps.find((step) =>
+    String(step.uses ?? "").startsWith("actions/setup-node@"),
+  );
+  assert.ok(
+    setupNodeStep,
+    `${jobId} fixture must configure Node with actions/setup-node`,
+  );
+
+  job.steps.push(
+    structuredClone(setupNodeStep),
+    structuredClone(setupNodeStep),
+  );
+  const setupNodeSteps = job.steps.filter((step) =>
+    String(step.uses ?? "").startsWith("actions/setup-node@"),
+  );
+  assert.equal(
+    setupNodeSteps.length,
+    3,
+    `${jobId} fixture must contain multiple setup-node declarations`,
+  );
+
+  delete setupNodeSteps[0].with["node-version"];
+  setupNodeSteps[1].with["node-version"] = malformedVersion;
+  setupNodeSteps[2].with["node-version"] = outOfRangeVersion;
+
+  assert.throws(
+    () => assertMobileReleaseNodeVersions(fixture, nodeRange),
+    (error) => {
+      const jobMentionCount =
+        error.message.split(`mobile-release job "${jobId}"`).length - 1;
+      assert.equal(
+        jobMentionCount,
+        setupNodeSteps.length,
+        "the combined failure must report every invalid setup-node declaration in the job",
+      );
+      assert.ok(
+        error.message.includes("must configure node-version"),
+        "the failure must explain that the missing node-version is required",
+      );
+      assert.ok(
+        error.message.includes(JSON.stringify(malformedVersion)),
+        "the failure must identify the malformed Node version",
+      );
+      assert.ok(
+        error.message.includes(
+          "must be a concrete Node major/minor/patch version",
+        ),
+        "the failure must explain the required concrete Node version format",
+      );
+      assert.ok(
+        error.message.includes(`Node ${JSON.stringify(outOfRangeVersion)}`),
+        "the failure must identify the out-of-range Node version",
+      );
+      assert.ok(
+        error.message.includes(
+          `outside package.json engines.node range ${JSON.stringify(nodeRange)}`,
+        ),
+        "the failure must explain the required supported Node range",
+      );
+      return true;
+    },
+  );
+});
+
 test("blocked release diagnostics identify the supported Node range safely", () => {
   const gateSteps = workflow.jobs?.["mobile-release-gate"]?.steps ?? [];
   const blockStep = gateSteps.find(
@@ -964,6 +1357,11 @@ test("blocked release diagnostics identify the supported Node range safely", () 
     blockStep.run,
     /configuration=\$RELEASE_CONFIGURATION_RESULT/,
     "blocked release output must include the centralized configuration result",
+  );
+  assert.match(
+    blockStep.run,
+    /idle-profile=\$IDLE_PROFILE_RESULT/,
+    "blocked release output must include the idle-profile registration result",
   );
   assert.match(
     blockStep.run,
@@ -1108,6 +1506,58 @@ test("publish job runs the evidence privacy and submission-boundary regression b
     },
     "the native evidence privacy summary must use the privacy step outcome",
   );
+  const privacySummaryFixtureRoot = mkdtempSync(
+    path.join(tmpdir(), "mobile-release-privacy-summary-"),
+  );
+  try {
+    for (const [outcome, expectedStatus] of [
+      ["success", "PASS"],
+      ["skipped", "BLOCKED"],
+      ["cancelled", "BLOCKED"],
+    ]) {
+      const summaryPath = path.join(privacySummaryFixtureRoot, `${outcome}.md`);
+      const summaryResult = spawnSync("bash", ["-c", privacySummaryStep.run], {
+        cwd: workspaceRoot,
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          GITHUB_STEP_SUMMARY: summaryPath,
+          PRIVACY_RESULT: outcome,
+        },
+      });
+      assert.equal(
+        summaryResult.status,
+        0,
+        `privacy summary must render for ${outcome}: ${summaryResult.stderr}`,
+      );
+      const summary = readFileSync(summaryPath, "utf8");
+      assert.match(
+        summary,
+        new RegExp(`- Status: \\*\\*${expectedStatus}\\*\\*`),
+        `privacy summary must report ${expectedStatus} for ${outcome}`,
+      );
+      if (expectedStatus === "BLOCKED") {
+        assert.match(
+          summary,
+          /Run native large-text evidence privacy and submission-boundary regression" step log/,
+          `blocked privacy summary must point to the checker log for ${outcome}`,
+        );
+      } else {
+        assert.doesNotMatch(
+          summary,
+          /Status: \*\*BLOCKED\*\*/,
+          "a successful privacy check must not be reported as blocked",
+        );
+      }
+      assert.doesNotMatch(
+        summary,
+        /test-results\/native-large-text|candidate-build-id|runner-metadata|pass-fail-record|sentry-source-map/,
+        `privacy summary must not embed fixture output for ${outcome}`,
+      );
+    }
+  } finally {
+    rmSync(privacySummaryFixtureRoot, { recursive: true, force: true });
+  }
   assert.match(
     privacySummaryStep.run,
     /Status: \*\*PASS\*\*/,
@@ -1247,6 +1697,7 @@ test("iOS preview evidence runs for every pull request", () => {
         "${{ github.event.pull_request.base.sha }}",
       IOS_PREVIEW_HEAD_SHA:
         "${{ github.event.pull_request.head.sha }}",
+      REVIEWED_REF: "${{ github.ref }}",
     },
     "the iOS preview job must compare the pull request base and head",
   );
@@ -1321,13 +1772,13 @@ test("routine unit validation runs the caller contract check", () => {
 });
 
 test("routine unit validation checks mobile release workflow syntax", () => {
-  const command = "pnpm run validate:mobile-release-workflow";
+  const command = "pnpm run validate:github-workflows";
   const unitCommands = String(rootPackage.scripts?.["test:unit"] ?? "")
     .split("&&")
     .map((entry) => entry.trim());
 
   assert.ok(
     unitCommands.includes(command),
-    "the root test:unit script must run the mobile release workflow syntax check",
+    "the root test:unit script must run the repository workflow syntax check",
   );
 });

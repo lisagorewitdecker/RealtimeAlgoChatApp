@@ -100,4 +100,4 @@ jobs:
           }}
         env:
           API_BREAKING_CHANGE_PR_BODY: ${{ github.event.pull_request.body }}
-        run: pnpm validate:api-compatibility
+        run: bash scripts/run-untrusted-checker.sh pnpm validate:api-compatibility

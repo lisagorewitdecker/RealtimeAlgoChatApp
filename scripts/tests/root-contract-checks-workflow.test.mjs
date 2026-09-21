@@ -189,7 +189,12 @@ test("the gate runs the root install, typecheck, unit, and API codegen commands"
 });
 
 test("the gate's unit suite covers the breakages that reached main unchecked", () => {
-  // Duplicate YAML keys and doubled steps in the mobile release workflow.
+  // Duplicate YAML keys and doubled steps in the repository workflows.
+  assert.ok(rootUnitCommands.includes("pnpm run validate:github-workflows"));
+  assert.equal(
+    rootPackage.scripts?.["validate:github-workflows"],
+    "status=0; for workflow in .github/workflows/*.yml; do actionlint -config-file .github/actionlint.yaml -ignore 'runtime \"node20\" is deprecated in GitHub Actions' -shellcheck= -oneline \"$workflow\" || status=$?; done; exit \"$status\"",
+  );
   assert.ok(rootUnitCommands.includes("pnpm run validate:mobile-release-workflow"));
   assert.match(
     String(rootPackage.scripts?.["validate:mobile-release-workflow"]),

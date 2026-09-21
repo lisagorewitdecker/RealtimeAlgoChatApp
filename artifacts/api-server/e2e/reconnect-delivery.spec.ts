@@ -13,6 +13,7 @@ import {
   throwTestAndCleanupFailures,
   withClerkRetry,
 } from "./clerk-retry.js";
+import { ROOM_MESSAGE_HISTORY_LIMIT } from "../src/lib/roomLimits.js";
 
 const chatUrl = process.env["E2E_CHAT_URL"];
 const apiUrl = process.env["E2E_API_URL"];
@@ -255,8 +256,11 @@ test("a live reconnect warns when the last-seen message is outside retained hist
   const roomName = `Reconnect gap ${suffix}`;
   const password = `E2e-${suffix}-Reconnect!9`;
   const beforeReconnect = `Before retained gap ${suffix}`;
+  // Cross the server's retained-history boundary by exactly one message so
+  // this check remains a gap test when the retention window changes.
+  const missedMessageCount = ROOM_MESSAGE_HISTORY_LIMIT + 1;
   const missedMessages = Array.from(
-    { length: 201 },
+    { length: missedMessageCount },
     (_, index) => `Retained gap ${String(index + 1).padStart(3, "0")} ${suffix}`,
   );
   const newestMessage = missedMessages.at(-1)!;
@@ -363,6 +367,13 @@ test("a live reconnect warns when the last-seen message is outside retained hist
     await expect(member.page.getByText(newestMessage, { exact: true })).toHaveCount(
       1,
     );
+    const gapWarning = member.page.getByTestId("room-message-gap-warning");
+    await expect(gapWarning).toBeVisible();
+    await expect(gapWarning).toContainText(
+      "This device was disconnected longer than the room history kept for reconnects.",
+    );
+    await gapWarning.getByTestId("room-message-gap-dismiss").click();
+    await expect(gapWarning).toHaveCount(0);
   } catch (error) {
     testFailure = error;
   } finally {

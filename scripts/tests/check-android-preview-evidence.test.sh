@@ -243,6 +243,24 @@ assert_not_contains "$unreadable_output" "$unreadable_json_sentinel"
 assert_not_contains "$unreadable_output" "$unreadable_json_path"
 assert_not_contains "$unreadable_output" "EACCES"
 
+missing_json_sentinel="android-preview-missing-preflight-sentinel"
+missing_root="$TEST_ROOT/missing-json"
+missing_record="$missing_root/validation-record.md"
+missing_json_path="$missing_root/android-preview-${missing_json_sentinel}.json"
+mkdir -p "$missing_root"
+cp "$blocked_record" "$missing_record"
+if missing_output="$(
+  bash "$CHECKER" "$missing_record" "$missing_json_path" 2>&1
+)"; then
+  printf 'Missing Android preflight JSON unexpectedly passed.\n' >&2
+  exit 1
+fi
+assert_contains "$missing_output" \
+  "The Android preview preflight JSON artifact does not exist."
+assert_not_contains "$missing_output" "$missing_json_sentinel"
+assert_not_contains "$missing_output" "$missing_json_path"
+assert_not_contains "$missing_output" "ENOENT"
+
 duplicate_json_sentinel="duplicate-preflight-secret"
 cat >"$json_contract_path" <<EOF
 {"schema":"android-preview-handoff-preflight/v1","schema":"$duplicate_json_sentinel","platform":"android","boundaries":{"publicManifestReachability":{"status":"PASS","status":"FAIL","evidence":"public manifest HTTP 200 (128 bytes)"},"localHandoffProbe":{"status":"NOT_RUN","evidence":"Local manifest/bundle probe not run — no successful probe result was recorded"},"expoGoLaunch":{"status":"NOT_ASSESSED","evidence":"Requires a physical Android phone running stock Expo Go."},"serverNativeRequestEvidence":{"status":"NOT_ASSESSED","evidence":"Requires filtered Metro or API evidence from that physical Expo Go session."}}}
@@ -253,6 +271,15 @@ if duplicate_json_output="$(bash "$CHECKER" "$json_contract_record" 2>&1)"; then
 fi
 assert_contains "$duplicate_json_output" "does not satisfy the redacted schema"
 assert_not_contains "$duplicate_json_output" "$duplicate_json_sentinel"
+if duplicate_json_direct_output="$(
+  node "$VALIDATOR" --validate-record "$json_contract_path" 2>&1
+)"; then
+  printf 'Duplicate-field Android preflight JSON unexpectedly passed direct validation.\n' >&2
+  exit 1
+fi
+assert_contains "$duplicate_json_direct_output" \
+  "Preview handoff preflight JSON contains duplicate fields."
+assert_not_contains "$duplicate_json_direct_output" "$duplicate_json_sentinel"
 
 unsafe_json_sentinel="https://preview-fixture.replit.dev/account=fixture-account/message=fixture-message"
 cat >"$json_contract_path" <<EOF
@@ -289,6 +316,42 @@ EOF
 missing_phone_output="$(bash "$CHECKER" "$json_contract_record" 2>&1)"
 assert_contains "$missing_phone_output" "validation passed"
 
+for duplicate_boundary in \
+  "Public manifest reachability" \
+  "Local handoff probe (manifest and bundle)"; do
+  duplicate_boundary_slug="$(
+    printf '%s' "$duplicate_boundary" |
+      tr '[:upper:] ' '[:lower:]-' |
+      tr -cd '[:alnum:]-'
+  )"
+  duplicate_boundary_record="$TEST_ROOT/duplicate-${duplicate_boundary_slug}.md"
+  duplicate_boundary_preflight="$TEST_ROOT/duplicate-${duplicate_boundary_slug}-preflight.json"
+  duplicate_boundary_sentinel="duplicate-${duplicate_boundary_slug}-boundary-sentinel"
+  awk -F'|' -v boundary="$duplicate_boundary" -v sentinel="$duplicate_boundary_sentinel" '
+    {
+      print
+      label = $2
+      gsub(/^[[:space:]]+|[[:space:]]+$/, "", label)
+      if (label == boundary) {
+        print "| " boundary " | FAIL | " sentinel " |"
+      }
+    }
+  ' "$blocked_record" >"$duplicate_boundary_record"
+  cp "$blocked_preflight" "$duplicate_boundary_preflight"
+  if duplicate_boundary_output="$(
+    bash "$CHECKER" "$duplicate_boundary_record" "$duplicate_boundary_preflight" 2>&1
+  )"; then
+    printf 'Android evidence with duplicate %s rows unexpectedly passed.\n' \
+      "$duplicate_boundary" >&2
+    exit 1
+  fi
+  assert_contains "$duplicate_boundary_output" \
+    "Android preview evidence records must contain only one '${duplicate_boundary}' boundary row."
+  assert_not_contains "$duplicate_boundary_output" "$duplicate_boundary_sentinel"
+  assert_not_contains "$duplicate_boundary_output" "does not match the Markdown record"
+  assert_not_contains "$duplicate_boundary_output" "unsupported status"
+done
+
 # Default discovery must be exercised against an isolated repository layout:
 # the workspace's artifact-level test-results/ tree is gitignored, so a clean
 # checkout has no record there. The checker resolves its record root relative
@@ -305,8 +368,12 @@ cp "$ROOT_DIR/scripts/find-duplicate-json-object-keys.mjs" \
   "$discovery_root/scripts/"
 cp "$ROOT_DIR/scripts/read-bounded-text.mjs" \
   "$discovery_root/scripts/"
+# The validator's local imports must travel with it: the launch-evidence
+# module supplies the expoGoLaunch boundary readers used by --validate-record.
 cp "$ROOT_DIR/artifacts/chat-app/scripts/validate-preview-startup.mjs" \
   "$ROOT_DIR/artifacts/chat-app/scripts/preview-startup-shared.mjs" \
+  "$ROOT_DIR/artifacts/chat-app/scripts/preview-launch-evidence.mjs" \
+  "$ROOT_DIR/artifacts/chat-app/scripts/preview-startup-runtime-library-fixture.mjs" \
   "$discovery_root/artifacts/chat-app/scripts/"
 write_record "$discovery_android_root/20260101T000000Z/validation-record.md" <<'EOF'
 # Older Android preview validation record
@@ -317,6 +384,23 @@ cp "$blocked_record" "$discovery_android_root/20260102T000000Z/validation-record
 cp "$blocked_preflight" "$discovery_android_root/20260102T000000Z/android-preview-preflight.json"
 default_output="$(bash "$discovery_root/scripts/check-android-preview-evidence.sh" 2>&1)"
 assert_contains "$default_output" "validation passed: $discovery_android_root/20260102T000000Z/validation-record.md"
+
+# Default discovery must fail closed when the selected newest record has a
+# malformed preflight sidecar. The checker must use the same fixed diagnostic
+# as explicit-sidecar validation without exposing the malformed content.
+discovery_malformed_sentinel="android-preview-default-discovery-malformed-preflight-sentinel"
+cat >"$discovery_android_root/20260102T000000Z/android-preview-preflight.json" <<EOF
+{"schema":"android-preview-handoff-preflight/v1","platform":"android","boundaries":{"publicManifestReachability":{"status":"PASS","evidence":"$discovery_malformed_sentinel"
+EOF
+if discovery_malformed_output="$(
+  bash "$discovery_root/scripts/check-android-preview-evidence.sh" 2>&1
+)"; then
+  printf 'Default discovery unexpectedly trusted a malformed Android preflight sidecar.\n' >&2
+  exit 1
+fi
+assert_contains "$discovery_malformed_output" \
+  "The Android preview preflight JSON artifact does not satisfy the redacted schema."
+assert_not_contains "$discovery_malformed_output" "$discovery_malformed_sentinel"
 
 # Repository handoff records are durable review evidence even though the
 # artifact-level test-results directory is ignored by default. Keep every

@@ -10,10 +10,16 @@
 // a non-padding behavior, or hides a platform split behind a helper can still
 // pass both Jest projects. Only reading the source catches it without a device.
 //
-// The check parses app/** and components/** plus the shared-module homes
-// hooks/**, lib/**, contexts/** and utils/** with the TypeScript compiler API
-// (already a Chat App devDependency) instead of regular expressions so that
-// comments, import aliases, namespace imports and same-file indirection
+// The check parses every top-level directory of the package except the known
+// non-source ones (NON_SOURCE_DIRECTORIES: dependencies, assets, the test
+// suites with their stand-ins and output, this package's scripts, written
+// records, build output) and dot-directories, so app/**, components/** and
+// every shared-module home — hooks/**, lib/**, contexts/**, utils/**,
+// constants/** and any folder added later (services/, store/, features/, …) —
+// are read at module level without editing a list; app/ and components/ must
+// exist. It uses the TypeScript compiler API (already a Chat App
+// devDependency) instead of regular expressions so that comments, import
+// aliases, namespace imports and same-file indirection
 // (`const isIOS = Platform.OS === "ios"`) are handled exactly. A behavior value
 // or JSX tag that comes from another Chat App file (`@/hooks/...`, `./...`) is
 // followed one import hop: the module is parsed and the exported declaration
@@ -22,7 +28,19 @@
 // found — is rejected outright so the platform split cannot be hidden by
 // moving it. Controller KeyboardAvoidingView usages are also required to
 // provide an explicit, statically provable behavior="padding" prop at the
-// call site.
+// call site. Root-level files are configuration (Metro, Babel, Jest) and are
+// not scanned; a value or tag imported from one is still followed from its
+// call site like any other module.
+//
+// None of that helps if the provider itself disappears: the controller's
+// KeyboardAvoidingView and KeyboardAwareScrollView only work under
+// KeyboardProvider, which the root layout (app/_layout.tsx) renders around
+// the navigator, and the Jest suites mock the provider as a pass-through. The
+// whole-tree rule therefore follows the tree the root layout's default export
+// renders — same-file components by name, a component imported from another
+// Chat App file one hop — and fails when the navigator (expo-router's Stack,
+// Slot, Tabs, …) is reached outside a KeyboardProvider from
+// react-native-keyboard-controller, or is not found at all.
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -34,20 +52,57 @@ export const KEYBOARD_STRATEGY_NOTE =
 export const KEYBOARD_STRATEGY_SUMMARY =
   "forms use KeyboardAwareScrollViewCompat from components/KeyboardAwareScrollViewCompat.tsx; " +
   'everything else uses KeyboardAvoidingView from "react-native-keyboard-controller" ' +
-  'with behavior="padding" on both platforms';
+  'with behavior="padding" on both platforms; app/_layout.tsx wraps the navigator in ' +
+  'KeyboardProvider from "react-native-keyboard-controller"';
 
 /** The one file allowed to use react-native-keyboard-controller's KeyboardAwareScrollView. */
 export const COMPAT_COMPONENT_PATH = "components/KeyboardAwareScrollViewCompat.tsx";
 
-/**
- * Directories (relative to the package root) covered by the check: the screens
- * and components, plus every shared-module home a helper could move into.
- */
-export const SCANNED_DIRECTORIES = ["app", "components", "hooks", "lib", "contexts", "utils"];
+/** The root layout expo-router mounts every screen under; it owns the KeyboardProvider. */
+export const ROOT_LAYOUT_PATH = "app/_layout.tsx";
 
 /**
- * Scanned directories that must exist. The other entries are optional homes
- * for shared modules and are skipped while the tree does not have them.
+ * expo-router components that render the matched child routes. Every screen
+ * mounts inside one of them, so a KeyboardProvider above the navigator covers
+ * the whole app and one below or beside it covers nothing.
+ */
+export const ROUTER_NAVIGATOR_EXPORTS = ["Stack", "Slot", "Tabs", "NativeTabs", "Drawer", "Navigator"];
+
+/**
+ * Top-level directories (relative to the package root) that never hold app
+ * source and are skipped by the scan: dependencies, static assets, the test
+ * suites with their stand-ins, device flows and output, this package's Node
+ * tooling (this check included), written records, and build output — the web
+ * export and the native projects `expo prebuild` generates. Dot-directories
+ * (`.expo`, `.replit-artifact`, …) are skipped as well. Every other top-level
+ * directory is scanned, so a helper moved into constants/ or into a folder
+ * that does not exist yet is read at module level without editing this list.
+ * Keep the list in step with the "Keyboard handling on native has one
+ * strategy" note in replit.md.
+ */
+export const NON_SOURCE_DIRECTORIES = [
+  "node_modules",
+  "assets",
+  "__tests__",
+  "__mocks__",
+  "test-utils",
+  "test-results",
+  "coverage",
+  "e2e",
+  "scripts",
+  "docs",
+  "dist",
+  "web-build",
+  "static-build",
+  "build",
+  "ios",
+  "android",
+];
+
+/**
+ * Directories that must exist: the screens and the components. They are
+ * scanned whatever the exclusions say, and a tree without them is not the
+ * Chat App, so the scan refuses to run instead of passing on what is left.
  */
 export const REQUIRED_DIRECTORIES = ["app", "components"];
 
@@ -73,8 +128,28 @@ const PLATFORM_LITERALS = new Set(["ios", "android", "web", "windows", "macos", 
 
 const KEYBOARD_CONTROLLER = "react-native-keyboard-controller";
 const REACT_NATIVE = "react-native";
+const EXPO_ROUTER = "expo-router";
+
+/** `Stack` from "expo-router", `NativeTabs` from "expo-router/unstable-native-tabs", … */
+function isRouterNavigatorExport(module, exportName) {
+  return (
+    (module === EXPO_ROUTER || module.startsWith(`${EXPO_ROUTER}/`)) &&
+    ROUTER_NAVIGATOR_EXPORTS.includes(exportName)
+  );
+}
 
 export const KEYBOARD_STRATEGY_RULES = {
+  "root-keyboard-provider": {
+    description:
+      `${ROOT_LAYOUT_PATH} does not render KeyboardProvider from "react-native-keyboard-controller" around the navigator`,
+    fix:
+      `keep <KeyboardProvider> from "react-native-keyboard-controller" in ${ROOT_LAYOUT_PATH} with the navigator ` +
+      `(${formatList(ROUTER_NAVIGATOR_EXPORTS.map((name) => `<${name}>`), "or")} from "expo-router") nested inside it; ` +
+      "without the provider KeyboardAvoidingView and KeyboardAwareScrollViewCompat do nothing on devices, and every " +
+      "Jest suite mocks the provider as a pass-through, so only this check notices. The check follows the tree " +
+      "from the default export through same-file components and one import hop; the navigator must be nested " +
+      "inside the provider element on that path, not passed through a children prop",
+  },
   "react-native-keyboard-avoiding-view": {
     description: 'KeyboardAvoidingView is imported from "react-native"',
     fix: 'import KeyboardAvoidingView from "react-native-keyboard-controller" instead; React Native\'s own component stops reacting on Android once the keyboard-controller provider owns the insets',
@@ -198,9 +273,9 @@ function lineIn(sourceFile, node) {
   return sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile)).line + 1;
 }
 
-function formatList(items) {
+function formatList(items, conjunction = "and") {
   if (items.length <= 1) return items.join("");
-  return `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
+  return `${items.slice(0, -1).join(", ")} ${conjunction} ${items[items.length - 1]}`;
 }
 
 /**
@@ -903,30 +978,35 @@ function isStaticallyPadding(node, context, visited = new Set()) {
 }
 
 /**
- * True when `tagName` denotes `exportName` of `packageName`: directly
- * (`import { X } from pkg`, `pkg.X`), through a same-file alias
- * (`const KAV = KC.X`), or through one import hop into a Chat App module that
- * re-exports or aliases it (`export { X as Shell } from pkg`).
+ * True when `tagName` denotes a package export accepted by
+ * `isTarget(packageName, exportName)`: directly (`import { X } from pkg`,
+ * `pkg.X`), through a same-file alias (`const KAV = KC.X`), or through one
+ * import hop into a Chat App module that re-exports or aliases it
+ * (`export { X as Shell } from pkg`). Local modules never count as the
+ * package, and a second local hop is not followed.
  */
-function tagResolvesToPackageExport(tagName, context, packageName, exportName, visited = new Set()) {
+function tagResolvesToExport(tagName, context, isTarget, visited = new Set()) {
   if (!tagName) return false;
   const reference = importedReference(tagName, context);
   if (reference) {
-    if (reference.binding.module === packageName) {
+    if (!isLocalSpecifier(reference.binding.module)) {
       // `import RN from pkg; RN.X` reads the package like a namespace.
       const chain =
         reference.binding.imported === "default"
           ? reference.properties
           : [reference.exported, ...reference.properties];
-      return chain.length === 1 && chain[0] === exportName;
+      return chain.length === 1 && isTarget(reference.binding.module, chain[0]);
     }
     const resolution = resolveImport(reference, context);
     if (resolution.status === "reexport") {
-      return resolution.binding.module === packageName && resolution.binding.imported === exportName;
+      return (
+        !isLocalSpecifier(resolution.binding.module) &&
+        isTarget(resolution.binding.module, resolution.binding.imported)
+      );
     }
     if (resolution.status === "resolved") {
       return resolution.targets.some((target) =>
-        tagResolvesToPackageExport(target.node, resolution.record.context, packageName, exportName, visited),
+        tagResolvesToExport(target.node, resolution.record.context, isTarget, visited),
       );
     }
     return false;
@@ -939,7 +1019,17 @@ function tagResolvesToPackageExport(tagName, context, packageName, exportName, v
     (declaration) =>
       ts.isVariableDeclaration(declaration) &&
       declaration.initializer &&
-      tagResolvesToPackageExport(declaration.initializer, context, packageName, exportName, visited),
+      tagResolvesToExport(declaration.initializer, context, isTarget, visited),
+  );
+}
+
+/** `tagResolvesToExport` for one named export of one package. */
+function tagResolvesToPackageExport(tagName, context, packageName, exportName, visited = new Set()) {
+  return tagResolvesToExport(
+    tagName,
+    context,
+    (module, name) => module === packageName && name === exportName,
+    visited,
   );
 }
 
@@ -1155,6 +1245,383 @@ export function scanKeyboardStrategySource({
   return findings;
 }
 
+// --- Whole-tree rule: the root layout wraps the navigator in KeyboardProvider
+
+/** JSX children that render something: elements, expressions and non-blank text. */
+function isRenderedJsxChild(child) {
+  return !(ts.isJsxText(child) && child.containsOnlyTriviaWhiteSpaces);
+}
+
+/** Functions and methods: their `return` statements belong to them, not to the enclosing component. */
+function isFunctionLikeValue(node) {
+  return (
+    ts.isFunctionDeclaration(node) ||
+    ts.isFunctionExpression(node) ||
+    ts.isArrowFunction(node) ||
+    ts.isMethodDeclaration(node) ||
+    ts.isGetAccessorDeclaration(node) ||
+    ts.isSetAccessorDeclaration(node) ||
+    ts.isConstructorDeclaration(node)
+  );
+}
+
+/**
+ * Follows the tree the root layout renders, starting at its default export,
+ * and records every navigator element reached together with whether a
+ * KeyboardProvider from react-native-keyboard-controller encloses it on that
+ * path, plus every provider element seen.
+ *
+ * Only rendered code is followed. A component contributes the expressions it
+ * returns (every `return` of its own body, a concise arrow body, a class's
+ * `render` method); nested callbacks, effects, unused declarations and JSX
+ * props are not rendered by the component and are not read. A rendered
+ * expression contributes its JSX (children carry the provider flag; a
+ * same-file component tag is followed into its declaration and a component
+ * imported from another Chat App file is followed one hop — the loaded module
+ * has no resolver, so its own imports are not followed), both branches of a
+ * conditional, the operands of `&&`/`||`/`??`, array elements, the value of a
+ * same-file variable (`{statusBar}`) and what a call in rendered position
+ * returns (`{renderContent()}`, `useMemo(() => <Stack />, [])`). A component
+ * that renders its `children` prop is not modelled: the navigator counts as
+ * inside the provider only when the followed JSX nests it there.
+ *
+ * @returns {{
+ *   entry: "followed" | "missing" | "reexport",
+ *   entryModule?: string,
+ *   navigators: Array<{ file: string, line: number, tag: string, insideProvider: boolean, path: string[] }>,
+ *   providers: Array<{ file: string, line: number, hasChildren: boolean }>,
+ * }}
+ */
+function traceRootLayout(facts, context, file) {
+  const trace = { entry: "followed", navigators: [], providers: [] };
+  const visited = new Set();
+  const isProvider = (tagName, tagContext) =>
+    tagResolvesToPackageExport(tagName, tagContext, KEYBOARD_CONTROLLER, "KeyboardProvider");
+
+  // A frame says where the trace currently is: which file (and its context),
+  // whether a provider element encloses this point, and the component path.
+
+  /** `node` is a value used as a component: what it returns is rendered in `frame`. */
+  const component = (node, frame) => {
+    node = unwrapExpression(node);
+    if (!node) return;
+    if (isFunctionLikeValue(node)) {
+      renderReturns(node, named(node, frame));
+      return;
+    }
+    if (ts.isClassDeclaration(node) || ts.isClassExpression(node)) {
+      const render = node.members.find(
+        (member) => ts.isMethodDeclaration(member) && propertyNameText(member.name) === "render",
+      );
+      if (render) renderReturns(render, named(node, frame));
+      return;
+    }
+    if (ts.isCallExpression(node)) {
+      // `memo(RootLayout)`, `forwardRef(function …)`, `Sentry.wrap(RootLayout)`:
+      // the wrapped arguments are the component.
+      for (const argument of node.arguments) component(argument, frame);
+      return;
+    }
+    if (ts.isConditionalExpression(node)) {
+      component(node.whenTrue, frame);
+      component(node.whenFalse, frame);
+      return;
+    }
+    if (ts.isBinaryExpression(node) && isEitherOperandOperator(node.operatorToken.kind)) {
+      component(node.left, frame);
+      component(node.right, frame);
+      return;
+    }
+    if (ts.isIdentifier(node) || ts.isPropertyAccessExpression(node)) {
+      followReference(node, frame, component);
+      return;
+    }
+    // `export default <JSX />` is not a component, but it is what mounts.
+    if (isJsxValue(node)) rendered(node, frame);
+  };
+
+  /** `node` is an expression whose value is rendered in `frame`. */
+  const rendered = (node, frame) => {
+    node = unwrapExpression(node);
+    if (!node) return;
+    if (ts.isJsxElement(node)) {
+      const opening = node.openingElement;
+      const providerHere = isProvider(opening.tagName, frame.context);
+      if (providerHere) {
+        trace.providers.push({
+          file: frame.file,
+          line: lineIn(frame.context.sourceFile, opening),
+          hasChildren: node.children.some(isRenderedJsxChild),
+        });
+      }
+      renderedTag(opening.tagName, opening, frame);
+      // Props are the component's business, wherever it sits; only the
+      // children are inside a provider element.
+      const inner = providerHere ? { ...frame, insideProvider: true } : frame;
+      for (const child of node.children) rendered(child, inner);
+      return;
+    }
+    if (ts.isJsxSelfClosingElement(node)) {
+      if (isProvider(node.tagName, frame.context)) {
+        trace.providers.push({ file: frame.file, line: lineIn(frame.context.sourceFile, node), hasChildren: false });
+      }
+      renderedTag(node.tagName, node, frame);
+      return;
+    }
+    if (ts.isJsxFragment(node)) {
+      for (const child of node.children) rendered(child, frame);
+      return;
+    }
+    if (ts.isJsxExpression(node)) {
+      rendered(node.expression, frame);
+      return;
+    }
+    if (ts.isConditionalExpression(node)) {
+      rendered(node.whenTrue, frame);
+      rendered(node.whenFalse, frame);
+      return;
+    }
+    if (ts.isBinaryExpression(node)) {
+      const operator = node.operatorToken.kind;
+      if (operator === ts.SyntaxKind.AmpersandAmpersandToken || operator === ts.SyntaxKind.CommaToken) {
+        rendered(node.right, frame);
+      } else if (isEitherOperandOperator(operator)) {
+        rendered(node.left, frame);
+        rendered(node.right, frame);
+      }
+      return;
+    }
+    if (ts.isArrayLiteralExpression(node)) {
+      for (const element of node.elements) {
+        rendered(ts.isSpreadElement(element) ? element.expression : element, frame);
+      }
+      return;
+    }
+    if (ts.isCallExpression(node)) {
+      // `{renderContent()}`, `(() => …)()`, `{items.map((item) => <Row />)}`,
+      // `useMemo(() => <Stack />, [])`: what the call returns is rendered
+      // here, so a same-file (or one-hop) callee is followed as a component
+      // and the functions passed to it contribute what they return.
+      const callee = unwrapExpression(node.expression);
+      if (isFunctionLikeValue(callee)) renderReturns(callee, frame);
+      else if (ts.isIdentifier(callee) || ts.isPropertyAccessExpression(callee)) followReference(callee, frame, component);
+      for (const argument of node.arguments) {
+        const value = unwrapExpression(argument);
+        if (isFunctionLikeValue(value)) renderReturns(value, frame);
+      }
+      return;
+    }
+    if (ts.isIdentifier(node) || ts.isPropertyAccessExpression(node)) {
+      // `{statusBar}`, `{content}`: a same-file variable's value (or a value
+      // imported from another Chat App file) is rendered here.
+      followReference(node, frame, rendered);
+    }
+    // Literals, `null`, templates, `new`, `await`, functions in rendered
+    // position (render props) and anything else render nothing the check
+    // can follow.
+  };
+
+  /** Renders every expression the function or method returns, skipping nested functions' returns. */
+  const renderReturns = (fn, frame) => {
+    if (!fn.body) return;
+    if (!ts.isBlock(fn.body)) {
+      rendered(fn.body, frame);
+      return;
+    }
+    const collect = (node) => {
+      if (ts.isReturnStatement(node)) {
+        rendered(node.expression, frame);
+        return;
+      }
+      if (isFunctionLikeValue(node) || ts.isClassLike(node)) return;
+      ts.forEachChild(node, collect);
+    };
+    ts.forEachChild(fn.body, collect);
+  };
+
+  const renderedTag = (tagName, element, frame) => {
+    if (tagResolvesToExport(tagName, frame.context, isRouterNavigatorExport)) {
+      trace.navigators.push({
+        file: frame.file,
+        line: lineIn(frame.context.sourceFile, element),
+        tag: tagName.getText(frame.context.sourceFile),
+        insideProvider: frame.insideProvider,
+        path: frame.path,
+      });
+      return;
+    }
+    followReference(tagName, frame, component);
+  };
+
+  /**
+   * Resolves an identifier or property chain to what it names — same-file
+   * declarations, or the export of another Chat App file one hop away — and
+   * hands each target to `mode` (component or rendered) in that file.
+   */
+  const followReference = (node, frame, mode) => {
+    const label = node.getText(frame.context.sourceFile);
+    const imported = importedReference(node, frame.context);
+    if (imported) {
+      if (!isLocalSpecifier(imported.binding.module)) return;
+      const key = `${visitKey(frame.context, `import ${label}`)}\u0000${mode.name}\u0000${frame.insideProvider}`;
+      if (visited.has(key)) return;
+      visited.add(key);
+      const resolution = resolveImport(imported, frame.context);
+      // A re-export chain, a missing module or export, or a whole namespace
+      // is not followed; a navigator hidden there is reported as not found.
+      if (resolution.status !== "resolved") return;
+      const { record } = resolution;
+      const next = {
+        context: record.context,
+        file: record.file,
+        insideProvider: frame.insideProvider,
+        path: [...frame.path, `${label} (${record.file})`],
+      };
+      for (const target of resolution.targets) mode(target.node, next);
+      return;
+    }
+    const reference = referenceTargets(node, frame.context);
+    if (!reference) return;
+    const key = `${reference.key}\u0000${mode.name}\u0000${frame.insideProvider}`;
+    if (visited.has(key)) return;
+    visited.add(key);
+    const next = { ...frame, path: [...frame.path, label] };
+    for (const target of reference.targets) mode(target.node, next);
+  };
+
+  /** Adds a named function's or class's own name to the path unless the reference already did. */
+  const named = (node, frame) => {
+    const name = node.name && ts.isIdentifier(node.name) ? node.name.text : null;
+    if (!name || frame.path[frame.path.length - 1] === name) return frame;
+    return { ...frame, path: [...frame.path, name] };
+  };
+
+  const entry = facts.exports.get("default");
+  if (!entry) {
+    trace.entry = "missing";
+    return trace;
+  }
+  if (entry.kind === "reexport") {
+    trace.entry = "reexport";
+    trace.entryModule = entry.module;
+    return trace;
+  }
+  const root = { context, file, insideProvider: false, path: [] };
+  if (entry.kind === "local") {
+    // `export default function RootLayout` / `export { RootLayout as default }`:
+    // the name is resolved like any reference (declared here or imported).
+    const name = ts.isExportSpecifier(entry.node) ? (entry.node.propertyName ?? entry.node.name) : entry.node.name;
+    if (name) followReference(name, root, component);
+    return trace;
+  }
+  // `export default <expression>`: `RootLayout`, `memo(function …)`,
+  // `sentryEnabled ? Sentry.wrap(RootLayout) : RootLayout`.
+  component(entry.node, root);
+  return trace;
+}
+
+/** `||` and `??` may render either operand. */
+function isEitherOperandOperator(operator) {
+  return operator === ts.SyntaxKind.BarBarToken || operator === ts.SyntaxKind.QuestionQuestionToken;
+}
+
+function isJsxValue(node) {
+  return ts.isJsxElement(node) || ts.isJsxSelfClosingElement(node) || ts.isJsxFragment(node);
+}
+
+/**
+ * Turns a root-layout trace into findings: the default export could not be
+ * followed, no navigator was reached, or a navigator sits outside the
+ * provider. Findings without a line are file-level.
+ */
+function rootLayoutFindings(trace, file, facts) {
+  const rule = "root-keyboard-provider";
+  const finding = (line, detail) => ({ file, rule, line, detail });
+  const navigatorList = formatList(ROUTER_NAVIGATOR_EXPORTS.map((name) => `<${name}>`), "or");
+  const followed = "followed from the default export through same-file components and one import hop";
+  if (trace.entry === "missing") {
+    return [finding(null, `has no default export, so the tree it renders cannot be ${followed}`)];
+  }
+  if (trace.entry === "reexport") {
+    return [
+      finding(
+        null,
+        `re-exports its default export from "${trace.entryModule}", which the check does not follow; ` +
+          "define the root layout component in this file",
+      ),
+    ];
+  }
+  if (trace.navigators.length === 0) {
+    return [
+      finding(
+        null,
+        `renders no navigator the check can see (${navigatorList} from "expo-router", ${followed})`,
+      ),
+    ];
+  }
+  const importsProvider =
+    facts.namedImports.some((entry) => entry.module === KEYBOARD_CONTROLLER && entry.imported === "KeyboardProvider") ||
+    facts.namespaceImports.some((entry) => entry.module === KEYBOARD_CONTROLLER) ||
+    facts.reexports.some((entry) => entry.module === KEYBOARD_CONTROLLER && entry.exported === "KeyboardProvider");
+  const providerStatus = () => {
+    if (trace.providers.length === 0) {
+      return importsProvider
+        ? `KeyboardProvider is imported but not rendered on the way there`
+        : `${file} does not import KeyboardProvider from "${KEYBOARD_CONTROLLER}"`;
+    }
+    const withChildren = trace.providers.filter((provider) => provider.hasChildren);
+    const describe = (providers) =>
+      formatList(
+        providers.map((provider) =>
+          provider.file === file ? `line ${provider.line}` : `line ${provider.line} of ${provider.file}`,
+        ),
+      );
+    if (withChildren.length === 0) {
+      return `the self-closing <KeyboardProvider /> on ${describe(trace.providers)} renders nothing inside it`;
+    }
+    return `the <KeyboardProvider> on ${describe(withChildren)} does not contain it`;
+  };
+  return trace.navigators
+    .filter((navigator) => !navigator.insideProvider)
+    .map((navigator) => {
+      const where = navigator.file === file ? "" : ` in ${navigator.file}`;
+      const through = navigator.path.length > 0 ? `reached through ${navigator.path.join(" › ")}; ` : "";
+      return finding(
+        navigator.file === file ? navigator.line : null,
+        `renders <${navigator.tag}> from "expo-router"${where}${
+          navigator.file === file ? "" : ` (line ${navigator.line})`
+        } outside KeyboardProvider from "${KEYBOARD_CONTROLLER}" (${through}${providerStatus()})`,
+      );
+    });
+}
+
+/**
+ * Checks that the root layout renders KeyboardProvider from
+ * react-native-keyboard-controller around the navigator.
+ *
+ * @param {{ file: string, source: string | null, resolveModule?: ((specifier: string) => object | null) | null }} input
+ *   `file` is the display name used in findings; `source` null means the
+ *   root layout file does not exist. `resolveModule` (from createModuleLoader)
+ *   lets components imported from another Chat App file be followed one hop.
+ * @returns {Array<{ file: string, rule: string, line: number | null, detail: string }>}
+ */
+export function scanRootLayoutKeyboardProvider({ file, source, resolveModule = null }) {
+  if (source === null) {
+    return [
+      {
+        file,
+        rule: "root-keyboard-provider",
+        line: null,
+        detail: "does not exist, so nothing renders KeyboardProvider around the navigator",
+      },
+    ];
+  }
+  const sourceFile = parseSource(file, source);
+  const facts = collectFacts(sourceFile);
+  const context = createContext(sourceFile, facts, resolveModule);
+  return rootLayoutFindings(traceRootLayout(facts, context, file), file, facts);
+}
+
 function isFile(candidate) {
   try {
     return statSync(candidate).isFile();
@@ -1265,38 +1732,107 @@ function listSourceFiles(directory) {
 }
 
 /**
- * Scans the package's app/, components/ and shared-module trees.
+ * Locates the root layout and runs the KeyboardProvider rule on it. Metro
+ * would prefer a platform-specific `_layout.<platform>.tsx` on that platform,
+ * so such variants are a finding: the check reads one root layout.
+ */
+function scanRootLayout({ packageRoot, workspaceRoot, loader }) {
+  const { file, platformVariants } = locateModuleFiles(path.join(packageRoot, ROOT_LAYOUT_PATH));
+  const rootLayoutFile = displayPath(workspaceRoot, file ?? path.join(packageRoot, ROOT_LAYOUT_PATH));
+  const findings = [];
+  if (platformVariants.length > 0) {
+    findings.push({
+      file: rootLayoutFile,
+      rule: "root-keyboard-provider",
+      line: null,
+      detail:
+        `has platform-specific variants (${formatList(platformVariants.map((variant) => displayPath(workspaceRoot, variant)))}) ` +
+        "that the check does not follow; keep a single root layout",
+    });
+  }
+  findings.push(
+    ...scanRootLayoutKeyboardProvider({
+      file: rootLayoutFile,
+      source: file ? readFileSync(file, "utf8") : null,
+      resolveModule: file ? loader.resolverFor(file) : null,
+    }),
+  );
+  return { rootLayoutFile, findings };
+}
+
+/**
+ * Enumerates the top-level directories the scan reads: every directory of the
+ * package root except the non-source ones and dot-directories, plus the
+ * required directories whatever the exclusions say. A folder added later is
+ * therefore scanned without editing a list, and only a name on the
+ * non-source list can keep one out. Throws when a required directory is
+ * missing.
  *
- * @param {{ packageRoot?: string, workspaceRoot?: string, directories?: string[], requiredDirectories?: string[] }} options
+ * @param {{ packageRoot: string, workspaceRoot?: string, excludedDirectories?: string[], requiredDirectories?: string[] }} options
+ * @returns {{ scanned: string[], skipped: string[] }} names sorted by name;
+ *   `skipped` lists the existing top-level directories the scan left out.
+ */
+export function listSourceDirectories({
+  packageRoot,
+  workspaceRoot = path.resolve(packageRoot, "../.."),
+  excludedDirectories = NON_SOURCE_DIRECTORIES,
+  requiredDirectories = REQUIRED_DIRECTORIES,
+}) {
+  for (const directory of requiredDirectories) {
+    const absoluteDirectory = path.join(packageRoot, directory);
+    if (!isDirectory(absoluteDirectory)) {
+      throw new Error(
+        `Keyboard strategy check: expected directory ${displayPath(workspaceRoot, absoluteDirectory)} ` +
+          "does not exist. Update REQUIRED_DIRECTORIES in scripts/validate-keyboard-strategy.mjs if the Chat App source moved.",
+      );
+    }
+  }
+  const excluded = new Set(excludedDirectories);
+  const scanned = [];
+  const skipped = [];
+  for (const name of readdirSync(packageRoot).sort((a, b) => a.localeCompare(b))) {
+    if (!isDirectory(path.join(packageRoot, name))) continue;
+    if (requiredDirectories.includes(name) || (!excluded.has(name) && !name.startsWith("."))) {
+      scanned.push(name);
+    } else {
+      skipped.push(name);
+    }
+  }
+  return { scanned, skipped };
+}
+
+/**
+ * Scans every top-level source directory of the package (see
+ * listSourceDirectories), then checks that the root layout wraps the
+ * navigator in KeyboardProvider.
+ *
+ * @param {{ packageRoot?: string, workspaceRoot?: string, excludedDirectories?: string[], requiredDirectories?: string[] }} options
  *   Findings name files relative to `workspaceRoot` (defaults to two levels
  *   above the package root, i.e. `artifacts/chat-app/app/...`). Directories
- *   listed in `requiredDirectories` must exist; the others are skipped while
- *   absent.
- * @returns {{ findings: Array<{ file: string, rule: string, line: number, detail: string }>, scannedFiles: string[], scannedDirectories: string[] }}
+ *   named in `excludedDirectories` (default NON_SOURCE_DIRECTORIES) and
+ *   dot-directories are skipped; those in `requiredDirectories` must exist.
+ * @returns {{ findings: Array<{ file: string, rule: string, line: number | null, detail: string }>, scannedFiles: string[], scannedDirectories: string[], skippedDirectories: string[], packagePath: string, rootLayoutFile: string }}
+ *   `line` is null for a file-level finding (the root layout is missing, has
+ *   no default export, …). `packagePath` is the package root relative to
+ *   `workspaceRoot` ("" when they coincide).
  */
 export function scanKeyboardStrategy({
   packageRoot = defaultPackageRoot(),
   workspaceRoot = path.resolve(packageRoot, "../.."),
-  directories = SCANNED_DIRECTORIES,
+  excludedDirectories = NON_SOURCE_DIRECTORIES,
   requiredDirectories = REQUIRED_DIRECTORIES,
 } = {}) {
   const findings = [];
   const scannedFiles = [];
-  const scannedDirectories = [];
+  const { scanned: scannedDirectories, skipped: skippedDirectories } = listSourceDirectories({
+    packageRoot,
+    workspaceRoot,
+    excludedDirectories,
+    requiredDirectories,
+  });
   const loader = createModuleLoader({ packageRoot, workspaceRoot });
-  for (const directory of directories) {
+  for (const directory of scannedDirectories) {
     const absoluteDirectory = path.join(packageRoot, directory);
-    if (!isDirectory(absoluteDirectory)) {
-      if (requiredDirectories.includes(directory)) {
-        throw new Error(
-          `Keyboard strategy check: expected directory ${displayPath(workspaceRoot, absoluteDirectory)} ` +
-            "does not exist. Update SCANNED_DIRECTORIES / REQUIRED_DIRECTORIES in scripts/validate-keyboard-strategy.mjs if the Chat App source moved.",
-        );
-      }
-      // An optional shared-module home this tree does not have.
-      continue;
-    }
-    scannedDirectories.push(directory);
     for (const absoluteFile of listSourceFiles(absoluteDirectory)) {
       const file = displayPath(workspaceRoot, absoluteFile);
       const packageRelativePath = displayPath(packageRoot, absoluteFile);
@@ -1316,7 +1852,42 @@ export function scanKeyboardStrategy({
       `Keyboard strategy check: no source files found under ${scannedDirectories.join(", ")}; refusing to pass an empty scan.`,
     );
   }
-  return { findings, scannedFiles, scannedDirectories };
+  const rootLayout = scanRootLayout({ packageRoot, workspaceRoot, loader });
+  findings.push(...rootLayout.findings);
+  return {
+    findings,
+    scannedFiles,
+    scannedDirectories,
+    skippedDirectories,
+    packagePath: displayPath(workspaceRoot, packageRoot),
+    rootLayoutFile: rootLayout.rootLayoutFile,
+  };
+}
+
+/**
+ * One sentence saying what a passing scan covered: the directories read, the
+ * fact that they are every top-level directory of the package minus the
+ * skipped non-source ones, and the root layout the whole-tree rule checked.
+ */
+export function formatKeyboardStrategyPass({
+  scannedFiles,
+  scannedDirectories,
+  skippedDirectories,
+  packagePath,
+  rootLayoutFile,
+}) {
+  const count = scannedFiles.length;
+  const asDirectories = (names) => formatList(names.map((name) => `${name}/`));
+  const where = packagePath ? `of ${packagePath}` : "of the package";
+  const scope =
+    skippedDirectories.length > 0
+      ? `every top-level directory ${where} except the non-source ${asDirectories(skippedDirectories)}`
+      : `every top-level directory ${where}`;
+  return (
+    `Keyboard strategy check passed: ${count} source file${count === 1 ? "" : "s"} under ` +
+    `${asDirectories(scannedDirectories)} (${scope}) follow${count === 1 ? "s" : ""} ` +
+    `${KEYBOARD_STRATEGY_NOTE}, and ${rootLayoutFile} wraps the navigator in KeyboardProvider.`
+  );
 }
 
 /** Formats findings as the failure message: file, line, rule, what was found, and the fix. */
@@ -1327,7 +1898,8 @@ export function formatKeyboardStrategyFailure(findings) {
   ];
   for (const finding of findings) {
     const rule = KEYBOARD_STRATEGY_RULES[finding.rule];
-    lines.push(`  - ${finding.file}:${finding.line} [${finding.rule}] ${finding.detail}. Fix: ${rule.fix}.`);
+    const location = finding.line === null || finding.line === undefined ? finding.file : `${finding.file}:${finding.line}`;
+    lines.push(`  - ${location} [${finding.rule}] ${finding.detail}. Fix: ${rule.fix}.`);
   }
   return lines.join("\n");
 }
@@ -1369,18 +1941,13 @@ function main() {
     // A custom root (fixtures, other checkouts) reports paths relative to itself.
     options.workspaceRoot = options.packageRoot;
   }
-  const { findings, scannedFiles, scannedDirectories } = scanKeyboardStrategy(options);
-  if (findings.length > 0) {
-    console.error(formatKeyboardStrategyFailure(findings));
+  const result = scanKeyboardStrategy(options);
+  if (result.findings.length > 0) {
+    console.error(formatKeyboardStrategyFailure(result.findings));
     process.exitCode = 1;
     return;
   }
-  const count = scannedFiles.length;
-  console.log(
-    `Keyboard strategy check passed: ${count} source file${count === 1 ? "" : "s"} under ` +
-      `${formatList(scannedDirectories.map((directory) => `${directory}/`))} ` +
-      `follow${count === 1 ? "s" : ""} ${KEYBOARD_STRATEGY_NOTE}.`,
-  );
+  console.log(formatKeyboardStrategyPass(result));
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

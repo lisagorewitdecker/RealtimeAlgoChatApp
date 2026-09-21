@@ -15,7 +15,12 @@ kept working from the previously installed tree. The durable fix was adding
 
 **How to apply:**
 - After any dependency upgrade, grep `pnpm-workspace.yaml` for `@<version>`
-  extension keys and confirm each still matches the installed version.
+  extension keys and confirm each still matches the installed version. The
+  worklets key is a `0.10.x` range since 2026-09-19 (the Expo Go pin moved the
+  package to 0.10.0, which also does not declare `@babel/generator`); keep it a
+  range, and remember that any extension edit changes the lockfile's
+  `packageExtensionsChecksum`, so a frozen install fails until the lockfile is
+  regenerated.
 - Prefer root dependencies or version-range keys over exact pins for peers
   that Metro/Babel plugins resolve at build time.
 - The publish build runs a fresh `pnpm install` plus each artifact's `build`

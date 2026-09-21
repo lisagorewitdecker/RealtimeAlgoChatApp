@@ -1,0 +1,19 @@
+kind = "design-system"
+previewPath = "/realtime-algo-chat-design-system/"
+title = "RealtimeAlgoChatApp Design System"
+description = "A reusable design system extracted from RealtimeAlgoChatApp, preserving its dark-first navy palette, accessible Inter typography, mobile interaction patterns, and core chat components."
+version = "1.0.0"
+id = "artifacts/realtime-algo-chat-design-system"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/realtime-algo-chat-design-system/" ]
+localPort = 19699
+
+[services.development]
+run = "pnpm --filter @workspace/realtime-algo-chat-design-system run dev"
+
+[services.env]
+PORT = "19699"
+BASE_PATH = "/realtime-algo-chat-design-system/"

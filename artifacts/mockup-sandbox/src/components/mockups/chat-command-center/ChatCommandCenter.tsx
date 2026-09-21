@@ -5,7 +5,6 @@ import {
   Bell,
   Check,
   ChevronRight,
-  Hash,
   Menu,
   Pin,
   Plus,
@@ -103,10 +102,6 @@ export default function ChatCommandCenter() {
       }),
     [filter, query, rooms],
   );
-
-  function togglePin(id: string) {
-    setRooms((current) => current.map((room) => (room.id === id ? { ...room, pinned: !room.pinned } : room)));
-  }
 
   function createRoom(event: React.FormEvent) {
     event.preventDefault();
