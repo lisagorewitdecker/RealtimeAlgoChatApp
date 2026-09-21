@@ -56,7 +56,12 @@ function runValidator(env) {
   const summaryPath = path.join(temporaryDirectory, "summary.md");
   const result = spawnSync(process.execPath, [validatorPath], {
     cwd: workspaceRoot,
-    env: { ...process.env, GITHUB_STEP_SUMMARY: summaryPath, ...env },
+    env: {
+      ...process.env,
+      GITHUB_STEP_SUMMARY: summaryPath,
+      REPLIT_EXPO_DEV_DOMAIN: "fallback-preview.example.test",
+      ...env,
+    },
     encoding: "utf8",
   });
 
@@ -99,6 +104,7 @@ function runWorkflowVerificationStep() {
         ...process.env,
         GITHUB_STEP_SUMMARY: githubStepSummaryPath,
         REVIEWED_REF: "preview-startup-summary-regression-test-ref",
+        REPLIT_EXPO_DEV_DOMAIN: "fallback-preview.example.test",
       },
       encoding: "utf8",
     },
