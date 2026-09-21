@@ -4288,6 +4288,11 @@ test("iOS preview evidence covers renamed records and blocks malformed changes",
     /cat\s+"\$record_path"|validation_output.*GITHUB_STEP_SUMMARY/,
     "the iOS job must not print iOS record evidence into the summary",
   );
+  assert.match(
+    validationStep.run,
+    /record_revision="\$GITHUB_SHA"[\s\S]*if \[\[ ! -f "\$record_path" \]\][\s\S]*record_revision="\$IOS_PREVIEW_BASE_SHA"[\s\S]*record_url="\$\{GITHUB_SERVER_URL\}\/\$\{GITHUB_REPOSITORY\}\/blob\/\$\{record_revision\}\/\$\{record_path\}"/,
+    "each changed iOS record must receive a GitHub link, using the base revision when the record was deleted",
+  );
 
   function runIosPreviewJob(
     name,
@@ -4485,6 +4490,8 @@ test("iOS preview evidence covers renamed records and blocks malformed changes",
     });
     return {
       result,
+      baseSha,
+      headSha,
       baseRecordPath: path.relative(fixtureRoot, baseRecordPath),
       recordPath: path.relative(fixtureRoot, recordPath),
       baseRecordPaths: baseRecordPaths.map((record) =>
@@ -4870,6 +4877,20 @@ PRIVATE_IOS_EVIDENCE_MARKER
     deleted.summary,
     /changed iOS preview validation record is missing/,
     "the summary must identify the missing changed iOS record",
+  );
+  assert.match(
+    deleted.summary,
+    new RegExp(
+      `\\[${deleted.recordPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\]\\(https://github\\.example/example/chat-app/blob/${deleted.baseSha}/${deleted.recordPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\)`,
+    ),
+    "a deleted iOS record must link to its base revision so reviewers can inspect it",
+  );
+  assert.doesNotMatch(
+    deleted.summary,
+    new RegExp(
+      `https://github\\.example/example/chat-app/blob/${deleted.headSha}/${deleted.recordPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`,
+    ),
+    "a deleted iOS record must not link to the missing pull request head path",
   );
 
   const malformedIosPreflight =
