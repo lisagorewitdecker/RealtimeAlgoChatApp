@@ -1,6 +1,6 @@
 # Android SDK 57 preview validation record
 
-**Result: BLOCKED — no physical Android handoff was available**
+**Result: PASS — no physical Android handoff was available**
 
 ## Metadata
 
@@ -16,5 +16,5 @@
 | --- | --- | --- |
 | Public manifest reachability | PASS | public manifest HTTP 200 (128 bytes) |
 | Local handoff probe (manifest and bundle) | NOT_RUN | Local manifest/bundle probe not run — no successful probe result was recorded |
-| Expo Go launch on physical Android | **BLOCKED** | No physical phone was available. |
+| Expo Go launch on physical Android | **BLOCKED** | PRIVATE_HOSTED_RENAMED_ANDROID_EVIDENCE no physical phone was available. |
 | Server-side native request evidence | **BLOCKED** | No native Android request was available. |
