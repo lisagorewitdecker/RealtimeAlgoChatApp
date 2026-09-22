@@ -174,3 +174,4 @@ export type HealthCheck503 = HealthStatus & {
 } & Required<Pick<HealthStatus & {
   status?: HealthCheck503Status;
 }, 'reason' | 'elapsedMs'>>;
+// hosted required-check probe: api-codegen-required-check-probe-20260922
