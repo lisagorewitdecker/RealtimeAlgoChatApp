@@ -206,6 +206,13 @@ test("the gate's unit suite covers the breakages that reached main unchecked", (
     ),
   );
 
+  // The production EthicalCheck job must not depend on an unavailable action.
+  assert.ok(
+    rootUnitCommands.includes(
+      "node --test scripts/tests/ethicalcheck-workflow-contract.test.mjs",
+    ),
+  );
+
   // Bash syntax errors in the native large-text evidence checker.
   assert.ok(rootUnitCommands.includes("pnpm run test:native-large-text-evidence"));
   assert.equal(
