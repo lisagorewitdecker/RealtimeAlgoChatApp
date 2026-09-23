@@ -40,7 +40,8 @@ Metro restart, so the probe needs no user action.
 **Startup-crash signature (sign-in already fixed):** manifest accepted → bundle 200 → inspector connection closed with an
 abnormal code (1006) a few seconds later, no `iOS LOG`, asset, lazy-bundle, or API request, simulator back on the iOS home
 screen. That is Expo Go quitting while starting the app, not a sign-in or launch-routing problem — do not spend more time on
-the login step for that symptom.
+the login step for that symptom. Its cause was a JS/native version mismatch inside Expo Go itself; see
+[Expo Go embedded native module versions](expo-go-embedded-native-versions.md) before bisecting the app's providers.
 
 ## Native secure storage failures never show up in the web preview
 `expo-secure-store` accepts only `[\w.-]` key names while web localStorage accepts anything, so a storage-key bug reaches

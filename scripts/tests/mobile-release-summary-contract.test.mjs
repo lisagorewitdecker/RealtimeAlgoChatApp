@@ -24,8 +24,8 @@
  *   6. A failed platform artifact download keeps the release blocked without
  *      hiding the other platform's report link.
  *   7. Mixed record-only, sidecar-only, and paired Android preview changes are
- *      validated independently; one failure does not hide valid records or
- *      expose any record's evidence text.
+ *      validated independently in deterministic path order; one failure does
+ *      not hide valid records, break sidecar pairing, or expose evidence text.
  *   8. Malformed, schema-invalid, and duplicate Android and iOS preflight
  *      artifacts fail with the fixed redacted-schema message without
  *      exposing their markers or raw artifact content.
@@ -40,6 +40,14 @@
  *  12. Native report artifacts use the maximum bounded retention window, and
  *      an expired artifact download never leaves a dead report link in the
  *      release summary.
+ *  13. A hosted cleanup failure skips the native retry, preserves stale output,
+ *      and still publishes the fixed redacted platform recovery summary.
+ *  14. A failed native privacy check still writes a BLOCKED publish summary
+ *      without reaching the simulated store submission boundary.
+ *  15. Successful native downloads with malformed artifact URLs keep both
+ *      platform statuses fixed while omitting unsafe report links.
+ *  16. A failed continue-on-error download remains blocked when its visible
+ *      step conclusion is successful, and the diagnostic explains why.
  *
  * The static rules catch code paths no scenario exercises; the behavioral runs
  * inject sentinel values for every secret-backed variable and prove the real
@@ -66,7 +74,7 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test, { after } from "node:test";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import YAML from "yaml";
 
 const workspaceRoot = path.resolve(
@@ -100,6 +108,8 @@ const iosPreflightScript = "scripts/check-ios-release-prerequisites.sh";
 const androidPreflightScript = "scripts/check-android-release-prerequisites.sh";
 const nativeEvidenceCheckerScript =
   "scripts/check-native-large-text-evidence.sh";
+const nativeReleaseArchiveScript =
+  "scripts/archive-native-release-report.sh";
 const untrustedCheckerWrapperScript = "scripts/run-untrusted-checker.sh";
 const workflowOutputSafetyScript = "scripts/workflow-output-safety.sh";
 const nativeBrandingSummaryScript = "scripts/summarize-native-branding.sh";
@@ -163,6 +173,11 @@ const scriptContracts = {
       "java_version",
       "pnpm_version",
       "PNPM_VERSION",
+      // These are fixed, non-secret values from the shared iOS runner
+      // contract. They are safe to copy into bounded diagnostics.
+      "IOS_RUNNER_PNPM_VERSION",
+      "IOS_RUNNER_JAVA_MINIMUM_MAJOR",
+      "IOS_RUNNER_SIMULATOR_NAME",
     ],
     summaryFunction: "write_summary",
     evidenceDirectoryVariable: null,
@@ -211,27 +226,33 @@ const scriptContracts = {
  * below intentionally discovers JSON.parse calls in release-check scripts and
  * their local helper modules rather than trusting this list alone: adding a
  * reader without adding the shared duplicate-key check must fail this
- * contract.
+ * contract. An entry script that reaches several readers (its own and those
+ * of the local helpers it imports) lists one contract per parsed argument.
  */
 const releaseEvidenceReaderContracts = {
-  "artifacts/chat-app/scripts/preview-launch-evidence.mjs": {
-    name: "iOS launch-evidence probe records",
-    argument: "contents",
-    scannerCall: "findDuplicateJsonObjectKeys(contents)",
-    duplicateFailure: /Launch-evidence probe JSON contains duplicate fields \(\$\{fileName\}\)\./,
-  },
   "artifacts/chat-app/scripts/validate-branding.mjs": {
     name: "native branding metadata",
     argument: "source",
     scannerCall: "findDuplicateJsonObjectKeys(source)",
     duplicateFailure: /Native \$\{platformLabel\(platform\)\} metadata contains duplicate fields/,
   },
-  "artifacts/chat-app/scripts/validate-preview-startup.mjs": {
-    name: "preview handoff sidecar",
-    argument: "source",
-    scannerCall: "findDuplicateJsonObjectKeys(source)",
-    duplicateFailure: /Preview handoff preflight JSON contains duplicate fields/,
-  },
+  "artifacts/chat-app/scripts/validate-preview-startup.mjs": [
+    {
+      name: "preview handoff sidecar",
+      argument: "source",
+      scannerCall: "findDuplicateJsonObjectKeys(source)",
+      duplicateFailure: /Preview handoff preflight JSON contains duplicate fields/,
+    },
+    {
+      // The preflight copies the launch-evidence probe result and start
+      // record through preview-launch-evidence.mjs, so that helper's reader
+      // is reached from this entry script.
+      name: "iOS launch-evidence probe records",
+      argument: "contents",
+      scannerCall: "findDuplicateJsonObjectKeys(contents)",
+      duplicateFailure: /Launch-evidence probe JSON contains duplicate fields \(\$\{fileName\}\)\./,
+    },
+  ],
   "scripts/check-native-large-text-evidence.sh": {
     name: "native large-text Sentry evidence",
     argument: "rawEvidence",
@@ -278,7 +299,19 @@ const nonEvidenceJsonParseArguments = {
     "manifestBody",
   ]),
   "scripts/validate-mockup-clean.mjs": new Set(["listOutput"]),
+  // Tracked package manifests are repository source, not evidence produced by
+  // a release run, so this reader is outside the evidence duplicate-field
+  // contract.
+  "scripts/validate-package-manifests.mjs": new Set(["source"]),
 };
+
+const shellHereDocPattern =
+  /<<-?\s*['"]?([A-Za-z_][A-Za-z0-9_-]*)['"]?\s*\n([\s\S]*?)\n\1(?=\n|$)/g;
+const shellDynamicImportPattern =
+  /\bimport\s*\(\s*pathToFileURL\(\s*([A-Za-z_$][\w$]*)\s*\)\.href\s*\)/g;
+const processArgDestructurePattern =
+  /\b(?:const|let|var)\s*\[([\s\S]*?)\]\s*=\s*process\.argv\b/g;
+const MAX_INVOKED_SCRIPT_DISCOVERY_DEPTH = 4;
 
 const actionExpressionPattern = /\$\{\{([\s\S]*?)\}\}/g;
 const secretExpressionPattern = /\bsecrets\s*[.[]|\bgithub\.token\b/;
@@ -412,7 +445,16 @@ const localModuleImportPatterns = [
   /\bexport\s+(?:[\s\S]*?\s+from\s+)["']([^"']+)["']/g,
   /\bimport\s*\(\s*["']([^"']+)["']\s*\)/g,
 ];
-const localModuleExtensions = ["", ".mjs", ".js", ".cjs"];
+const localModuleExtensions = [
+  "",
+  ".mjs",
+  ".js",
+  ".cjs",
+  ".ts",
+  ".tsx",
+  ".mts",
+  ".cts",
+];
 
 function resolveLocalModule(filePath, specifier) {
   if (!specifier.startsWith(".")) {
@@ -440,6 +482,168 @@ function resolveLocalModule(filePath, specifier) {
   return null;
 }
 
+function tokenizeShellArguments(text) {
+  const tokens = [];
+  let token = "";
+  let quote = null;
+  let escaped = false;
+
+  const pushToken = () => {
+    if (token !== "") {
+      tokens.push(token);
+      token = "";
+    }
+  };
+
+  for (let index = 0; index < text.length; index += 1) {
+    const character = text[index];
+    if (escaped) {
+      if (character !== "\n") {
+        token += character;
+      }
+      escaped = false;
+      continue;
+    }
+    if (character === "\\" && quote !== "'") {
+      escaped = true;
+      continue;
+    }
+    if (quote) {
+      if (character === quote) {
+        quote = null;
+      } else {
+        token += character;
+      }
+      continue;
+    }
+    if (character === "'" || character === '"') {
+      quote = character;
+    } else if (/\s/.test(character)) {
+      pushToken();
+    } else {
+      token += character;
+    }
+  }
+  if (escaped) {
+    token += "\\";
+  }
+  pushToken();
+  return tokens;
+}
+
+function heredocCommand(source, heredocStart) {
+  let commandStart = source.lastIndexOf("\n", heredocStart - 1) + 1;
+  while (commandStart > 0) {
+    const previousLineEnd = commandStart - 1;
+    const previousLineStart = source.lastIndexOf("\n", previousLineEnd - 1) + 1;
+    if (
+      !source.slice(previousLineStart, previousLineEnd).trimEnd().endsWith("\\")
+    ) {
+      break;
+    }
+    commandStart = previousLineStart;
+  }
+  return source.slice(commandStart, heredocStart);
+}
+
+function resolveShellPathToken(filePath, token) {
+  const relative = token
+    .replace(/^\$\{?[A-Za-z_][A-Za-z0-9_]*\}?\/+/, "")
+    .replace(/^\.\//, "");
+  if (!relative || /[$'"{}]/.test(relative) || path.isAbsolute(relative)) {
+    return null;
+  }
+
+  for (const base of [path.dirname(filePath), workspaceRoot]) {
+    const candidate = path.resolve(base, relative);
+    if (
+      candidate.startsWith(`${workspaceRoot}${path.sep}`) &&
+      !candidate.includes(`${path.sep}node_modules${path.sep}`) &&
+      existsSync(candidate) &&
+      statSync(candidate).isFile()
+    ) {
+      return candidate;
+    }
+  }
+  return null;
+}
+
+/** Contracts registered for an entry script, one per parsed argument. */
+function releaseEvidenceReaderContractsFor(relativePath) {
+  const contracts = releaseEvidenceReaderContracts[relativePath];
+  if (contracts === undefined) {
+    return [];
+  }
+  return Array.isArray(contracts) ? contracts : [contracts];
+}
+
+function discoverShellEmbeddedLocalModules(filePath) {
+  const relativePath = path.relative(workspaceRoot, filePath);
+  const [shellContract] = releaseEvidenceReaderContractsFor(relativePath);
+  if (!filePath.endsWith(".sh") || !shellContract) {
+    return [];
+  }
+
+  const source = readFileSync(filePath, "utf8");
+  const importedPaths = new Set();
+  for (const match of source.matchAll(shellHereDocPattern)) {
+    const body = match[2];
+    const dynamicImportVariables = [
+      ...body.matchAll(shellDynamicImportPattern),
+    ].map(([, variable]) => variable);
+    if (dynamicImportVariables.length === 0) {
+      continue;
+    }
+
+    const processArgumentIndexes = new Map();
+    for (const destructure of body.matchAll(processArgDestructurePattern)) {
+      destructure[1].split(",").forEach((part, index) => {
+        const variable = part.trim();
+        if (/^[A-Za-z_$][\w$]*$/.test(variable)) {
+          processArgumentIndexes.set(variable, index);
+        }
+      });
+    }
+
+    const commandTokens = tokenizeShellArguments(
+      heredocCommand(source, match.index),
+    );
+    const dashIndex = commandTokens.findIndex(
+      (token, index) =>
+        token === "-" &&
+        index > 0 &&
+        commandTokens
+          .slice(0, index)
+          .some(
+            (candidate) =>
+              /(?:^|\/)node$/.test(candidate) ||
+              candidate.includes("NODE_BINARY"),
+          ),
+    );
+    if (dashIndex < 0) {
+      continue;
+    }
+
+    for (const variable of dynamicImportVariables) {
+      const processArgumentIndex = processArgumentIndexes.get(variable);
+      if (processArgumentIndex === undefined) {
+        continue;
+      }
+      // Node's process.argv contains the executable and "-" before the
+      // arguments supplied to a stdin script.
+      const argumentToken =
+        commandTokens[dashIndex + 1 + processArgumentIndex - 2];
+      const importedPath = argumentToken
+        ? resolveShellPathToken(filePath, argumentToken)
+        : null;
+      if (importedPath) {
+        importedPaths.add(importedPath);
+      }
+    }
+  }
+  return [...importedPaths];
+}
+
 function discoverLocalModuleClosure(entryPath) {
   const discovered = new Set();
   const queue = [entryPath];
@@ -451,7 +655,12 @@ function discoverLocalModuleClosure(entryPath) {
     }
     discovered.add(filePath);
 
-    if (!/\.(?:mjs|js|cjs)$/.test(filePath)) {
+    if (!/\.(?:mjs|js|cjs|ts|tsx|mts|cts)$/.test(filePath)) {
+      for (const importedPath of discoverShellEmbeddedLocalModules(filePath)) {
+        if (!discovered.has(importedPath)) {
+          queue.push(importedPath);
+        }
+      }
       continue;
     }
 
@@ -474,11 +683,17 @@ function jsonParseMatches(filePath) {
   const relativePath = path.relative(workspaceRoot, filePath);
   const ignoredArguments =
     nonEvidenceJsonParseArguments[relativePath] ?? new Set();
+  const [shellContract] = releaseEvidenceReaderContractsFor(relativePath);
   const source = readFileSync(filePath, "utf8");
 
   return [...source.matchAll(parsePattern)]
     .map(([, argument]) => argument)
     .filter((argument) => !ignoredArguments.has(argument))
+    .filter(
+      (argument) =>
+        !filePath.endsWith(".sh") ||
+        (shellContract && argument === shellContract.argument),
+    )
     .map((argument) => ({ filePath, argument }));
 }
 
@@ -657,14 +872,19 @@ function referencedScriptFiles(text, baseDirectories) {
 /**
  * Every repository script the workflow runs, keyed by workspace-relative path,
  * with the workflow steps that (transitively) invoke it. Follows script file
- * references and `pnpm --filter <package> <script>` invocations up to three
- * levels deep.
+ * references and `pnpm --filter <package> <script>` invocations up to the
+ * configured depth. If another helper is found at the boundary, fail instead
+ * of silently leaving that helper (and any summary writer it invokes)
+ * unreviewed.
  */
-function discoverInvokedScripts() {
+function discoverInvokedScripts({
+  steps = allSteps,
+  maxDepth = MAX_INVOKED_SCRIPT_DISCOVERY_DEPTH,
+} = {}) {
   const packages = workspacePackages();
   const discovered = new Map();
   const visited = new Set();
-  const queue = allSteps
+  const queue = steps
     .filter(({ step }) => typeof step.run === "string")
     .map((origin) => ({
       origin,
@@ -682,6 +902,12 @@ function discoverInvokedScripts() {
 
     for (const file of referencedScriptFiles(commandText, baseDirectories)) {
       const relative = path.relative(workspaceRoot, file);
+      // This contract test is itself executed by the hosted release workflow.
+      // Its assertions contain summary strings, but it is not a release
+      // summary writer and must not recursively expose the scripts it tests.
+      if (relative === "scripts/tests/mobile-release-summary-contract.test.mjs") {
+        continue;
+      }
       if (!discovered.has(relative)) {
         discovered.set(relative, { invokedBy: new Set() });
       }
@@ -723,8 +949,15 @@ function discoverInvokedScripts() {
       });
     }
 
-    if (depth >= 3) {
-      continue;
+    if (depth >= maxDepth) {
+      const unvisitedNested = nested.find(
+        (item) => !visited.has(`${origin.label}|${item.key}`),
+      );
+      if (unvisitedNested) {
+        throw new Error(
+          `${origin.label} exceeds the supported mobile release helper depth of ${maxDepth} while following ${unvisitedNested.key}; extend discovery before adding a deeper helper.`,
+        );
+      }
     }
     for (const item of nested) {
       const visitKey = `${origin.label}|${item.key}`;
@@ -1365,6 +1598,7 @@ test("idle-profile summary reports fixed browser target outages without leaking 
           GITHUB_STEP_SUMMARY: summaryPath,
           IDLE_PROFILE_PREFLIGHT_FAILURE_REASON: failureReason,
           IDLE_PROFILE_RESULT: "skipped",
+          REVIEWED_REF: "refs/heads/mobile-v0.0.0",
         },
       });
       const summaryOutput = `${summary.stdout}${summary.stderr}`;
@@ -1653,6 +1887,21 @@ test("hosted native evidence regression proves a transient download recovers", (
   );
   assert.match(
     recoveryStep.run,
+    /download_ios_empty_once[\s\S]*empty_retry_download_status=\$\?/,
+    "the hosted regression must exercise a retry that succeeds without extracting a timestamped evidence run",
+  );
+  assert.match(
+    recoveryStep.run,
+    /NATIVE_EVIDENCE_REQUIRE_APPROVAL=1[\s\S]*NATIVE_IOS_EVIDENCE_DOWNLOAD_RESULT=success[\s\S]*empty_retry_summary_path[\s\S]*check-native-large-text-evidence\.sh "\$recovery_root"/,
+    "strict publish validation must inspect the extracted evidence after the successful empty retry",
+  );
+  assert.match(
+    recoveryStep.run,
+    /simulate_store_submission "\$empty_retry_submission_marker"[\s\S]*if \[\[ -e "\$empty_retry_submission_marker" \]\]/,
+    "the successful empty retry must not reach the simulated store submission boundary",
+  );
+  assert.match(
+    recoveryStep.run,
     /NATIVE_IOS_EVIDENCE_DOWNLOAD_RESULT=success[\s\S]*NATIVE_ANDROID_EVIDENCE_DOWNLOAD_RESULT=success[\s\S]*check-native-large-text-evidence\.sh "\$recovery_root"/,
     "the native checker must receive success only after the retry succeeds",
   );
@@ -1690,6 +1939,282 @@ test("hosted native evidence regression proves a transient download recovers", (
     recoveryStep.run,
     /cat\s+.*(?:candidate-build-id|runner-metadata|pass-fail-record|sentry-source-map)/,
     "the hosted recovery scenario must not print downloaded evidence contents",
+  );
+});
+
+test("hosted native evidence regression keeps cleanup failures visible", () => {
+  const regressionJob = workflow.jobs["native-evidence-summary-regression"];
+  assert.deepEqual(
+    regressionJob.needs,
+    ["mobile-release-node-range"],
+    "the hosted cleanup regression must run independently of credential and native-runner availability",
+  );
+  const prepareStep = regressionJob.steps.find(
+    (step) => step.name === "Prepare stale iOS evidence before forced cleanup failure",
+  );
+  const cleanupStep = regressionJob.steps.find(
+    (step) => step.name === "Force iOS retry cleanup failure",
+  );
+  const retryStep = regressionJob.steps.find(
+    (step) => step.name === "Retry iOS native evidence download after failed cleanup",
+  );
+  const checkerStep = regressionJob.steps.find(
+    (step) => step.name === "Run checker after forced retry cleanup failure",
+  );
+  const verifyStep = regressionJob.steps.find(
+    (step) => step.name === "Verify forced retry cleanup failure remains visible and redacted",
+  );
+
+  assert.ok(prepareStep, "the hosted cleanup scenario must create stale iOS output");
+  assert.ok(cleanupStep, "the hosted cleanup scenario must force cleanup to fail");
+  assert.equal(cleanupStep.id, "cleanup-forced-ios");
+  assert.equal(cleanupStep["continue-on-error"], true);
+  assert.match(
+    cleanupStep.run,
+    /stale-marker\.txt[\s\S]*Controlled iOS retry cleanup failure injected[\s\S]*false/,
+    "the hosted cleanup scenario must fail after confirming stale output exists",
+  );
+
+  assert.ok(retryStep, "the hosted cleanup scenario must retain the real retry action");
+  assert.equal(retryStep.id, "retry-forced-ios");
+  assert.equal(retryStep.uses, pinnedDownloadArtifactAction);
+  assert.equal(retryStep["continue-on-error"], true);
+  assert.equal(
+    retryStep.if,
+    "${{ always() && steps.cleanup-forced-ios.outcome == 'success' }}",
+    "the retry must be gated on successful cleanup",
+  );
+  assert.equal(
+    retryStep.with.path,
+    "${{ runner.temp }}/native-retry-cleanup-failure/ios",
+  );
+
+  assert.ok(checkerStep, "the hosted cleanup scenario must run the production checker");
+  assert.equal(checkerStep.id, "forced-cleanup-check");
+  assert.equal(checkerStep["continue-on-error"], true);
+  assert.equal(
+    checkerStep.env.NATIVE_IOS_EVIDENCE_DOWNLOAD_RESULT,
+    "${{ steps.retry-forced-ios.outcome }}",
+  );
+  assert.match(
+    checkerStep.run,
+    /check-native-large-text-evidence\.sh[\s\S]*SUMMARY_PATH%\/summary\.md/,
+    "the hosted cleanup scenario must validate the stale extraction root",
+  );
+
+  assert.ok(
+    verifyStep,
+    "the hosted cleanup scenario must verify its fixed redacted summary",
+  );
+  assert.equal(verifyStep.if, "${{ always() }}");
+  assert.equal(
+    verifyStep.env.CLEANUP_RESULT,
+    "${{ steps.cleanup-forced-ios.outcome }}",
+  );
+  assert.equal(
+    verifyStep.env.RETRY_RESULT,
+    "${{ steps.retry-forced-ios.outcome }}",
+  );
+  assert.match(
+    verifyStep.run,
+    /"\$RETRY_RESULT" != "skipped"/,
+    "the hosted cleanup scenario must require the retry to be skipped",
+  );
+  assert.match(
+    verifyStep.run,
+    /NATIVE_IOS_RECOVERY_LINE/,
+    "the hosted cleanup scenario must assert the shared iOS recovery line",
+  );
+  assert.match(
+    verifyStep.run,
+    /cleanup-failure-evidence-must-not-appear/,
+    "the hosted cleanup scenario must reject stale evidence text in the summary",
+  );
+  assert.match(
+    verifyStep.run,
+    /cat "\$SUMMARY_PATH" >> "\$GITHUB_STEP_SUMMARY"/,
+    "the hosted cleanup scenario must publish the validated summary",
+  );
+});
+
+test("hosted privacy regression blocks the publish boundary and keeps fixture contents out", () => {
+  const regressionJob = workflow.jobs["native-evidence-summary-regression"];
+  const privacyCheckStep = regressionJob.steps.find(
+    (step) =>
+      step.name === "Run controlled failed mobile publish privacy check",
+  );
+  const summaryStep = regressionJob.steps.find(
+    (step) => step.name === "Summarize native evidence privacy regression",
+  );
+  const submitStep = regressionJob.steps.find(
+    (step) => step.name === "Simulate mobile store submission after privacy check",
+  );
+  const verifyStep = regressionJob.steps.find(
+    (step) => step.name === "Verify failed privacy summary blocks simulated store submission",
+  );
+
+  assert.ok(
+    privacyCheckStep,
+    "the hosted regression job must run the real privacy command",
+  );
+  assert.equal(
+    privacyCheckStep.id,
+    "native-evidence-privacy",
+  );
+  assert.equal(
+    privacyCheckStep["continue-on-error"],
+    true,
+    "the hosted regression must retain control after the expected privacy failure",
+  );
+  assert.equal(
+    privacyCheckStep.run,
+    "bash scripts/run-untrusted-checker.sh pnpm run test:native-large-text-evidence",
+    "the hosted regression must execute the production privacy command",
+  );
+  assert.equal(
+    privacyCheckStep.env.NATIVE_EVIDENCE_PRIVACY_FAILURE_FIXTURE_ROOT,
+    "${{ runner.temp }}/native-evidence-privacy-publish",
+  );
+
+  assert.ok(summaryStep, "the hosted regression must write the publish summary");
+  assert.equal(
+    summaryStep.if,
+    "${{ always() }}",
+    "the failed privacy scenario must still write its reviewer-visible summary",
+  );
+  assert.equal(
+    summaryStep.env.PRIVACY_RESULT,
+    "${{ steps.native-evidence-privacy.outcome }}",
+    "the publish summary must use the real privacy step outcome",
+  );
+  const publishSummaryStep = workflow.jobs["mobile-publish"].steps.find(
+    (step) => step.name === "Summarize native evidence privacy regression",
+  );
+  assert.equal(
+    summaryStep.run,
+    publishSummaryStep?.run,
+    "the hosted regression must exercise the same summary branch as mobile-publish",
+  );
+  assert.match(
+    summaryStep.run,
+    /echo "- Status: \*\*BLOCKED\*\*"/,
+    "the publish summary must record a failed privacy check as BLOCKED",
+  );
+  assert.match(
+    summaryStep.run,
+    /privacy checks failed; store submission is blocked\./,
+    "the publish summary must explain why submission is blocked",
+  );
+
+  assert.ok(
+    submitStep,
+    "the hosted regression must include a simulated submission step",
+  );
+  assert.equal(
+    submitStep.if,
+    "${{ steps.native-evidence-privacy.outcome == 'success' }}",
+    "simulated submission must be gated by the real privacy step outcome",
+  );
+  assert.equal(
+    submitStep.env.SUBMISSION_MARKER,
+    "${{ runner.temp }}/native-evidence-privacy-publish/store-submission-command-ran",
+  );
+
+  assert.ok(
+    verifyStep,
+    "the hosted regression must verify the failed summary and submission boundary",
+  );
+  assert.equal(verifyStep.if, "${{ always() }}");
+  assert.equal(
+    verifyStep.env.PRIVACY_RESULT,
+    "${{ steps.native-evidence-privacy.outcome }}",
+  );
+  assert.match(
+    verifyStep.run,
+    /if \[\[ "\$PRIVACY_RESULT" != "failure" \]\]/,
+    "the hosted regression must require the real privacy step to fail",
+  );
+  assert.match(
+    verifyStep.run,
+    /fixture_sentinel[\s\S]*grep -Fq -- "\$fixture_sentinel"/,
+    "the hosted privacy scenario must check that fixture contents stay redacted",
+  );
+  assert.match(
+    verifyStep.run,
+    /grep -Fq -- "- Status: \*\*BLOCKED\*\*" "\$GITHUB_STEP_SUMMARY"/,
+    "the hosted regression must inspect the reviewer-visible BLOCKED summary",
+  );
+  assert.match(
+    verifyStep.run,
+    /if \[\[ -e "\$SUBMISSION_MARKER" \]\]/,
+    "the hosted regression must prove the simulated submission was skipped",
+  );
+  assert.doesNotMatch(
+    verifyStep.run,
+    /cat\s+.*(?:candidate-build-id|runner-metadata|pass-fail-record|sentry-source-map|private-fixture-content)/,
+    "the hosted privacy scenario must not print fixture contents",
+  );
+});
+
+test("successful artifact outcomes cannot approve empty extracted evidence", () => {
+  const evidenceRoot = path.join(testRoot, "successful-empty-artifact");
+  mkdirSync(path.join(evidenceRoot, "ios"), { recursive: true });
+  mkdirSync(path.join(evidenceRoot, "android"), { recursive: true });
+  const summaryPath = path.join(
+    testRoot,
+    "successful-empty-artifact-summary.md",
+  );
+  const result = spawnSync(
+    bashPath,
+    [
+      path.join(workspaceRoot, untrustedCheckerWrapperScript),
+      bashPath,
+      path.join(workspaceRoot, nativeEvidenceCheckerScript),
+      evidenceRoot,
+    ],
+    {
+      cwd: workspaceRoot,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        GITHUB_STEP_SUMMARY: summaryPath,
+        NATIVE_EVIDENCE_REQUIRE_APPROVAL: "1",
+        NATIVE_IOS_EVIDENCE_DOWNLOAD_RESULT: "success",
+        NATIVE_ANDROID_EVIDENCE_DOWNLOAD_RESULT: "success",
+        NATIVE_IOS_EVIDENCE_ARTIFACT_URL:
+          "https://github.example/example/chat-app/actions/runs/123/artifacts/456",
+        NATIVE_ANDROID_EVIDENCE_ARTIFACT_URL:
+          "https://github.example/example/chat-app/actions/runs/123/artifacts/789",
+      },
+    },
+  );
+
+  assert.notEqual(
+    result.status,
+    0,
+    "successful download outcomes must not approve empty extracted evidence",
+  );
+  const summary = readFileSync(summaryPath, "utf8");
+  const iosSection = summary.match(
+    /## iOS native large-text evidence[\s\S]*?(?=## Android native large-text evidence)/,
+  )?.[0];
+  assert.ok(iosSection, "the summary should include the iOS evidence section");
+  assert.match(iosSection, /- Status: \*\*FAIL\*\*/);
+  assert.match(iosSection, /- Artifact download: \*\*PASS\*\*/);
+  assert.match(
+    iosSection,
+    /download reported success, but no timestamped evidence run directory exists/,
+    "the summary must explain that a successful action did not produce evidence",
+  );
+  assert.match(
+    iosSection,
+    /- Detailed evidence report: \*\*Unavailable\*\*/,
+    "an empty extracted artifact must not receive a report link",
+  );
+  assert.doesNotMatch(
+    summary,
+    /github\.example|actions\/runs\/123\/artifacts\/(?:456|789)/,
+    "empty artifact report links must not reach the actionable summary",
   );
 });
 
@@ -1756,6 +2281,11 @@ test("hosted native evidence regression exercises real artifact download continu
     "${{ steps.download-controlled-android.outcome }}",
   );
   assert.equal(
+    blockerStep?.env?.IOS_DOWNLOAD_CONCLUSION,
+    "${{ steps.download-controlled-ios.conclusion }}",
+    "the controlled fixture must model the successful visible conclusion separately from the failed outcome",
+  );
+  assert.equal(
     checkerStep?.["continue-on-error"],
     true,
     "the checker must publish its blocked summary before the assertion step",
@@ -1776,6 +2306,169 @@ test("hosted native evidence regression exercises real artifact download continu
   assert.match(
     blockerStep?.run ?? "",
     /Rerun the failed native job or make its artifact available/,
+  );
+  assert.match(
+    blockerStep?.run ?? "",
+    /continue-on-error failure[\s\S]*visible conclusion is success/,
+    "the controlled fixture must verify the outcome/conclusion distinction",
+  );
+  const checkerSource = readFileSync(
+    path.join(workspaceRoot, nativeEvidenceCheckerScript),
+    "utf8",
+  );
+  assert.match(
+    checkerSource,
+    /continue-on-error lets the job continue[\s\S]*underlying outcome, which was not success/,
+    "the controlled fixture must verify the checker explains why the visible success does not unblock promotion",
+  );
+});
+
+test("hosted native evidence regression preserves iOS when Android artifact is missing", () => {
+  const regressionJob = workflow.jobs["native-evidence-summary-regression"];
+  const uploadStep = regressionJob.steps.find(
+    (step) =>
+      step.name ===
+      "Store controlled iOS artifact for missing Android scenario",
+  );
+  const iosDownloadStep = regressionJob.steps.find(
+    (step) =>
+      step.name === "Download controlled iOS artifact before Android failure",
+  );
+  const androidDownloadStep = regressionJob.steps.find(
+    (step) => step.name === "Download controlled missing Android artifact",
+  );
+  const checkerStep = regressionJob.steps.find(
+    (step) => step.name === "Run checker after controlled Android artifact outage",
+  );
+  const blockerStep = regressionJob.steps.find(
+    (step) =>
+      step.name ===
+      "Confirm controlled Android outage blocks promotion and preserves both sections",
+  );
+
+  assert.equal(
+    uploadStep?.uses,
+    pinnedUploadArtifactAction,
+    "the controlled iOS fixture must use the pinned upload action",
+  );
+  assert.equal(
+    iosDownloadStep?.uses,
+    pinnedDownloadArtifactAction,
+    "the Android outage scenario must download iOS with the pinned action",
+  );
+  assert.equal(
+    androidDownloadStep?.uses,
+    pinnedDownloadArtifactAction,
+    "the missing Android scenario must use the pinned download action",
+  );
+  assert.equal(
+    iosDownloadStep?.["continue-on-error"],
+    true,
+    "the iOS download must preserve its successful result before the Android failure",
+  );
+  assert.equal(
+    androidDownloadStep?.["continue-on-error"],
+    true,
+    "the missing Android download must preserve its failure for the checker",
+  );
+  assert.equal(
+    checkerStep?.env?.NATIVE_IOS_EVIDENCE_DOWNLOAD_RESULT,
+    "${{ steps.download-controlled-ios-android-outage.outcome }}",
+  );
+  assert.equal(
+    checkerStep?.env?.NATIVE_ANDROID_EVIDENCE_DOWNLOAD_RESULT,
+    "${{ steps.download-controlled-android-outage.outcome }}",
+  );
+  assert.equal(
+    checkerStep?.["continue-on-error"],
+    true,
+    "the Android outage checker must publish its blocked summary before assertions",
+  );
+  assert.equal(
+    blockerStep?.if,
+    "${{ always() }}",
+    "the Android outage assertion must run after the checker blocks promotion",
+  );
+  assert.match(
+    blockerStep?.run ?? "",
+    /iOS artifact download did not continue successfully before the Android failure/,
+  );
+  assert.match(
+    blockerStep?.run ?? "",
+    /The controlled Android artifact download unexpectedly succeeded/,
+  );
+  assert.match(
+    blockerStep?.run ?? "",
+    /\$NATIVE_ANDROID_RECOVERY_LINE/,
+    "the Android outage must retain the shared recovery wording",
+  );
+  assert.match(
+    blockerStep?.run ?? "",
+    /iOS completed before the Android failure/,
+    "the published summary must retain the independent iOS continuation result",
+  );
+});
+
+test("hosted release validation exercises nested evidence readers without publishing contents", () => {
+  const regressionJob = workflow.jobs["native-evidence-tamper-regression"];
+  assert.ok(
+    regressionJob,
+    "the hosted tamper-regression job must remain available for nested reader validation",
+  );
+
+  const readerStep = regressionJob.steps.find(
+    (step) =>
+      step.name === "Verify nested release evidence readers on hosted runner",
+  );
+  assert.ok(
+    readerStep,
+    "the hosted release validation must execute the nested evidence-reader checks",
+  );
+  assert.equal(
+    readerStep.id,
+    "nested-release-evidence",
+    "the nested reader check outcome must be available to the release summary",
+  );
+  assert.match(
+    readerStep.run,
+    /node --test[\s\S]*--test-name-pattern=/,
+    "the hosted validation must run the focused contract tests on the release runner",
+  );
+  assert.match(
+    readerStep.run,
+    /release evidence discovery catches an un-inventoried nested TypeScript helper reader/,
+    "the hosted validation must exercise the nested inventory guard",
+  );
+  assert.match(
+    readerStep.run,
+    /nested release evidence reader rejects duplicate fields with fixed redacted diagnostic/,
+    "the hosted validation must exercise the fixed duplicate-field diagnostic",
+  );
+
+  const summaryStep = regressionJob.steps.find(
+    (step) => step.name === "Summarize nested release evidence validation",
+  );
+  assert.ok(
+    summaryStep,
+    "the hosted nested reader check must be documented in release validation evidence",
+  );
+  assert.equal(
+    summaryStep.if,
+    "${{ always() }}",
+    "the nested reader summary must remain visible when its check fails",
+  );
+  assert.equal(
+    summaryStep.env.CHECK_RESULT,
+    "${{ steps.nested-release-evidence.outcome }}",
+  );
+  assert.match(
+    summaryStep.run,
+    /expected un-inventoried-reader failure diagnostic/,
+  );
+  assert.match(summaryStep.run, /fixed and redacted/);
+  assert.match(
+    summaryStep.run,
+    /Evidence contents in release validation output: \*\*NOT INCLUDED\*\*/,
   );
 });
 
@@ -1965,6 +2658,50 @@ test("publish requires candidate-bound approvals from the current run attempt", 
   }
 
   const publishSteps = workflow.jobs["mobile-publish"].steps;
+  const privacyIndex = publishSteps.findIndex(
+    (step) =>
+      step.name ===
+      "Run native large-text evidence privacy and submission-boundary regression",
+  );
+  const privacyStep = publishSteps[privacyIndex];
+  const privacySummaryStep = publishSteps.find(
+    (step) => step.name === "Summarize native evidence privacy regression",
+  );
+  assert.ok(privacyIndex >= 0, "publish job must run the privacy check");
+  assert.equal(
+    privacyStep.id,
+    "native-evidence-privacy",
+    "publish privacy step must expose its outcome for downstream guards",
+  );
+  assert.notEqual(
+    privacyStep["continue-on-error"],
+    true,
+    "a failed publish privacy check must fail the job instead of continuing",
+  );
+  assert.equal(
+    privacyStep.if,
+    undefined,
+    "the publish privacy check must use normal success gating",
+  );
+  assert.ok(
+    privacySummaryStep,
+    "publish job must retain its reviewer-visible privacy summary",
+  );
+  assert.equal(
+    privacySummaryStep.if,
+    "${{ always() }}",
+    "the publish privacy summary must survive a failed privacy check",
+  );
+  const privacySummaryIndex = publishSteps.indexOf(privacySummaryStep);
+  assert.ok(
+    privacySummaryIndex > privacyIndex,
+    "the publish privacy summary must follow the privacy check",
+  );
+  assert.equal(
+    privacySummaryStep.env.PRIVACY_RESULT,
+    "${{ steps.native-evidence-privacy.outcome }}",
+    "the publish privacy summary must use the real privacy step outcome",
+  );
   assert.equal(
     workflow.jobs["mobile-publish"].environment.name,
     "mobile-store-submission",
@@ -1989,6 +2726,24 @@ test("publish requires candidate-bound approvals from the current run attempt", 
   const submitIndex = publishSteps.findIndex(
     (step) => step.name === "Submit the tested iOS and Android candidates",
   );
+  for (const stepName of [
+    "Attach candidate-bound human approvals",
+    "Require approved iOS and Android evidence",
+    "Verify publishing inputs",
+    "Submit the tested iOS and Android candidates",
+  ]) {
+    const step = publishSteps.find((candidate) => candidate.name === stepName);
+    assert.ok(step, `publish job must define "${stepName}"`);
+    assert.equal(
+      step.if,
+      "${{ steps.native-evidence-privacy.outcome == 'success' }}",
+      `${stepName} must be unreachable after a failed privacy check`,
+    );
+    assert.ok(
+      publishSteps.indexOf(step) > privacySummaryIndex,
+      `${stepName} must follow the privacy summary`,
+    );
+  }
   assert.ok(approvalIndex >= 0, "publish job must attach human approvals");
   assert.ok(
     strictIndex > approvalIndex,
@@ -2235,6 +2990,71 @@ test("every summary-writing script the release workflow invokes has a contract",
   );
 });
 
+test("deeply nested release helpers fail before bypassing the summary inventory", () => {
+  const fixtureDirectory = mkdtempSync(
+    path.join(workspaceRoot, ".mobile-release-summary-contract-"),
+  );
+  const helperNames = [
+    "entry.sh",
+    ...Array.from(
+      { length: MAX_INVOKED_SCRIPT_DISCOVERY_DEPTH + 1 },
+      (_, index) => `helper-${index + 1}.sh`,
+    ),
+  ];
+  const helperPaths = helperNames.map((name) =>
+    path.join(fixtureDirectory, name),
+  );
+
+  helperPaths.forEach((helperPath, index) => {
+    const nextName = helperNames[index + 1];
+    writeFileSync(
+      helperPath,
+      [
+        "#!/usr/bin/env bash",
+        ...(nextName
+          ? [`bash ${nextName}`]
+          : ['printf "hidden summary writer\\n" >> "$GITHUB_STEP_SUMMARY"']),
+      ].join("\n"),
+    );
+  });
+
+  try {
+    assert.throws(
+      () =>
+        discoverInvokedScripts({
+          steps: [
+            {
+              label: "deep helper fixture",
+              step: {
+                run: `bash ${path.relative(workspaceRoot, helperPaths[0])}`,
+                "working-directory": ".",
+              },
+            },
+          ],
+          maxDepth: MAX_INVOKED_SCRIPT_DISCOVERY_DEPTH,
+        }),
+      (error) => {
+        assert.match(
+          error.message,
+          new RegExp(
+            `supported mobile release helper depth of ${MAX_INVOKED_SCRIPT_DISCOVERY_DEPTH}`,
+          ),
+        );
+        assert.match(
+          error.message,
+          new RegExp(
+            `helper-${MAX_INVOKED_SCRIPT_DISCOVERY_DEPTH}\\.sh`,
+          ),
+        );
+        return true;
+      },
+      "a summary writer beyond the supported helper depth must not disappear from discovery",
+    );
+  } finally {
+    rmSync(fixtureDirectory, { recursive: true, force: true });
+  }
+});
+
 function releaseEvidenceReaderInventory(discovered) {
   return [
     ...new Set(
@@ -2246,8 +3066,12 @@ function releaseEvidenceReaderInventory(discovered) {
 }
 
 function assertReleaseEvidenceReaderInventory(discovered) {
-  const inventory = Object.entries(releaseEvidenceReaderContracts)
-    .map(([relativePath, contract]) => `${relativePath}::${contract.argument}`)
+  const inventory = Object.keys(releaseEvidenceReaderContracts)
+    .flatMap((relativePath) =>
+      releaseEvidenceReaderContractsFor(relativePath).map(
+        (contract) => `${relativePath}::${contract.argument}`,
+      ),
+    )
     .sort();
   const discoveredInventory = releaseEvidenceReaderInventory(discovered);
 
@@ -2263,75 +3087,249 @@ function assertReleaseEvidenceReaderInventory(discovered) {
   );
 }
 
+function assertReleaseEvidenceReader({ entryPath, parserPath, argument }) {
+  const contract = releaseEvidenceReaderContractsFor(entryPath).find(
+    (candidate) => candidate.argument === argument,
+  );
+  assert.ok(
+    contract,
+    `The release evidence JSON reader ${entryPath} (JSON.parse(${argument}) in ${parserPath}) must have an inventory contract.`,
+  );
+  const source = scriptSource(parserPath);
+  const scannerCall = contract.scannerCall.replace(
+    /\([^)]*\)$/,
+    `(${argument})`,
+  );
+  const scannerIndex = source.indexOf(scannerCall);
+  const parseIndex = source.search(
+    new RegExp(`JSON\\.parse\\(\\s*${argument}\\s*\\)`),
+  );
+
+  assert.ok(
+    scannerIndex >= 0,
+    `${contract.name} must use the shared duplicate-key scanner.`,
+  );
+  assert.ok(
+    parseIndex >= 0,
+    `${contract.name} must parse its evidence source with JSON.parse.`,
+  );
+  assert.ok(
+    scannerIndex < parseIndex,
+    `${contract.name} must scan for duplicate fields before JSON.parse applies last-value-wins semantics.`,
+  );
+  assert.match(
+    source,
+    contract.duplicateFailure,
+    `${contract.name} must keep duplicate-field failures fixed and redacted.`,
+  );
+}
+
 test("every release JSON evidence reader rejects duplicate fields with fixed diagnostics", () => {
   const discovered = discoverReleaseEvidenceJsonParses();
   assertReleaseEvidenceReaderInventory(discovered);
 
   for (const { entryPath, parserPath, argument } of discovered) {
-    const contract = releaseEvidenceReaderContracts[entryPath];
-    assert.ok(
-      contract,
-      `The release evidence JSON reader ${entryPath} must have an inventory contract.`,
-    );
-    const source = scriptSource(parserPath);
-    const scannerCall = contract.scannerCall.replace(
-      /\([^)]*\)$/,
-      `(${argument})`,
-    );
-    const scannerIndex = source.indexOf(scannerCall);
-    const parseIndex = source.search(
-      new RegExp(`JSON\\.parse\\(\\s*${argument}\\s*\\)`),
-    );
-
-    assert.ok(
-      scannerIndex >= 0,
-      `${contract.name} must use the shared duplicate-key scanner.`,
-    );
-    assert.ok(
-      parseIndex >= 0,
-      `${contract.name} must parse its evidence source with JSON.parse.`,
-    );
-    assert.ok(
-      scannerIndex < parseIndex,
-      `${contract.name} must scan for duplicate fields before JSON.parse applies last-value-wins semantics.`,
-    );
-    assert.match(
-      source,
-      contract.duplicateFailure,
-      `${contract.name} must keep duplicate-field failures fixed and redacted.`,
-    );
+    assertReleaseEvidenceReader({ entryPath, parserPath, argument });
   }
 });
 
-test("release evidence discovery catches an un-inventoried nested helper reader", () => {
+test(
+  "release evidence discovery catches an un-inventoried nested TypeScript helper reader",
+  () => {
+    const fixtureDirectory = mkdtempSync(
+      path.join(workspaceRoot, ".mobile-release-summary-contract-"),
+    );
+    const entryPath = path.join(fixtureDirectory, "release-check.mjs");
+    const helperPath = path.join(fixtureDirectory, "nested", "reader.ts");
+    mkdirSync(path.dirname(helperPath), { recursive: true });
+    writeFileSync(
+      entryPath,
+      'import { readEvidence } from "./nested/reader";\nreadEvidence();\n',
+    );
+    writeFileSync(
+      helperPath,
+      [
+        "export function readEvidence() {",
+        "  return JSON.parse(evidence);",
+        "}",
+      ].join("\n"),
+    );
+
+    try {
+      const discovered = discoverReleaseEvidenceJsonParses([entryPath]);
+      assert.deepEqual(releaseEvidenceReaderInventory(discovered), [
+        `${path.relative(workspaceRoot, entryPath)}::evidence`,
+      ]);
+      assert.throws(
+        () => assertReleaseEvidenceReaderInventory(discovered),
+        /The release evidence JSON reader inventory must cover every JSON\.parse call in release-check scripts\./,
+      );
+    } finally {
+      rmSync(fixtureDirectory, { recursive: true, force: true });
+    }
+  },
+);
+
+test("release evidence discovery follows helpers dynamically imported by shell checks", () => {
   const fixtureDirectory = mkdtempSync(
     path.join(workspaceRoot, ".mobile-release-summary-contract-"),
   );
-  const entryPath = path.join(fixtureDirectory, "release-check.mjs");
+  const entryPath = path.join(fixtureDirectory, "release-check.sh");
   const helperPath = path.join(fixtureDirectory, "nested", "reader.mjs");
+  const relativeEntryPath = path.relative(workspaceRoot, entryPath);
   mkdirSync(path.dirname(helperPath), { recursive: true });
   writeFileSync(
     entryPath,
-    'import { readEvidence } from "./nested/reader.mjs";\nreadEvidence();\n',
+    [
+      "#!/usr/bin/env bash",
+      'ROOT_DIR="$(pwd)"',
+      'node --input-type=module - "$ROOT_DIR/PLACEHOLDER/nested/reader.mjs" <<\'NODE\'',
+      'import { pathToFileURL } from "node:url";',
+      "const [, , readerPath] = process.argv;",
+      "const { readEvidence } = await import(pathToFileURL(readerPath).href);",
+      "readEvidence(rawEvidence);",
+      "NODE",
+    ].join("\n").replace("PLACEHOLDER", path.basename(fixtureDirectory)),
   );
   writeFileSync(
     helperPath,
     [
-      "export function readEvidence() {",
-      "  return JSON.parse(evidence);",
+      "export function readEvidence(rawEvidence) {",
+      "  return JSON.parse(rawEvidence);",
       "}",
     ].join("\n"),
   );
 
+  releaseEvidenceReaderContracts[relativeEntryPath] = {
+    name: "shell delegated evidence",
+    argument: "rawEvidence",
+    scannerCall: "findDuplicateJsonObjectKeys(rawEvidence)",
+    duplicateFailure: /delegated evidence contains duplicate fields/,
+  };
+
   try {
     const discovered = discoverReleaseEvidenceJsonParses([entryPath]);
-    assert.deepEqual(releaseEvidenceReaderInventory(discovered), [
-      `${path.relative(workspaceRoot, entryPath)}::evidence`,
+    assert.deepEqual(discovered, [
+      {
+        entryPath: relativeEntryPath,
+        parserPath: path.relative(workspaceRoot, helperPath),
+        argument: "rawEvidence",
+      },
     ]);
     assert.throws(
-      () => assertReleaseEvidenceReaderInventory(discovered),
-      /The release evidence JSON reader inventory must cover every JSON\.parse call in release-check scripts\./,
+      () => assertReleaseEvidenceReader({ ...discovered[0] }),
+      /shell delegated evidence must use the shared duplicate-key scanner\./,
     );
+  } finally {
+    delete releaseEvidenceReaderContracts[relativeEntryPath];
+    rmSync(fixtureDirectory, { recursive: true, force: true });
+  }
+});
+
+test(
+  "nested release evidence reader rejects duplicate fields with fixed redacted diagnostic",
+  () => {
+    const fixtureDirectory = mkdtempSync(
+      path.join(workspaceRoot, ".mobile-release-summary-contract-"),
+    );
+    const entryPath = path.join(fixtureDirectory, "release-check.mjs");
+    const helperPath = path.join(fixtureDirectory, "nested", "reader.mjs");
+    const duplicateMarker =
+      "NESTED_RELEASE_EVIDENCE_PRIVATE_CONTENT_MUST_NOT_ESCAPE";
+    try {
+      mkdirSync(path.dirname(helperPath), { recursive: true });
+      writeFileSync(
+        entryPath,
+        'import { readEvidence } from "./nested/reader.mjs";\nreadEvidence();\n',
+      );
+      writeFileSync(
+        helperPath,
+        [
+          `import { findDuplicateJsonObjectKeys } from ${JSON.stringify(
+            pathToFileURL(
+              path.join(
+                workspaceRoot,
+                "scripts/find-duplicate-json-object-keys.mjs",
+              ),
+            ).href,
+          )};`,
+          "const rawEvidence = " +
+            JSON.stringify(
+              `{"status":"PASS","status":"${duplicateMarker}"}`,
+            ) +
+            ";",
+          "export function readEvidence() {",
+          "  if (findDuplicateJsonObjectKeys(rawEvidence).length > 0) {",
+          '    throw new Error("Nested release evidence contains duplicate fields.");',
+          "  }",
+          "  return JSON.parse(rawEvidence);",
+          "}",
+          "readEvidence();",
+        ].join("\n"),
+      );
+
+      const result = spawnSync(process.execPath, [entryPath], {
+        cwd: workspaceRoot,
+        encoding: "utf8",
+      });
+      const output = `${result.stdout}\n${result.stderr}`;
+      assert.notEqual(
+        result.status,
+        0,
+        "the nested evidence reader must reject duplicate fields",
+      );
+      assert.match(
+        output,
+        /Nested release evidence contains duplicate fields\./,
+      );
+      assert.doesNotMatch(
+        output,
+        new RegExp(duplicateMarker),
+        "the nested reader diagnostic must not expose evidence contents",
+      );
+    } finally {
+      rmSync(fixtureDirectory, { recursive: true, force: true });
+    }
+  },
+);
+
+test("the native shell evidence check keeps its dynamic helper closure", () => {
+  const entryPath = path.join(
+    workspaceRoot,
+    "scripts/check-native-large-text-evidence.sh",
+  );
+  const closure = discoverLocalModuleClosure(entryPath);
+
+  for (const helperPath of [
+    "scripts/find-duplicate-json-object-keys.mjs",
+    "scripts/read-bounded-text.mjs",
+    "scripts/validate-junit-xml.mjs",
+  ]) {
+    assert.ok(
+      closure.has(path.join(workspaceRoot, helperPath)),
+      `${entryPath} must keep its local ${helperPath} helper visible to the release contract`,
+    );
+  }
+});
+
+test("non-evidence JSON parsing embedded in shell remains excluded", () => {
+  const fixtureDirectory = mkdtempSync(
+    path.join(workspaceRoot, ".mobile-release-summary-contract-"),
+  );
+  const entryPath = path.join(fixtureDirectory, "utility.sh");
+  writeFileSync(
+    entryPath,
+    [
+      "#!/usr/bin/env bash",
+      "node --input-type=module - <<'NODE'",
+      'const [, , packageJson] = process.argv;',
+      "JSON.parse(packageJson);",
+      "NODE",
+    ].join("\n"),
+  );
+
+  try {
+    assert.deepEqual(discoverReleaseEvidenceJsonParses([entryPath]), []);
   } finally {
     rmSync(fixtureDirectory, { recursive: true, force: true });
   }
@@ -2354,6 +3352,7 @@ test("Android preview evidence keeps its pull-request validation and privacy con
         "${{ github.event.pull_request.base.sha }}",
       ANDROID_PREVIEW_HEAD_SHA:
         "${{ github.event.pull_request.head.sha }}",
+      REVIEWED_REF: "${{ github.ref }}",
     },
     "the Android preview job must compare the pull request base and head",
   );
@@ -2377,6 +3376,21 @@ test("Android preview evidence keeps its pull-request validation and privacy con
     (step) => step.name === "Validate changed Android preview records",
   );
   assert.ok(validationStep, "the Android preview job must validate changed records");
+  assert.match(
+    validationStep.run,
+    /resolved_commit_sha="\$\(git rev-parse --verify HEAD\)"[\s\S]*echo "## Reviewed release revision"[\s\S]*Checked ref: `%s`[\s\S]*Resolved commit SHA: `%s`/,
+    "the Android preview summary must record the checked revision",
+  );
+  assert.ok(
+    validationStep.run.indexOf('echo "## Reviewed release revision"') <
+      validationStep.run.indexOf('>> "$GITHUB_STEP_SUMMARY"'),
+    "Android revision metadata must precede every preview summary branch",
+  );
+  assert.doesNotMatch(
+    validationStep.run,
+    /secrets\.|E2E_CHAT_URL|E2E_API_URL|CLERK_SECRET_KEY|DATABASE_URL/,
+    "Android preview revision metadata must not expose secrets or private URLs",
+  );
   const ocrStep = androidJob.steps.find(
     (step) => step.name === "Install screenshot OCR runtime",
   );
@@ -2415,6 +3429,11 @@ test("Android preview evidence keeps its pull-request validation and privacy con
   );
   assert.match(
     validationStep.run,
+    /LC_ALL=C sort -u/,
+    "Android preview records must use a locale-independent path order",
+  );
+  assert.match(
+    validationStep.run,
     /checker_args=\("\$record_path"\)[\s\S]*checker_args\+=\("\$preflight_path"\)[\s\S]*validate:android-preview-evidence -- "\$\{checker_args\[@\]\}"/,
     "changed Android preflight sidecars must be passed explicitly to the checker",
   );
@@ -2443,6 +3462,64 @@ test("Android preview evidence keeps its pull-request validation and privacy con
     validationStep.run,
     /cat\s+"\$record_path"|validation_output.*GITHUB_STEP_SUMMARY/,
     "the job must not print Android record evidence into the summary",
+  );
+
+  const hostedRenameJob = workflow.jobs["android-preview-rename-regression"];
+  assert.ok(
+    hostedRenameJob,
+    "the release workflow must define the hosted Android rename regression",
+  );
+  assert.equal(
+    hostedRenameJob.if,
+    "${{ github.event_name == 'pull_request' }}",
+    "the hosted Android rename regression must run on pull requests",
+  );
+  const hostedCheckout = hostedRenameJob.steps.find(
+    (step) => step.name === "Check out reviewed pull request",
+  );
+  assert.ok(hostedCheckout, "the hosted Android regression must check out the PR");
+  assert.equal(hostedCheckout.with?.["fetch-depth"], 0);
+  assert.equal(hostedCheckout.with?.["persist-credentials"], false);
+  const hostedValidation = hostedRenameJob.steps.find(
+    (step) => step.name === "Run renamed Android preview evidence regression",
+  );
+  assert.ok(hostedValidation, "the hosted Android regression must run its fixture");
+  assert.deepEqual(hostedValidation.env, {
+    ANDROID_PREVIEW_BASE_SHA:
+      "${{ github.event.pull_request.base.sha }}",
+    ANDROID_PREVIEW_HEAD_SHA:
+      "${{ github.event.pull_request.head.sha }}",
+    REVIEWED_REF: "${{ github.ref }}",
+  });
+  assert.match(
+    hostedValidation.run,
+    /git cat-file -e "\$\{ANDROID_PREVIEW_BASE_SHA\}\^\{commit\}"[\s\S]*git cat-file -e "\$\{ANDROID_PREVIEW_HEAD_SHA\}\^\{commit\}"/,
+    "the hosted regression must verify both pull-request commits are available",
+  );
+  assert.match(
+    hostedValidation.run,
+    /git diff[\s\S]*--name-only[\s\S]*--find-renames[\s\S]*"\$\{base_sha\}\.\.\.\$\{head_sha\}"[\s\S]*validation-record\.md[\s\S]*android-preview-preflight\.json/,
+    "the hosted regression must exercise Git rename detection over base and head",
+  );
+  assert.match(
+    hostedValidation.run,
+    /validate:android-preview-evidence --[\s\S]*"\$record_path" "\$preflight_path"/,
+    "the hosted regression must pass each destination record and matching sidecar to the checker",
+  );
+  assert.match(
+    hostedValidation.run,
+    /Changed records checked: \*\*\$\{#changed_records\[@\]\}\*\*/,
+    "the hosted regression must write the reviewer-visible summary",
+  );
+  assert.match(
+    hostedValidation.run,
+    /record_count=.*grep -Fc[\s\S]*link_count=.*grep -Fc[\s\S]*grep -Fxc/,
+    "the hosted regression must enforce one section, one link, and one checker input per destination",
+  );
+  assert.match(
+    hostedValidation.run,
+    /Hosted renamed Android preview evidence regression passed\./,
+    "the hosted regression must report a fixed success diagnostic",
   );
 
   const blockedRecord = `# Android SDK 57 preview validation record
@@ -2476,6 +3553,10 @@ test("Android preview evidence keeps its pull-request validation and privacy con
     "public manifest HTTP 200 (128 bytes)",
     "public manifest HTTP 200 (256 bytes)",
   );
+  const changedBlockedPreflight512 = blockedPreflight.replace(
+    "public manifest HTTP 200 (128 bytes)",
+    "public manifest HTTP 200 (512 bytes)",
+  );
 
   function runAndroidPreviewJob(name, recordText, options = {}) {
     const {
@@ -2483,6 +3564,7 @@ test("Android preview evidence keeps its pull-request validation and privacy con
       changedPreflight = blockedPreflight,
       missingValidator = false,
       renameRecord = false,
+      diffOrder = "default",
     } = options;
     const fixtureRoot = path.join(testRoot, `android-preview-${name}`);
     const recordDefinitions = Array.isArray(recordText)
@@ -2649,6 +3731,23 @@ test("Android preview evidence keeps its pull-request validation and privacy con
 
     const pnpmCalledPath = path.join(fixtureRoot, "pnpm-called");
     const checkerArgsLogPath = path.join(fixtureRoot, "checker-args.log");
+    if (diffOrder === "reverse") {
+      writeStub(
+        binDirectory,
+        "git",
+        `set -euo pipefail
+if [[ "\${1:-}" == "diff" ]]; then
+  diff_output="$(${shellQuote(gitPath)} "$@")"
+  mapfile -t diff_paths <<< "$diff_output"
+  for ((index=\${#diff_paths[@]} - 1; index >= 0; index--)); do
+    [[ -n "\${diff_paths[index]}" ]] || continue
+    printf '%s\n' "\${diff_paths[index]}"
+  done
+else
+  exec ${shellQuote(gitPath)} "$@"
+fi`,
+      );
+    }
     writeStub(
       binDirectory,
       "pnpm",
@@ -2682,6 +3781,7 @@ test("Android preview evidence keeps its pull-request validation and privacy con
         ),
         GITHUB_SERVER_URL: "https://github.example",
         GITHUB_REPOSITORY: "example/chat-app",
+        REVIEWED_REF: "refs/heads/mobile-v0.0.0",
         GITHUB_SHA: headSha,
         GITHUB_STEP_SUMMARY: summaryPath,
         ANDROID_PREVIEW_ARGS_LOG: checkerArgsLogPath,
@@ -2784,6 +3884,79 @@ test("Android preview evidence keeps its pull-request validation and privacy con
     "a renamed Android summary must not expose evidence text",
   );
 
+  const renamedMalformed = runAndroidPreviewJob(
+    "renamed-malformed",
+    [
+      {
+        timestamp: "20260915T121500Z",
+        baseText: blockedRecord,
+        text: blockedRecord
+          .replace("**Result: BLOCKED", "**Result: PASS")
+          .replace(
+            "No physical phone was available.",
+            "PRIVATE_RENAMED_ANDROID_EVIDENCE no physical phone was available.",
+          ),
+        preflight: blockedPreflight,
+      },
+    ],
+    { renameRecord: true },
+  );
+  const renamedMalformedFailure = [
+    renamedMalformed.result.stdout,
+    renamedMalformed.result.stderr,
+  ].join("\n");
+  assert.notEqual(
+    renamedMalformed.result.status,
+    0,
+    "a malformed renamed Android preview record must fail the job",
+  );
+  assert.match(
+    renamedMalformed.summary,
+    /- Changed records checked: \*\*1\*\*/,
+    "a malformed renamed Android record must count as one changed record",
+  );
+  assert.equal(
+    renamedMalformed.checkerArgs.length,
+    1,
+    "a malformed renamed Android record must produce one checker invocation",
+  );
+  assert.deepEqual(
+    renamedMalformed.checkerArgs,
+    [[renamedMalformed.recordPath, renamedMalformed.preflightPath]],
+    "a malformed renamed Android record must be checked with its renamed sibling sidecar",
+  );
+  const renamedMalformedRecordLink = new RegExp(
+    `\\[${renamedMalformed.recordPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\]\\(https://github\\.example/example/chat-app/blob/[^)]+/${renamedMalformed.recordPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\)`,
+    "g",
+  );
+  assert.equal(
+    renamedMalformed.summary.match(renamedMalformedRecordLink)?.length ?? 0,
+    1,
+    "a malformed renamed Android record must have one destination link",
+  );
+  assert.doesNotMatch(
+    renamedMalformed.summary,
+    new RegExp(
+      renamedMalformed.baseRecordPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
+    ),
+    "a malformed renamed Android record must not leave its old path in the summary",
+  );
+  assert.match(
+    renamedMalformed.summary,
+    /Validation: \*\*FAIL\*\*[\s\S]*PASS records must include a real Device model value\./,
+    "a malformed renamed Android record must report the fixed checker reason",
+  );
+  assert.match(
+    renamedMalformedFailure,
+    /PASS records must include a real Device model value\./,
+    "the surfaced malformed renamed Android checker failure must use the fixed reason",
+  );
+  assert.doesNotMatch(
+    `${renamedMalformed.summary}\n${renamedMalformedFailure}`,
+    /PRIVATE_RENAMED_ANDROID_EVIDENCE|Workspace curl returned HTTP 200|No physical phone was available/,
+    "a malformed renamed Android record must not expose evidence text",
+  );
+
   const multipleRenamed = runAndroidPreviewJob(
     "multiple-renamed",
     [
@@ -2791,24 +3964,40 @@ test("Android preview evidence keeps its pull-request validation and privacy con
         baseTimestamp: "20260915T120000Z",
         timestamp: "20260915T121500Z",
         baseText: blockedRecord,
-        text: blockedRecord.replace(
-          "public manifest HTTP 200 (128 bytes)",
-          "public manifest HTTP 200 (256 bytes)",
-        ),
+        text: blockedRecord
+          .replace(
+            "public manifest HTTP 200 (128 bytes)",
+            "public manifest HTTP 200 (256 bytes)",
+          )
+          .replace(
+            "No physical phone was available.",
+            "PRIVATE_RENAMED_ANDROID_EVIDENCE_A no physical phone was available.",
+          ),
         preflight: changedBlockedPreflight,
       },
       {
         baseTimestamp: "20260915T120500Z",
         timestamp: "20260915T122000Z",
         baseText: blockedRecord,
-        text: blockedRecord,
-        preflight: blockedPreflight,
+        text: blockedRecord
+          .replace(
+            "public manifest HTTP 200 (128 bytes)",
+            "public manifest HTTP 200 (512 bytes)",
+          )
+          .replace(
+            "No physical phone was available.",
+            "PRIVATE_RENAMED_ANDROID_EVIDENCE_B no physical phone was available.",
+          ),
+        preflight: changedBlockedPreflight512,
       },
       {
         baseTimestamp: "20260915T121000Z",
         timestamp: "20260915T122500Z",
         baseText: blockedRecord,
-        text: blockedRecord,
+        text: blockedRecord.replace(
+          "No physical phone was available.",
+          "PRIVATE_RENAMED_ANDROID_EVIDENCE_C no physical phone was available.",
+        ),
         preflight: blockedPreflight,
       },
     ],
@@ -2870,6 +4059,11 @@ test("Android preview evidence keeps its pull-request validation and privacy con
       `the renamed Android summary must not retain the old path for ${recordPath}`,
     );
   }
+  assert.doesNotMatch(
+    multipleRenamed.summary,
+    /PRIVATE_RENAMED_ANDROID_EVIDENCE_[ABC]|Workspace curl returned HTTP 200|No physical phone was available/,
+    "the multi-record renamed Android summary must not expose evidence text",
+  );
 
   const incompletePass = runAndroidPreviewJob(
     "incomplete-pass",
@@ -2903,7 +4097,7 @@ test("Android preview evidence keeps its pull-request validation and privacy con
     "the failed summary must not expose record evidence text",
   );
 
-  const multiRecord = runAndroidPreviewJob("multi-record", [
+  const mixedRecordDefinitions = [
     {
       timestamp: "20260915T120000Z",
       baseText: blockedRecord,
@@ -2928,7 +4122,16 @@ test("Android preview evidence keeps its pull-request validation and privacy con
       ),
       preflight: mismatchedPreflight,
     },
-  ]);
+  ];
+  const multiRecord = runAndroidPreviewJob(
+    "multi-record",
+    mixedRecordDefinitions,
+  );
+  const multiRecordReversed = runAndroidPreviewJob(
+    "multi-record-reversed",
+    mixedRecordDefinitions,
+    { diffOrder: "reverse" },
+  );
   assert.notEqual(
     multiRecord.result.status,
     0,
@@ -2946,6 +4149,19 @@ test("Android preview evidence keeps its pull-request validation and privacy con
       [multiRecord.recordPaths[2], multiRecord.preflightPaths[2]],
     ],
     "each present changed Android preflight sidecar must be passed to the checker even after a deleted record",
+  );
+  assert.equal(
+    multiRecordReversed.result.status,
+    multiRecord.result.status,
+    "reordering the pull request diff must preserve the overall blocking status",
+  );
+  assert.deepEqual(
+    multiRecordReversed.checkerArgs,
+    [
+      [multiRecordReversed.recordPaths[0], multiRecordReversed.preflightPaths[0]],
+      [multiRecordReversed.recordPaths[2], multiRecordReversed.preflightPaths[2]],
+    ],
+    "reordering the pull request diff must not change which present records are checked",
   );
   for (const recordPath of multiRecord.recordPaths) {
     const escapedPath = recordPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -2978,6 +4194,64 @@ test("Android preview evidence keeps its pull-request validation and privacy con
       `the multi-record summary must include the validation result for ${recordPath}`,
     );
   }
+  for (const [recordIndex, recordPath] of multiRecordReversed.recordPaths.entries()) {
+    const escapedPath = recordPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const expectedRevision =
+      recordIndex === 1
+        ? multiRecordReversed.baseSha
+        : multiRecordReversed.headSha;
+    const recordLinkPattern = new RegExp(
+      `\\[${escapedPath}\\]\\(https://github\\.example/example/chat-app/blob/${expectedRevision}/${escapedPath}\\)`,
+      "g",
+    );
+    const recordSectionPattern = new RegExp(
+      `### \\[${escapedPath}\\]\\(https://github\\.example/example/chat-app/blob/${expectedRevision}/${escapedPath}\\)[\\s\\S]*?(?=\\n### |$)`,
+      "g",
+    );
+    assert.equal(
+      multiRecordReversed.summary.match(recordLinkPattern)?.length ?? 0,
+      1,
+      `the reversed mixed summary must include exactly one stable link for ${recordPath}`,
+    );
+    assert.equal(
+      multiRecordReversed.summary.match(recordSectionPattern)?.length ?? 0,
+      1,
+      `the reversed mixed summary must include exactly one validation section for ${recordPath}`,
+    );
+  }
+  const reversedSummarySectionPaths = [
+    ...multiRecordReversed.summary.matchAll(/^### \[([^\]]+)\]\(/gm),
+  ].map(([, recordPath]) => recordPath);
+  assert.deepEqual(
+    reversedSummarySectionPaths,
+    [...multiRecordReversed.recordPaths].sort(),
+    "the reversed mixed Android summary must emit every section in deterministic path order",
+  );
+  assert.equal(
+    multiRecordReversed.summary.match(/- Validation: \*\*PASS\*\*/g)?.length ?? 0,
+    1,
+    "the reversed mixed summary must preserve the valid record result",
+  );
+  assert.equal(
+    multiRecordReversed.summary.match(/- Validation: \*\*FAIL\*\*/g)?.length ?? 0,
+    2,
+    "the reversed mixed summary must preserve the deleted and invalid failures",
+  );
+  assert.match(
+    multiRecordReversed.summary,
+    /- Record result: \*\*BLOCKED \(valid\)\*\*/,
+    "the reversed mixed summary must preserve the valid BLOCKED record result",
+  );
+  assert.match(
+    multiRecordReversed.summary,
+    /changed Android preview validation record is missing from the checked-out commit\./,
+    "the reversed mixed summary must preserve the deleted-record result",
+  );
+  assert.match(
+    multiRecordReversed.summary,
+    /preflight JSON public manifest boundary does not match the Markdown record\./,
+    "the reversed mixed summary must preserve the invalid-record result",
+  );
   assert.match(
     multiRecord.summary,
     new RegExp(
@@ -3028,33 +4302,110 @@ test("Android preview evidence keeps its pull-request validation and privacy con
     "a multi-record summary must not expose evidence text from either record",
   );
 
+  const allDeleted = runAndroidPreviewJob("all-deleted", [
+    {
+      timestamp: "20260915T120000Z",
+      baseText: blockedRecord,
+      text: blockedRecord,
+      preflight: blockedPreflight,
+      deleted: true,
+    },
+    {
+      timestamp: "20260915T121000Z",
+      baseText: blockedRecord,
+      text: blockedRecord,
+      preflight: blockedPreflight,
+      deleted: true,
+    },
+  ]);
+  assert.notEqual(
+    allDeleted.result.status,
+    0,
+    "an Android preview change containing only deleted records must remain blocking",
+  );
+  assert.equal(
+    allDeleted.checkerInvoked,
+    false,
+    "an all-deleted Android preview change must not invoke the record checker",
+  );
+  assert.deepEqual(
+    allDeleted.checkerArgs,
+    [],
+    "an all-deleted Android preview change must not produce checker arguments",
+  );
+  assert.match(
+    allDeleted.summary,
+    /- Changed records checked: \*\*2\*\*/,
+    "the all-deleted summary must report the exact number of deleted records",
+  );
+  for (const recordPath of allDeleted.recordPaths) {
+    const escapedPath = recordPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const recordLinkPattern = new RegExp(
+      `\\[${escapedPath}\\]\\(https://github\\.example/example/chat-app/blob/${allDeleted.baseSha}/${escapedPath}\\)`,
+      "g",
+    );
+    const recordSectionPattern = new RegExp(
+      `### \\[${escapedPath}\\]\\(https://github\\.example/example/chat-app/blob/${allDeleted.baseSha}/${escapedPath}\\)[\\s\\S]*?(?=\\n### |$)`,
+      "g",
+    );
+    assert.equal(
+      allDeleted.summary.match(recordLinkPattern)?.length ?? 0,
+      1,
+      `each deleted Android record must have one base-revision link: ${recordPath}`,
+    );
+    assert.equal(
+      allDeleted.summary.match(recordSectionPattern)?.length ?? 0,
+      1,
+      `each deleted Android record must have one validation section: ${recordPath}`,
+    );
+    assert.match(
+      allDeleted.summary,
+      new RegExp(
+        `### \\[${escapedPath}\\]\\(https://github\\.example/example/chat-app/blob/${allDeleted.baseSha}/${escapedPath}\\)[\\s\\S]*?- Validation: \\*\\*FAIL\\*\\*[\\s\\S]*?Missing-boundary reason[\\s\\S]*?changed Android preview validation record is missing from the checked-out commit\\.`,
+      ),
+      `each deleted Android record must report the fixed missing-record reason: ${recordPath}`,
+    );
+  }
+  assert.equal(
+    allDeleted.summary.match(
+      /changed Android preview validation record is missing from the checked-out commit\./g,
+    )?.length ?? 0,
+    allDeleted.recordPaths.length,
+    "the all-deleted summary must report one fixed missing-record reason per deleted record",
+  );
+
   const changedSidecarOnlyPreflight = `${blockedPreflight}\n`;
-  const mixedModes = runAndroidPreviewJob(
-    "mixed-modes",
-    [
-      {
-        timestamp: "20260915T120000Z",
-        mode: "record-only",
-        text: blockedRecord,
-      },
-      {
-        timestamp: "20260915T121500Z",
-        mode: "sidecar-only",
-        text: blockedRecord,
-      },
-      {
-        timestamp: "20260915T123000Z",
-        mode: "paired",
-        baseText: blockedRecord,
-        text: blockedRecord.replace(
-          "Workspace curl returned HTTP 200.",
-          "PRIVATE_MIXED_MODES_EVIDENCE Workspace curl returned HTTP 200.",
-        ),
-        preflight: mismatchedPreflight,
-      },
-    ],
+  const mixedModeDefinitions = [
+    {
+      timestamp: "20260915T120000Z",
+      mode: "record-only",
+      text: blockedRecord,
+    },
+    {
+      timestamp: "20260915T121500Z",
+      mode: "sidecar-only",
+      text: blockedRecord,
+    },
+    {
+      timestamp: "20260915T123000Z",
+      mode: "paired",
+      baseText: blockedRecord,
+      text: blockedRecord.replace(
+        "Workspace curl returned HTTP 200.",
+        "PRIVATE_MIXED_MODES_EVIDENCE Workspace curl returned HTTP 200.",
+      ),
+      preflight: mismatchedPreflight,
+    },
+  ];
+  const mixedModes = runAndroidPreviewJob("mixed-modes", mixedModeDefinitions, {
+    changedPreflight: changedSidecarOnlyPreflight,
+  });
+  const mixedModesReversed = runAndroidPreviewJob(
+    "mixed-modes-reversed",
+    mixedModeDefinitions,
     {
       changedPreflight: changedSidecarOnlyPreflight,
+      diffOrder: "reverse",
     },
   );
   assert.notEqual(
@@ -3075,6 +4426,20 @@ test("Android preview evidence keeps its pull-request validation and privacy con
       [mixedModes.recordPaths[2], mixedModes.preflightPaths[2]],
     ],
     "each mixed Android change must validate with only its own optional sidecar",
+  );
+  assert.deepEqual(
+    mixedModesReversed.checkerArgs,
+    mixedModes.checkerArgs,
+    "reordering the pull request diff must not change each record's sidecar pairing",
+  );
+  assert.deepEqual(
+    mixedModesReversed.recordPaths.map((recordPath) =>
+      mixedModesReversed.summary.indexOf(`### [${recordPath}]`),
+    ),
+    [...mixedModesReversed.recordPaths]
+      .sort()
+      .map((recordPath) => mixedModesReversed.summary.indexOf(`### [${recordPath}]`)),
+    "the mixed Android summary must keep sections in deterministic path order",
   );
   for (const recordPath of mixedModes.recordPaths) {
     const escapedPath = recordPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -3321,6 +4686,26 @@ test("iOS preview evidence covers renamed records and blocks malformed changes",
     (step) => step.name === "Validate changed iOS preview records",
   );
   assert.ok(validationStep, "the iOS preview job must validate changed records");
+  assert.equal(
+    validationStep.env.REVIEWED_REF,
+    "${{ github.ref }}",
+    "the iOS preview summary must use the trusted workflow ref",
+  );
+  assert.match(
+    validationStep.run,
+    /resolved_commit_sha="\$\(git rev-parse --verify HEAD\)"[\s\S]*echo "## Reviewed release revision"[\s\S]*Checked ref: `%s`[\s\S]*Resolved commit SHA: `%s`/,
+    "the iOS preview summary must record the checked revision",
+  );
+  assert.ok(
+    validationStep.run.indexOf('echo "## Reviewed release revision"') <
+      validationStep.run.indexOf('>> "$GITHUB_STEP_SUMMARY"'),
+    "iOS revision metadata must precede every preview summary branch",
+  );
+  assert.doesNotMatch(
+    validationStep.run,
+    /secrets\.|E2E_CHAT_URL|E2E_API_URL|CLERK_SECRET_KEY|DATABASE_URL/,
+    "iOS preview revision metadata must not expose secrets or private URLs",
+  );
   assert.match(
     validationStep.run,
     /No iOS preview validation records or preflight artifacts changed; nothing to validate\./,
@@ -3351,6 +4736,11 @@ test("iOS preview evidence covers renamed records and blocks malformed changes",
     validationStep.run,
     /cat\s+"\$record_path"|validation_output.*GITHUB_STEP_SUMMARY/,
     "the iOS job must not print iOS record evidence into the summary",
+  );
+  assert.match(
+    validationStep.run,
+    /record_revision="\$GITHUB_SHA"[\s\S]*if \[\[ ! -f "\$record_path" \]\][\s\S]*record_revision="\$IOS_PREVIEW_BASE_SHA"[\s\S]*record_url="\$\{GITHUB_SERVER_URL\}\/\$\{GITHUB_REPOSITORY\}\/blob\/\$\{record_revision\}\/\$\{record_path\}"/,
+    "each changed iOS record must receive a GitHub link, using the base revision when the record was deleted",
   );
 
   function runIosPreviewJob(
@@ -3478,6 +4868,9 @@ test("iOS preview evidence covers renamed records and blocks malformed changes",
     ] of recordDefinitions.entries()) {
       if (definitionDeletesRecord) {
         rmSync(baseRecordPaths[index]);
+        if (basePreflight !== undefined) {
+          rmSync(basePreflightPaths[index]);
+        }
       } else if (renameRecord) {
         mkdirSync(path.dirname(recordPaths[index]), { recursive: true });
         renameSync(baseRecordPaths[index], recordPaths[index]);
@@ -3507,10 +4900,11 @@ test("iOS preview evidence covers renamed records and blocks malformed changes",
     }).stdout.trim();
 
     const checkerInvokedPath = path.join(fixtureRoot, "checker-invoked");
+    const checkerArgsLogPath = path.join(fixtureRoot, "checker-args.log");
     writeStub(
       binDirectory,
       "pnpm",
-      `set -euo pipefail\ntouch ${shellQuote(checkerInvokedPath)}\nshift 3\nexec bash "$IOS_PREVIEW_CHECKER" "$@"`,
+      `set -euo pipefail\ntouch ${shellQuote(checkerInvokedPath)}\nchecker_args=()\nfound_separator=0\nfor arg in "$@"; do\n  if [[ "$arg" == "--" ]]; then\n    found_separator=1\n    continue\n  fi\n  if ((found_separator)); then\n    checker_args+=("$arg")\n  fi\ndone\nprintf '%s\\t%s\\n' "\${checker_args[0]}" "\${checker_args[1]:-}" >> "$IOS_PREVIEW_ARGS_LOG"\nexec bash "$IOS_PREVIEW_CHECKER" "\${checker_args[@]}"`,
     );
     mkdirSync(path.join(fixtureRoot, "scripts"), { recursive: true });
     writeFileSync(
@@ -3540,12 +4934,16 @@ test("iOS preview evidence covers renamed records and blocks malformed changes",
         ),
         GITHUB_SERVER_URL: "https://github.example",
         GITHUB_REPOSITORY: "example/chat-app",
+        REVIEWED_REF: "refs/heads/mobile-v0.0.0",
         GITHUB_SHA: headSha,
         GITHUB_STEP_SUMMARY: summaryPath,
+        IOS_PREVIEW_ARGS_LOG: checkerArgsLogPath,
       },
     });
     return {
       result,
+      baseSha,
+      headSha,
       baseRecordPath: path.relative(fixtureRoot, baseRecordPath),
       recordPath: path.relative(fixtureRoot, recordPath),
       baseRecordPaths: baseRecordPaths.map((record) =>
@@ -3554,8 +4952,17 @@ test("iOS preview evidence covers renamed records and blocks malformed changes",
       recordPaths: recordPaths.map((record) =>
         path.relative(fixtureRoot, record),
       ),
+      preflightPaths: preflightPaths.map((preflight) =>
+        path.relative(fixtureRoot, preflight),
+      ),
       summary: readFileSync(summaryPath, "utf8"),
       checkerInvoked: existsSync(checkerInvokedPath),
+      checkerArgs: existsSync(checkerArgsLogPath)
+        ? readFileSync(checkerArgsLogPath, "utf8")
+            .trim()
+            .split("\n")
+            .map((line) => line.split("\t"))
+        : [],
     };
   }
 
@@ -3615,8 +5022,8 @@ PRIVATE_IOS_EVIDENCE_MARKER
 
 | Boundary | Status | Evidence |
 | --- | --- | --- |
-| Public manifest reachability | PASS | Public edge was reachable. |
-| Local handoff probe (manifest and bundle) | NOT_RUN | No local probe was available. |
+| Public manifest reachability | PASS | public manifest HTTP 200 (128 bytes) |
+| Local handoff probe (manifest and bundle) | NOT_RUN | Local manifest/bundle probe not run — no successful probe result was recorded |
 | Expo Go launch on physical iPhone | BLOCKED | No physical phone was available. |
 | Server-side native request evidence | BLOCKED | No native request was available. |
 `;
@@ -3701,8 +5108,8 @@ PRIVATE_IOS_EVIDENCE_MARKER
 
 | Boundary | Status | Evidence |
 | --- | --- | --- |
-| Public manifest reachability | FAIL | The public edge was unavailable. |
-| Local handoff probe (manifest and bundle) | NOT_RUN | The public probe failed first. |
+| Public manifest reachability | FAIL | Public manifest probe failed — no successful probe result was recorded |
+| Local handoff probe (manifest and bundle) | NOT_RUN | Local manifest/bundle probe not run — no successful probe result was recorded |
 | Expo Go launch on physical iPhone | FAIL | Physical launch was not attempted after the public failure. |
 | Server-side native request evidence | FAIL | Native request evidence was not available after the public failure. |
 `;
@@ -3734,6 +5141,35 @@ PRIVATE_IOS_EVIDENCE_MARKER
     "a renamed public-edge FAIL record must be linked at its new path",
   );
 
+  const iosBlockedPreflight = `{
+  "schema": "ios-preview-handoff-preflight/v1",
+  "platform": "ios",
+  "boundaries": {
+    "publicManifestReachability": {
+      "status": "PASS",
+      "evidence": "public manifest HTTP 200 (128 bytes)"
+    },
+    "localHandoffProbe": {
+      "status": "NOT_RUN",
+      "evidence": "Local manifest/bundle probe not run — no successful probe result was recorded"
+    },
+    "expoGoLaunch": {
+      "status": "NOT_ASSESSED",
+      "evidence": "Requires a physical iPhone running stock Expo Go."
+    },
+    "serverNativeRequestEvidence": {
+      "status": "NOT_ASSESSED",
+      "evidence": "Requires filtered Metro or API evidence from that physical Expo Go session."
+    }
+  }
+}
+`;
+  const iosPublicFailurePreflight = iosBlockedPreflight
+    .replace(
+      '"status": "PASS",\n      "evidence": "public manifest HTTP 200 (128 bytes)"',
+      '"status": "FAIL",\n      "evidence": "Public manifest probe failed — no successful probe result was recorded"',
+    );
+
   const multipleRenamed = runIosPreviewJob("multiple-renamed", {
     renameRecord: true,
     recordText: [
@@ -3745,18 +5181,24 @@ PRIVATE_IOS_EVIDENCE_MARKER
           "**Result: BLOCKED",
           "**Result: PASS",
         ),
+        basePreflight: iosBlockedPreflight,
+        preflight: iosBlockedPreflight,
       },
       {
         baseTimestamp: "20260915T120500Z",
         timestamp: "20260915T122000Z",
         baseText: blockedRecord,
         text: blockedRecord,
+        basePreflight: iosBlockedPreflight,
+        preflight: iosBlockedPreflight,
       },
       {
         baseTimestamp: "20260915T121000Z",
         timestamp: "20260915T122500Z",
         baseText: publicFailureRecord,
         text: publicFailureRecord,
+        basePreflight: iosPublicFailurePreflight,
+        preflight: iosPublicFailurePreflight,
       },
     ],
   });
@@ -3769,6 +5211,14 @@ PRIVATE_IOS_EVIDENCE_MARKER
     multipleRenamed.summary,
     /- Changed records checked: \*\*3\*\*/,
     "the summary must report the exact number of renamed destination records",
+  );
+  assert.deepEqual(
+    multipleRenamed.checkerArgs,
+    multipleRenamed.recordPaths.map((recordPath, index) => [
+      recordPath,
+      multipleRenamed.preflightPaths[index],
+    ]),
+    "the checker must receive each renamed iOS record with its matching sidecar exactly once",
   );
   for (const [index, recordPath] of multipleRenamed.recordPaths.entries()) {
     const escapedPath = recordPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -3880,30 +5330,94 @@ PRIVATE_IOS_EVIDENCE_MARKER
     /changed iOS preview validation record is missing/,
     "the summary must identify the missing changed iOS record",
   );
+  assert.match(
+    deleted.summary,
+    new RegExp(
+      `\\[${deleted.recordPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\]\\(https://github\\.example/example/chat-app/blob/${deleted.baseSha}/${deleted.recordPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\)`,
+    ),
+    "a deleted iOS record must link to its base revision so reviewers can inspect it",
+  );
+  assert.doesNotMatch(
+    deleted.summary,
+    new RegExp(
+      `https://github\\.example/example/chat-app/blob/${deleted.headSha}/${deleted.recordPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`,
+    ),
+    "a deleted iOS record must not link to the missing pull request head path",
+  );
 
-  const iosBlockedPreflight = `{
-  "schema": "ios-preview-handoff-preflight/v1",
-  "platform": "ios",
-  "boundaries": {
-    "publicManifestReachability": {
-      "status": "PASS",
-      "evidence": "public manifest HTTP 200 (128 bytes)"
-    },
-    "localHandoffProbe": {
-      "status": "NOT_RUN",
-      "evidence": "Local manifest/bundle probe not run — no successful probe result was recorded"
-    },
-    "expoGoLaunch": {
-      "status": "NOT_ASSESSED",
-      "evidence": "Requires a physical iPhone running stock Expo Go."
-    },
-    "serverNativeRequestEvidence": {
-      "status": "NOT_ASSESSED",
-      "evidence": "Requires filtered Metro or API evidence from that physical Expo Go session."
-    }
-  }
-}
-`;
+  const deletedAndPresentIos = runIosPreviewJob("deleted-and-present", {
+    recordText: [
+      {
+        baseTimestamp: "20260915T120000Z",
+        timestamp: "20260915T120000Z",
+        baseText: blockedRecord,
+        text: blockedRecord,
+        basePreflight: iosBlockedPreflight,
+        preflight: iosBlockedPreflight,
+        deleteRecord: true,
+      },
+      {
+        baseTimestamp: "20260915T120500Z",
+        timestamp: "20260915T120500Z",
+        baseText: blockedRecord,
+        text: blockedRecord.replace(
+          "No physical phone was available.",
+          "PRIVATE_IOS_PRESENT_RECORD_EVIDENCE No physical phone was available.",
+        ),
+        basePreflight: iosBlockedPreflight,
+        preflight: iosBlockedPreflight,
+      },
+    ],
+  });
+  assert.notEqual(
+    deletedAndPresentIos.result.status,
+    0,
+    "a deleted iOS record must keep the release summary blocked",
+  );
+  assert.match(
+    deletedAndPresentIos.summary,
+    /- Changed records checked: \*\*2\*\*/,
+    "the deleted and present iOS summary must count both changed records",
+  );
+  const deletedIosPath = deletedAndPresentIos.recordPaths[0];
+  const presentIosPath = deletedAndPresentIos.recordPaths[1];
+  const deletedIosBaseLink = `https://github.example/example/chat-app/blob/${deletedAndPresentIos.baseSha}/${deletedIosPath}`;
+  const presentIosHeadLink = `https://github.example/example/chat-app/blob/${deletedAndPresentIos.headSha}/${presentIosPath}`;
+  const deletedIosSection = `### [${deletedIosPath}](${deletedIosBaseLink})`;
+  const presentIosSection = `### [${presentIosPath}](${presentIosHeadLink})`;
+  assert.equal(
+    deletedAndPresentIos.summary.split(deletedIosBaseLink).length - 1,
+    1,
+    "a deleted iOS record must have exactly one link to its base revision",
+  );
+  assert.equal(
+    deletedAndPresentIos.summary.split(presentIosHeadLink).length - 1,
+    1,
+    "a present iOS record must have exactly one link to the pull request head",
+  );
+  assert.equal(
+    deletedAndPresentIos.summary.split(deletedIosSection).length - 1,
+    1,
+    "a deleted record and its deleted sidecar must produce one iOS summary section",
+  );
+  assert.equal(
+    deletedAndPresentIos.summary.split(presentIosSection).length - 1,
+    1,
+    "a present iOS record must produce one summary section",
+  );
+  assert.doesNotMatch(
+    deletedAndPresentIos.summary,
+    new RegExp(
+      `https://github\\.example/example/chat-app/blob/${deletedAndPresentIos.headSha}/${deletedIosPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`,
+    ),
+    "a deleted iOS record must not use the pull request head link",
+  );
+  assert.doesNotMatch(
+    deletedAndPresentIos.summary,
+    /PRIVATE_IOS_PRESENT_RECORD_EVIDENCE/,
+    "the iOS summary must not expose present-record evidence markers",
+  );
+
   const malformedIosPreflight =
     '{"schema":"ios-preview-handoff-preflight/v1","platform":"ios","boundaries":{"publicManifestReachability":{"status":"PASS","evidence":"MALFORMED_IOS_PREFLIGHT_SENTINEL raw-malformed-ios-preflight-content"}';
   const schemaInvalidIosPreflight = iosBlockedPreflight.replace(
@@ -4008,16 +5522,96 @@ PRIVATE_IOS_EVIDENCE_MARKER
 `,
     updateOnlyPreflight: true,
   });
-  assert.equal(
+  assert.notEqual(
     preflightOnly.result.status,
     0,
-    "a changed iOS preflight artifact must still validate its paired record",
+    "a changed iOS preflight artifact with a tampered byte count must fail its paired record",
+  );
+  assert.match(
+    [preflightOnly.result.stdout, preflightOnly.result.stderr].join("\n"),
+    /preflight JSON public manifest evidence does not match the Markdown record/,
+    "a preflight-only iOS byte-count mismatch must report the fixed paired-evidence diagnostic",
   );
   assert.match(
     preflightOnly.summary,
     /- Changed records checked: \*\*1\*\*/,
     "a preflight-only iOS change must still count its paired validation record",
   );
+
+  const changedIosPreflight = iosBlockedPreflight.replace(
+    "public manifest HTTP 200 (128 bytes)",
+    "public manifest HTTP 200 (256 bytes)",
+  );
+  const pairedAlongsideRecord = runIosPreviewJob("paired-alongside-record", {
+    recordText: [
+      {
+        timestamp: "20260915T120000Z",
+        baseText: blockedRecord,
+        text: blockedRecord.replace(
+          "Public edge was reachable.",
+          "Public edge remained reachable.",
+        ),
+        basePreflight: iosBlockedPreflight,
+        preflight: changedIosPreflight,
+      },
+      {
+        timestamp: "20260915T120500Z",
+        baseText: blockedRecord,
+        text: blockedRecord.replace(
+          "Public edge was reachable.",
+          "Public edge was reachable after a second record change.",
+        ),
+      },
+    ],
+  });
+  assert.notEqual(
+    pairedAlongsideRecord.result.status,
+    0,
+    "a changed iOS record and sibling preflight with a tampered byte count must fail",
+  );
+  assert.match(
+    [pairedAlongsideRecord.result.stdout, pairedAlongsideRecord.result.stderr].join(
+      "\n",
+    ),
+    /preflight JSON public manifest evidence does not match the Markdown record/,
+    "a paired iOS byte-count mismatch must report the fixed paired-evidence diagnostic",
+  );
+  assert.match(
+    pairedAlongsideRecord.summary,
+    /Validation: \*\*FAIL\*\*/,
+    "a paired iOS byte-count mismatch must fail the release summary",
+  );
+  assert.deepEqual(
+    pairedAlongsideRecord.checkerArgs,
+    [
+      [
+        pairedAlongsideRecord.recordPaths[0],
+        pairedAlongsideRecord.preflightPaths[0],
+      ],
+    ],
+    "the iOS checker must receive the changed sidecar with its record without duplicating it before the job fails fast",
+  );
+  for (const recordPath of pairedAlongsideRecord.recordPaths.slice(0, 1)) {
+    const escapedPath = recordPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const recordLinkPattern = new RegExp(
+      `\\[${escapedPath}\\]\\(https://github\\.example/example/chat-app/blob/[^)]+/${escapedPath}\\)`,
+      "g",
+    );
+    const recordSectionPattern = new RegExp(
+      `### \\[${escapedPath}\\]\\(https://github\\.example/example/chat-app/blob/[^)]+/${escapedPath}\\)[\\s\\S]*?(?=\\n### |$)`,
+      "g",
+    );
+    assert.equal(
+      pairedAlongsideRecord.summary.match(recordLinkPattern)?.length ?? 0,
+      1,
+      `each changed iOS record must have one stable link: ${recordPath}`,
+    );
+    assert.equal(
+      pairedAlongsideRecord.summary.match(recordSectionPattern)?.length ?? 0,
+      1,
+      `each changed iOS record must have one validation section: ${recordPath}`,
+    );
+  }
 });
 
 // ---------------------------------------------------------------------------
@@ -4285,6 +5879,9 @@ const identifierNames = new Set(
     .map(([name]) => name),
 );
 identifierNames.add("NATIVE_SMOKE_BUILD_ID");
+const readinessWorkflowCommand = "::warning::native-readiness-control-input";
+const encodedReadinessWorkflowCommand =
+  readinessWorkflowCommand.replaceAll("::", "&#58;&#58;");
 
 function assertNoSentinels(text, description, allowedNames = new Set()) {
   for (const [name, sentinel] of Object.entries(sentinelEnvironment)) {
@@ -4482,6 +6079,9 @@ function getGateRuns() {
       bootedDevices:
         "iPhone 14 (00000000-0000-0000-0000-000000000000) (Booted)",
     }),
+    hostileWrongModel: runGate("hostile-wrong-model", 2, {
+      bootedDevices: `iPhone 14 ${readinessWorkflowCommand} (00000000-0000-0000-0000-000000000000) (Booted)`,
+    }),
     supportedModel: runGate("supported-model", 1, {
       bootedDevices:
         "iPhone SE (3rd generation) (00000000-0000-0000-0000-000000000000) (Booted)",
@@ -4504,6 +6104,10 @@ test("iOS gate keeps private values out of logs and the readiness report while r
     wrongModel: {
       status: "BLOCKED",
       diagnostic: "Expected iPhone SE (3rd generation); found: iPhone 14",
+    },
+    hostileWrongModel: {
+      status: "BLOCKED",
+      diagnostic: `Expected iPhone SE (3rd generation); found: iPhone 14 ${readinessWorkflowCommand}`,
     },
     supportedModel: { status: "READY", diagnostic: null },
   };
@@ -4528,10 +6132,35 @@ test("iOS gate keeps private values out of logs and the readiness report while r
       `${run.name}: readiness report should be ${status}\n${readiness}`,
     );
     if (diagnostic) {
+      const readinessDiagnostic = diagnostic.replaceAll(
+        "::",
+        "&#58;&#58;",
+      );
       assert.ok(
-        readiness.includes(`- ${diagnostic}`),
+        readiness.includes(readinessDiagnostic),
         `${run.name}: readiness report should list the fixed diagnostic\n${readiness}`,
       );
+      assert.match(
+        readiness,
+        new RegExp(
+          String.raw`### Blocking prerequisites[\s\S]*\n` +
+            String.raw`(` + "```" + String.raw`+)\n` +
+            readinessDiagnostic.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") +
+            String.raw`\n\1`,
+        ),
+        `${run.name}: readiness diagnostic should be in a literal code block`,
+      );
+      if (diagnostic.includes(readinessWorkflowCommand)) {
+        assert.ok(
+          readiness.includes(encodedReadinessWorkflowCommand),
+          `${run.name}: readiness report should encode workflow-command sentinels`,
+        );
+        assert.doesNotMatch(
+          readiness,
+          /::warning::/,
+          `${run.name}: readiness report must not contain a live workflow command`,
+        );
+      }
     }
     assertNoSentinels(readiness, `${run.name}: ios-readiness.md`);
 
@@ -4693,10 +6322,24 @@ test("Android preflight keeps private values out of its log and step summary", (
         ["summary", run.summary],
       ]) {
         assert.ok(
-          text.includes(`- ${scenario.diagnostic}`),
+          text.includes(
+            surface === "summary"
+              ? scenario.diagnostic
+              : `- ${scenario.diagnostic}`,
+          ),
           `${run.name}: ${surface} should carry the fixed diagnostic\n${text}`,
         );
       }
+      assert.match(
+        run.summary,
+        new RegExp(
+          String.raw`### Blocking prerequisites[\s\S]*\n` +
+            String.raw`(` + "```" + String.raw`+)\n` +
+            scenario.diagnostic.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") +
+            String.raw`\n\1`,
+        ),
+        `${run.name}: summary diagnostic should stay in a literal code block`,
+      );
     }
   }
 });
@@ -4715,6 +6358,7 @@ function renderSummaryStepEnv(summaryStep, { resultsDir, outcome }) {
     "github.repository": "example/chat-app",
     "github.server_url": "https://github.example",
     "github.sha": "0".repeat(40),
+    "github.ref": "refs/heads/mobile-v0.0.0",
     "github.ref_name": "mobile-v0.0.0",
     "github.event_name": "workflow_dispatch",
     "runner.temp": testRoot,
@@ -4808,7 +6452,11 @@ function runSummaryStep(summaryStep, { name, resultsDir, outcome }) {
     cwd: workspaceRoot,
     encoding: "utf8",
     env: {
-      PATH: makeIosCommandDirectory(`${scratchName}-summary`),
+      PATH: [
+        makeIosCommandDirectory(`${scratchName}-summary`),
+        path.dirname(gitPath),
+        process.env.PATH,
+      ].join(path.delimiter),
       HOME: homeDirectory,
       GITHUB_STEP_SUMMARY: summaryPath,
       // Even if a secret were ever in scope, the summary must not print it.
@@ -4865,6 +6513,13 @@ test("workflow summaries show candidate build IDs without exposing private value
       diagnostic: "Expected iPhone SE (3rd generation); found: iPhone 14",
     },
     {
+      name: "blocked-readiness-sentinel",
+      run: runs.hostileWrongModel,
+      outcome: "failure",
+      status: "BLOCKED",
+      diagnostic: `Expected iPhone SE (3rd generation); found: iPhone 14 ${readinessWorkflowCommand}`,
+    },
+    {
       name: "ready",
       run: runs.supportedModel,
       outcome: "success",
@@ -4917,10 +6572,35 @@ test("workflow summaries show candidate build IDs without exposing private value
       `${scenario.name}: iOS summary should report ${scenario.status}\n${iosSummary}`,
     );
     if (scenario.diagnostic) {
+      const summaryDiagnostic = scenario.diagnostic.replaceAll(
+        "::",
+        "&#58;&#58;",
+      );
       assert.ok(
-        iosSummary.includes(`- ${scenario.diagnostic}`),
+        iosSummary.includes(summaryDiagnostic),
         `${scenario.name}: iOS summary should surface the fixed readiness diagnostic\n${iosSummary}`,
       );
+      assert.match(
+        iosSummary,
+        new RegExp(
+          String.raw`### Readiness diagnostics[\s\S]*\n` +
+            String.raw`(` + "```" + String.raw`+)\n` +
+            summaryDiagnostic.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") +
+            String.raw`\n\1`,
+        ),
+        `${scenario.name}: readiness diagnostic should stay in a literal code block`,
+      );
+      if (scenario.diagnostic.includes(readinessWorkflowCommand)) {
+        assert.ok(
+          iosSummary.includes(encodedReadinessWorkflowCommand),
+          `${scenario.name}: iOS summary should contain the encoded workflow-command sentinel`,
+        );
+        assert.doesNotMatch(
+          iosSummary,
+          /::warning::/,
+          `${scenario.name}: iOS summary must not contain a live workflow command`,
+        );
+      }
     }
     // Both the copied fragment and the fallback branch must have produced the
     // branding section, otherwise the no-sentinel checks above were vacuous.
@@ -4938,7 +6618,8 @@ test("workflow summaries show candidate build IDs without exposing private value
 
 test("native branding summaries keep a durable report snapshot after artifact removal", () => {
   const summaryStep = summarySteps.find(
-    ({ step }) => step.run === "scripts/summarize-native-branding.sh ios",
+    ({ jobId, step }) =>
+      jobId === "native-ios" && step.name === "Summarize iOS native branding",
   );
   assert.ok(summaryStep, "the iOS native branding summary step must exist");
 
@@ -5412,14 +7093,96 @@ test("unsafe download metadata cannot alter fixed platform recovery actions", ()
   );
 });
 
+test("successful downloads cannot turn unsafe artifact URLs into report links", () => {
+  const summaryPath = path.join(
+    testRoot,
+    "unsafe-successful-download-summary.md",
+  );
+  const result = spawnSync(
+    bashPath,
+    [
+      path.join(
+        workspaceRoot,
+        "scripts/tests/native-evidence-summary-regression-fixture.sh",
+      ),
+      bashPath,
+      path.join(workspaceRoot, nativeEvidenceCheckerScript),
+    ],
+    {
+      cwd: workspaceRoot,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        GITHUB_STEP_SUMMARY: summaryPath,
+        REVIEWED_REF: "refs/heads/fixture",
+        NATIVE_EVIDENCE_HOSTILE_SUCCESS_METADATA: "1",
+      },
+    },
+  );
+  assert.equal(
+    result.status,
+    0,
+    `successful hostile-download fixture should pass its fixed release checks\n${result.stdout}${result.stderr}`,
+  );
+
+  const summary = readFileSync(summaryPath, "utf8");
+  for (const platform of ["iOS", "Android"]) {
+    const section = summary.match(
+      new RegExp(
+        `## ${platform} native large-text evidence[\\s\\S]*?(?=## (?:Android|$) native large-text evidence|$)`,
+      ),
+    )?.[0];
+    assert.ok(section, `the summary should include the ${platform} section`);
+    assert.match(section, /- Status: \*\*PASS\*\*/);
+    assert.match(section, /- Artifact download: \*\*PASS\*\*/);
+    assert.match(
+      section,
+      /- Detailed evidence report: \*\*Unavailable\*\*/,
+      `${platform} must not receive a report link for an unsafe URL`,
+    );
+    assert.doesNotMatch(
+      section,
+      /- Detailed evidence report: \[[^\]]+\]\(/,
+      `${platform} must not emit any Markdown report link`,
+    );
+  }
+
+  for (const [streamName, stream] of [
+    ["stdout", result.stdout],
+    ["stderr", result.stderr],
+    ["summary", summary],
+  ]) {
+    assert.doesNotMatch(
+      stream,
+      /https?:\/\/|attacker\.example|::error::|::warning::|unsafe-download-metadata-shell-marker/,
+      `hostile URLs and control text must not reach ${streamName}`,
+    );
+  }
+  assert.match(
+    result.stdout,
+    /Native large-text evidence completeness check passed for iOS and Android\./,
+    "the checker must retain its fixed successful status",
+  );
+});
+
 test("cleanup-gated skipped retries preserve fixed blocking summaries", () => {
   const evidenceRoot = path.join(testRoot, "cleanup-failure-stale-output");
   const iosRunDir = path.join(evidenceRoot, "ios", "stale-run");
-  mkdirSync(iosRunDir, { recursive: true });
-  writeFileSync(
-    path.join(iosRunDir, brandingReportFile),
-    "private-evidence-marker must not appear in the release summary\n",
-  );
+  const androidRunDir = path.join(evidenceRoot, "android", "stale-run");
+  const staleEvidenceMarkers = {
+    ios: "private-ios-evidence-marker",
+    android: "private-android-evidence-marker",
+  };
+  for (const [platform, runDir] of Object.entries({
+    ios: iosRunDir,
+    android: androidRunDir,
+  })) {
+    mkdirSync(runDir, { recursive: true });
+    writeFileSync(
+      path.join(runDir, brandingReportFile),
+      `${staleEvidenceMarkers[platform]} must not appear in the release summary\n`,
+    );
+  }
   const summaryPath = path.join(
     testRoot,
     "cleanup-failure-stale-output-summary.md",
@@ -5441,7 +7204,7 @@ test("cleanup-gated skipped retries preserve fixed blocking summaries", () => {
         NATIVE_IOS_EVIDENCE_ARTIFACT_URL: iosArtifactUrl,
         NATIVE_ANDROID_EVIDENCE_ARTIFACT_URL: androidArtifactUrl,
         NATIVE_IOS_EVIDENCE_DOWNLOAD_RESULT: "skipped",
-        NATIVE_ANDROID_EVIDENCE_DOWNLOAD_RESULT: "success",
+        NATIVE_ANDROID_EVIDENCE_DOWNLOAD_RESULT: "skipped",
       },
     },
   );
@@ -5452,21 +7215,39 @@ test("cleanup-gated skipped retries preserve fixed blocking summaries", () => {
   );
 
   const summary = readFileSync(summaryPath, "utf8");
-  assert.match(
-    summary,
-    /## iOS native large-text evidence[\s\S]*- Status: \*\*FAIL\*\*[\s\S]*- Artifact download: \*\*FAIL\*\*/,
-    "the affected platform must retain a fixed blocking summary",
-  );
-  assert.match(
-    summary,
-    /- Recovery: \*\*Rerun the iOS native large-text job, or make the existing iOS artifact available, then rerun the mobile release gate\.\*\*/,
-    "the affected platform must retain fixed iOS recovery guidance",
-  );
-  assert.doesNotMatch(
-    summary,
-    /private-evidence-marker|github\.example/,
-    "stale evidence text and artifact metadata must not reach the summary",
-  );
+  for (const [platform, label, recoveryLine] of [
+    ["ios", "iOS", iosRecoveryLine],
+    ["android", "Android", androidRecoveryLine],
+  ]) {
+    const section = summary.match(
+      new RegExp(`## ${label} native large-text evidence[\\s\\S]*?(?=## |$)`),
+    )?.[0];
+    assert.ok(
+      section,
+      `${platform}: the cleanup-failure summary must include its platform section`,
+    );
+    assert.match(
+      section,
+      /- Status: \*\*FAIL\*\*[\s\S]*- Artifact download: \*\*FAIL\*\*/,
+      `${platform}: the affected platform must retain a fixed blocking summary`,
+    );
+    assert.match(
+      section,
+      new RegExp(recoveryLine.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
+      `${platform}: the affected platform must retain fixed recovery guidance`,
+    );
+  }
+  for (const value of [
+    ...Object.values(staleEvidenceMarkers),
+    iosArtifactUrl,
+    androidArtifactUrl,
+  ]) {
+    assert.equal(
+      summary.includes(value),
+      false,
+      "stale evidence text and artifact metadata must not reach the summary",
+    );
+  }
 });
 
 test("partial native reruns keep each platform linked to its own artifact", () => {
@@ -5855,6 +7636,151 @@ test("partial native reruns keep each platform linked to its own artifact", () =
   );
 });
 
+test("native reports use a durable redacted archive before artifact expiry", () => {
+  const gate = workflow.jobs["mobile-release-gate"];
+  assert.deepEqual(
+    gate.permissions,
+    { contents: "write" },
+    "the archive job must have only the repository permission needed for release assets",
+  );
+
+  const prepareStep = gate.steps.find(
+    (step) => step.id === "prepare-native-archive",
+  );
+  const createStep = gate.steps.find(
+    (step) => step.id === "create-native-archive",
+  );
+  const iosUploadStep = gate.steps.find(
+    (step) => step.id === "upload-ios-native-archive",
+  );
+  const androidUploadStep = gate.steps.find(
+    (step) => step.id === "upload-android-native-archive",
+  );
+  const evidenceStep = gate.steps.find(
+    (step) => step.id === "evidence-completeness",
+  );
+  assert.match(
+    prepareStep?.run ?? "",
+    new RegExp(nativeReleaseArchiveScript.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
+    "the release gate must prepare reports through the redacting archive boundary",
+  );
+  assert.equal(
+    createStep?.env?.GH_TOKEN,
+    "${{ github.token }}",
+    "only the release-asset creation step may receive the GitHub write token",
+  );
+  assert.equal(
+    iosUploadStep?.env?.GH_TOKEN,
+    "${{ github.token }}",
+    "the iOS release-asset upload must use the GitHub write token",
+  );
+  assert.equal(
+    androidUploadStep?.env?.GH_TOKEN,
+    "${{ github.token }}",
+    "the Android release-asset upload must use the GitHub write token",
+  );
+  assert.match(
+    evidenceStep?.env?.NATIVE_IOS_EVIDENCE_ARCHIVE_URL ?? "",
+    /releases\/download\/native-evidence-\$\{\{ github\.run_id \}\}-\$\{\{ github\.run_attempt \}\}\/native-release-report-ios\.md/,
+    "the iOS summary must receive its deterministic durable archive location",
+  );
+  assert.match(
+    evidenceStep?.env?.NATIVE_ANDROID_EVIDENCE_ARCHIVE_URL ?? "",
+    /releases\/download\/native-evidence-\$\{\{ github\.run_id \}\}-\$\{\{ github\.run_attempt \}\}\/native-release-report-android\.md/,
+    "the Android summary must receive its deterministic durable archive location",
+  );
+
+  const archiveRoot = mkdtempSync(path.join(testRoot, "native-report-archive-"));
+  const fixtureBuilderPath = path.join(
+    workspaceRoot,
+    "scripts/tests/native-large-text-evidence-fixture.sh",
+  );
+  const buildId = "private-candidate-build-id";
+  const fixtureResult = spawnSync(
+    bashPath,
+    [
+      "-c",
+      'source "$1"; write_native_large_text_evidence_fixture "$2" ios "$3"',
+      "native-report-archive-fixture",
+      fixtureBuilderPath,
+      archiveRoot,
+      buildId,
+    ],
+    { cwd: workspaceRoot, encoding: "utf8" },
+  );
+  assert.equal(fixtureResult.status, 0, fixtureResult.stderr);
+
+  const outputPath = path.join(archiveRoot, "native-release-report-ios.md");
+  const archiveResult = spawnSync(
+    bashPath,
+    [path.join(workspaceRoot, nativeReleaseArchiveScript), "ios", archiveRoot, outputPath],
+    { cwd: workspaceRoot, encoding: "utf8" },
+  );
+  assert.equal(archiveResult.status, 0, archiveResult.stderr);
+  const archivedReport = readFileSync(outputPath, "utf8");
+  assert.match(archivedReport, /- Platform: \*\*ios\*\*/);
+  assert.match(archivedReport, /- Status: \*\*PASS\*\*/);
+  assert.doesNotMatch(
+    archivedReport,
+    /private-candidate-build-id|Candidate build ID|fingerprint|account|password|token|secret|credential/i,
+    "the durable archive must exclude candidate and private source values",
+  );
+
+  rmSync(archiveRoot, { recursive: true, force: true });
+});
+
+test("archive failures block native evidence without publishing dead locations", () => {
+  for (const platform of ["ios", "android"]) {
+    const upload = workflow.jobs[`native-${platform}`].steps.find(
+      (step) => step.id === `upload-${platform}-native-smoke`,
+    );
+    assert.equal(
+      upload?.with?.["retention-days"],
+      90,
+      `${platform}: native report artifacts must use the maximum bounded retention window`,
+    );
+  }
+
+  const evidenceRoot = path.join(testRoot, "failed-native-report-archive");
+  const summaryPath = path.join(
+    testRoot,
+    "failed-native-report-archive-summary.md",
+  );
+  const iosArchiveUrl =
+    "https://github.example/example/chat-app/releases/download/native-evidence-123-1/native-release-report-ios.md";
+  const result = spawnSync(
+    bashPath,
+    [
+      path.join(workspaceRoot, nativeEvidenceCheckerScript),
+      evidenceRoot,
+    ],
+    {
+      cwd: workspaceRoot,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        GITHUB_STEP_SUMMARY: summaryPath,
+        NATIVE_IOS_EVIDENCE_ARCHIVE_URL: iosArchiveUrl,
+        NATIVE_IOS_EVIDENCE_ARCHIVE_RESULT: "failure",
+        NATIVE_ANDROID_EVIDENCE_ARCHIVE_RESULT: "skipped",
+      },
+    },
+  );
+  assert.notEqual(
+    result.status,
+    0,
+    "a failed durable archive must keep native release evidence blocked",
+  );
+  const summary = readFileSync(summaryPath, "utf8");
+  assert.match(summary, /- Durable archive: \*\*FAIL\*\*/);
+  assert.match(summary, /- Durable evidence report: \*\*Unavailable\*\*/);
+  assert.doesNotMatch(
+    summary,
+    new RegExp(iosArchiveUrl.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
+    "a failed archive must not publish its dead release-asset location",
+  );
+});
+
 test("expired native report artifacts are detected before a report link is published", () => {
   for (const platform of ["ios", "android"]) {
     const upload = workflow.jobs[`native-${platform}`].steps.find(
@@ -5943,7 +7869,7 @@ test("native evidence checker output is isolated from workflow commands", () => 
 
   assert.equal(
     checkerCallers.length,
-    9,
+    11,
     "every native evidence checker caller must be inventoried by this contract",
   );
   assert.equal(
@@ -6077,6 +8003,136 @@ test("release summary writers encode workflow-command sentinels", () => {
   assert.match(summary, /&#58;&#58;error&#58;&#58;summary-control-input/);
 });
 
+test("release summary writers keep hostile diagnostics literal and line-broken", () => {
+  const hostileDiagnostic = [
+    "# reviewer-controlled heading",
+    "- reviewer-controlled bullet",
+    "`reviewer-controlled code` | reviewer-controlled pipe",
+    "",
+    "reviewer-controlled continuation",
+  ].join("\n");
+  const rendererProbe = spawnSync(
+    bashPath,
+    [
+      "-c",
+      'source "$1"; printf "%s\\n" "$2" | render_markdown_code_block',
+      "workflow-output-safety",
+      path.join(workspaceRoot, workflowOutputSafetyScript),
+      hostileDiagnostic,
+    ],
+    { cwd: workspaceRoot, encoding: "utf8" },
+  );
+  assert.equal(rendererProbe.status, 0, rendererProbe.stderr);
+  assert.equal(
+    rendererProbe.stdout,
+    `\`\`\`\n${hostileDiagnostic}\n\`\`\`\n`,
+    "the shared renderer must preserve Markdown-looking diagnostics as code",
+  );
+
+  const androidPreviewStep = listSteps().find(
+    ({ jobId, step }) =>
+      jobId === "android-preview-evidence" &&
+      step.name === "Validate changed Android preview records",
+  );
+  assert.match(
+    androidPreviewStep?.step.run ?? "",
+    /safe_reasons[\s\S]*render_markdown_code_block/,
+    "Android preview reasons must use the literal renderer",
+  );
+
+  const iosReadinessStep = summarySteps.find(
+    ({ jobId, step }) =>
+      jobId === "native-ios" && step.name === "Summarize iOS readiness",
+  );
+  assert.ok(iosReadinessStep, "the iOS readiness summary step must exist");
+  const readinessResultsDir = path.join(
+    testRoot,
+    "hostile-ios-readiness-summary-results",
+  );
+  mkdirSync(readinessResultsDir, { recursive: true });
+  writeFileSync(
+    path.join(readinessResultsDir, "ios-readiness.md"),
+    [
+      "## iOS native large-text readiness",
+      "",
+      "### Blocking prerequisites",
+      hostileDiagnostic,
+      "",
+      "### Later fixed section",
+      "- fixed content",
+      "",
+    ].join("\n"),
+  );
+  const { summary: readinessSummary } = runSummaryStep(iosReadinessStep, {
+    name: "hostile-ios-readiness",
+    resultsDir: readinessResultsDir,
+    outcome: "failure",
+  });
+  assert.match(
+    readinessSummary,
+    new RegExp(
+      String.raw`### Readiness diagnostics[\s\S]*\n` +
+        String.raw`(` + "```" + String.raw`+)\n` +
+        hostileDiagnostic
+          .split("\n")
+          .map((line) => line.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+          .join("\\n") +
+        String.raw`\n\1`,
+    ),
+    "iOS readiness diagnostics must remain one literal multi-line block",
+  );
+
+  const brandingStep = summarySteps.find(
+    ({ jobId, step }) =>
+      jobId === "native-ios" && step.name === "Summarize iOS native branding",
+  );
+  assert.ok(brandingStep, "the iOS branding summary step must exist");
+  const brandingResultsDir = path.join(
+    testRoot,
+    "hostile-native-branding-summary-results",
+  );
+  mkdirSync(brandingResultsDir, { recursive: true });
+  writeFileSync(
+    path.join(brandingResultsDir, "native-branding-summary.md"),
+    [
+      "## iOS native branding",
+      "",
+      hostileDiagnostic,
+      "",
+      "- Detailed report: [native-branding-check.md](__NATIVE_BRANDING_REPORT_URL__)",
+      "",
+    ].join("\n"),
+  );
+  const { summary: brandingSummary } = runSummaryStep(brandingStep, {
+    name: "hostile-native-branding",
+    resultsDir: brandingResultsDir,
+    outcome: "success",
+  });
+  assert.match(
+    brandingSummary,
+    /## iOS native branding[\s\S]*### Branding validation details[\s\S]*```[\s\S]*# reviewer-controlled heading[\s\S]*reviewer-controlled continuation[\s\S]*```/,
+    "native branding report content must be copied as literal text",
+  );
+  assert.match(
+    brandingSummary,
+    /- Detailed report: \[native-branding-check\.md\]\(https:\/\/github\.example\/example\/chat-app\/upload-ios-native-smoke\/artifact-url\)/,
+    "the fixed branding report link must remain outside the literal report block",
+  );
+
+  for (const relativePath of [
+    iosPreflightScript,
+    androidPreflightScript,
+    "artifacts/chat-app/e2e/native-large-text/run.sh",
+    nativeBrandingSummaryScript,
+  ]) {
+    assert.match(
+      scriptSource(relativePath),
+      /render_markdown_code_block/,
+      `${relativePath} must use the shared literal renderer`,
+    );
+  }
+});
+
 test("hosted native evidence summaries record the checked revision before untrusted checks", () => {
   const checkerCall = `bash ${nativeEvidenceCheckerScript}`;
   const checkerCallers = listSteps().filter(({ step }) =>
@@ -6088,7 +8144,7 @@ test("hosted native evidence summaries record the checked revision before untrus
 
   assert.equal(
     summaryCheckerCallers.length,
-    7,
+    9,
     "every hosted native evidence summary caller must be covered",
   );
 
@@ -6120,5 +8176,62 @@ test("hosted native evidence summaries record the checked revision before untrus
       /summary_path.*(?:REVIEWED_REF|resolved_commit_sha)|(?:REVIEWED_REF|resolved_commit_sha).*summary_path/,
       `${label} must not derive revision metadata from checker output`,
     );
+  }
+});
+
+test("non-native release summaries record the checked revision without private inputs", () => {
+  const summaryCases = [
+    ["mobile-release-node-range", "Reject invalid Node range before release checks"],
+    ["android-preview-evidence", "Validate changed Android preview records"],
+    ["ios-preview-evidence", "Validate changed iOS preview records"],
+    ["native-ios", "Summarize iOS readiness"],
+    ["native-ios", "Summarize iOS native branding"],
+    ["native-android", "Summarize Android native branding"],
+    ["idle-profile-registration", "Summarize idle-profile registration check"],
+  ];
+
+  for (const [jobId, stepName] of summaryCases) {
+    const job = workflow.jobs[jobId];
+    assert.ok(job, `${jobId} must exist`);
+    const step = job.steps.find((candidate) => candidate.name === stepName);
+    assert.ok(step, `${jobId} must define "${stepName}"`);
+    assert.equal(
+      step.env.REVIEWED_REF,
+      "${{ github.ref }}",
+      `${jobId} ${stepName} must use the trusted workflow ref`,
+    );
+
+    const run = String(step.run);
+    const revisionMetadataIndex = run.indexOf(
+      'echo "## Reviewed release revision"',
+    );
+    assert.ok(
+      revisionMetadataIndex >= 0,
+      `${jobId} ${stepName} must write revision metadata`,
+    );
+    assert.match(
+      run,
+      /resolved_commit_sha="\$\(git rev-parse --verify HEAD\)"/,
+      `${jobId} ${stepName} must resolve the checked commit from the checkout`,
+    );
+    assert.match(run, /Checked ref: `%s`/);
+    assert.match(run, /Resolved commit SHA: `%s`/);
+    assert.doesNotMatch(
+      run,
+      /secrets\.|E2E_CHAT_URL|E2E_API_URL|CLERK_SECRET_KEY|DATABASE_URL|NATIVE_SMOKE_APP_ID|NATIVE_SMOKE_EMAIL|NATIVE_SMOKE_PASSWORD/,
+      `${jobId} ${stepName} must not expose secrets or private release inputs`,
+    );
+
+    const summaryWriteIndex = run.indexOf('>> "$GITHUB_STEP_SUMMARY"');
+    assert.ok(
+      summaryWriteIndex < 0 || revisionMetadataIndex < summaryWriteIndex,
+      `${jobId} ${stepName} must write revision metadata before its summary`,
+    );
+    if (stepName.includes("branding")) {
+      assert.ok(
+        revisionMetadataIndex < run.indexOf("scripts/summarize-native-branding.sh"),
+        `${jobId} ${stepName} must write revision metadata before branding output`,
+      );
+    }
   }
 });

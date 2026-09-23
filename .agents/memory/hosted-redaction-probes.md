@@ -32,3 +32,16 @@ out of the log.
 **How to apply:** Keep the fixture run layout deterministic for the test
 harness, use a temporary fixture root, and make the release gate depend on the
 hosted regression result.
+For hosted tamper checks, capture the entire untrusted-checker wrapper stream
+before printing it, verify the wrapper's matching stop/resume markers, and scan
+both that log and the reviewer summary for workflow commands and private
+fixture sentinels. Keep negative assertions redacted so a failed safety check
+does not print the value it was meant to protect.
+
+**Why:** A wrapper can be present in the workflow while a later log or summary
+writer still leaks a command marker or fixture metadata; failures must identify
+the platform and validation deadline without reproducing the evidence.
+
+**How to apply:** Make the tamper step retain its outcome with
+`continue-on-error`, let an always-run summary step perform the scans, and
+fail that step after publishing only fixed BLOCKED context.

@@ -61,6 +61,7 @@ import {
   recordSocketDisconnect,
   reportSocketHandlerError,
 } from "./lib/socketMonitoring";
+import { ROOM_MESSAGE_HISTORY_LIMIT } from "./lib/roomLimits";
 
 interface User {
   userId: string;
@@ -1614,7 +1615,9 @@ function setupConnectedSocket(
           timestamp: msg.timestamp,
         });
         room.messages.push(msg);
-        if (room.messages.length > 200) room.messages = room.messages.slice(-200);
+        if (room.messages.length > ROOM_MESSAGE_HISTORY_LIMIT) {
+          room.messages = room.messages.slice(-ROOM_MESSAGE_HISTORY_LIMIT);
+        }
         emitRoomEvent(io, room, "message", msg);
       } catch (error) {
          reportSocketHandlerError("save-encrypted-message", error, {

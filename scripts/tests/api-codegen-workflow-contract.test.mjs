@@ -83,6 +83,7 @@ const generatedClientValidationFixturePaths = [
   "tsconfig.json",
   ".github/pull_request_template.md",
   ".github/workflows/api-codegen.yml",
+  "scripts/run-untrusted-checker.sh",
   "lib/api-spec",
   "lib/api-client-react/package.json",
   "lib/api-client-react/tsconfig.json",
@@ -101,7 +102,9 @@ const generatedClientValidationFixturePaths = [
 function resolveRootPackageScript(command) {
   const match = String(command)
     .trim()
-    .match(/^pnpm(?:\s+run)?\s+([^\s]+)$/);
+    .match(
+      /^(?:bash\s+scripts\/run-untrusted-checker\.sh\s+)?pnpm(?:\s+run)?\s+([^\s]+)$/,
+    );
   assert.ok(
     match,
     `expected a single root pnpm package script command, received: ${command}`,
@@ -731,5 +734,10 @@ test("API compatibility workflow command resolves to the maintained contract che
     resolveRootPackageScript(compatibilityStep.run),
     "node lib/api-spec/scripts/check-contract-compatibility.mjs",
     "the compatibility workflow must invoke the repository's maintained contract compatibility checker through the root package script",
+  );
+  assert.equal(
+    compatibilityStep.run,
+    "bash scripts/run-untrusted-checker.sh pnpm validate:api-compatibility",
+    "the compatibility workflow must protect checker output from workflow-command interpretation",
   );
 });
