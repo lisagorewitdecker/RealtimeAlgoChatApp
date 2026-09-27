@@ -188,8 +188,8 @@ importers:
         specifier: link:vendor/image-size-secure
         version: link:vendor/image-size-secure
       semver:
-        specifier: 6.3.1
-        version: 6.3.1
+        specifier: 7.8.5
+        version: 7.8.5
       yaml:
         specifier: ^2.9.0
         version: 2.9.0
@@ -12701,7 +12701,7 @@ snapshots:
 
   '@types/pg@8.23.1':
     dependencies:
-      '@types/node': 25.9.5
+      '@types/node': 26.6.2
       pg-protocol: 1.16.0
       pg-types: 2.2.0
 
