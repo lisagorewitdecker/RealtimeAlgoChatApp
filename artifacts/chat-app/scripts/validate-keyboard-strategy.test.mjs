@@ -1065,7 +1065,7 @@ test("the real root layout fails the root provider rule as soon as KeyboardProvi
   ]);
   const message = formatKeyboardStrategyFailure(findings);
   assert.match(message, /^Keyboard strategy violation in the Chat App \(.*; see the "Keyboard handling on native has one strategy" note in replit\.md\):/);
-  assert.match(message, /\n  - artifacts\/chat-app\/app\/_layout\.tsx:\d+ \[root-keyboard-provider\] renders <Stack> .* Fix: keep <KeyboardProvider>/);
+  assert.match(message, /\n {2}- artifacts\/chat-app\/app\/_layout\.tsx:\d+ \[root-keyboard-provider\] renders <Stack> .* Fix: keep <KeyboardProvider>/);
 });
 
 test("the root provider rule says how the provider went missing", () => {
@@ -1186,7 +1186,7 @@ export default function RootLayout() {
   );
   // The failure message has no line to print for a file-level finding.
   const message = formatKeyboardStrategyFailure(rootFinding("has no default export"));
-  assert.match(message, /\n  - app\/_layout\.tsx \[root-keyboard-provider\] has no default export\. Fix: /);
+  assert.match(message, /\n {2}- app\/_layout\.tsx \[root-keyboard-provider\] has no default export\. Fix: /);
 });
 
 test("the root provider rule reads only what the layout renders, so dead code cannot satisfy it", () => {

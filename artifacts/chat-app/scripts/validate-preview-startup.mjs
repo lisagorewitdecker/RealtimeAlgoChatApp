@@ -42,8 +42,6 @@ const MAX_RECORDED_STARTUP_OUTPUT_LENGTH = 16_384;
 const MAX_RECORDED_STARTUP_LINE_LENGTH = 1_024;
 const STARTUP_DIAGNOSTIC_PREFIX = "Expo preview startup error: ";
 const PREVIEW_TIMING_SCHEMA = "preview-startup-timing/v1";
-const PREVIEW_TOOLING_MISMATCH_SUMMARY_PREFIX =
-  "Expo preview tooling mismatch: ";
 const RECORD_WRITE_RECOVERY_MESSAGE =
   "Recovery: rerun with --record-output set to a writable JSON file, " +
   "or omit --record-output.";
@@ -56,10 +54,6 @@ const packageRequire = createRequire(
 );
 const EXPO_GO_LAUNCH_CRASH_FAILURE_PREFIX =
   "Expo Go iOS launch evidence is BUNDLE_ONLY_THEN_CLOSED";
-const ANSI_ESCAPE = String.fromCharCode(27);
-const BELL = String.fromCharCode(7);
-const ANSI_PATTERN = new RegExp(`${ANSI_ESCAPE}\\[[0-?]*[ -/]*[@-~]`, "g");
-const TRAILING_BELL_PATTERN = new RegExp(`${BELL}\\s*$`, "g");
 const HANDOFF_FAILURE_PHASES = Object.freeze([
   {
     label: "public manifest",

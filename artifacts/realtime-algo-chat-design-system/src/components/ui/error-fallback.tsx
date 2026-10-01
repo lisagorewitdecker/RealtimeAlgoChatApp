@@ -1,4 +1,4 @@
-import { Component, type ErrorInfo, type ReactNode } from 'react';
+import { Component, type ReactNode } from 'react';
 
 export type ErrorFallbackProps = {
   error: Error;
@@ -48,8 +48,6 @@ export class ErrorBoundary extends Component<
   static getDerivedStateFromError(error: Error) {
     return { error };
   }
-
-  componentDidCatch(_error: Error, _info: ErrorInfo) {}
 
   render() {
     if (this.state.error) {
