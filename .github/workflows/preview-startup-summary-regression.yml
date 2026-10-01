@@ -399,6 +399,18 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha || inputs.reviewed_ref }}
           fetch-depth: 1
           persist-credentials: false
+          # Git for Windows cannot materialize the repository's documentation
+          # fixture paths, and this job only needs the preview workspace.
+          sparse-checkout: |
+            /package.json
+            /pnpm-lock.yaml
+            /pnpm-workspace.yaml
+            /.npmrc
+            /artifacts/chat-app/
+            /lib/
+            /vendor/
+            /scripts/
+          sparse-checkout-cone-mode: false
 
       - name: Set up pnpm
         uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0

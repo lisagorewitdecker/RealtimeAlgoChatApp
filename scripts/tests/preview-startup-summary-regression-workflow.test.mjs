@@ -315,6 +315,21 @@ test("hosted preview timing evidence covers every supported runner profile", () 
     "macos-latest",
     "windows-latest",
   ]);
+  const checkoutStep = timingJob.steps[0];
+  assert.equal(checkoutStep.name, "Check out reviewed revision");
+  assert.equal(checkoutStep.uses, "actions/checkout@v4");
+  assert.equal(checkoutStep.with["persist-credentials"], false);
+  assert.equal(checkoutStep.with["sparse-checkout-cone-mode"], false);
+  assert.deepEqual(checkoutStep.with["sparse-checkout"].trim().split("\n"), [
+    "/package.json",
+    "/pnpm-lock.yaml",
+    "/pnpm-workspace.yaml",
+    "/.npmrc",
+    "/artifacts/chat-app/",
+    "/lib/",
+    "/vendor/",
+    "/scripts/",
+  ]);
   const timingStep = timingJob.steps.at(-1);
   assert.equal(timingStep.name, "Measure startup, public preview, and local handoff phases");
   assert.match(timingStep.run, /PREVIEW_STARTUP_REAL_LAUNCHER=1/);
