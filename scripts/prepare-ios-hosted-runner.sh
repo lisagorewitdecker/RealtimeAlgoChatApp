@@ -65,7 +65,7 @@ if [[ -z "$device_udid" ]]; then
       head -n 1
   )"
   if [[ -z "$device_udid" ]]; then
-    echo "GitHub-hosted macOS does not provide an available ${IOS_DEVICE_NAME} simulator." >&2
+    echo "The self-hosted macOS runner does not provide an available ${IOS_DEVICE_NAME} simulator." >&2
     xcrun simctl list devices available >&2
     exit 2
   fi
