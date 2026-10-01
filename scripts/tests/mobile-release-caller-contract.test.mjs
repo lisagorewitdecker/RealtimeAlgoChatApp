@@ -410,7 +410,7 @@ function documentedCallerJob() {
 
 function documentedCallerSecrets() {
   const section = callerDocumentation.match(
-    /#### Required reusable-workflow secrets\n([\s\S]*?)\n#### Optional reusable-workflow secrets\n([\s\S]*?)\n#### Publish-only secret\n([\s\S]*?)\n\nBuild each candidate with/,
+    /#### Required reusable-workflow secrets\n([\s\S]*?)\n#### Optional reusable-workflow secrets\n([\s\S]*?)\n#### Required reusable-workflow secret and publish secret\n([\s\S]*?)\n\nBuild each candidate with/,
   );
   assert.ok(
     section,
@@ -431,7 +431,7 @@ function documentedCallerSecrets() {
   return {
     required: parseSecretList(section[1], "required"),
     optional: parseSecretList(section[2], "optional"),
-    publishOnly: parseSecretList(section[3], "publish-only"),
+    releaseAndPublish: parseSecretList(section[3], "release-and-publish"),
   };
 }
 
@@ -662,7 +662,7 @@ test("caller setup documentation lists every reusable workflow secret with its r
     .filter(
       (secret) =>
         !requiredSecrets.includes(secret) &&
-        !documentedSecrets.publishOnly.includes(secret),
+        !documentedSecrets.releaseAndPublish.includes(secret),
     )
     .sort();
 
@@ -694,9 +694,9 @@ test("credential preflight reports every missing required caller key together wi
     [
       ...requiredSecrets,
       ...documentedSecrets.optional,
-      ...documentedSecrets.publishOnly,
+      ...documentedSecrets.releaseAndPublish,
     ].sort(),
-    "the preflight, optional, and publish-only sets must cover every workflow_call secret",
+    "the preflight, optional, and release-and-publish sets must cover every workflow_call secret",
   );
   assert.equal(
     step.env?.NATIVE_SMOKE_DISPLAY_NAME,
@@ -706,7 +706,7 @@ test("credential preflight reports every missing required caller key together wi
   assert.equal(
     step.env?.EAS_TOKEN,
     undefined,
-    "the publish-only EAS token must not be injected into the evidence-release preflight",
+    "the release-and-publish EAS token must not be injected into the evidence-release preflight",
   );
   for (const secret of requiredSecrets) {
     assert.equal(
