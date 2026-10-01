@@ -772,7 +772,7 @@ The publish job always runs this strict check before either `eas submit`.
 ### Supplying approvals to the publish job
 
 Configure the GitHub `mobile-store-submission` environment with required
-reviewers and place the publish-only `EAS_TOKEN` secret there. Candidate build
+reviewers and place the `EAS_TOKEN` secret there as well. Candidate build
 IDs continue to come from the non-secret repository variables. Do not
 permit self-review. This protected environment is the trusted
 human approval boundary; the general `mobile-release` environment used by the

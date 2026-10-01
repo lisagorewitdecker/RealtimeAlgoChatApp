@@ -431,7 +431,7 @@ function documentedCallerSecrets() {
   return {
     required: parseSecretList(section[1], "required"),
     optional: parseSecretList(section[2], "optional"),
-    releaseAndPublish: parseSecretList(section[3], "release-and-publish"),
+    releaseAndPublish: parseSecretList(section[3], "shared release-and-publish"),
   };
 }
 
@@ -706,7 +706,7 @@ test("credential preflight reports every missing required caller key together wi
   assert.equal(
     step.env?.EAS_TOKEN,
     undefined,
-    "the release-and-publish EAS token must not be injected into the evidence-release preflight",
+    "the shared release-and-publish EAS token must not be injected into the evidence-release preflight",
   );
   for (const secret of requiredSecrets) {
     assert.equal(
@@ -770,7 +770,7 @@ test("credential preflight reports every missing required caller key together wi
   assert.equal(
     publishJob?.environment?.name,
     "mobile-store-submission",
-    "publish-only credentials must remain behind the protected submission environment",
+    "the publish job must remain behind the protected submission environment",
   );
   const publishInputStep = publishJob?.steps?.find(
     (candidate) => candidate.name === "Verify publishing inputs",
