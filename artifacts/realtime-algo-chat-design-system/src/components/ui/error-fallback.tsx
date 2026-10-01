@@ -49,6 +49,8 @@ export class ErrorBoundary extends Component<
     return { error };
   }
 
+  componentDidCatch() {}
+
   render() {
     if (this.state.error) {
       return (

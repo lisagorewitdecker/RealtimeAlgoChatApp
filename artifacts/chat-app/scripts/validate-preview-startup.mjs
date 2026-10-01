@@ -192,6 +192,9 @@ const STARTUP_FAILURES = [
   /(?:error|failed|unable|cannot).{0,80}(?:react native )?devtools/i,
   /(?:react native )?devtools.{0,80}(?:error|failed|unable|cannot|could not|couldn't)/i,
 ];
+const NON_FATAL_STARTUP_WARNINGS = [
+  /unknown error occurred while installing React Native DevTools/i,
+];
 const LOADER_FAILURES = [
   /error while loading shared libraries:/i,
   /cannot open shared object file/i,
@@ -343,8 +346,10 @@ function validatePreviewTooling(environment = process.env) {
 function findStartupFailure(output) {
   const lines = output.split(/\r?\n/);
   return (
-    lines.find((line) =>
-      STARTUP_FAILURES.some((pattern) => pattern.test(line)),
+    lines.find(
+      (line) =>
+        !NON_FATAL_STARTUP_WARNINGS.some((pattern) => pattern.test(line)) &&
+        STARTUP_FAILURES.some((pattern) => pattern.test(line)),
     ) ?? null
   );
 }
@@ -1382,7 +1387,7 @@ function localBundleUrl(port, launchAssetUrl) {
     throw new InvalidLaunchAssetUrlError();
   }
 
-  return `http://127.0.0.1:${port}${parsedUrl.pathname}${parsedUrl.search}`;
+  return `http://localhost:${port}${parsedUrl.pathname}${parsedUrl.search}`;
 }
 
 async function requestWithDeadline(
@@ -1472,7 +1477,7 @@ export async function requestLocalHandoffProbe(
 
     try {
       const manifestRequest = await requestWithDeadline(
-        `http://127.0.0.1:${port}/`,
+        `http://localhost:${port}/`,
         { headers },
         deadline,
         (response) => response.text(),
