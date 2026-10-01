@@ -824,6 +824,7 @@ async function withLocalManifestServer(manifest, run, options = {}) {
     observedPlatforms.push(request.headers["expo-platform"]);
     observedRequests.push({
       path: request.url,
+      host: request.headers.host,
       platform: request.headers["expo-platform"],
     });
     if (request.url === "/") {
@@ -868,6 +869,10 @@ test("local iOS handoff probe requests the manifest launch asset path", async ()
       assert.deepEqual(
         observedRequests.map(({ path }) => path),
         ["/", "/_expo/static/js/ios-bundle"],
+      );
+      assert.deepEqual(
+        observedRequests.map(({ host }) => host),
+        [`localhost:${port}`, `localhost:${port}`],
       );
       assert.equal(result.signedInDeveloper, false);
     },
