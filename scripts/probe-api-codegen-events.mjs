@@ -214,7 +214,7 @@ export class GitHubClient {
       : undefined;
     let attempt = 0;
 
-    while (true) {
+    while (attempt === 0 || safeGet) {
       if (safeGet && this.nowImpl() >= retryDeadline) {
         throw new GitHubRequestTimeoutError(path);
       }
