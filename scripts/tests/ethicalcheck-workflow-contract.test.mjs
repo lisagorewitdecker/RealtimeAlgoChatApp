@@ -74,13 +74,20 @@ test("EthicalCheck workflow posts the expected request payload when configuratio
     `#!/usr/bin/env bash
 set -euo pipefail
 printf '%s\n' "$@" > "${argsPath}"
-while (($#)); do
-  if [[ "$1" == "--data-raw" ]]; then
-    printf '%s' "$2" > "${bodyPath}"
-    exit 0
-  fi
-  shift
+  case "$1" in
+    --data-raw)
+      printf '%s' "$2" > "${bodyPath}"
+      shift 2
+      ;;
+    --output)
+      response_path="$2"
+      shift 2
+      ;;
+    *) shift ;;
+  esac
 done
+printf '{"success":true}' > "$response_path"
+printf '202'
 `,
     { mode: 0o755 },
   );
