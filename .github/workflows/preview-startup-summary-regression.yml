@@ -129,6 +129,7 @@ jobs:
 
           if GITHUB_STEP_SUMMARY="$failure_summary_path" \
             PREVIEW_STARTUP_TEST_FIXTURE=missing-runtime-library-long-path \
+            REPLIT_EXPO_DEV_DOMAIN=fallback-preview.example.test \
             node artifacts/chat-app/scripts/validate-preview-startup.mjs > /tmp/preview-startup-failure.log 2>&1; then
             echo "The missing-runtime-library-long-path preview startup scenario unexpectedly passed." >&2
             exit 1
