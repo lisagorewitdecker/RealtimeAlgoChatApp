@@ -840,7 +840,7 @@ async function withLocalManifestServer(manifest, run, options = {}) {
     response.end(options.bundleBody ?? "console.log('ios');");
   });
 
-  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  await new Promise((resolve) => server.listen(0, "localhost", resolve));
   const address = server.address();
   assert.notEqual(typeof address, "string");
 
@@ -1552,7 +1552,7 @@ globalThis.fetch = async (url, options = {}) => {
     );
   }
   if (
-    requestUrl.hostname === "127.0.0.1" &&
+    requestUrl.hostname === "localhost" &&
     requestUrl.pathname === "/_expo/static/js/bundle"
   ) {
     return new Response("local response contains private-secret", {
@@ -1753,7 +1753,7 @@ globalThis.fetch = async (url, options = {}) => {
     );
   }
   if (
-    requestUrl.hostname === "127.0.0.1" &&
+    requestUrl.hostname === "localhost" &&
     requestUrl.pathname === "/_expo/static/js/bundle"
   ) {
     await new Promise((resolve, reject) => {
@@ -1883,7 +1883,7 @@ globalThis.fetch = async (url, options = {}) => {
     );
   }
   if (
-    requestUrl.hostname === "127.0.0.1" &&
+    requestUrl.hostname === "localhost" &&
     requestUrl.pathname === "/_expo/static/js/bundle"
   ) {
     await new Promise((resolve, reject) => {

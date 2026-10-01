@@ -1382,7 +1382,7 @@ function localBundleUrl(port, launchAssetUrl) {
     throw new InvalidLaunchAssetUrlError();
   }
 
-  return `http://127.0.0.1:${port}${parsedUrl.pathname}${parsedUrl.search}`;
+  return `http://localhost:${port}${parsedUrl.pathname}${parsedUrl.search}`;
 }
 
 async function requestWithDeadline(
@@ -1472,7 +1472,7 @@ export async function requestLocalHandoffProbe(
 
     try {
       const manifestRequest = await requestWithDeadline(
-        `http://127.0.0.1:${port}/`,
+        `http://localhost:${port}/`,
         { headers },
         deadline,
         (response) => response.text(),
