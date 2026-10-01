@@ -6,15 +6,16 @@ the workflow's uploaded captures are redacted before persistence.
 
 | Item | Result |
 | --- | --- |
-| Reviewed ref | `task-607-real-platform` |
-| Reviewed revision | `f57ac12bdd25b8fa87265f08a0cccd5a33f8c359` |
+| Reviewed ref | `task-607-final` |
+| Reviewed revision | `b18c8e77989a09969b3ac337bc5823bed2d942fa` |
 | Expo CLI / React Native samples | `57.0.20` / `0.86.3` |
-| Workflow run | `35433637963` |
+| Workflow run | `35435705488` |
 | macOS launcher | PASS — capture, validator revalidation, and redacted upload completed |
-| Windows launcher | BLOCKED — the Windows loader smoke check failed before launcher capture |
-| Windows validator comparison | NOT RECORDED — no Windows capture was produced |
-| Parser/sample change | None — the successful macOS diagnosis matched the existing `libgtk-3.dylib` wording |
+| Windows launcher | PASS — loader smoke check, capture, validator revalidation, and redacted upload completed |
+| Windows validator comparison | PASS — captured output remained readable after revalidation |
+| Capture redaction | PASS — both artifacts contain no credentials or private user/workspace paths |
+| Parser/sample change | None — both runners used the existing healthy-startup wording; no loader wording change was observed |
 
-The Windows failure is a runner smoke-check failure, not evidence of changed
-Expo launcher wording. The existing deterministic compatibility suite remains
-the source of truth for the parser until a Windows capture can be produced.
+The final matrix run checked the reviewed revision on both runners. The
+uploaded artifacts are the redacted evidence for the independent capture and
+revalidation results; raw launcher output is not retained in this record.

@@ -87,8 +87,8 @@ write_record "$blocked_record" <<'EOF'
 
 | Handoff boundary | Status | Evidence |
 | --- | --- | --- |
-| Public manifest reachability | PASS | Public manifest returned HTTP 200. |
-| Local handoff probe (manifest and bundle) | NOT_RUN | The local probe was not run. |
+| Public manifest reachability | PASS | public manifest HTTP 200 (128 bytes) |
+| Local handoff probe (manifest and bundle) | NOT_RUN | Local manifest/bundle probe not run — no successful probe result was recorded |
 | Expo Go launch on physical iPhone | **BLOCKED** | No physical iPhone was available. |
 | Server-side native request evidence | **BLOCKED** | No native iOS request was available. |
 EOF
@@ -178,6 +178,26 @@ assert_contains "$non_json_direct_output" \
   "Preview handoff preflight JSON is not valid JSON."
 assert_not_contains "$non_json_direct_output" "$non_json_sentinel"
 
+duplicate_json_sentinel="ios-duplicate-preflight-secret"
+cat >"$json_contract_path" <<EOF
+{"schema":"ios-preview-handoff-preflight/v1","schema":"$duplicate_json_sentinel","platform":"ios","boundaries":{"publicManifestReachability":{"status":"PASS","status":"FAIL","evidence":"public manifest HTTP 200 (128 bytes)"},"localHandoffProbe":{"status":"NOT_RUN","evidence":"Local manifest/bundle probe not run — no successful probe result was recorded"},"expoGoLaunch":{"status":"NOT_ASSESSED","evidence":"Requires a physical iPhone running stock Expo Go."},"serverNativeRequestEvidence":{"status":"NOT_ASSESSED","evidence":"Requires filtered Metro or API evidence from that physical Expo Go session."}}}
+EOF
+if duplicate_json_output="$(bash "$CHECKER" "$json_contract_record" 2>&1)"; then
+  printf 'iOS preflight JSON with duplicate fields unexpectedly passed.\n' >&2
+  exit 1
+fi
+assert_contains "$duplicate_json_output" "does not satisfy the redacted schema"
+assert_not_contains "$duplicate_json_output" "$duplicate_json_sentinel"
+if duplicate_json_direct_output="$(
+  node "$VALIDATOR" --validate-record "$json_contract_path" 2>&1
+)"; then
+  printf 'Duplicate-field iOS preflight JSON unexpectedly passed direct validation.\n' >&2
+  exit 1
+fi
+assert_contains "$duplicate_json_direct_output" \
+  "Preview handoff preflight JSON contains duplicate fields."
+assert_not_contains "$duplicate_json_direct_output" "$duplicate_json_sentinel"
+
 cat >"$json_contract_path" <<'EOF'
 {"schema":"ios-preview-handoff-preflight/v1","platform":"ios","boundaries":{"publicManifestReachability":{"status":"GARBAGE","evidence":"public manifest HTTP 200 (128 bytes)"},"localHandoffProbe":{"status":"NOT_RUN","evidence":"Local manifest/bundle probe not run — no successful probe result was recorded"},"expoGoLaunch":{"status":"NOT_ASSESSED","evidence":"Requires a physical iPhone running stock Expo Go."},"serverNativeRequestEvidence":{"status":"NOT_ASSESSED","evidence":"Requires filtered Metro or API evidence from that physical Expo Go session."}}}
 EOF
@@ -232,8 +252,8 @@ write_record "$public_failure_record" <<'EOF'
 
 | Handoff boundary | Status | Evidence |
 | --- | --- | --- |
-| Public manifest reachability | FAIL | Public manifest probe failed. |
-| Local handoff probe (manifest and bundle) | NOT_RUN | The local probe was not run because the public edge failed. |
+| Public manifest reachability | FAIL | Public manifest probe failed — no successful probe result was recorded |
+| Local handoff probe (manifest and bundle) | NOT_RUN | Local manifest/bundle probe not run — no successful probe result was recorded |
 | Expo Go launch on physical iPhone | BLOCKED | Phone handoff did not start after the public-edge failure. |
 | Server-side native request evidence | BLOCKED | No native request was expected after the public-edge failure. |
 EOF
@@ -270,13 +290,30 @@ write_record "$pass_record" <<'EOF'
 
 | Handoff boundary | Status | Evidence |
 | --- | --- | --- |
-| Public manifest reachability | PASS | Public manifest returned HTTP 200. |
-| Local handoff probe (manifest and bundle) | PASS | Manifest and bundle returned HTTP 200. |
+| Public manifest reachability | PASS | public manifest HTTP 200 (128 bytes) |
+| Local handoff probe (manifest and bundle) | PASS | manifest HTTP 200 (64 bytes); bundle HTTP 200 (4096 bytes) |
 | Expo Go launch on physical iPhone | PASS | Landing screen rendered. |
 | Server-side native request evidence | PASS | Native request evidence: platform=ios; client=Expo Go; user-agent=[redacted] |
 EOF
+pass_preflight="$(dirname "$pass_record")/ios-preview-preflight.json"
+write_preflight "$pass_preflight" <<'EOF'
+{"schema":"ios-preview-handoff-preflight/v1","platform":"ios","boundaries":{"publicManifestReachability":{"status":"PASS","evidence":"public manifest HTTP 200 (128 bytes)"},"localHandoffProbe":{"status":"PASS","evidence":"manifest HTTP 200 (64 bytes); bundle HTTP 200 (4096 bytes)"},"expoGoLaunch":{"status":"NOT_ASSESSED","evidence":"Requires a physical iPhone running stock Expo Go."},"serverNativeRequestEvidence":{"status":"NOT_ASSESSED","evidence":"Requires filtered Metro or API evidence from that physical Expo Go session."}}}
+EOF
 pass_output="$(bash "$CHECKER" "$pass_record" 2>&1)"
 assert_contains "$pass_output" "validation passed"
+
+tampered_byte_count="$TEST_ROOT/pass/tampered-byte-count.md"
+cp "$pass_record" "$tampered_byte_count"
+sed -i 's/public manifest HTTP 200 (128 bytes)/public manifest HTTP 200 (129 bytes)/' \
+  "$pass_preflight"
+if tampered_byte_output="$(bash "$CHECKER" "$tampered_byte_count" 2>&1)"; then
+  printf 'iOS preflight JSON with a tampered public byte count unexpectedly passed.\n' >&2
+  exit 1
+fi
+assert_contains "$tampered_byte_output" \
+  "preflight JSON public manifest evidence does not match"
+sed -i 's/public manifest HTTP 200 (129 bytes)/public manifest HTTP 200 (128 bytes)/' \
+  "$pass_preflight"
 
 wrong_platform="$TEST_ROOT/wrong-platform.md"
 sed 's/platform=ios/platform=android/' "$pass_record" >"$wrong_platform"

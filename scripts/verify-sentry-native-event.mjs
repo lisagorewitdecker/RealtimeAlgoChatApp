@@ -10,6 +10,8 @@ const DEFAULT_API_BASE_URL = "https://sentry.io";
 const DEFAULT_ATTEMPTS = 18;
 const DEFAULT_INTERVAL_MS = 10_000;
 const EXPECTED_PROBE_FUNCTION = "createNativeSourceMapProbeError";
+const EXPECTED_STORAGE_RECOVERY_MESSAGE = "Room key persistence retry failed";
+const EXPECTED_STORAGE_RECOVERY_OPERATION = "save";
 const EXPECTED_TRIGGER_KEYS = new Set(["platform", "candidate_build_id", "marker"]);
 const CREDENTIAL_FIELD_PATTERN =
   /^(?:authorization[_-]?token|auth[_-]?token|sentry_auth_token|access[_-]?token|refresh[_-]?token)$/i;
@@ -160,6 +162,61 @@ function eventRelease(event) {
     : event.release?.version;
 }
 
+function eventMessage(event) {
+  return event.message ?? event.title ?? event.metadata?.title;
+}
+
+const SENSITIVE_STORAGE_FIELD_PATTERN =
+  /^(?:room_?id|roomid|ciphertext|key_?material|secure_?store_?value)$/i;
+const SENSITIVE_STORAGE_TEXT_PATTERN =
+  /(?:room[_ -]?id|ciphertext|key[_ -]?material|secure[_ -]?store[_ -]?value)\s*[:=]/i;
+
+export function findSensitiveStorageContent(value, fieldName = "") {
+  if (SENSITIVE_STORAGE_FIELD_PATTERN.test(fieldName)) return fieldName;
+  if (typeof value === "string") {
+    return SENSITIVE_STORAGE_TEXT_PATTERN.test(value) ? fieldName || "text" : "";
+  }
+  if (Array.isArray(value)) {
+    for (const entry of value) {
+      const found = findSensitiveStorageContent(entry, fieldName);
+      if (found) return found;
+    }
+    return "";
+  }
+  if (!value || typeof value !== "object") return "";
+  for (const [key, entry] of Object.entries(value)) {
+    const found = findSensitiveStorageContent(entry, key);
+    if (found) return found;
+  }
+  return "";
+}
+
+export function validateStorageRecoverySentryEvent(event, expected) {
+  const tags = tagMap(event);
+  const failures = [];
+  if (eventRelease(event) !== expected.release) failures.push("release");
+  if (event.dist !== expected.dist) failures.push("dist");
+  if (eventMessage(event) !== EXPECTED_STORAGE_RECOVERY_MESSAGE) failures.push("fixed warning");
+  if (tags.get("recovery_operation") !== EXPECTED_STORAGE_RECOVERY_OPERATION) {
+    failures.push("recovery operation tag");
+  }
+  if (tags.get("mobile_storage_recovery_probe") !== expected.marker) failures.push("probe marker");
+  if (tags.get("mobile_platform") !== expected.platform) failures.push("platform tag");
+  if (tags.get("mobile_candidate_build_id") !== expected.candidateBuildId) {
+    failures.push("candidate build ID");
+  }
+  const sensitiveField = findSensitiveStorageContent(event);
+  if (sensitiveField) failures.push("privacy-safe storage event");
+  if (failures.length > 0) {
+    throw new Error(`Sentry storage recovery event did not match: ${failures.join(", ")}.`);
+  }
+  return {
+    eventId: event.eventID ?? event.id,
+    message: EXPECTED_STORAGE_RECOVERY_MESSAGE,
+    operation: EXPECTED_STORAGE_RECOVERY_OPERATION,
+  };
+}
+
 function exceptionValues(event) {
   const exceptionEntry = (event.entries ?? []).find(
     (entry) => entry.type === "exception",
@@ -306,6 +363,16 @@ export function verifyNativeSentryEvidence({
   ) {
     throw new Error("readable source-mapped frame is missing");
   }
+  const storageRecovery = evidence.storageRecovery;
+  if (
+    !storageRecovery ||
+    typeof storageRecovery.eventId !== "string" ||
+    storageRecovery.eventId.trim() === "" ||
+    storageRecovery.message !== EXPECTED_STORAGE_RECOVERY_MESSAGE ||
+    storageRecovery.operation !== EXPECTED_STORAGE_RECOVERY_OPERATION
+  ) {
+    throw new Error("storage recovery warning evidence is missing");
+  }
 
   return evidence;
 }
@@ -366,7 +433,45 @@ export async function verifyNativeSentryEvent({
         );
         const event = await sentryRequest(fetchImpl, detailUrl, token);
         try {
-          return validateNativeSentryEvent(event, expected);
+          const sourceMapEvidence = validateNativeSentryEvent(event, expected);
+          const storageQuery = [
+            `release:"${escapeSentrySearchValue(expected.release)}"`,
+            `mobile_storage_recovery_probe:"${escapeSentrySearchValue(expected.marker)}"`,
+            `mobile_platform:"${escapeSentrySearchValue(expected.platform)}"`,
+          ].join(" ");
+          const storageListUrl = new URL(listUrl);
+          storageListUrl.searchParams.set("query", storageQuery);
+          const storageSummaries = await sentryRequest(
+            fetchImpl,
+            storageListUrl,
+            token,
+          );
+          for (const storageSummary of Array.isArray(storageSummaries)
+            ? storageSummaries
+            : []) {
+            const storageEventId = storageSummary.eventID ?? storageSummary.id;
+            if (!storageEventId) continue;
+            const storageDetailUrl = new URL(
+              `/api/0/projects/${encodeURIComponent(organization)}/${encodeURIComponent(project)}/events/${encodeURIComponent(storageEventId)}/`,
+              baseUrl,
+            );
+            const storageEvent = await sentryRequest(
+              fetchImpl,
+              storageDetailUrl,
+              token,
+            );
+            try {
+              return {
+                ...sourceMapEvidence,
+                storageRecovery: validateStorageRecoverySentryEvent(
+                  storageEvent,
+                  expected,
+                ),
+              };
+            } catch (error) {
+              lastValidationError = error;
+            }
+          }
         } catch (error) {
           lastValidationError = error;
         }

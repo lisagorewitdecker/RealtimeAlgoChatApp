@@ -12,8 +12,22 @@ GREP_BIN="$(command -v grep)"
 MKDIR_BIN="$(command -v mkdir)"
 RM_BIN="$(command -v rm)"
 
-test_parent="$("$MKTEMP_BIN" -d)"
-trap '"$RM_BIN" -rf "$test_parent"' EXIT
+sandbox_parent="$("$MKTEMP_BIN" -d)"
+test_parent="$sandbox_parent/fixtures"
+cleanup_guard="$sandbox_parent/cleanup-must-not-escape-fixtures"
+"$MKDIR_BIN" -p "$test_parent"
+printf 'keep\n' >"$cleanup_guard"
+
+cleanup_test_fixtures() {
+  "$RM_BIN" -rf "$test_parent"
+  if [[ ! -f "$cleanup_guard" ]]; then
+    echo "Android runner health test cleanup escaped its fixture directory" >&2
+    exit 1
+  fi
+  "$RM_BIN" -rf "$sandbox_parent"
+}
+
+trap cleanup_test_fixtures EXIT
 stub_bin="$test_parent/bin"
 "$MKDIR_BIN" -p "$stub_bin"
 

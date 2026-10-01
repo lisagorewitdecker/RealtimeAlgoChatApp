@@ -18,7 +18,9 @@
 // On iOS 26 the layout renders expo-router's NativeTabs (Liquid Glass) instead
 // of the classic bar. "iOS 26 native tab bar" flips the mocked
 // isLiquidGlassAvailable to true and pins the appearance props the layout
-// passes: none by default, and the opaque set with Reduce transparency on.
+// passes: none by default, the opaque set with Reduce transparency on, the
+// denser high-contrast panel plus the palette's item tints with high contrast
+// on, and the opaque high-contrast bar with those tints when both are on.
 import React from "react";
 import { render } from "@testing-library/react-native";
 import { Platform, StyleSheet, type StyleProp, type ViewStyle } from "react-native";
@@ -460,21 +462,27 @@ describe("classic tab bar with Reduce transparency", () => {
 
 // On iOS 26 (expo-glass-effect reports Liquid Glass available) the layout
 // renders expo-router's NativeTabs and UIKit draws the bar. iOS's own Reduce
-// Transparency setting solidifies that glass by itself, but the in-app toggle
-// is a preference the system never sees, so the layout has to pass the opaque
-// appearance explicitly: `backgroundColor` fills the bar with the palette
-// background, `blurEffect="none"` removes the material behind it, and
-// `disableTransparentOnScrollEdge` keeps that background at the scroll edge,
-// where expo-router otherwise clears the bar. With the toggle off none of them
-// may be passed, or the tabs lose their default Liquid Glass look.
+// Transparency setting solidifies that glass by itself, but the in-app toggles
+// are preferences the system never sees, so the layout has to pass the
+// appearance explicitly. A surface is requested with four props together:
+// `backgroundColor` fills the bar, `blurEffect="none"` removes the material
+// behind it, `disableTransparentOnScrollEdge` keeps that background at the
+// scroll edge (where expo-router otherwise clears the bar), and `shadowColor`
+// draws the top border. Reduce transparency asks for the opaque palette
+// background; high contrast alone asks for the palette's denser (still
+// see-through) panel and colors the tab items with the high-contrast palette
+// through `tintColor`, `iconColor` and `labelStyle`. With both toggles off none
+// of these may be passed, or the tabs lose their default Liquid Glass look and
+// system tints.
 describe("iOS 26 native tab bar", () => {
   const originalPlatform = Platform.OS;
-  const appearanceProps = [
+  const surfaceProps = [
     "backgroundColor",
     "blurEffect",
     "disableTransparentOnScrollEdge",
     "shadowColor",
   ] as const;
+  const tintProps = ["tintColor", "iconColor", "labelStyle"] as const;
 
   beforeEach(() => {
     Platform.OS = "ios";
@@ -492,20 +500,64 @@ describe("iOS 26 native tab bar", () => {
     return view.getByTestId("native-tabs").props as Record<string, unknown>;
   }
 
-  function expectLiquidGlass(view: Rendered) {
+  // UIKit's defaults: Liquid Glass behind system blue / gray items.
+  function expectSystemTints(view: Rendered) {
     const props = nativeTabsProps(view);
-    for (const prop of appearanceProps) {
+    for (const prop of tintProps) {
       expect(props[prop]).toBeUndefined();
     }
   }
 
-  function expectOpaqueNativeBar(view: Rendered, palette: Palette) {
+  function expectLiquidGlass(view: Rendered) {
     const props = nativeTabsProps(view);
-    expect(props.backgroundColor).toBe(palette.background);
-    expect(parseColor(palette.background).alpha).toBe(1);
+    for (const prop of surfaceProps) {
+      expect(props[prop]).toBeUndefined();
+    }
+    expectSystemTints(view);
+  }
+
+  // The four surface props always travel together: expo-router's scroll-edge
+  // appearance drops `backgroundColor` and forces `blurEffect` to none unless
+  // `disableTransparentOnScrollEdge` is set, so a partial set would leave the
+  // bar clear whenever content sits at the scroll edge.
+  function expectSurface(view: Rendered, surface: string, palette: Palette) {
+    const props = nativeTabsProps(view);
+    expect(props.backgroundColor).toBe(surface);
     expect(props.blurEffect).toBe("none");
     expect(props.disableTransparentOnScrollEdge).toBe(true);
     expect(props.shadowColor).toBe(palette.border);
+  }
+
+  function expectOpaqueNativeBar(view: Rendered, palette: Palette) {
+    expectSurface(view, palette.background, palette);
+    expect(parseColor(palette.background).alpha).toBe(1);
+  }
+
+  // The same denser panel the classic iOS bar swaps in for its blur: the
+  // palette background at partial opacity, so it is not the opaque bar.
+  function expectHighContrastPanel(view: Rendered) {
+    expectSurface(view, colors.highContrast.tabBarBackground, colors.highContrast);
+    const panel = parseColor(colors.highContrast.tabBarBackground);
+    expect(panel.alpha).toBeGreaterThan(0);
+    expect(panel.alpha).toBeLessThan(1);
+  }
+
+  // The classic bar's tints (`tabBarActiveTintColor` / `tabBarInactiveTintColor`)
+  // mapped onto NativeTabs: `tintColor` is UITabBar's selected tint, while
+  // `iconColor` and `labelStyle` set both item states explicitly so the
+  // unselected items do not stay system gray.
+  function expectHighContrastTints(view: Rendered) {
+    const props = nativeTabsProps(view);
+    const palette = colors.highContrast;
+    expect(props.tintColor).toBe(palette.primary);
+    expect(props.iconColor).toEqual({
+      default: palette.mutedForeground,
+      selected: palette.primary,
+    });
+    expect(props.labelStyle).toEqual({
+      default: { color: palette.mutedForeground },
+      selected: { color: palette.primary },
+    });
   }
 
   it("renders the native tabs for both routes instead of the classic bar", () => {
@@ -517,30 +569,40 @@ describe("iOS 26 native tab bar", () => {
     ).toEqual(["index", "profile"]);
   });
 
-  it("leaves the default Liquid Glass look alone while Reduce transparency is off", () => {
+  it("leaves the default Liquid Glass look and system tints alone while both options are off", () => {
     expectLiquidGlass(render(<TabLayout />));
   });
 
   it("asks for an opaque bar while Reduce transparency is on", () => {
     mockReduceTransparency = true;
+    const view = render(<TabLayout />);
 
-    expectOpaqueNativeBar(render(<TabLayout />), colors.dark);
+    expectOpaqueNativeBar(view, colors.dark);
+    // Reduce transparency changes the surface only; the items keep UIKit's
+    // tints, as they do on the default glass.
+    expectSystemTints(view);
   });
 
-  it("keeps Liquid Glass with high contrast alone", () => {
+  it("swaps the glass for the high-contrast panel and palette tints with high contrast alone", () => {
     // High contrast alone never makes a surface opaque — that is Reduce
-    // transparency's job, and the two settings stay distinct (the classic
-    // bar keeps a see-through panel in the same situation).
+    // transparency's job, and the two settings stay distinct — but the glass
+    // is the busiest surface, so the native bar gets the same denser panel
+    // the classic iOS bar draws, and the palette's tab tints in place of the
+    // system blue and gray every other screen has already left behind.
     mockHighContrast = true;
+    const view = render(<TabLayout />);
 
-    expectLiquidGlass(render(<TabLayout />));
+    expectHighContrastPanel(view);
+    expectHighContrastTints(view);
   });
 
-  it("uses the high-contrast palette for the opaque bar when both options are on", () => {
+  it("uses the opaque high-contrast bar and palette tints when both options are on", () => {
     mockHighContrast = true;
     mockReduceTransparency = true;
+    const view = render(<TabLayout />);
 
-    expectOpaqueNativeBar(render(<TabLayout />), colors.highContrast);
+    expectOpaqueNativeBar(view, colors.highContrast);
+    expectHighContrastTints(view);
   });
 
   it("returns to Liquid Glass when Reduce transparency is turned off again", () => {
@@ -553,6 +615,87 @@ describe("iOS 26 native tab bar", () => {
 
     expectLiquidGlass(view);
     expect(view.queryByTestId("tab-bar")).toBeNull();
+  });
+
+  it("returns to Liquid Glass when high contrast is turned off again", () => {
+    mockHighContrast = true;
+    const view = render(<TabLayout />);
+    expectHighContrastPanel(view);
+    expectHighContrastTints(view);
+
+    mockHighContrast = false;
+    view.rerender(<TabLayout />);
+
+    expectLiquidGlass(view);
+    expect(view.queryByTestId("tab-bar")).toBeNull();
+  });
+
+  it("keeps the opaque bar when high contrast is turned off with Reduce transparency still on", () => {
+    // The two toggles are independent: dropping high contrast returns the
+    // items to the system tints and the surface to the default palette, but
+    // the bar must stay opaque as long as Reduce transparency asks for it.
+    mockHighContrast = true;
+    mockReduceTransparency = true;
+    const view = render(<TabLayout />);
+    expectOpaqueNativeBar(view, colors.highContrast);
+
+    mockHighContrast = false;
+    view.rerender(<TabLayout />);
+
+    expectOpaqueNativeBar(view, colors.dark);
+    expectSystemTints(view);
+  });
+});
+
+// The high-contrast item tints the native bar passes are the classic bar's
+// tints from the same palette, over the same two surfaces the classic bar
+// uses, so the token checks above ("Android tab bar surface tokens" for the
+// opaque background, "tab bar panel tokens" for the panel over whatever
+// scrolls under it) already bound their contrast. This pins that the native
+// bar draws exactly those tokens, so a palette edit cannot leave the native
+// bar on tints the token checks never saw.
+describe("iOS 26 native tab bar tokens", () => {
+  const originalPlatform = Platform.OS;
+
+  beforeEach(() => {
+    Platform.OS = "ios";
+    mockLiquidGlassAvailable = true;
+    mockHighContrast = true;
+  });
+
+  afterEach(() => {
+    Platform.OS = originalPlatform;
+    mockLiquidGlassAvailable = false;
+    mockHighContrast = false;
+    mockReduceTransparency = false;
+  });
+
+  it.each([
+    ["the high-contrast panel", false],
+    ["the opaque high-contrast bar", true],
+  ])("keeps the item tints readable on %s", (_surface, reduceTransparency) => {
+    mockReduceTransparency = reduceTransparency;
+    const props = render(<TabLayout />).getByTestId("native-tabs").props as {
+      backgroundColor: string;
+      iconColor: { default: string; selected: string };
+      labelStyle: { default: { color: string }; selected: { color: string } };
+    };
+
+    const surface = parseColor(props.backgroundColor);
+    const tints = [
+      props.iconColor.default,
+      props.iconColor.selected,
+      props.labelStyle.default.color,
+      props.labelStyle.selected.color,
+    ].map((tint) => parseColor(tint).rgb);
+    // White is the brightest thing that can scroll under a see-through bar;
+    // an opaque bar composites to itself.
+    const composited = composite(surface, [255, 255, 255]);
+
+    for (const tint of tints) {
+      // WCAG AA for normal text; the tab labels are small text.
+      expect(contrastRatio(tint, composited)).toBeGreaterThanOrEqual(4.5);
+    }
   });
 });
 

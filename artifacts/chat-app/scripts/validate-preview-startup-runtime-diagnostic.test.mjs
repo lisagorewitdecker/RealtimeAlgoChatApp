@@ -33,8 +33,11 @@ const refreshPath = join(
 );
 const packageRequire = createRequire(join(packageRoot, "package.json"));
 
-function runNodeScript(args, env = {}) {
+function runNodeScript(args, env = {}, unsetEnvironmentVariables = []) {
   const childEnvironment = { ...process.env, ...env };
+  for (const variableName of unsetEnvironmentVariables) {
+    delete childEnvironment[variableName];
+  }
   if (!Object.hasOwn(env, "GITHUB_STEP_SUMMARY")) {
     delete childEnvironment.GITHUB_STEP_SUMMARY;
   }
@@ -49,6 +52,49 @@ function runNodeScript(args, env = {}) {
     status: result.status,
     output: `${result.stdout}${result.stderr}`,
   };
+}
+
+function runNodeScriptWithPreload(preloadPath, args, env = {}) {
+  return runNodeScript(["--import", preloadPath, ...args], env);
+}
+
+function writeWindowsPlatformPreload(preloadPath, { failDestination } = {}) {
+  const failureHook = failDestination
+    ? `
+const originalRenameSync = fs.renameSync;
+let failReplacement = true;
+fs.renameSync = (source, destination) => {
+  if (failReplacement && destination === ${JSON.stringify(failDestination)}) {
+    failReplacement = false;
+    throw new Error("simulated Windows replacement failure");
+  }
+  return originalRenameSync(source, destination);
+};
+`
+    : "";
+  writeFileSync(
+    preloadPath,
+    `import fs from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
+
+Object.defineProperty(process, "platform", { value: "win32" });
+${failureHook}
+syncBuiltinESMExports();
+`,
+    "utf8",
+  );
+}
+
+function withoutGeneratedEvidence(source) {
+  return source
+    .replace(
+      /\/\/ BEGIN GENERATED PREVIEW LOADER EVIDENCE[\s\S]*?\/\/ END GENERATED PREVIEW LOADER EVIDENCE\n?/,
+      "",
+    )
+    .replace(
+      /\/\/ BEGIN GENERATED PREVIEW LOADER OUTPUT[\s\S]*?\/\/ END GENERATED PREVIEW LOADER OUTPUT\n?/,
+      "",
+    );
 }
 
 function findDiagnostic(output) {
@@ -696,6 +742,7 @@ test("refresh command leaves the existing fixture untouched when a platform capt
     join(tmpdir(), "chat-preview-loader-refresh-incomplete-"),
   );
   const captureDirectory = join(temporaryDirectory, "captures");
+  const preloadPath = join(temporaryDirectory, "windows-preload.mjs");
   const outputPath = join(
     temporaryDirectory,
     "preview-startup-runtime-library-fixture.mjs",
@@ -714,8 +761,9 @@ test("refresh command leaves the existing fixture untouched when a platform capt
       );
     }
     writeFileSync(outputPath, existingFixture, "utf8");
+    writeWindowsPlatformPreload(preloadPath);
 
-    const result = runNodeScript([
+    const result = runNodeScriptWithPreload(preloadPath, [
       refreshPath,
       "--capture-dir",
       captureDirectory,
@@ -726,6 +774,103 @@ test("refresh command leaves the existing fixture untouched when a platform capt
     assert.equal(result.status, 1);
     assert.match(result.output, /Could not read windows capture/);
     assert.equal(readFileSync(outputPath, "utf8"), existingFixture);
+    assert.doesNotMatch(
+      result.output,
+      /TOP_SECRET|password=|Authorization:/i,
+    );
+  } finally {
+    rmSync(temporaryDirectory, { recursive: true, force: true });
+  }
+});
+
+test("Windows refresh restores the existing fixture when replacement fails", () => {
+  const temporaryDirectory = mkdtempSync(
+    join(tmpdir(), "chat-preview-loader-refresh-windows-failure-"),
+  );
+  const captureDirectory = join(temporaryDirectory, "captures");
+  const outputPath = join(
+    temporaryDirectory,
+    "preview-startup-runtime-library-fixture.mjs",
+  );
+  const preloadPath = join(temporaryDirectory, "windows-preload.mjs");
+  const existingFixture = readFileSync(fixturePath, "utf8");
+
+  try {
+    writeIndependentCaptureArtifacts(captureDirectory, "windows-refresh-");
+    writeFileSync(outputPath, existingFixture, "utf8");
+    writeWindowsPlatformPreload(preloadPath, { failDestination: outputPath });
+
+    const result = runNodeScriptWithPreload(
+      preloadPath,
+      [
+        refreshPath,
+        "--capture-dir",
+        captureDirectory,
+        "--output",
+        outputPath,
+      ],
+    );
+
+    assert.equal(result.status, 1);
+    assert.match(result.output, /simulated Windows replacement failure/);
+    assert.equal(readFileSync(outputPath, "utf8"), existingFixture);
+    assert.doesNotMatch(
+      result.output,
+      /TOP_SECRET|password=|Authorization:/i,
+    );
+  } finally {
+    rmSync(temporaryDirectory, { recursive: true, force: true });
+  }
+});
+
+test("Windows refresh replaces generated sections without changing the handoff server", () => {
+  const temporaryDirectory = mkdtempSync(
+    join(tmpdir(), "chat-preview-loader-refresh-windows-success-"),
+  );
+  const captureDirectory = join(temporaryDirectory, "captures");
+  const outputPath = join(
+    temporaryDirectory,
+    "preview-startup-runtime-library-fixture.mjs",
+  );
+  const preloadPath = join(temporaryDirectory, "windows-preload.mjs");
+  const existingFixture = readFileSync(fixturePath, "utf8");
+
+  try {
+    writeIndependentCaptureArtifacts(captureDirectory, "windows-refresh-");
+    writeFileSync(outputPath, existingFixture, "utf8");
+    writeWindowsPlatformPreload(preloadPath);
+
+    const result = runNodeScriptWithPreload(
+      preloadPath,
+      [
+        refreshPath,
+        "--capture-dir",
+        captureDirectory,
+        "--output",
+        outputPath,
+      ],
+    );
+
+    assert.equal(result.status, 0, result.output);
+    const refreshedSource = readFileSync(outputPath, "utf8");
+    assert.equal(
+      withoutGeneratedEvidence(refreshedSource),
+      withoutGeneratedEvidence(existingFixture),
+      "the non-generated handoff server portion changed",
+    );
+    for (const sample of CAPTURED_LOADER_SAMPLES) {
+      assert.match(
+        refreshedSource,
+        new RegExp(
+          `${escapeRegExp(sample.fixture)}[\\s\\S]+windows-refresh-${sample.platform}`,
+        ),
+        sample.name,
+      );
+    }
+    assert.doesNotMatch(
+      result.output,
+      /TOP_SECRET|password=|Authorization:/i,
+    );
   } finally {
     rmSync(temporaryDirectory, { recursive: true, force: true });
   }
@@ -830,11 +975,184 @@ test(
           `${scenario.displayName} mismatch test changed installed dependencies`,
         );
       }
+
+      const combinedCapturedVersions = {
+        expoCli: "0.0.0",
+        reactNative: "0.0.1",
+      };
+      const combinedInstalledVersions = {
+        expoCli: installedPackageVersion("@expo/cli"),
+        reactNative: installedPackageVersion("react-native"),
+      };
+      assert.notEqual(
+        combinedInstalledVersions.expoCli,
+        combinedCapturedVersions.expoCli,
+        "combined Expo CLI fixture version must be stale",
+      );
+      assert.notEqual(
+        combinedInstalledVersions.reactNative,
+        combinedCapturedVersions.reactNative,
+        "combined React Native fixture version must be stale",
+      );
+      const combinedMarkerPath = join(
+        temporaryDirectory,
+        "combined-tooling.marker",
+      );
+      const combinedEnvironment = {
+        ...process.env,
+        PREVIEW_STARTUP_TEST_CAPTURED_EXPO_CLI_VERSION:
+          combinedCapturedVersions.expoCli,
+        PREVIEW_STARTUP_TEST_CAPTURED_REACT_NATIVE_VERSION:
+          combinedCapturedVersions.reactNative,
+        PREVIEW_STARTUP_TOOLING_MISMATCH: "Expo CLI and React Native",
+        PREVIEW_STARTUP_LIVE_START_MARKER: combinedMarkerPath,
+        PREVIEW_STARTUP_TEST_FIXTURE: "handoff-server",
+      };
+      delete combinedEnvironment.NODE_TEST_CONTEXT;
+      const combinedResult = spawnSync(
+        "pnpm",
+        ["run", "validate:preview-startup"],
+        {
+          cwd: packageRoot,
+          encoding: "utf8",
+          env: combinedEnvironment,
+          timeout: 60_000,
+        },
+      );
+      const combinedOutput = `${combinedResult.stdout ?? ""}${combinedResult.stderr ?? ""}`;
+
+      assert.notEqual(
+        combinedResult.error?.code,
+        "ETIMEDOUT",
+        "combined mismatch validation did not terminate",
+      );
+      assert.notEqual(combinedResult.status, 0, combinedOutput);
+      assert.match(
+        combinedOutput,
+        new RegExp(
+          `Expo CLI changed: loader samples were captured with ` +
+            escapeRegExp(combinedCapturedVersions.expoCli) +
+            `, but the installed version is ` +
+            escapeRegExp(combinedInstalledVersions.expoCli),
+        ),
+      );
+      assert.match(
+        combinedOutput,
+        new RegExp(
+          `React Native changed: loader samples were captured with ` +
+            escapeRegExp(combinedCapturedVersions.reactNative) +
+            `, but the installed version is ` +
+            escapeRegExp(combinedInstalledVersions.reactNative),
+        ),
+      );
+      assert.match(combinedOutput, /Affected captured loader samples:/);
+      for (const sampleName of capturedLoaderSampleNames.split(", ")) {
+        assert.match(combinedOutput, new RegExp(escapeRegExp(sampleName)));
+      }
+      assert.match(
+        combinedOutput,
+        /preview-startup-runtime-library-fixture\.mjs/,
+      );
+      assert.match(combinedOutput, /validate-preview-startup\.mjs/);
+      assert.equal(
+        existsSync(combinedMarkerPath),
+        false,
+        "combined mismatch validation continued into live preview startup",
+      );
+      assert.equal(
+        installedPackageVersion("@expo/cli"),
+        combinedInstalledVersions.expoCli,
+        "combined mismatch test changed the installed Expo CLI dependency",
+      );
+      assert.equal(
+        installedPackageVersion("react-native"),
+        combinedInstalledVersions.reactNative,
+        "combined mismatch test changed the installed React Native dependency",
+      );
     } finally {
       rmSync(temporaryDirectory, { recursive: true, force: true });
     }
   },
 );
+
+test("stale tooling summaries retain versions, samples, and maintenance files", () => {
+  const temporaryDirectory = mkdtempSync(
+    join(tmpdir(), "chat-preview-tooling-summary-"),
+  );
+
+  try {
+    const scenarios = [
+      {
+        displayName: "Expo CLI",
+        environmentName: "PREVIEW_STARTUP_TEST_CAPTURED_EXPO_CLI_VERSION",
+        installedVersion: installedPackageVersion("@expo/cli"),
+      },
+      {
+        displayName: "React Native",
+        environmentName: "PREVIEW_STARTUP_TEST_CAPTURED_REACT_NATIVE_VERSION",
+        installedVersion: installedPackageVersion("react-native"),
+      },
+    ];
+
+    for (const scenario of scenarios) {
+      const capturedVersion = "0.0.0";
+      const summaryPath = join(
+        temporaryDirectory,
+        `${scenario.displayName.toLowerCase().replaceAll(" ", "-")}.md`,
+      );
+      const markerPath = join(
+        temporaryDirectory,
+        `${scenario.displayName.toLowerCase().replaceAll(" ", "-")}.marker`,
+      );
+      const result = runNodeScript([validatorPath], {
+        GITHUB_STEP_SUMMARY: summaryPath,
+        [scenario.environmentName]: capturedVersion,
+        PREVIEW_STARTUP_LIVE_START_MARKER: markerPath,
+        PREVIEW_STARTUP_TEST_FIXTURE: "handoff-server",
+        PREVIEW_STARTUP_TEST_PRIVATE_VALUE: "PRIVATE_ENV_VALUE",
+      });
+
+      assert.equal(result.status, 1, `${scenario.displayName}: ${result.output}`);
+      const summary = readFileSync(summaryPath, "utf8");
+      assert.match(summary, /^### Expo preview startup/m);
+      assert.match(summary, /\*\*Status:\*\* FAIL/);
+      assert.match(summary, /\*\*Failure:\*\* Stale preview tooling/);
+      assert.match(
+        summary,
+        new RegExp(
+          `captured version \\\`${escapeRegExp(capturedVersion)}\\\`; installed version ` +
+            `\\\`${escapeRegExp(scenario.installedVersion)}\\\``,
+        ),
+      );
+      for (const { name } of CAPTURED_LOADER_SAMPLES) {
+        assert.ok(
+          summary.includes(name),
+          `${scenario.displayName} summary omitted ${name}`,
+        );
+      }
+      assert.match(
+        summary,
+        /preview-startup-runtime-library-fixture\.mjs/,
+      );
+      assert.match(summary, /validate-preview-startup\.mjs/);
+      assert.doesNotMatch(
+        summary,
+        /PRIVATE_ENV_VALUE|https?:\/\/|authorization|password|secret|token|credential/i,
+      );
+      assert.equal(
+        existsSync(markerPath),
+        false,
+        `${scenario.displayName} summary validation started live preview`,
+      );
+      assert.ok(
+        summary.length < 2_000,
+        `${scenario.displayName} summary exceeded its bounded size`,
+      );
+    }
+  } finally {
+    rmSync(temporaryDirectory, { recursive: true, force: true });
+  }
+});
 
 test("unsupported loader wording fails with a maintenance message", () => {
   const temporaryDirectory = mkdtempSync(
@@ -849,6 +1167,44 @@ test("unsupported loader wording fails with a maintenance message", () => {
     assert.equal(result.status, 1);
     assert.match(result.output, /Expo preview loader wording changed/);
     assert.match(result.output, /refresh the versioned loader samples/);
+  } finally {
+    rmSync(temporaryDirectory, { recursive: true, force: true });
+  }
+});
+
+test("unexpected startup failures keep the generic summary bounded", () => {
+  const temporaryDirectory = mkdtempSync(
+    join(tmpdir(), "chat-preview-unexpected-startup-"),
+  );
+  const summaryPath = join(temporaryDirectory, "summary.md");
+  const capturedLogPath = join(temporaryDirectory, "expo-startup.log");
+
+  try {
+    const live = runNodeScript([validatorPath], {
+      GITHUB_STEP_SUMMARY: summaryPath,
+      PREVIEW_STARTUP_TEST_FIXTURE: "unexpected-startup-failure",
+    });
+
+    assert.equal(live.status, 1, live.output);
+    writeFileSync(capturedLogPath, fixtureOutput["unexpected-startup-failure"], "utf8");
+    const capturedSummaryPath = join(temporaryDirectory, "captured-summary.md");
+    const captured = runNodeScript(
+      [validatorPath, "--log-file", capturedLogPath],
+      { GITHUB_STEP_SUMMARY: capturedSummaryPath },
+    );
+
+    assert.equal(captured.status, 1, captured.output);
+    const expectedSummary =
+      "### Expo preview startup\n\n" +
+      "**Status:** FAIL\n\n" +
+      "**Diagnosis:** Preview startup could not be confirmed. See the workflow log for details.\n\n";
+    assert.equal(readFileSync(summaryPath, "utf8"), expectedSummary);
+    assert.equal(readFileSync(capturedSummaryPath, "utf8"), expectedSummary);
+    assert.doesNotMatch(
+      `${readFileSync(summaryPath, "utf8")}${readFileSync(capturedSummaryPath, "utf8")}`,
+      /https?:\/\/|authorization|password|passwd|secret|token|credential|unexpected-private-token/i,
+    );
+    assert.ok(expectedSummary.length <= 700, "summary exceeded its bounded size");
   } finally {
     rmSync(temporaryDirectory, { recursive: true, force: true });
   }
@@ -1173,14 +1529,24 @@ test("CI summaries preserve direct preview-setting rejection reasons without val
     {
       name: "non-HTTPS selected setting",
       value: "http://preview-setting-secret.example.test/expo",
-      expectedReason: /Public Expo preview manifest URL must use HTTPS/,
+      expectedReason:
+        /Public Expo preview manifest URL configured by PREVIEW_PUBLIC_URL must use HTTPS/,
     },
     {
       name: "credential-bearing selected setting",
       value:
         "https://preview-user:preview-password@credential-preview.example.test/expo",
       expectedReason:
-        /Public Expo preview manifest URL must not contain credentials/,
+        /Public Expo preview manifest URL configured by PREVIEW_PUBLIC_URL must not contain credentials/,
+    },
+    {
+      name: "both preview settings missing",
+      expectedReason:
+        /Public Expo preview manifest URL is not configured\. Set REPLIT_EXPO_DEV_DOMAIN or PREVIEW_PUBLIC_URL before running the live preview handoff preflight\./,
+      unsetEnvironmentVariables: [
+        "PREVIEW_PUBLIC_URL",
+        "REPLIT_EXPO_DEV_DOMAIN",
+      ],
     },
   ];
 
@@ -1192,8 +1558,82 @@ test("CI summaries preserve direct preview-setting rejection reasons without val
       );
       const result = runNodeScript([validatorPath], {
         GITHUB_STEP_SUMMARY: summaryPath,
-        PREVIEW_PUBLIC_URL: previewValue.value,
-        REPLIT_EXPO_DEV_DOMAIN: "fallback-preview.example.test",
+        ...(previewValue.value
+          ? {
+              PREVIEW_PUBLIC_URL: previewValue.value,
+              REPLIT_EXPO_DEV_DOMAIN: "fallback-preview.example.test",
+            }
+          : {}),
+        PREVIEW_PUBLIC_TIMEOUT_MS: "25",
+        PREVIEW_STARTUP_TIMEOUT_MS: "2000",
+        PREVIEW_STARTUP_TEST_FIXTURE: "handoff-server",
+      }, previewValue.unsetEnvironmentVariables);
+
+      assert.equal(result.status, 1, previewValue.name);
+      const summary = readFileSync(summaryPath, "utf8");
+      assert.match(summary, previewValue.expectedReason, previewValue.name);
+      if (previewValue.name === "both preview settings missing") {
+        assert.equal(
+          summary,
+          "### Expo preview startup\n\n" +
+            "**Status:** FAIL\n\n" +
+            "**Diagnosis:** Public Expo preview manifest URL is not configured. " +
+            "Set REPLIT_EXPO_DEV_DOMAIN or PREVIEW_PUBLIC_URL before running the " +
+            "live preview handoff preflight.\n\n",
+        );
+      }
+      assert.ok(
+        !summary.includes(previewValue.value),
+        `${previewValue.name} leaked its configured value`,
+      );
+      if (previewValue.name === "malformed selected setting") {
+        assert.doesNotMatch(
+          summary,
+          /https?:\/\/|authorization|proxy-authorization|password|passwd|secret|token/i,
+          `${previewValue.name} leaked credential-like text`,
+        );
+      }
+    }
+  } finally {
+    rmSync(temporaryDirectory, { recursive: true, force: true });
+  }
+});
+
+test("CI summaries preserve fallback preview-setting rejection reasons without values", () => {
+  const temporaryDirectory = mkdtempSync(
+    join(tmpdir(), "chat-preview-fallback-setting-rejection-summary-"),
+  );
+  const cases = [
+    {
+      name: "malformed fallback setting",
+      value: "https://[fallback-preview-setting-secret",
+      expectedReason:
+        /Public Expo preview manifest URL configuration from REPLIT_EXPO_DEV_DOMAIN is invalid/,
+    },
+    {
+      name: "non-HTTPS fallback setting",
+      value: "http://fallback-preview-setting-secret.example.test/expo",
+      expectedReason:
+        /Public Expo preview manifest URL configured by REPLIT_EXPO_DEV_DOMAIN must use HTTPS/,
+    },
+    {
+      name: "credential-bearing fallback setting",
+      value:
+        "https://fallback-user:fallback-password@credential-fallback.example.test/expo",
+      expectedReason:
+        /Public Expo preview manifest URL configured by REPLIT_EXPO_DEV_DOMAIN must not contain credentials/,
+    },
+  ];
+
+  try {
+    for (const [index, previewValue] of cases.entries()) {
+      const summaryPath = join(
+        temporaryDirectory,
+        `summary-${index}.md`,
+      );
+      const result = runNodeScript([validatorPath], {
+        GITHUB_STEP_SUMMARY: summaryPath,
+        REPLIT_EXPO_DEV_DOMAIN: previewValue.value,
         PREVIEW_PUBLIC_TIMEOUT_MS: "25",
         PREVIEW_STARTUP_TIMEOUT_MS: "2000",
         PREVIEW_STARTUP_TEST_FIXTURE: "handoff-server",
@@ -1206,7 +1646,7 @@ test("CI summaries preserve direct preview-setting rejection reasons without val
         !summary.includes(previewValue.value),
         `${previewValue.name} leaked its configured value`,
       );
-      if (previewValue.name === "malformed selected setting") {
+      if (previewValue.name === "malformed fallback setting") {
         assert.doesNotMatch(
           summary,
           /https?:\/\/|authorization|proxy-authorization|password|passwd|secret|token/i,

@@ -74,17 +74,6 @@ export const CAPTURED_LOADER_SAMPLES = Object.freeze([
 ]);
 // END GENERATED PREVIEW LOADER EVIDENCE
 
-const longLinuxLibraryPath =
-  `/opt/expo/${"react-native-devtools-cache/".repeat(16)}` +
-  "libgtk-3.so.0";
-const longDyldLibraryPath =
-  `/opt/homebrew/Library/Application Support/Expo/` +
-  `${"react native devtools cache/".repeat(12)}` +
-  "libgtk-3.dylib";
-const longWindowsLibraryPath =
-  `C:\\Program Files\\Expo\\${"react native devtools cache\\".repeat(12)}` +
-  "libgtk-3-0.dll";
-
 // BEGIN GENERATED PREVIEW LOADER OUTPUT
 export const fixtureOutput = Object.freeze({
   "missing-runtime-library": "Error: /opt/expo/react-native-devtools: error while loading shared libraries: libgtk-3.so.0: cannot open shared object file: No such file or directory\n",
@@ -102,11 +91,15 @@ export const fixtureOutput = Object.freeze({
   "missing-runtime-library-malformed-control": "Error: /opt/expo/react-native-devtools: error while loading shared libraries: /opt/expo/libgtk-3.so.0\u0000 trailing unrelated loader text: cannot open shared object file: No such file or directory\n",
   "missing-runtime-library-malformed-trailing": "Error: The code execution cannot proceed because C:\\Program Files\\Expo\\React Native DevTools\\libgtk-3-0.dll was not found. trailing unrelated loader text\n",
   "missing-runtime-library-malformed-followed-by-valid": "dyld[12345]: Library not loaded: '/opt/homebrew/Library/Application Support/Expo/libgtk-3.dylib\" trailing unrelated loader text\ndyld[12345]: Library not loaded: /opt/homebrew/lib/libgtk-3.dylib\n",
-  "unsupported-loader-wording": "React Native DevTools launcher exited with status 127\n"
+  "unsupported-loader-wording": "React Native DevTools launcher exited with status 127\n",
+  "unexpected-startup-failure": "Unexpected preview launcher failure: https://private.example.test/start?token=unexpected-private-token\nAuthorization: Bearer unexpected-private-token\n"
 });
 // END GENERATED PREVIEW LOADER OUTPUT
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
+if (
+  process.argv[1] &&
+  fileURLToPath(import.meta.url) === resolve(process.argv[1])
+) {
   const fixtureName =
     process.env.PREVIEW_STARTUP_TEST_FIXTURE ?? "missing-runtime-library";
   if (
@@ -115,7 +108,14 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1
     fixtureName === "handoff-server-stall-bundle"
   ) {
     if (process.env.PREVIEW_STARTUP_LIVE_START_MARKER) {
-      appendFileSync(process.env.PREVIEW_STARTUP_LIVE_START_MARKER, "started\n");
+      // The launcher pass-through flag is recorded so the preflight tests can
+      // prove the throwaway dev server never counts as a managed start.
+      appendFileSync(
+        process.env.PREVIEW_STARTUP_LIVE_START_MARKER,
+        `started PREVIEW_LAUNCH_PROBE_PASSTHROUGH=${
+          process.env.PREVIEW_LAUNCH_PROBE_PASSTHROUGH ?? ""
+        }\n`,
+      );
     }
     const stallManifest = fixtureName === "handoff-server-stall-manifest";
     const stallBundle = fixtureName === "handoff-server-stall-bundle";

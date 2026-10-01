@@ -63,6 +63,24 @@ expo_go_asset_requests=0
 request_log_lines=0
 ```
 
+## Availability recheck — 2026-09-21 UTC
+
+**Result: BLOCKED — no phone or simulator became available in this workspace.**
+
+The one-time recheck found no `adb`, `xcrun`, `maestro`, or `java`; no
+`/dev/bus/usb`; an empty `artifacts/chat-app/.expo/devices.json`; and no
+`NATIVE_SMOKE_*` environment variables. The current redacted request evidence
+file is empty. The current `.expo/preview-dev-server-start.json` contains only
+the managed server start record and does not establish a device session.
+
+Because no stock Expo Go session connected, this recheck has no actual device
+model, OS/version, Expo Go version, landing-screen result, or filtered redacted
+native request marker to record. No values are inferred from the public
+manifest, local Metro handoff, or server-start timestamp.
+
+The public manifest and local handoff rows above remain **PASS**. The physical
+Expo Go launch and server-side native request evidence rows remain **BLOCKED**.
+
 ## Follow-up needed for a complete device pass
 
 Repeat this record from an available iOS or Android phone/simulator using stock

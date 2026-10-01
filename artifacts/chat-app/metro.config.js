@@ -31,9 +31,15 @@ if (requestLogEnabled) {
     fs.writeFileSync(evidencePath, "", "utf8");
     let requestEvidenceFileAvailable = true;
     appendRequestEvidence = createEvidenceAppender(
-      (contents) => {
+      async (contents) => {
         if (!requestEvidenceFileAvailable) return false;
-        return fs.promises.writeFile(evidencePath, contents, "utf8");
+        // External readers poll this file while writes are queued behind it.
+        // Write a sibling temp file and rename it into place so a reader can
+        // never observe the truncate-then-rewrite window as an empty or
+        // partial evidence file.
+        const temporaryPath = `${evidencePath}.tmp`;
+        await fs.promises.writeFile(temporaryPath, contents, "utf8");
+        await fs.promises.rename(temporaryPath, evidencePath);
       },
       undefined,
       (error) => {

@@ -18,7 +18,10 @@ function assertFileSize(size, maxBytes) {
 }
 
 
-export function readBoundedTextFileSync(
+// Returns the file's bytes within the same bound. A caller that must judge the
+// source encoding itself needs the raw bytes: decoding to text first replaces
+// malformed sequences and hides them.
+export function readBoundedFileBytesSync(
   filePath,
   { maxBytes = MAX_JSON_EVIDENCE_BYTES } = {},
 ) {
@@ -30,10 +33,17 @@ export function readBoundedTextFileSync(
     if (bytesRead > maxBytes) {
       throw new JsonEvidenceLimitError("size");
     }
-    return buffer.subarray(0, bytesRead).toString("utf8");
+    return Buffer.from(buffer.subarray(0, bytesRead));
   } finally {
     closeSync(descriptor);
   }
+}
+
+export function readBoundedTextFileSync(
+  filePath,
+  { maxBytes = MAX_JSON_EVIDENCE_BYTES } = {},
+) {
+  return readBoundedFileBytesSync(filePath, { maxBytes }).toString("utf8");
 }
 
 export async function readBoundedTextFile(

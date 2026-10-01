@@ -66,6 +66,31 @@ boundary_status() {
   awk -F'|' '{ value = $3; gsub(/\*/,"",value); gsub(/^[[:space:]]+|[[:space:]]+$/,"",value); print tolower(value) }' <<<"$row"
 }
 
+validate_unique_handoff_boundaries() {
+  local boundary count duplicate_found=0
+  for boundary in \
+    "Public manifest reachability" \
+    "Local handoff probe (manifest and bundle)" \
+    "Expo Go launch on physical Android" \
+    "Server-side native request evidence"; do
+    count="$(
+      awk -F'|' -v expected="$boundary" '
+        {
+          label = $2
+          gsub(/^[[:space:]]+|[[:space:]]+$/, "", label)
+          if (label == expected) count++
+        }
+        END { print count + 0 }
+      ' "$RECORD_PATH"
+    )"
+    if ((count > 1)); then
+      failure "Android preview evidence records must contain only one '${boundary}' boundary row."
+      duplicate_found=1
+    fi
+  done
+  return "$duplicate_found"
+}
+
 require_handoff_boundary() {
   local boundary="$1"
   if [[ -z "$(boundary_row "$boundary")" ]]; then
@@ -520,23 +545,25 @@ else
   if [[ -z "$PREFLIGHT_PATH" ]]; then
     PREFLIGHT_PATH="$(dirname "$RECORD_PATH")/android-preview-preflight.json"
   fi
-  validate_preflight_json "$PREFLIGHT_PATH"
-  validate_handoff_boundaries
-  result="$(sed -nE 's/^\*\*Result:[[:space:]]*(PASS|BLOCKED|FAIL).*/\1/p' "$RECORD_PATH" | head -n 1)"
-  case "$result" in
-    PASS)
-      validate_pass_record
-      ;;
-    BLOCKED)
-      validate_blocked_record
-      ;;
-    "")
-      failure "Evidence record must declare **Result: PASS** or **Result: BLOCKED**."
-      ;;
-    *)
-      failure "Evidence record has an unsupported result; use PASS or BLOCKED."
-      ;;
-  esac
+  if validate_unique_handoff_boundaries; then
+    validate_preflight_json "$PREFLIGHT_PATH"
+    validate_handoff_boundaries
+    result="$(sed -nE 's/^\*\*Result:[[:space:]]*(PASS|BLOCKED|FAIL).*/\1/p' "$RECORD_PATH" | head -n 1)"
+    case "$result" in
+      PASS)
+        validate_pass_record
+        ;;
+      BLOCKED)
+        validate_blocked_record
+        ;;
+      "")
+        failure "Evidence record must declare **Result: PASS** or **Result: BLOCKED**."
+        ;;
+      *)
+        failure "Evidence record has an unsupported result; use PASS or BLOCKED."
+        ;;
+    esac
+  fi
 fi
 
 if [[ -n "$SCREENSHOT_INSPECTION_PATH" ]]; then
