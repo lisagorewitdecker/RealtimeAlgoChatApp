@@ -102,16 +102,20 @@ function runWorkflowVerificationStep() {
   );
   writeFileSync(scriptPath, verificationStep.run);
 
+  const environment = {
+    ...process.env,
+    GITHUB_STEP_SUMMARY: githubStepSummaryPath,
+    REVIEWED_REF: "preview-startup-summary-regression-test-ref",
+  };
+  delete environment.PREVIEW_PUBLIC_URL;
+  delete environment.REPLIT_EXPO_DEV_DOMAIN;
+
   const result = spawnSync(
     "bash",
     ["-euo", "pipefail", "-c", ". \"$1\"", "bash", scriptPath],
     {
       cwd: workspaceRoot,
-      env: {
-        ...process.env,
-        GITHUB_STEP_SUMMARY: githubStepSummaryPath,
-        REVIEWED_REF: "preview-startup-summary-regression-test-ref",
-      },
+      env: environment,
       encoding: "utf8",
     },
   );
