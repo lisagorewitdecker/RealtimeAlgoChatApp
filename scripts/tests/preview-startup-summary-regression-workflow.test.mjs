@@ -111,7 +111,6 @@ function runWorkflowVerificationStep() {
         ...process.env,
         GITHUB_STEP_SUMMARY: githubStepSummaryPath,
         REVIEWED_REF: "preview-startup-summary-regression-test-ref",
-        REPLIT_EXPO_DEV_DOMAIN: "fallback-preview.example.test",
       },
       encoding: "utf8",
     },

@@ -274,6 +274,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
           if GITHUB_STEP_SUMMARY="$unexpected_summary_path" \
+            REPLIT_EXPO_DEV_DOMAIN=fallback-preview.example.test \
             PREVIEW_STARTUP_TEST_FIXTURE=unexpected-startup-failure \
             node artifacts/chat-app/scripts/validate-preview-startup.mjs > /tmp/preview-startup-unexpected-failure.log 2>&1; then
             echo "The unexpected preview startup scenario unexpectedly passed." >&2
