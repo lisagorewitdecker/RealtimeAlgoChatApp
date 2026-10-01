@@ -2603,11 +2603,26 @@ test("native runner preparation passes the pinned Maestro installer digest and l
     "native-ios must pass the pinned Maestro installer digest into runner preparation",
   );
 
-  for (const jobId of ["android-prerequisite-preflight", "native-android"]) {
-    const step = workflow.jobs[jobId].steps.find(
-      (candidate) => candidate.name === "Prepare GitHub-hosted Android runner",
-    );
-    assert.ok(step, `${jobId} must prepare the Android runner before native checks`);
+  const androidPreflightPrepareStep = workflow.jobs[
+    "android-prerequisite-preflight"
+  ].steps.find(
+    (candidate) => candidate.name === "Prepare self-hosted Android runner",
+  );
+  assert.ok(
+    androidPreflightPrepareStep,
+    "android-prerequisite-preflight must describe its self-hosted runner accurately",
+  );
+  const androidPrepareStep = workflow.jobs["native-android"].steps.find(
+    (candidate) => candidate.name === "Prepare GitHub-hosted Android runner",
+  );
+  assert.ok(
+    androidPrepareStep,
+    "native-android must describe its GitHub-hosted runner accurately",
+  );
+  for (const [jobId, step] of [
+    ["android-prerequisite-preflight", androidPreflightPrepareStep],
+    ["native-android", androidPrepareStep],
+  ]) {
     assert.equal(
       step.env.MAESTRO_INSTALLER_SHA256,
       "${{ env.MAESTRO_INSTALLER_SHA256 }}",

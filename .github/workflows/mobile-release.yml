@@ -2363,7 +2363,7 @@ jobs:
         with:
           node-version: ${{ env.RELEASE_NODE_VERSION }}
 
-      - name: Prepare GitHub-hosted Android runner
+      - name: Prepare self-hosted Android runner
         env:
           EAS_TOKEN: ${{ secrets.EAS_TOKEN }}
           MAESTRO_INSTALLER_SHA256: ${{ env.MAESTRO_INSTALLER_SHA256 }}
