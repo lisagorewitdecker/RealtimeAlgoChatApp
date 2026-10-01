@@ -2167,6 +2167,42 @@ globalThis.fetch = async (url, options = {}) => {
 );
 
 test(
+  "live Metro handoff ignores the non-fatal React Native DevTools install warning",
+  { timeout: 5_000 },
+  () => {
+    const directory = mkdtempSync(join(tmpdir(), "preview-devtools-warning-"));
+    const timingPath = join(directory, "preview-startup-timing.json");
+
+    try {
+      const result = spawnSync(process.execPath, [validatorPath], {
+        env: {
+          ...process.env,
+          REPLIT_EXPO_SESSION_SECRET: "",
+          PREVIEW_STARTUP_REAL_LAUNCHER: "1",
+          PREVIEW_STARTUP_REAL_HANDOFF: "1",
+          PREVIEW_STARTUP_SKIP_PUBLIC: "1",
+          PREVIEW_STARTUP_TIMEOUT_MS: "1000",
+          PREVIEW_HANDOFF_TIMEOUT_MS: "1000",
+          PREVIEW_STARTUP_TEST_FIXTURE: "handoff-server",
+          PREVIEW_STARTUP_TEST_DEVTOOLS_INSTALL_WARNING: "1",
+          PREVIEW_TIMING_OUTPUT: timingPath,
+        },
+        encoding: "utf8",
+        timeout: 4_000,
+      });
+
+      assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+      const timing = JSON.parse(readFileSync(timingPath, "utf8"));
+      assert.equal(timing.phases.startup.status, "PASS");
+      assert.equal(timing.phases.localHandoff.status, "PASS");
+      assert.doesNotMatch(result.stderr, /Expo preview startup error:/);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
   "live Metro manifest timeout exits with the timed-out resource and recovery guidance",
   { timeout: 5_000 },
   () =>
