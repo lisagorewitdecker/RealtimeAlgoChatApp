@@ -183,6 +183,10 @@ test("hosted preview startup summary regression checks the reviewed revision", (
     verification,
     /GITHUB_STEP_SUMMARY="\$failure_summary_path"\s+\\\s*\n\s+PREVIEW_STARTUP_TEST_FIXTURE=missing-runtime-library-long-path/,
   );
+  assert.match(
+    verification,
+    /PREVIEW_STARTUP_TEST_FIXTURE=missing-runtime-library-long-path\s+\\\s*\n\s+REPLIT_EXPO_DEV_DOMAIN=fallback-preview\.example\.test/,
+  );
   assert.match(verification, /Expo preview startup output is healthy:/);
   assert.match(
     verification,
