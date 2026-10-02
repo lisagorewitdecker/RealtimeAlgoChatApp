@@ -6,7 +6,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./batch": "./src/batch/index.ts"
-  }
+  },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.78.0",
     "p-limit": "^7.3.2",
