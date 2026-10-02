@@ -1,0 +1,51 @@
+appId: ${NATIVE_SMOKE_APP_ID}
+---
+- launchApp:
+    clearState: true
+- openLink: ${NATIVE_SMOKE_SCHEME}://native-smoke
+- extendedWaitUntil:
+    visible:
+      id: sign-in-scroll
+    timeout: 30000
+- assertVisible: "Sign in to your .* Workspace"
+- tapOn:
+    id: sign-in-email
+- inputText: ${NATIVE_SMOKE_EMAIL}
+- tapOn:
+    id: sign-in-password
+- inputText: ${NATIVE_SMOKE_PASSWORD}
+- scrollUntilVisible:
+    element:
+      id: sign-in-primary-action
+    direction: DOWN
+- assertVisible:
+    id: sign-in-primary-action
+- takeScreenshot: ${NATIVE_SMOKE_SCREENSHOT_DIR}/01-sign-in-keyboard
+- hideKeyboard
+- tapOn:
+    id: forgot-password-button
+- assertVisible: "Reset your password"
+- assertVisible:
+    id: password-reset-email
+- takeScreenshot: ${NATIVE_SMOKE_SCREENSHOT_DIR}/02-password-reset
+- tapOn: "Back to sign in"
+- hideKeyboard
+- tapOn:
+    id: sign-in-primary-action
+- extendedWaitUntil:
+    visible:
+      id: new-room-button
+    timeout: 30000
+- assertVisible:
+    id: new-room-button
+- tapOn: "Profile"
+- scrollUntilVisible:
+    element:
+      id: accessibility-settings
+    direction: DOWN
+- assertVisible: "Current size: 140%"
+- assertVisible: "High contrast: on"
+- assertVisible: "Reduced motion: on"
+- tapOn: "Chats"
+- assertVisible:
+    id: new-room-button

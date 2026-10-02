@@ -1,0 +1,8 @@
+appId: ${NATIVE_SMOKE_APP_ID}
+---
+- openLink: "${NATIVE_SMOKE_SCHEME}://sentry-smoke?marker=${NATIVE_SENTRY_MARKER}&buildId=${NATIVE_SMOKE_BUILD_ID}"
+- extendedWaitUntil:
+    visible:
+      id: sentry-probe-sent
+    timeout: 30000
+- assertVisible: "Controlled crash report sent"

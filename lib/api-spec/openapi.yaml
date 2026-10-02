@@ -1,0 +1,326 @@
+openapi: 3.1.0
+info:
+  # Do not change the title, if the title changes, the import paths will be broken
+  title: Api
+  version: 0.2.0
+  description: RealtimeAlgoChatApp Studio API — secure rooms, profiles, and E2EE collaboration
+servers:
+  - url: /api
+    description: Base API path
+tags:
+  - name: health
+    description: Health operations
+  - name: profile
+    description: User profile operations
+  - name: rooms
+    description: Room operations
+paths:
+  /healthz:
+    get:
+      operationId: healthCheck
+      tags: [health]
+      summary: Health check
+      description: Returns server health status
+      responses:
+        "200":
+          description: Healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+
+  /profile:
+    get:
+      operationId: getProfile
+      tags: [profile]
+      summary: Get current user profile
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: User profile
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProfileResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Profile not found
+
+    put:
+      operationId: upsertProfile
+      tags: [profile]
+      summary: Create or update current user profile
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpsertProfileRequest"
+      responses:
+        "200":
+          description: Updated profile
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProfileResponse"
+        "400":
+          description: Validation error
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "409":
+          description: >-
+            A different public key is registered for the account and the request
+            did not name it in previousPublicKey. The stored key is unchanged.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PublicKeyConflictResponse"
+
+  /rooms:
+    get:
+      operationId: listRooms
+      tags: [rooms]
+      summary: List active rooms
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: List of active rooms
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RoomsListResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+    post:
+      operationId: createRoom
+      tags: [rooms]
+      summary: Create a room
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateRoomRequest"
+      responses:
+        "201":
+          description: Room created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RoomResponse"
+        "400":
+          description: Validation error
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /rooms/{roomId}:
+    get:
+      operationId: getRoom
+      tags: [rooms]
+      summary: Get room info
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: roomId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Room info
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RoomResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Room not found
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  responses:
+    Unauthorized:
+      description: Authentication required
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error:
+                type: string
+            required:
+              - error
+
+  schemas:
+    HealthStatus:
+      type: object
+      properties:
+        status:
+          type: string
+      required:
+        - status
+
+    UserProfile:
+      type: object
+      properties:
+        userId:
+          type: string
+        username:
+          type: string
+        avatar:
+          type: string
+          nullable: true
+          maxLength: 16
+          enum: ["🧑‍💻", "🚀", "🦊", "🐼", "🐸", "🐙", "🦄", "🌻", "🍕", "🎮", "🔥", "💎"]
+        publicKey:
+          type: string
+          nullable: true
+          description: Base64-encoded X25519 public key for E2EE
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      required:
+        - userId
+        - username
+        - createdAt
+        - updatedAt
+
+    ProfileResponse:
+      type: object
+      properties:
+        profile:
+          $ref: "#/components/schemas/UserProfile"
+        publicKey:
+          type: string
+          nullable: true
+          description: The account's registered X25519 public key
+        registrationVersion:
+          type: integer
+          format: int64
+          nullable: true
+          minimum: 0
+          description: The monotonic version of the registered public key
+      required:
+        - profile
+
+    UpsertProfileRequest:
+      type: object
+      properties:
+        username:
+          type: string
+          maxLength: 64
+        avatar:
+          type: string
+          nullable: true
+          maxLength: 16
+          enum: ["🧑‍💻", "🚀", "🦊", "🐼", "🐸", "🐙", "🦄", "🌻", "🍕", "🎮", "🔥", "💎"]
+        publicKey:
+          type: string
+          nullable: true
+          maxLength: 64
+          description: Base64-encoded X25519 public key
+        previousPublicKey:
+          type: string
+          nullable: true
+          maxLength: 64
+          description: >-
+            Compare-and-set guard for publicKey: the key currently registered
+            for the account (null when none). Omitted, publicKey only registers
+            a first key or re-sends the current one; replacing a different key
+            without naming it is rejected with 409.
+        registrationVersion:
+          type: integer
+          format: int64
+          minimum: 0
+          description: >-
+            Optional monotonic version for this public-key registration. Writes
+            must advance the authoritative account revision by exactly one;
+            older or future-skewed writes are rejected without changing the
+            registered key. Omit for compatibility with older clients.
+
+    PublicKeyConflictResponse:
+      type: object
+      properties:
+        error:
+          type: string
+        code:
+          type: string
+          enum: [PUBLIC_KEY_CONFLICT, PUBLIC_KEY_STALE, PUBLIC_KEY_VERSION_AHEAD]
+        publicKey:
+          type: string
+          nullable: true
+          description: The public key the account currently holds
+        registrationVersion:
+          type: integer
+          format: int64
+          nullable: true
+          minimum: 0
+          description: The authoritative account revision currently stored
+      required:
+        - error
+        - code
+
+    Room:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        userCount:
+          type: integer
+        createdAt:
+          type: integer
+          description: Unix timestamp in milliseconds
+      required:
+        - id
+        - name
+        - createdAt
+
+    RoomsListResponse:
+      type: object
+      properties:
+        rooms:
+          type: array
+          items:
+            $ref: "#/components/schemas/Room"
+      required:
+        - rooms
+
+    CreateRoomRequest:
+      type: object
+      properties:
+        roomId:
+          type: string
+          maxLength: 128
+        roomName:
+          type: string
+          maxLength: 128
+      required:
+        - roomId
+
+    RoomResponse:
+      type: object
+      properties:
+        room:
+          $ref: "#/components/schemas/Room"
+      required:
+        - room

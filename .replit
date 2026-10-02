@@ -1,4 +1,4 @@
-modules = ["nodejs-24"]
+modules = ["nodejs-24", "python-base-3.13"]
 
 [deployment]
 router = "application"
@@ -9,7 +9,190 @@ args = ["pnpm", "store", "prune"]
 env = { "CI" = "true" }
 
 [workflows]
-runButton = "Project"
+
+[[workflows.workflow]]
+name = "chat-app-preview-startup"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "flock -w 900 /tmp/replit-heavy-validation.lock pnpm --filter @workspace/chat-app run validate:preview-startup"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow]]
+name = "typecheck"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "flock -w 900 /tmp/replit-heavy-validation.lock pnpm run typecheck"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow]]
+name = "unit-tests"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm test:unit --run"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow]]
+name = "api-server-test"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "flock -w 900 /tmp/replit-heavy-validation.lock pnpm --filter @workspace/api-server run test"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow]]
+name = "chat-app-test"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "flock -w 900 /tmp/replit-heavy-validation.lock pnpm --filter @workspace/chat-app run test"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow]]
+name = "banned-room-e2e"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "E2E_CHAT_URL=https://$REPLIT_EXPO_DEV_DOMAIN E2E_API_URL=https://$REPLIT_DEV_DOMAIN flock -w 900 /tmp/replit-heavy-validation.lock pnpm --filter @workspace/api-server run test:e2e:banned-room"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow]]
+name = "mockup-clean-typecheck"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "flock -w 900 /tmp/replit-heavy-validation.lock pnpm run validate:mockup-clean"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow]]
+name = "key-reset-recovery-e2e"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "E2E_CHAT_URL=https://$REPLIT_EXPO_DEV_DOMAIN E2E_API_URL=https://$REPLIT_DEV_DOMAIN flock -w 900 /tmp/replit-heavy-validation.lock pnpm --filter @workspace/api-server run test:e2e:key-reset-recovery"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow]]
+name = "idle-profile-registration-e2e"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "E2E_CHAT_URL=https://$REPLIT_EXPO_DEV_DOMAIN E2E_API_URL=https://$REPLIT_DEV_DOMAIN flock -w 900 /tmp/replit-heavy-validation.lock pnpm --filter @workspace/api-server run test:e2e:idle-profile-registration"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow]]
+name = "reconnect-delivery-e2e"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "E2E_CHAT_URL=https://$REPLIT_EXPO_DEV_DOMAIN E2E_API_URL=https://$REPLIT_DEV_DOMAIN flock -w 900 /tmp/replit-heavy-validation.lock pnpm --filter @workspace/api-server run test:e2e:reconnect-delivery"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow]]
+name = "playwright-clean-runtime"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "flock -w 900 /tmp/replit-heavy-validation.lock pnpm --filter @workspace/api-server run test:browser:clean-runtime"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow]]
+name = "artifacts/mockup-sandbox: Component Preview Server"
+author = "agent"
+mode = "sequential"
+
+[workflows.workflow.metadata]
+outputType = "webview"
+artifactId = "XegfDyZt7HqfW2Bb8Ghoy"
+isCanvasWorkflow = true
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm --filter @workspace/mockup-sandbox run dev"
+cwd = "./artifacts/mockup-sandbox"
+waitForPort = 8081
+ensurePreviewReachable = "/"
+router = "path"
+
+[workflows.workflow.tasks.env]
+PORT = "8081"
+BASE_PATH = "/__mockup"
+
+[[workflows.workflow]]
+name = "artifacts/chat-app: expo"
+author = "agent"
+mode = "sequential"
+
+[workflows.workflow.metadata]
+outputType = "webview"
+artifactId = "artifacts/chat-app"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm --filter @workspace/chat-app run dev"
+cwd = "./artifacts/chat-app"
+waitForPort = 21127
+ensurePreviewReachable = "/status"
+router = "expo-domain"
+
+[workflows.workflow.tasks.env]
+PORT = "21127"
+BASE_PATH = "/"
+
+[[workflows.workflow]]
+name = "artifacts/api-server: API Server"
+author = "agent"
+mode = "parallel"
+
+[workflows.workflow.metadata]
+outputType = "webview"
+artifactId = "3B4_FFSkEVBkAeYMFRJ2e"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm --filter @workspace/api-server run dev"
+cwd = "./artifacts/api-server"
+waitForPort = 8080
+ensurePreviewReachable = "/"
+router = "path"
+
+[workflows.workflow.tasks.env]
+PORT = "8080"
 
 [agent]
 stack = "PNPM_WORKSPACE"
@@ -17,4 +200,21 @@ expertMode = true
 
 [postMerge]
 path = "scripts/post-merge.sh"
-timeoutMs = 20000
+timeoutMs = 180000
+
+[nix]
+channel = "stable-25_05"
+# Expo SDK 57's optional React Native DevTools launcher is a native binary.
+# Keep this desktop runtime set aligned with @expo/cli and react-native upgrades;
+# validate-preview-runtime reports a missing entry before preview startup runs.
+packages = ["glib", "nss", "nspr", "atk", "at-spi2-atk", "dbus", "xorg.libX11", "xorg.libXcomposite", "xorg.libXdamage", "xorg.libXext", "xorg.libXfixes", "xorg.libXrandr", "mesa", "xorg.libxcb", "libxkbcommon", "alsa-lib", "at-spi2-core", "libgbm", "cups", "expat", "libdrm", "pango", "cairo", "fontconfig", "freetype", "systemd", "gtk3", "tesseract", "imagemagick", "actionlint"]
+
+[userenv]
+
+[userenv.shared]
+ADMIN_USER_IDS = ""
+EXPO_PUBLIC_ADMIN_USER_IDS = ""
+
+
+[objectStorage]
+defaultBucketID = "replit-objstore-6a255b4b-ad2d-4e4e-86dd-174ca70c17f1"

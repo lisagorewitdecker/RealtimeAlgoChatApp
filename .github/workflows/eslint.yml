@@ -1,0 +1,109 @@
+# This workflow uses actions that are not certified by GitHub.
+# They are provided by a third-party and are governed by
+# separate terms of service, privacy policy, and support
+# documentation.
+# ESLint is a tool for identifying and reporting on patterns
+# found in ECMAScript/JavaScript code.
+# More details at https://github.com/eslint/eslint
+# and https://eslint.org
+
+name: ESLint
+
+on:
+  push:
+    branches: [ "production" ]
+  pull_request:
+    # The branches below must be a subset of the branches above
+    branches: [ "production" ]
+  schedule:
+    - cron: '24 8 * * 1'
+
+jobs:
+  eslint:
+    name: Run eslint scanning
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+      actions: read # only required for a private repository by github/codeql-action/upload-sarif to get the Action run status
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1
+        with:
+          version: 10.26.1
+
+      - name: Run ESLint
+        id: lint
+        env:
+          SARIF_ESLINT_IGNORE_SUPPRESSED: "true"
+        run: |
+          tmp_dir="$(mktemp -d)"
+          status=0
+          sarif_generated=false
+
+          rm -f eslint-results.sarif
+
+          printf '{"name":"eslint-temp","private":true}\n' > "$tmp_dir/package.json"
+
+          pnpm --config.minimumReleaseAge=1440 --dir "$tmp_dir" add \
+            eslint@8.57.1 \
+            @microsoft/eslint-formatter-sarif@3.1.0 \
+            @typescript-eslint/eslint-plugin@8.43.0 \
+            @typescript-eslint/parser@8.43.0 \
+            typescript@5.9.3 || status=$?
+
+          if [ "$status" -eq 0 ]; then
+            ESLINT_PACKAGE_ROOT="$tmp_dir" "$tmp_dir/node_modules/.bin/eslint" \
+              artifacts \
+              scripts \
+              vendor \
+              --config .eslintrc.cjs \
+              --resolve-plugins-relative-to "$tmp_dir" \
+              --ext .js,.jsx,.mjs,.cjs,.ts,.tsx \
+              --format "$tmp_dir/node_modules/@microsoft/eslint-formatter-sarif" \
+              --output-file eslint-results.sarif || status=$?
+          fi
+
+          echo "exit_code=$status" >> "$GITHUB_OUTPUT"
+          if [ -f eslint-results.sarif ]; then
+            sarif_generated=true
+          fi
+          echo "sarif_generated=$sarif_generated" >> "$GITHUB_OUTPUT"
+
+      - name: Upload analysis results to GitHub
+        if: ${{ always() && steps.lint.outputs.sarif_generated == 'true' && (github.event.pull_request == null || github.event.pull_request.head.repo.fork == false) }}
+        uses: github/codeql-action/upload-sarif@6f5948dfacef28e207b48d0905cf90c03365536d
+        with:
+          sarif_file: eslint-results.sarif
+          wait-for-processing: true
+
+      - name: Print ESLint diagnostics
+        if: ${{ always() && steps.lint.outputs.exit_code != '0' && steps.lint.outputs.sarif_generated == 'true' }}
+        run: |
+          node -e '
+          const fs = require("node:fs");
+          const sarif = JSON.parse(fs.readFileSync("eslint-results.sarif", "utf8"));
+          const runs = Array.isArray(sarif.runs) ? sarif.runs : [];
+          for (const run of runs) {
+            const results = Array.isArray(run.results) ? run.results : [];
+            for (const result of results) {
+              const location = result.locations?.[0]?.physicalLocation;
+              const path = location?.artifactLocation?.uri ?? "<unknown-file>";
+              const line = location?.region?.startLine ?? "?";
+              const message = result.message?.text ?? "<no message>";
+              const rule = result.ruleId ?? "eslint";
+              console.log(`${path}:${line} [${rule}] ${message}`);
+            }
+          }'
+
+      - name: Fail on ESLint errors
+        if: ${{ always() && steps.lint.outputs.exit_code != '0' }}
+        run: exit 1

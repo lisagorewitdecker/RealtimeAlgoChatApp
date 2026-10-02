@@ -1,0 +1,254 @@
+import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import test from "node:test";
+import { fileURLToPath } from "node:url";
+import YAML from "yaml";
+
+const workspaceRoot = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "../..",
+);
+const workflowPath = path.join(
+  workspaceRoot,
+  ".github/workflows/preview-startup-summary-regression.yml",
+);
+const workflow = YAML.parse(readFileSync(workflowPath, "utf8"));
+const workflowText = readFileSync(workflowPath, "utf8");
+const validatorPath = path.join(
+  workspaceRoot,
+  "artifacts/chat-app/scripts/validate-preview-startup.mjs",
+);
+
+function extractWorkflowHereDoc(variableName) {
+  const match = workflowText.match(
+    new RegExp(
+      `cat > "\\$${variableName}" <<'EOF'\\n([\\s\\S]*?)\\n\\s*EOF`,
+    ),
+  );
+  assert.ok(match, `workflow is missing the ${variableName} here-doc`);
+  const body = match[1];
+  const indents = body
+    .split("\n")
+    .filter((line) => line.length > 0)
+    .map((line) => line.match(/^ */)?.[0].length ?? 0);
+  const sharedIndent = indents.length > 0 ? Math.min(...indents) : 0;
+  return (
+    body
+      .split("\n")
+      .map((line) => line.slice(sharedIndent))
+      .join("\n") + "\n\n"
+  );
+}
+
+function runValidator(env) {
+  const temporaryDirectory = mkdtempSync(
+    path.join(os.tmpdir(), "preview-startup-summary-workflow-"),
+  );
+  const summaryPath = path.join(temporaryDirectory, "summary.md");
+  const result = spawnSync(process.execPath, [validatorPath], {
+    cwd: workspaceRoot,
+    env: { ...process.env, GITHUB_STEP_SUMMARY: summaryPath, ...env },
+    encoding: "utf8",
+  });
+
+  try {
+    const summary = existsSync(summaryPath)
+      ? readFileSync(summaryPath, "utf8")
+      : "";
+    return {
+      ...result,
+      summary,
+    };
+  } finally {
+    rmSync(temporaryDirectory, { recursive: true, force: true });
+  }
+}
+
+function runWorkflowVerificationStep() {
+  const temporaryDirectory = mkdtempSync(
+    path.join(os.tmpdir(), "preview-startup-summary-step-"),
+  );
+  const scriptPath = path.join(temporaryDirectory, "verify-hosted-summary.sh");
+  const githubStepSummaryPath = path.join(temporaryDirectory, "summary.md");
+  writeFileSync(scriptPath, workflow.jobs["verify-hosted-summary"].steps[1].run);
+
+  const result = spawnSync(
+    "bash",
+    ["-euo", "pipefail", "-c", ". \"$1\"", "bash", scriptPath],
+    {
+      cwd: workspaceRoot,
+      env: {
+        ...process.env,
+        GITHUB_STEP_SUMMARY: githubStepSummaryPath,
+        REVIEWED_REF: "preview-startup-summary-regression-test-ref",
+      },
+      encoding: "utf8",
+    },
+  );
+
+  try {
+    const summary = existsSync(githubStepSummaryPath)
+      ? readFileSync(githubStepSummaryPath, "utf8")
+      : "";
+    return {
+      ...result,
+      summary,
+    };
+  } finally {
+    rmSync(temporaryDirectory, { recursive: true, force: true });
+  }
+}
+
+test("hosted preview startup summary regression checks the reviewed revision", () => {
+  assert.deepEqual(Object.keys(workflow.on), [
+    "pull_request",
+    "workflow_dispatch",
+  ]);
+  assert.deepEqual(workflow.on.pull_request.paths, [
+    ".github/workflows/preview-startup-summary-regression.yml",
+    ".github/workflows/preview-startup-real-platform.yml",
+    ".replit",
+    "artifacts/chat-app/package.json",
+    "artifacts/chat-app/scripts/preview-startup-runtime-library-fixture.mjs",
+    "artifacts/chat-app/scripts/preview-startup-shared.mjs",
+    "artifacts/chat-app/scripts/validate-preview-startup.mjs",
+    "artifacts/chat-app/scripts/validate-preview-startup-runtime-diagnostic.test.mjs",
+  ]);
+  assert.equal(workflow.on.workflow_dispatch.inputs.reviewed_ref.required, true);
+  assert.equal(workflow.on.workflow_dispatch.inputs.reviewed_ref.type, "string");
+  assert.deepEqual(workflow.permissions, { contents: "read" });
+
+  const jobs = Object.entries(workflow.jobs);
+  assert.deepEqual(
+    jobs.map(([jobId]) => jobId),
+    ["verify-hosted-summary"],
+  );
+  const [, job] = jobs[0];
+  assert.equal(job["runs-on"], "ubuntu-latest");
+  assert.equal(job.steps.length, 2);
+  assert.equal(job.steps[0].uses, "actions/checkout@v4");
+  assert.equal(
+    job.steps[0].with.ref,
+    "${{ github.event.pull_request.head.sha || inputs.reviewed_ref }}",
+  );
+  assert.equal(job.steps[0].with["persist-credentials"], false);
+
+  const verification = job.steps[1].run;
+  assert.deepEqual(job.steps[1].env, {
+    REVIEWED_REF:
+      "${{ github.event.pull_request.head.sha || inputs.reviewed_ref }}",
+  });
+  assert.match(
+    verification,
+    /node artifacts\/chat-app\/scripts\/validate-preview-startup\.mjs\s+\\\s*\n\s+--log-file/,
+  );
+  assert.match(
+    verification,
+    /PREVIEW_PUBLIC_URL=https:\/\/preview\.example\.test\/expo\s+\\\s*\n\s+PREVIEW_STARTUP_TEST_FIXTURE=missing-runtime-library-long-path/,
+  );
+  assert.match(
+    verification,
+    /PREVIEW_STARTUP_TEST_FIXTURE=missing-runtime-library-long-path/,
+  );
+  assert.match(
+    verification,
+    /REPLIT_EXPO_DEV_DOMAIN=fallback-preview\.example\.test\s+\\\s*\n\s+PREVIEW_PUBLIC_URL=https:\/\/preview\.example\.test\/expo\s+\\\s*\n\s+PREVIEW_STARTUP_TEST_FIXTURE=missing-runtime-library-long-path/,
+  );
+  assert.match(verification, /Expo preview startup output is healthy:/);
+  assert.match(verification, /bounded missing-library diagnosis/);
+  assert.match(verification, /private material/);
+  assert.match(
+    verification,
+    /diagnosis_matches="\$\(grep -E -- '\^\\\*\\\*Diagnosis:\\\*\\\* Expo preview startup error: Error: \/opt\/expo\/react-native-devtools:/,
+  );
+  assert.match(
+    verification,
+    /\.\*\\\(missing runtime library: \.\*libgtk-3\\\.so\\\.0\\\)\[\[:space:\]\]\*\$' "\$summary_path" \|\| true\)"/,
+  );
+  assert.match(verification, /diagnosis_line="\$diagnosis_matches"/);
+  assert.match(verification, /printf '%s\\n' "\$diagnosis_line"/);
+  assert.match(
+    verification,
+    /contained output beyond the bounded diagnosis/,
+  );
+  assert.match(verification, /malformed_preview_setting/);
+  assert.match(
+    verification,
+    /malformed preview-setting diagnosis/,
+  );
+  assert.match(
+    verification,
+    /malformed preview-setting summary contained private material/,
+  );
+  assert.match(verification, /base64 --decode/);
+  assert.match(verification, /"\$GITHUB_STEP_SUMMARY"/);
+  assert.doesNotMatch(workflowText, /\$\{\{\s*secrets\./);
+  assert.doesNotMatch(workflowText, /EAS_TOKEN|CLERK_SECRET_KEY|DATABASE_URL/);
+});
+
+test("hosted preview startup summary regression is a read-only Linux check", () => {
+  assert.doesNotMatch(workflowText, /self-hosted/);
+  assert.doesNotMatch(workflowText, /runs-on:\s*.*(?:macos|windows)/i);
+  assert.doesNotMatch(workflowText, /\b(publish|deploy|submit)\b/i);
+});
+
+test("hosted preview startup workflow summary matches validator output exactly", () => {
+  const result = runValidator({
+    PREVIEW_STARTUP_TEST_FIXTURE: "missing-runtime-library-long-path",
+  });
+  const lines = result.summary.split("\n");
+
+  assert.equal(result.status, 1, `${result.stdout}${result.stderr}`);
+  assert.equal(lines.length, 7, `${result.stdout}${result.stderr}`);
+  assert.equal(lines[0], "### Expo preview startup");
+  assert.equal(lines[1], "");
+  assert.equal(lines[2], "**Status:** FAIL");
+  assert.equal(lines[3], "");
+  assert.equal(lines[5], "");
+  assert.equal(lines[6], "");
+  assert.match(
+    lines[4],
+    /^\*\*Diagnosis:\*\* Expo preview startup error: Error: \/opt\/expo\/react-native-devtools: error while loading shared libraries: [^\r\n]*\(missing runtime library: [^\r\n]*libgtk-3\.so\.0\)[ \t]*$/,
+  );
+});
+
+test("hosted preview startup workflow invalid-setting summary matches validator output exactly", () => {
+  const result = runValidator({
+    PREVIEW_PUBLIC_URL: "https://[preview-setting-secret",
+    PREVIEW_PUBLIC_TIMEOUT_MS: "25",
+    PREVIEW_STARTUP_TIMEOUT_MS: "2000",
+    PREVIEW_STARTUP_TEST_FIXTURE: "handoff-server",
+    REPLIT_EXPO_DEV_DOMAIN: "fallback-preview.example.test",
+  });
+
+  assert.equal(result.status, 1, `${result.stdout}${result.stderr}`);
+  assert.equal(
+    result.summary,
+    extractWorkflowHereDoc("expected_setting_summary_path"),
+  );
+});
+
+test("hosted preview startup workflow step succeeds end-to-end", () => {
+  const result = runWorkflowVerificationStep();
+
+  assert.equal(result.status, 0, `${result.stdout}${result.stderr}`);
+  assert.match(result.summary, /## Reviewed preview startup revision/);
+  assert.match(result.summary, /## Preview startup summary regression/);
+  assert.match(
+    result.summary,
+    /Healthy captured startup: \*\*PASS\*\* \(success output retained; no failure section\)/,
+  );
+  assert.match(
+    result.summary,
+    /Malformed preview setting: \*\*PASS\*\* \(configuration diagnosis retained; private material excluded\)/,
+  );
+});

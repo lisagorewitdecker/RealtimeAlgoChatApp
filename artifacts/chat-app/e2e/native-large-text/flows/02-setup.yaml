@@ -1,0 +1,34 @@
+appId: ${NATIVE_SMOKE_APP_ID}
+---
+- openLink: ${NATIVE_SMOKE_SCHEME}://native-smoke/setup
+- extendedWaitUntil:
+    visible:
+      id: setup-scroll
+    timeout: 15000
+- tapOn:
+    id: setup-display-name-input
+- eraseText: 30
+- inputText: A
+- scrollUntilVisible:
+    element:
+      id: setup-submit-button
+    direction: DOWN
+- tapOn:
+    id: setup-submit-button
+- assertVisible: "Name must be at least 2 characters."
+- assertVisible:
+    id: setup-sign-out-button
+- takeScreenshot: ${NATIVE_SMOKE_SCREENSHOT_DIR}/03-setup-invalid-keyboard
+- tapOn:
+    id: setup-display-name-input
+- eraseText: 30
+- inputText: ${NATIVE_SMOKE_DISPLAY_NAME}
+- assertVisible:
+    id: setup-submit-button
+- takeScreenshot: ${NATIVE_SMOKE_SCREENSHOT_DIR}/04-setup-valid-keyboard
+- tapOn:
+    id: setup-submit-button
+- extendedWaitUntil:
+    visible:
+      id: new-room-button
+    timeout: 15000

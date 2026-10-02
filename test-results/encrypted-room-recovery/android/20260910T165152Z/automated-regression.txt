@@ -1,0 +1,42 @@
+Encrypted-room recovery automated evidence — Android companion record
+=====================================================================
+Recorded (UTC): 2026-09-10T16:51:52Z
+Source revision: dddebef13472c705888d52d5dac68cb0f01ec68b
+Procedure: artifacts/chat-app/docs/encrypted-room-recovery-device-check.md (step 11)
+
+These checks are not physical-device evidence and do not change the overall
+Android result from BLOCKED. They were run serialized behind the shared
+validation lock (flock /tmp/replit-heavy-validation.lock).
+
+PASS | pnpm --filter @workspace/chat-app exec jest __tests__/CryptoContext.test.tsx __tests__/Room.test.tsx __tests__/secureStorageKey.test.ts --runInBand --coverage=false
+  3 suites passed; 28 tests passed.
+  Covers: public-key registration retry and encrypted rooms staying
+  unavailable until registration succeeds; stale-identity registration
+  responses ignored; device keypair and room keys persisted in native secure
+  storage and restored after remount; envelope round trips between
+  independent devices with invalid envelopes rejected; retryable persistence
+  failure surfaced without losing the in-memory key; secure-store key names
+  encoded deterministically without collisions; the room screen registering
+  listeners before join, waiting for delayed secure-storage hydration before
+  decrypting history, and blocking join while a key is only in memory.
+  Existing React test act(...) warnings were emitted; no test failed.
+  First attempt of this command failed to load (Babel: Cannot find module
+  '@babel/generator') because the workspace node_modules was stale relative
+  to the committed lockfile. `pnpm install --frozen-lockfile --offline`
+  reconciled it without changing any tracked file; the rerun above passed.
+
+PASS | pnpm --filter @workspace/api-server exec vitest run src/socket.rooms.test.ts --maxWorkers=1
+  1 file passed; 10 tests passed.
+  Covers: ciphertext-only relay of chat and sandbox payloads with envelope
+  delivery, per-account envelope restoration on join, authenticated room
+  create/list/join/remove, banned-account rejection and disconnection, and
+  persistence back-pressure before mutation or broadcast.
+
+PASS | pnpm --filter @workspace/api-server exec vitest run src/socket.assistant.test.ts src/socket.security.test.ts src/routes/profile.test.ts --maxWorkers=1
+  3 files passed; 14 tests passed.
+  Covers: assistant requests rejected for encrypted rooms without invoking
+  the model, room-scoped capability and cross-room relay boundaries, and
+  public-key registration/rotation on the authenticated profile route.
+
+No credentials, private keys, room plaintext, tokens, or database payloads were
+written to this evidence directory.

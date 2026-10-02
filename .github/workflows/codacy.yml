@@ -54,9 +54,128 @@ jobs:
           # This will handover control about PR rejection to the GitHub side
           max-allowed-issues: 2147483647
 
+      - name: Ensure unique SARIF run categories
+        run: |
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          import re
+          from collections import Counter
+
+
+          def slug(value):
+            return re.sub(r"[^a-z0-9._-]+", "-", value.strip().lower()).strip("-") or "tool"
+
+
+          def stable_tool_key(run):
+            tool = run.get("tool", {})
+            driver = tool.get("driver", {})
+            extensions = tool.get("extensions", [])
+
+            parts = [
+              driver.get("name"),
+              driver.get("guid"),
+            ]
+
+            for extension in extensions:
+              parts.extend(
+                [
+                  extension.get("name"),
+                  extension.get("guid"),
+                ]
+              )
+
+            slugged_parts = [slug(part) for part in parts if isinstance(part, str) and part.strip()]
+            if slugged_parts:
+              return "-".join(slugged_parts)
+
+            digest = hashlib.sha256(
+              json.dumps(tool, sort_keys=True).encode("utf-8")
+            ).hexdigest()[:12]
+            return f"tool-{digest}"
+
+
+          def normalized_automation_id(automation_details):
+            automation_id = automation_details.get("id")
+            if isinstance(automation_id, str) and automation_id:
+              return automation_id
+            return None
+
+
+          def normalized_category_id(value):
+            normalized_value = re.sub(r"[^a-z0-9._/-]+", "-", value.strip().lower())
+            normalized_value = re.sub(r"/+", "/", normalized_value).strip("/-")
+            return normalized_value or None
+
+
+          def stable_run_signature(run, automation_id):
+            return json.dumps(
+              {
+                "automation_id": automation_id,
+                "conversion": run.get("conversion", {}),
+                "invocations": run.get("invocations", []),
+                "originalUriBaseIds": run.get("originalUriBaseIds", {}),
+                "tool": run.get("tool", {}),
+              },
+              sort_keys=True,
+            )
+
+          with open("results.sarif", "r", encoding="utf-8") as sarif_file:
+            sarif_data = json.load(sarif_file)
+
+          runs = sarif_data.get("runs", [])
+          for run in runs:
+            if not isinstance(run.get("automationDetails"), dict):
+              run["automationDetails"] = {}
+
+          existing_ids = [
+            normalized_automation_id(run["automationDetails"])
+            for run in runs
+            if normalized_automation_id(run["automationDetails"])
+          ]
+          duplicate_existing_ids = {
+            automation_id for automation_id, count in Counter(existing_ids).items() if count > 1
+          }
+          assigned_ids = set()
+          replacement_candidates = []
+
+          for run in runs:
+            automation_details = run["automationDetails"]
+            automation_id = normalized_automation_id(automation_details)
+            if automation_id and automation_id not in duplicate_existing_ids and automation_id not in assigned_ids:
+              assigned_ids.add(automation_id)
+              continue
+
+            tool_key = stable_tool_key(run)
+            normalized_id = normalized_category_id(automation_id) if automation_id else None
+            replacement_candidates.append(
+              (
+                f"{normalized_id}/{tool_key}" if normalized_id else f"codacy/{tool_key}",
+                stable_run_signature(run, normalized_id),
+                automation_details,
+              )
+            )
+
+          replacement_candidates.sort(key=lambda candidate: (candidate[0], candidate[1]))
+          for base_candidate_id, _, automation_details in replacement_candidates:
+            candidate_id = base_candidate_id
+            suffix = 1
+            while candidate_id in assigned_ids:
+              suffix += 1
+              candidate_id = f"{base_candidate_id}-{suffix}"
+
+            automation_details["id"] = candidate_id
+            assigned_ids.add(candidate_id)
+
+          temp_output_path = "results.sarif.tmp"
+          with open(temp_output_path, "w", encoding="utf-8") as sarif_file:
+            json.dump(sarif_data, sarif_file)
+          os.replace(temp_output_path, "results.sarif")
+          PY
+
       # Upload the SARIF file generated in the previous step
       - name: Upload SARIF results file
         uses: github/codeql-action/upload-sarif@6f5948dfacef28e207b48d0905cf90c03365536d
         with:
           sarif_file: results.sarif
-          category: codacy

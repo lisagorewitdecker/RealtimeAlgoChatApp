@@ -1,0 +1,26 @@
+diff --git a/dist/types/utils.js b/dist/types/utils.js
+index 5224bbafe87551ac415cb3de234820ccc0ff6e2c..7514a0fd10303ff9e75ed6d7100c5190e29ce031 100644
+--- a/dist/types/utils.js
++++ b/dist/types/utils.js
+@@ -52,6 +52,9 @@
+     if (input.length - offset < 4)
+         return;
+     const boxSize = (0, exports.readUInt32BE)(input, offset);
++    // A box must at least contain its 4-byte length and 4-byte type.
++    if (boxSize < 8)
++        return;
+     if (input.length - offset < boxSize)
+         return;
+     return {
+@@ -67,10 +70,8 @@
+         if (!box)
+             break;
+         if (box.name === boxName)
+             return box;
+-        // Fix the infinite loop by ensuring offset always increases
+-        // If box.size is 0, advance by at least 8 bytes (the size of the box header)
+-        offset += box.size > 0 ? box.size : 8;
++        offset += box.size;
+     }
+ }
+ exports.findBox = findBox;

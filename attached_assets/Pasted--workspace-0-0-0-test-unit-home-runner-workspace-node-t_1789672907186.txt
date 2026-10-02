@@ -1,0 +1,257 @@
+
+> workspace@0.0.0 test:unit /home/runner/workspace
+> node --test artifacts/api-server/tests/profileIdentity.test.ts && pnpm --filter @workspace/api-server run test:clerk-retry && node --test scripts/tests/verify-sentry-native-event.test.mjs && node --test scripts/tests/api-codegen-workflow-contract.test.mjs && node --test scripts/tests/api-codegen-event-probe.test.mjs && node --test scripts/tests/mobile-release-caller-contract.test.mjs && node --test scripts/tests/native-evidence-summary-regression-workflow.test.mjs && node --test scripts/tests/preview-startup-summary-regression-workflow.test.mjs && pnpm --filter @workspace/api-spec run test:compatibility && pnpm --filter @workspace/scripts run test:android-preflight && pnpm --filter @workspace/scripts run test:ios-runner && bash scripts/tests/check-ios-native-large-text-readiness.test.sh && bash scripts/tests/check-android-native-large-text-readiness.test.sh && bash scripts/tests/native-review-record-template.test.sh && bash scripts/tests/check-android-preview-evidence.test.sh && bash scripts/tests/check-ios-preview-evidence.test.sh && pnpm run test:native-large-text-evidence && bash scripts/tests/validate-branding-command.test.sh && node --test scripts/tests/mobile-release-summary-contract.test.mjs --run
+
+✔ normalizes email addresses before saving them (1.137075ms)
+✔ rejects malformed profile email addresses (0.3974ms)
+✔ keeps ordinary users' chosen display names (0.372245ms)
+✔ uses the canonical main-admin display name (0.219429ms)
+ℹ tests 4
+ℹ suites 0
+ℹ pass 4
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 164.396886
+
+> @workspace/api-server@0.0.0 test:clerk-retry /home/runner/workspace/artifacts/api-server
+> vitest run e2e/clerk-retry.test.ts --testNamePattern='^(withClerkRetry|withClerkSetupRetry)' --maxWorkers=1
+
+
+ RUN  v4.1.11 /home/runner/workspace/artifacts/api-server
+
+
+ Test Files  1 passed (1)
+      Tests  21 passed | 34 skipped (55)
+   Start at  19:11:01
+   Duration  338ms (transform 103ms, setup 0ms, import 130ms, tests 27ms, environment 0ms)
+
+✔ accepts a candidate-bound event with a readable source frame (1.853404ms)
+✔ rejects an event from a different release (0.696098ms)
+✔ rejects a minified bundle frame without mapped source (0.236063ms)
+✔ rejects a mapped frame that is not the controlled probe function (0.199264ms)
+✔ retries transient Sentry API failures (35.818678ms)
+✔ rejects a non-HTTPS Sentry API base URL (0.605159ms)
+✔ rejects a credentialed Sentry API base URL (0.309876ms)
+✔ rejects a Sentry API base URL with a path (0.37037ms)
+✔ normalizes a Sentry API base URL with only repeated root slashes (0.898535ms)
+✔ quotes Sentry search values before requesting events (0.744464ms)
+✔ accepts a redacted saved evidence file (6.025451ms)
+✔ rejects duplicate trigger metadata fields (2.634729ms)
+✔ rejects trigger metadata values containing '=' (2.169591ms)
+✔ rejects trigger metadata with missing required fields (3.462589ms)
+✔ rejects trigger metadata containing an empty line (2.386232ms)
+✔ allows non-credential authorization text in saved evidence (2.138411ms)
+✔ rejects nested credential-bearing evidence fields (2.347981ms)
+✔ rejects non-empty object values under credential-named evidence fields (2.859043ms)
+✔ rejects non-object saved evidence JSON (1.827652ms)
+✔ rejects credential-like token text embedded in evidence strings (2.378809ms)
+✔ rejects credential-like token text embedded in parsed escaped evidence strings (1.691146ms)
+✔ rejects saved evidence with non-positive frame coordinates (4.561941ms)
+✔ cli uses evidence verification mode for environment-only inputs (57.402149ms)
+✔ cli does not fall back to remote polling for an explicit missing evidence path (45.558775ms)
+✔ cli falls back to remote polling for a missing env evidence path even when the sibling trigger exists (76.47375ms)
+ℹ tests 25
+ℹ suites 0
+ℹ pass 25
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 336.182548
+✔ API codegen workflow runs after pushes to development (1.651431ms)
+✔ API codegen workflow runs for the complete development pull-request event set (0.159431ms)
+✔ API codegen workflow checks out full history for generated-client validation (0.164901ms)
+✔ API compatibility receives the current pull request description (0.106757ms)
+✔ root unit validation runs the API codegen workflow contract suite (0.230088ms)
+✔ root unit validation invokes the maintained API compatibility behavior suite (0.25559ms)
+✔ root API codegen validation fails when the generated client drifts (26720.574086ms)
+✔ generated-client drift evidence remains visible in the CI job log (0.566187ms)
+✔ generated-client drift evidence is complete in the reviewer-visible summary (0.445432ms)
+✔ generated-client validation remains required for the workflow (0.275613ms)
+✔ API compatibility still runs after generated-client failures (0.648566ms)
+✔ API compatibility workflow command resolves to the maintained contract checker (0.140093ms)
+ℹ tests 12
+ℹ suites 0
+ℹ pass 12
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 26865.757049
+✔ probe arguments keep the hosted check defaults and accept an output path (0.904724ms)
+✔ workflow paths are sent to GitHub as one filename identifier (4.436562ms)
+✔ stale generated content changes only the checked-in generated file (0.487454ms)
+✔ matching workflow runs are bound to the branch, head, pull request, and event time (0.291611ms)
+✔ required evidence is the generated-client step failure and its job URL (1.085964ms)
+✔ a successful probe confirms cleanup before returning its hosted evidence (2.885089ms)
+ℹ tests 6
+ℹ suites 0
+ℹ pass 6
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 87.680049
+✔ Node engine range validation accepts standard range forms (6.540287ms)
+✔ Node engine range validation rejects malformed and unsupported syntax (1.269917ms)
+✔ documented caller passes every required build ID through with (1.70994ms)
+✔ controlled Node range validation input is optional and stays outside secrets (0.195289ms)
+✔ candidate build IDs do not cross the reusable secrets boundary (0.567978ms)
+✔ release credentials remain in the reusable workflow secrets contract (0.163207ms)
+✔ caller setup documentation lists every reusable workflow secret with its required setting (0.602899ms)
+✔ every mobile release setup-node value stays inside the declared Node range (0.723961ms)
+✔ invalid Node range guard blocks release jobs before setup or publish work (0.412062ms)
+✔ out-of-range mobile release Node diagnostics identify every job and version (1.186807ms)
+✔ malformed mobile release Node versions identify the affected job and required format (0.910384ms)
+✔ missing mobile release Node versions identify the affected job and required configuration (0.704535ms)
+✔ blocked release diagnostics identify the supported Node range safely (0.169839ms)
+✔ workflow hardening pins actions, runs for every pull request, and bounds duplicate release work (0.297876ms)
+✔ publish job runs the evidence privacy and submission-boundary regression before approval validation and submission (0.255835ms)
+✔ Android preview evidence validation succeeds when no handoff record changed (0.125805ms)
+✔ iOS preview evidence validation succeeds when no handoff record changed (0.105233ms)
+✔ Android preview evidence runs for every pull request (0.080658ms)
+✔ iOS preview evidence runs for every pull request (0.349302ms)
+✔ routine unit validation runs the caller contract check (0.157911ms)
+ℹ tests 20
+ℹ suites 0
+ℹ pass 20
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 194.601005
+✔ hosted summary regression checks only the reviewed ref (2.462627ms)
+✔ hosted summary regression cannot publish or start native jobs (0.380744ms)
+✔ hosted summary keeps revision metadata when the checker fails (133.500951ms)
+ℹ tests 3
+ℹ suites 0
+ℹ pass 3
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 266.904555
+✔ hosted preview startup summary regression checks the reviewed revision (2.235973ms)
+✔ hosted preview startup summary regression is a read-only Linux check (0.33811ms)
+ℹ tests 2
+ℹ suites 0
+ℹ pass 2
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 124.603809
+
+> @workspace/api-spec@0.0.0 test:compatibility /home/runner/workspace/lib/api-spec
+> node ./scripts/check-contract-compatibility.test.mjs
+
+✔ allows additive endpoints, optional fields, and response statuses (16.83894ms)
+✔ reports removed endpoints and changed operation identifiers (7.998143ms)
+✔ reports incompatible request and response schema changes (4.406472ms)
+✔ reports newly required request parameters (2.608636ms)
+✔ reports removed request properties when additional properties are disallowed (1.649003ms)
+✔ reports response schemas that lose type and min/max constraints (1.37188ms)
+✔ formats actionable failure output that asks for both override declarations (0.681773ms)
+✔ explains which declaration an incomplete override omitted (0.446351ms)
+✔ extracts the justification and migration plan from a pull request body (0.984399ms)
+✔ extracts indented and bulleted declaration blocks (0.851701ms)
+✔ supports mixed inline and block declarations with CRLF endings (0.245213ms)
+✔ treats empty declarations as missing (0.221735ms)
+✔ uses a later valid declaration when an earlier copy is empty (0.149037ms)
+✔ accepts repeated matching inline declarations without a warning (4.566387ms)
+✔ ignores empty duplicate markers around valid declarations in reviewer output (5.893616ms)
+✔ ignores placeholder duplicates when a substantive pull request declaration exists (3.444412ms)
+✔ stops declaration blocks at blank lines and unrelated unindented text (0.146167ms)
+✔ rejects placeholder and stock non-answer declarations (22.765888ms)
+✔ accepts substantive one-sentence declarations (2.555586ms)
+✔ formats an override with every changed contract and both pieces of review evidence (0.212355ms)
+✔ formats the full multi-line migration plan in compatibility output (0.170256ms)
+✔ fails by default and only overrides when the pull request supplies a reason and a migration plan (7.262296ms)
+✔ skips compatibility enforcement on push after pull request review (0.326968ms)
+✔ workflow enforces compatibility on pull requests and skips post-merge development pushes (5.104416ms)
+✔ contributor guidance uses the canonical compatibility override instructions (0.558483ms)
+✔ pull request template offers canonical API-break declaration fields (0.363206ms)
+✔ plain-text and Markdown instructions keep shared wording and examples aligned (0.360374ms)
+✔ guidance synchronization is deterministic and preserves surrounding formatting (0.742738ms)
+✔ guidance check fails when any checked-in copy is stale and update repairs all (7.258929ms)
+✔ guidance check bounds large stale previews for CI logs (2.758279ms)
+✔ guidance check bounds combined stale previews within one CI log budget (2.99411ms)
+✔ guidance command exits non-zero and previews stale checked-in copies (91.819414ms)
+✔ guidance command rejects invalid repair arguments without modifying fixtures (325.510575ms)
+✔ guidance command repairs stale checked-in copies (82.151234ms)
+✔ the command line exits non-zero for an override that omits the migration plan (348.691185ms)
+✔ the command line rejects placeholder declarations from pull request bodies and explicit flags (354.596714ms)
+✔ the command line rejects a placeholder from the winning declaration source (222.787957ms)
+✔ warns about conflicting declarations without printing their values (100.162897ms)
+✔ ignores pull request placeholders in cross-source conflict warnings (190.616173ms)
+✔ does not treat placeholder-only pull request copies as cross-source conflicts (210.390575ms)
+✔ warns in console and summary about conflicting inline declarations in a pull request body (101.728647ms)
+✔ warns about conflicting block declarations in a pull request body (3.373574ms)
+✔ does not warn when pull request, environment, and flag declarations match (97.618104ms)
+✔ summarizes a compatible contract without a changed-contracts section (0.520045ms)
+✔ summarizes blocked breaks with every changed contract and the override instructions (0.79547ms)
+✔ summarizes an incomplete override as blocked with the missing evidence called out (0.525003ms)
+✔ summarizes approved overrides with the changed contracts and the exact review evidence (0.400179ms)
+✔ renders multi-line review evidence as distinct code lines under each declaration (10.149484ms)
+✔ keeps review evidence containing backticks intact in the summary (0.207674ms)
+✔ summarizes a check that could not run (0.205367ms)
+✔ appends the summary only when a step summary file is configured (0.9238ms)
+✔ publishes the decision to the job summary while preserving exit codes (645.37092ms)
+ℹ tests 52
+ℹ suites 0
+ℹ pass 52
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 2905.134821
+
+> @workspace/scripts@0.0.0 test:android-preflight /home/runner/workspace/scripts
+> bash ./tests/check-android-release-prerequisites.test.sh && bash ./tests/check-android-runner-procedure.test.sh
+
+Android preflight regression tests passed.
+Android runner provisioning procedure regression test passed.
+
+> @workspace/scripts@0.0.0 test:ios-runner /home/runner/workspace/scripts
+> bash ./tests/provision-ios-runner.test.sh
+
+bare-dry-run: PASS
+toolchain-dry-run: PASS
+old-java-dry-run: PASS
+registration-name-mismatch: PASS
+registration-repository-mismatch: PASS
+registration-labels-unverifiable: PASS
+registration-record-stale: PASS
+registration-record-missing-labels: PASS
+registration-record-verified: PASS
+registration-labels-missing-on-github: PASS
+registration-labels-verified-on-github: PASS
+registration-removed-on-github: PASS
+service-withheld-for-foreign-registration: PASS
+service-withheld-without-label-verification: PASS
+service-withheld-until-core-ready: PASS
+service-installed-for-verified-registration: PASS
+simulator-agent-boots-then-waits: PASS
+archive-digest-mismatch: PASS
+archive-digest-match: PASS
+token-argument-rejected: PASS
+linux-requires-dry-run: PASS
+candidate-path-required: PASS
+github-flags-conflict: PASS
+help: PASS
+provision-ios-runner.test.sh: all cases passed
+iOS native large-text readiness regression tests passed.
+Android native large-text readiness regression tests passed.
+Native review-record template contract tests passed.
+Android preview evidence regression tests passed.
+iOS preview evidence regression tests passed.
+
+> workspace@0.0.0 test:native-large-text-evidence /home/runner/workspace
+> bash scripts/tests/check-native-large-text-evidence.test.sh
+
+Native evidence test cleanup changed the saved API test status
+Native evidence test cleanup changed the saved API test status
+ ELIFECYCLE  Command failed with exit code 1.
+ ELIFECYCLE  Command failed with exit code 1.

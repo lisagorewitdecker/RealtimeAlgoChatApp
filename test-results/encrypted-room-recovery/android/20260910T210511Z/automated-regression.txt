@@ -1,0 +1,16 @@
+Encrypted-room recovery automated companion evidence — Android
+================================================================
+Recorded (UTC): 2026-09-10T21:05:11Z
+Source revision: aebcfc4
+Project SDK: Expo SDK 57.0.0
+Procedure: artifacts/chat-app/docs/encrypted-room-recovery-device-check.md (step 11)
+
+These checks are not physical-device evidence and do not change the Android
+result from BLOCKED. No room plaintext, key material, tokens, or credentials
+were recorded.
+
+PASS | pnpm --filter @workspace/chat-app exec jest __tests__/CryptoContext.test.tsx __tests__/Room.test.tsx __tests__/secureStorageKey.test.ts --runInBand --coverage=false --forceExit
+  3 suites passed; 35 tests passed.
+
+The new companion checks reject decoded room keys whose length is not the
+secretbox key size, including keys received through an authenticated envelope.
