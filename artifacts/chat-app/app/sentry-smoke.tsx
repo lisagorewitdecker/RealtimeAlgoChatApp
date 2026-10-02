@@ -12,6 +12,7 @@ import {
 import { useColors } from "@/hooks/useColors";
 import {
   captureNativeSourceMapProbe,
+  captureRoomKeyPersistenceRetryFailure,
   Sentry,
   sentryEnabled,
 } from "@/lib/sentry";
@@ -63,6 +64,15 @@ export default function SentrySmokeScreen() {
         platform,
         candidateBuildId,
       });
+      try {
+        await Promise.reject(new Error("Controlled room-key save retry rejection"));
+      } catch {
+        captureRoomKeyPersistenceRetryFailure("save", {
+          marker,
+          platform,
+          candidateBuildId,
+        });
+      }
       const delivered = await Sentry.flush();
       setStatus(delivered ? "sent" : "failed");
     };

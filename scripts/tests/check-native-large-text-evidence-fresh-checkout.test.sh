@@ -53,18 +53,23 @@ else
     "$ROOT_DIR"
 fi
 
-# Build the fresh-checkout layout: only the suite, the checker it exercises,
-# the checker's own helpers, and the root package.json the suite reads for the
-# release Node range. There is deliberately no artifacts/ tree, so the layout
-# matches a clone that has never run the API browser suite.
+# Build the fresh-checkout layout: only the suite, its shared fixture builder,
+# its tamper-output verifier, the checker it exercises, the checker's own
+# helpers, and the root package.json the suite reads for the release Node range.
+# There is deliberately no artifacts/ tree, so the layout matches a clone that
+# has never run the API browser suite.
 fresh_checkout="$TEST_ROOT/fresh-checkout"
 mkdir -p "$fresh_checkout/scripts/tests"
 cp "$ROOT_DIR/package.json" "$fresh_checkout/package.json"
 cp "$ROOT_DIR/scripts/check-native-large-text-evidence.sh" \
+  "$ROOT_DIR/scripts/verify-native-tamper-output.sh" \
   "$ROOT_DIR/scripts/native-release-recovery-contract.sh" \
   "$ROOT_DIR/scripts/find-duplicate-json-object-keys.mjs" \
   "$ROOT_DIR/scripts/read-bounded-text.mjs" \
+  "$ROOT_DIR/scripts/validate-junit-xml.mjs" \
   "$fresh_checkout/scripts/"
+cp "$ROOT_DIR/scripts/tests/native-large-text-evidence-fixture.sh" \
+  "$fresh_checkout/scripts/tests/"
 cp "$ROOT_DIR/$SUITE_RELATIVE_PATH" "$fresh_checkout/$SUITE_RELATIVE_PATH"
 missing_saved_status="$fresh_checkout/$PLAYWRIGHT_OUTPUT_RELATIVE_DIR/.last-run.json"
 

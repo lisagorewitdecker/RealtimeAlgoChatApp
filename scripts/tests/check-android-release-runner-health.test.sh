@@ -12,8 +12,22 @@ GREP_BIN="$(command -v grep)"
 MKDIR_BIN="$(command -v mkdir)"
 RM_BIN="$(command -v rm)"
 
-test_parent="$("$MKTEMP_BIN" -d)"
-trap '"$RM_BIN" -rf "$test_parent"' EXIT
+sandbox_parent="$("$MKTEMP_BIN" -d)"
+test_parent="$sandbox_parent/fixtures"
+cleanup_guard="$sandbox_parent/cleanup-must-not-escape-fixtures"
+"$MKDIR_BIN" -p "$test_parent"
+printf 'keep\n' >"$cleanup_guard"
+
+cleanup_test_fixtures() {
+  "$RM_BIN" -rf "$test_parent"
+  if [[ ! -f "$cleanup_guard" ]]; then
+    echo "Android runner health test cleanup escaped its fixture directory" >&2
+    exit 1
+  fi
+  "$RM_BIN" -rf "$sandbox_parent"
+}
+
+trap cleanup_test_fixtures EXIT
 stub_bin="$test_parent/bin"
 "$MKDIR_BIN" -p "$stub_bin"
 
@@ -93,6 +107,22 @@ missing_token_output="$(
   fi
 )"
 assert_contains "$missing_token_output" \
+  "GITHUB_WORKFLOW_PULL_TOKEN_FINAL must be configured with Administration: read access."
+
+empty_token_output="$(
+  if "$ENV_BIN" \
+    PATH="$stub_bin:$PATH" \
+    GITHUB_REPOSITORY=example/project \
+    GH_TOKEN= \
+    GH_STUB_JSON="$ready_fixture" \
+    "$BASH_BIN" "$CHECKER" 2>&1; then
+    exit 1
+  else
+    status=$?
+    [[ "$status" -eq 2 ]]
+  fi
+)"
+assert_contains "$empty_token_output" \
   "GITHUB_WORKFLOW_PULL_TOKEN_FINAL must be configured with Administration: read access."
 
 missing_label_fixture='[{"runners":[{"name":"android-release-linux","status":"online","labels":[{"name":"self-hosted"},{"name":"linux"},{"name":"android"}]}]}]'

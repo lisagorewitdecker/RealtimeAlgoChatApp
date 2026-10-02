@@ -7,20 +7,87 @@ import { logger } from "./logger";
 // alert rule — a "dead man's switch" that catches full outages, not just
 // errors reported from within a live process.
 const MONITOR_SLUG = "api-server-healthz";
-const LIVENESS_PATH = "/api/livez";
+const READINESS_PATH = "/api/healthz";
 const CHECK_INTERVAL_MINUTES = 5;
 const CHECK_INTERVAL_MS = CHECK_INTERVAL_MINUTES * 60 * 1000;
 const CHECK_TIMEOUT_MS = 10_000;
+const MAX_REPORTED_ELAPSED_MS = 60_000;
 
-async function pingHealthz(port: number): Promise<void> {
+export type ReadinessFailureReason = "timeout" | "connection" | "unknown";
+
+export interface ReadinessFailureDetails {
+  reason: ReadinessFailureReason;
+  elapsedMs: number;
+}
+
+function isReadinessFailureReason(
+  value: unknown,
+): value is ReadinessFailureReason {
+  return value === "timeout" || value === "connection" || value === "unknown";
+}
+
+export function parseReadinessFailureBody(
+  body: unknown,
+): ReadinessFailureDetails | undefined {
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    return undefined;
+  }
+
+  const record = body as Record<string, unknown>;
+  const { reason, elapsedMs } = record;
+  if (
+    !isReadinessFailureReason(reason) ||
+    typeof elapsedMs !== "number" ||
+    !Number.isSafeInteger(elapsedMs) ||
+    elapsedMs < 0 ||
+    elapsedMs > MAX_REPORTED_ELAPSED_MS
+  ) {
+    return undefined;
+  }
+
+  return { reason, elapsedMs };
+}
+
+class ReadinessFailureError extends Error {
+  constructor(
+    readonly status: number,
+    readonly details: ReadinessFailureDetails,
+  ) {
+    super(
+      `${READINESS_PATH} responded with status ${status} ` +
+        `(reason=${details.reason}, elapsedMs=${details.elapsedMs})`,
+    );
+    this.name = "ReadinessFailureError";
+  }
+}
+
+async function readReadinessFailureDetails(
+  response: Response,
+): Promise<ReadinessFailureDetails | undefined> {
+  if (response.status !== 503) {
+    return undefined;
+  }
+
+  try {
+    return parseReadinessFailureBody(await response.json());
+  } catch {
+    return undefined;
+  }
+}
+
+export async function pingHealthz(port: number): Promise<void> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), CHECK_TIMEOUT_MS);
   try {
-    const res = await fetch(`http://127.0.0.1:${port}${LIVENESS_PATH}`, {
+    const res = await fetch(`http://127.0.0.1:${port}${READINESS_PATH}`, {
       signal: controller.signal,
     });
     if (!res.ok) {
-      throw new Error(`${LIVENESS_PATH} responded with status ${res.status}`);
+      const details = await readReadinessFailureDetails(res);
+      if (details) {
+        throw new ReadinessFailureError(res.status, details);
+      }
+      throw new Error(`${READINESS_PATH} responded with status ${res.status}`);
     }
   } finally {
     clearTimeout(timeout);
@@ -28,7 +95,7 @@ async function pingHealthz(port: number): Promise<void> {
 }
 
 /**
- * Starts a recurring uptime check against this server's own liveness endpoint,
+ * Starts a recurring uptime check against this server's own readiness endpoint,
  * reported to Sentry as a Cron Monitor check-in. Requires SENTRY_DSN — without
  * it there is nowhere to send the alert, so the check is skipped entirely
  * rather than silently doing nothing useful.
@@ -36,7 +103,7 @@ async function pingHealthz(port: number): Promise<void> {
 export function startHealthMonitor(port: number): void {
   if (!sentryEnabled) {
     logger.warn(
-      `Sentry is disabled; skipping the ${LIVENESS_PATH} uptime monitor`,
+      `Sentry is disabled; skipping the ${READINESS_PATH} uptime monitor`,
     );
     return;
   }
@@ -58,7 +125,24 @@ export function startHealthMonitor(port: number): void {
         timezone: "Etc/UTC",
       },
     ).catch((err: unknown) => {
-      logger.error({ err }, `${LIVENESS_PATH} uptime check failed`);
+      if (err instanceof ReadinessFailureError) {
+        Sentry.captureException(err, {
+          tags: { readinessFailureReason: err.details.reason },
+          extra: { elapsedMs: err.details.elapsedMs },
+        });
+        logger.error(
+          {
+            err,
+            reason: err.details.reason,
+            elapsedMs: err.details.elapsedMs,
+          },
+          `${READINESS_PATH} uptime check failed`,
+        );
+        return;
+      }
+
+      Sentry.captureException(err);
+      logger.error({ err }, `${READINESS_PATH} uptime check failed`);
     });
   };
 

@@ -104,9 +104,9 @@ write_ios_readiness_summary() {
     if ((${#IOS_READINESS_BLOCKERS[@]})); then
       echo
       echo "### Blocking prerequisites"
-      for blocker in "${IOS_READINESS_BLOCKERS[@]}"; do
-        printf -- '- %s\n' "$(sanitize_workflow_text "$blocker")"
-      done
+      printf -- '%s\n' "${IOS_READINESS_BLOCKERS[@]}" |
+        sanitize_workflow_stream |
+        render_markdown_code_block
     fi
   } > "$RESULTS_DIR/ios-readiness.md"
 

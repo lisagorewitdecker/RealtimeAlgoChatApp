@@ -3,8 +3,11 @@ import { execFileSync, spawnSync } from "node:child_process";
 import {
   appendFileSync,
   copyFileSync,
+  existsSync,
+  lstatSync,
   mkdtempSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
   rmSync,
   symlinkSync,
@@ -80,6 +83,7 @@ const generatedClientValidationFixturePaths = [
   "tsconfig.json",
   ".github/pull_request_template.md",
   ".github/workflows/api-codegen.yml",
+  "scripts/run-untrusted-checker.sh",
   "lib/api-spec",
   "lib/api-client-react/package.json",
   "lib/api-client-react/tsconfig.json",
@@ -98,7 +102,9 @@ const generatedClientValidationFixturePaths = [
 function resolveRootPackageScript(command) {
   const match = String(command)
     .trim()
-    .match(/^pnpm(?:\s+run)?\s+([^\s]+)$/);
+    .match(
+      /^(?:bash\s+scripts\/run-untrusted-checker\.sh\s+)?pnpm(?:\s+run)?\s+([^\s]+)$/,
+    );
   assert.ok(
     match,
     `expected a single root pnpm package script command, received: ${command}`,
@@ -297,11 +303,46 @@ function createGeneratedClientFixture() {
       copyFileSync(source, destination);
     }
 
-    symlinkSync(
-      path.join(workspaceRoot, "node_modules"),
-      path.join(fixtureRoot, "node_modules"),
-      "dir",
-    );
+    const mirrorNodeModules = (relativePath) => {
+      const source = path.join(workspaceRoot, relativePath, "node_modules");
+      if (!existsSync(source)) {
+        return;
+      }
+      const destination = path.join(fixtureRoot, relativePath, "node_modules");
+      mkdirSync(destination, { recursive: true });
+
+      const linkEntry = (sourceEntry, fixtureEntry) => {
+        const sourceStats = lstatSync(sourceEntry);
+        if (path.basename(sourceEntry).startsWith(".pnpm-task-run-state")) {
+          mkdirSync(fixtureEntry, { recursive: true });
+          return;
+        }
+        if (
+          path.basename(sourceEntry).startsWith("@") &&
+          sourceStats.isDirectory()
+        ) {
+          mkdirSync(fixtureEntry, { recursive: true });
+          for (const scopedEntry of readdirSync(sourceEntry)) {
+            linkEntry(
+              path.join(sourceEntry, scopedEntry),
+              path.join(fixtureEntry, scopedEntry),
+            );
+          }
+          return;
+        }
+        symlinkSync(
+          sourceEntry,
+          fixtureEntry,
+          sourceStats.isDirectory() ? "dir" : "file",
+        );
+      };
+
+      for (const entry of readdirSync(source)) {
+        linkEntry(path.join(source, entry), path.join(destination, entry));
+      }
+    };
+
+    mirrorNodeModules("");
     for (const packagePath of [
       "lib/api-client-react",
       "lib/api-spec",
@@ -309,11 +350,7 @@ function createGeneratedClientFixture() {
       "lib/db",
       "lib/integrations-anthropic-ai",
     ]) {
-      symlinkSync(
-        path.join(workspaceRoot, packagePath, "node_modules"),
-        path.join(fixtureRoot, packagePath, "node_modules"),
-        "dir",
-      );
+      mirrorNodeModules(packagePath);
     }
 
     return fixtureRoot;
@@ -697,5 +734,10 @@ test("API compatibility workflow command resolves to the maintained contract che
     resolveRootPackageScript(compatibilityStep.run),
     "node lib/api-spec/scripts/check-contract-compatibility.mjs",
     "the compatibility workflow must invoke the repository's maintained contract compatibility checker through the root package script",
+  );
+  assert.equal(
+    compatibilityStep.run,
+    "bash scripts/run-untrusted-checker.sh pnpm validate:api-compatibility",
+    "the compatibility workflow must protect checker output from workflow-command interpretation",
   );
 });

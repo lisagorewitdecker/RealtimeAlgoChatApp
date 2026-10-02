@@ -7,4 +7,4 @@ Restore a preserved hook by renaming it directly over the active managed hook. N
 
 **Why:** If restoration fails after removing the managed hook, the repository has no active hook and one recovery copy may be harder to identify. Direct replacement either succeeds atomically or leaves both copies recoverable. A cleanup exception thrown first can also hide the setup failure and skip restoration entirely.
 
-**How to apply:** Use this rule whenever dispatcher installation, uninstallation, or another hook-management operation restores a preserved developer hook. Attempt restoration even after cleanup errors; on failure, keep the setup error primary, identify every surviving path, and print exact manual recovery commands.
+**How to apply:** Use this rule whenever dispatcher installation, uninstallation, or another hook-management operation restores a preserved developer hook. Attempt restoration even after cleanup errors; if a failed cleanup can leave a temporary path occupied, stage a prior registration on a distinct rollback path. On failure, keep the setup error primary, identify every surviving path, and print exact manual recovery commands.

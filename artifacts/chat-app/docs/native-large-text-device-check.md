@@ -455,11 +455,13 @@ are read from the workflow on `main`, not from a local checkout.
 dry-run path on Linux and fails when its labels, pinned runner release, pnpm
 version, or readiness report drift from the workflow and this document. It
 also drives the macOS-only branches through stubs (`uname` reporting Darwin,
-`xcrun simctl` listings padded with trailing whitespace, `launchctl`
-bootstrap failing once after bootout, `svc.sh` in every service state). macOS
-ships bash 3.2, so run the suite with `PROVISION_TEST_BASH=/path/to/bash-3.2`
-pointing at a locally built bash 3.2.57 before changing the script; the
-default run uses the workspace bash.
+`xcrun simctl` listings padded with trailing whitespace, a device type list
+with and without the iPhone SE, `launchctl` bootstrap failing once after
+bootout, `svc.sh` in every service state) and runs the report checker suite
+described below. macOS ships bash 3.2, so run the suite with
+`PROVISION_TEST_BASH=/path/to/bash-3.2` pointing at a locally built bash
+3.2.57 before changing the script; the default run uses the workspace bash.
+The hosted Mac check below runs the same suites under Apple's `/bin/bash`.
 
 Store the candidate build IDs as repository-level GitHub Actions
 **variables**:
@@ -473,6 +475,56 @@ These IDs are non-secret release configuration and appear literally alongside
 their SHA-256 fingerprints in the release summary. Reusable-workflow callers
 instead pass the required `native_smoke_ios_build_id` and
 `native_smoke_android_build_id` inputs.
+
+### Checking the Mac setup script on a GitHub-hosted Mac
+
+The Linux suite can only simulate Xcode. Two facts about a real Mac stay
+unverified from the workspace: whether the text output of `xcrun simctl list`
+pads its lines (the patterns tolerate padding precautionarily) and whether the
+installed Xcode still offers
+`com.apple.CoreSimulator.SimDeviceType.iPhone-SE-3rd-generation`. The
+`iOS runner provisioning real macOS` workflow
+(`.github/workflows/ios-runner-provisioning-real-macos.yml`) answers both on a
+GitHub-hosted `macos-latest` runner, which ships Apple's `/bin/bash` 3.2, a
+real Xcode, `xcrun`, `simctl`, and `launchctl`, so breakage surfaces on GitHub
+instead of on the owner's Mac. Its single job:
+
+1. runs `scripts/tests/provision-ios-runner.test.sh` and
+   `scripts/tests/check-ios-runner-dry-run-report.test.sh` with
+   `PROVISION_TEST_BASH=/bin/bash`, so every stub and the script itself run
+   under the bash the Mac will use;
+2. runs `/bin/bash ./scripts/provision-ios-runner.sh --dry-run --no-github`
+   with stdin closed, `RUNNER_NAME=ios-release-mac`, and an empty
+   `RUNNER_ROOT` under the job's temporary directory. The dry run performs the
+   real Xcode and `simctl` detection, runtime listing, device type lookup, and
+   simulator lookup; it never registers a runner, never reads a registration
+   token (none exists in the job), never calls the GitHub CLI, and never
+   installs a launch agent;
+3. runs `scripts/check-ios-runner-dry-run-report.sh` on the transcript. The
+   check fails when the `Xcode with simctl` row or the `iOS simulator runtime`
+   row is anything other than `READY` (on a hosted Mac that means the
+   detection or the listing parser broke), when the
+   `Booted iPhone SE (3rd generation)` row is neither `READY` nor a `MISSING`
+   row that plans the boot or the creation on a parsed runtime (an unavailable
+   device type reports `cannot be created: ... is not offered by the installed
+   Xcode`), when the transcript was not produced by a dry run on macOS, or
+   when the run stopped before `IOS_RELEASE_RUNNER=`. Its last line is
+   `IOS_RUNNER_DRY_RUN_CHECK=PASS` or `IOS_RUNNER_DRY_RUN_CHECK=FAIL`, and it
+   appends the readiness report, sanitized and bounded, to the job summary.
+   The report lists configuration names only, never values.
+
+The job runs for pull requests and pushes to `main` that touch the script, the
+shared contract, the checker, or their tests, weekly on a schedule (GitHub
+pauses schedules after sixty days without repository activity; re-enable the
+workflow from the Actions tab if that happens), and on demand through
+**Run workflow**. The hosted Mac never has pnpm, Java, or Maestro prepared,
+so those rows stay `MISSING` with install plans and the report always ends in
+`IOS_RELEASE_RUNNER=INCOMPLETE`; the job judges only the Xcode-dependent rows.
+Run it before the owner's first provisioning run whenever the script or the
+Xcode on `macos-latest` changed, and read the quoted report in the job summary
+when it fails. `pnpm run validate:github-workflows` lints the workflow file
+and `node --test scripts/tests/ios-runner-real-macos-workflow.test.mjs` keeps
+it read-only (no secrets, no `config.sh`, no `svc.sh`) and pinned.
 
 ### Updating reusable-workflow callers
 
@@ -513,15 +565,18 @@ together before native runners or release regressions start. It names keys only,
 never values. GitHub's reusable-workflow declarations leave the secrets
 syntactically optional so this aggregate diagnostic can run; the preflight list
 below is the blocking required contract. `NATIVE_SMOKE_DISPLAY_NAME` remains
-optional and is not included in that failure. The publish-only `EAS_TOKEN` also
-stays out of this preflight and remains available only after approval from the
+optional and is not included in that failure. `EAS_TOKEN` is required earlier in
+the `mobile-release` environment so native runner preparation can download the
+exact tested candidates, and the publish job also needs the same secret in the
 protected `mobile-store-submission` environment.
 
 Store the runner-read token below as a repository Actions **secret** so manual
 dispatches can use it, and pass it through the reusable-workflow secret contract.
 Store the release credentials in the GitHub Actions `mobile-release` environment.
-Authentication values are injected only into the process that needs them and
-are never written to the repository or printed by the workflow.
+If the workflow will publish after approval, also store `EAS_TOKEN` in the
+protected `mobile-store-submission` environment. Authentication values are
+injected only into the process that needs them and are never written to the
+repository or printed by the workflow.
 The candidate build IDs are recorded in each smoke result directory so the
 tested candidate can be audited by the publish job:
 
@@ -555,10 +610,12 @@ tested candidate can be audited by the publish job:
 - `NATIVE_SMOKE_DISPLAY_NAME` — reusable display name for the smoke account; the
   test flow can register the account without a preconfigured value
 
-#### Publish-only secret
+#### Required reusable-workflow secret and publish secret
 
-- `EAS_TOKEN` — EAS authentication token used only by the publish job; store it
-  in the protected `mobile-store-submission` environment, not `mobile-release`
+- `EAS_TOKEN` — EAS authentication token used by native release configuration,
+  the iOS and Android runner-preparation jobs that download the tested
+  candidates, and the final publish job; store it in `mobile-release`, and also
+  in the protected `mobile-store-submission` environment when publish is enabled
 
 Build each candidate with `SENTRY_DSN`, `SENTRY_AUTH_TOKEN`, `SENTRY_RELEASE`,
 and `SENTRY_DIST` in its EAS release environment. EAS supplies `EAS_BUILD_ID`;
@@ -666,6 +723,15 @@ A failed or blocked pass record, a pass record that does not declare
 `run_mode=release-gate` (including diagnostic-only iOS runs), a non-PASS
 branding or Sentry report, or an empty artifact blocks release review.
 
+Both JUnit artifacts must also be UTF-8 and well-formed XML holding a
+`testsuite` element. A truncated upload, or a captured log that merely mentions
+a `testsuite` element, is rejected on structure alone: the diagnostic names the
+file path and the structural reason, and never quotes what the file contains.
+Open the uploaded report itself to see why the run stopped. The one deliberate
+allowance is terminal escape bytes inside element text, attribute values, and
+CDATA, which real device logs carry; they are still rejected in markup,
+comments, and processing instructions.
+
 `runner-check.txt` is host diagnostic evidence only. If it is the only file
 available for a platform, the check reports that the platform is blocked rather
 than treating the diagnostic as reviewed device evidence. Complete the run on
@@ -706,7 +772,7 @@ The publish job always runs this strict check before either `eas submit`.
 ### Supplying approvals to the publish job
 
 Configure the GitHub `mobile-store-submission` environment with required
-reviewers and place the publish-only `EAS_TOKEN` secret there. Candidate build
+reviewers and place the `EAS_TOKEN` secret there as well. Candidate build
 IDs continue to come from the non-secret repository variables. Do not
 permit self-review. This protected environment is the trusted
 human approval boundary; the general `mobile-release` environment used by the

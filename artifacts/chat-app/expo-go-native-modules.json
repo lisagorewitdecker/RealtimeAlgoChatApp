@@ -1,0 +1,15 @@
+{
+  "$comment": "Native modules compiled into the Expo Go iOS builds this app is loaded with. Expo Go ships one native binary per build, so the JavaScript versions installed here must match the native versions inside the targeted build exactly: react-native-worklets compares only major.minor at startup, and a patch-level mismatch kills the app before AppRegistry runs (no red box, no client log, inspector close 1006 seconds after the bundle download). A target that is not listed uses the closest lower listed build. Update targetExpoGoIosVersion together with the pins in package.json (and expo.install.exclude) when the Expo Go build on Replit's iPhone simulator changes; scripts/validate-preview-runtime.mjs enforces the pairing. Sources: expo/expo apps/expo-go/ios/Podfile.lock on the sdk-57 branch before and after the 2026-07-27 reanimated 4.5.1 bump (commit f076696a), and expo/expo issues 48390, 48414 and 48418.",
+  "targetExpoGoIosVersion": "57.0.5",
+  "targetObservation": "Replit iPhone simulator, 2026-09-17: the bundle request User-Agent was Expo/57.0.5. The App Store build was 57.0.9 on 2026-09-19; it follows the 57.0.6 row.",
+  "expoGoIosBuilds": {
+    "57.0.5": {
+      "react-native-worklets": "0.10.0",
+      "react-native-reanimated": "4.5.0"
+    },
+    "57.0.6": {
+      "react-native-worklets": "0.10.1",
+      "react-native-reanimated": "4.5.1"
+    }
+  }
+}

@@ -3,8 +3,12 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 CHECKER="$ROOT_DIR/scripts/check-native-large-text-evidence.sh"
+FIXTURE_BUILDER="$ROOT_DIR/scripts/tests/native-large-text-evidence-fixture.sh"
+TAMPER_OUTPUT_CHECKER="$ROOT_DIR/scripts/verify-native-tamper-output.sh"
 SAVED_TEST_STATUS="$ROOT_DIR/artifacts/api-server/test-results/.last-run.json"
 HOSTED_TAMPER_FIXTURES_ROOT="${NATIVE_EVIDENCE_TAMPER_FIXTURES_ROOT:-}"
+HOSTED_TAMPER_DEADLINE="${NATIVE_EVIDENCE_TAMPER_DEADLINE:-}"
+PRIVACY_FAILURE_FIXTURE_ROOT="${NATIVE_EVIDENCE_PRIVACY_FAILURE_FIXTURE_ROOT:-}"
 TEST_PARENT="$(mktemp -d)"
 TEST_ROOT="$TEST_PARENT/fixtures"
 CLEANUP_GUARD="$TEST_PARENT/cleanup-must-not-escape-fixtures"
@@ -32,17 +36,23 @@ cleanup_test_fixtures() {
     echo "Native evidence test cleanup escaped its fixture directory" >&2
     return 1
   fi
-  if ((SAVED_TEST_STATUS_GUARDED)) &&
-    ! cmp -s "$SAVED_TEST_STATUS_SNAPSHOT" "$SAVED_TEST_STATUS"; then
-    printf 'Native evidence test cleanup changed the saved API test status: %s no longer matches its pre-test snapshot (a concurrent API Playwright run rewrites this file too).\n' \
-      "$SAVED_TEST_STATUS" >&2
-    return 1
+  if ((SAVED_TEST_STATUS_GUARDED)); then
+    if [[ ! -f "$SAVED_TEST_STATUS" ]]; then
+      printf 'Skipping the saved API test status cleanup guard: %s disappeared during the test (optional gitignored Playwright output may be rewritten by other local runs).\n' \
+        "$SAVED_TEST_STATUS" >&2
+    elif ! cmp -s "$SAVED_TEST_STATUS_SNAPSHOT" "$SAVED_TEST_STATUS"; then
+      printf 'Skipping the saved API test status cleanup guard: %s changed during the test (optional gitignored Playwright output may be rewritten by other local runs).\n' \
+        "$SAVED_TEST_STATUS" >&2
+    fi
   fi
 
   rm -rf "$TEST_PARENT"
 }
 
 trap cleanup_test_fixtures EXIT
+
+# The hosted tamper job sources the same complete fixture builder below.
+source "$FIXTURE_BUILDER"
 
 assert_contains() {
   local output="$1"
@@ -61,6 +71,65 @@ assert_not_contains() {
     exit 1
   fi
 }
+
+assert_not_contains_private_fixture() {
+  local output="$1"
+  local private_value="$2"
+  local context="$3"
+  if grep -Fq -- "$private_value" <<<"$output"; then
+    printf 'The %s exposed private fixture content; the value is intentionally omitted from this diagnostic.\n' \
+      "$context" >&2
+    exit 1
+  fi
+}
+
+tamper_output_contract_root="$TEST_ROOT/tamper-output-contract"
+tamper_output_log="$tamper_output_contract_root/checker.log"
+tamper_output_summary="$tamper_output_contract_root/summary.md"
+tamper_output_stdout="$tamper_output_contract_root/verifier.stdout"
+tamper_output_stderr="$tamper_output_contract_root/verifier.stderr"
+mkdir -p "$tamper_output_contract_root"
+printf '%s\n' \
+  '::stop-commands::01234567-89ab-cdef-0123-456789abcdef' \
+  'safe checker output' \
+  '::01234567-89ab-cdef-0123-456789abcdef::' \
+  > "$tamper_output_log"
+printf '%s\n' '# Safe tamper summary' > "$tamper_output_summary"
+if ! bash "$TAMPER_OUTPUT_CHECKER" \
+  "$tamper_output_log" \
+  "$tamper_output_summary" \
+  > "$tamper_output_stdout" \
+  2> "$tamper_output_stderr"; then
+  echo "safe tamper output unexpectedly failed verification" >&2
+  exit 1
+fi
+assert_contains "$(cat "$tamper_output_stdout")" "safe checker output"
+
+tamper_private_marker="$(printf '%s' 'Y2FuZGlkYXRlLWlvcy1wcml2YXRlLXNlbnRpbmVs' | base64 --decode)"
+printf '%s\n' \
+  '::stop-commands::01234567-89ab-cdef-0123-456789abcdef' \
+  "$tamper_private_marker" \
+  '::error::must-not-run' \
+  '::01234567-89ab-cdef-0123-456789abcdef::' \
+  > "$tamper_output_log"
+: > "$tamper_output_stdout"
+: > "$tamper_output_stderr"
+if bash "$TAMPER_OUTPUT_CHECKER" \
+  "$tamper_output_log" \
+  "$tamper_output_summary" \
+  > "$tamper_output_stdout" \
+  2> "$tamper_output_stderr"; then
+  echo "unsafe tamper output unexpectedly passed verification" >&2
+  exit 1
+fi
+if [[ -s "$tamper_output_stdout" ]]; then
+  echo "unsafe tamper output was printed before verification rejected it" >&2
+  exit 1
+fi
+assert_not_contains_private_fixture \
+  "$(cat "$tamper_output_stderr")" \
+  "$tamper_private_marker" \
+  "tamper output verifier diagnostics"
 
 release_node_range="$(node --input-type=module - <<'NODE'
 import { readFileSync } from "node:fs";
@@ -101,84 +170,12 @@ EOF
 write_valid_run() {
   local root="$1"
   local platform="$2"
-  local run_dir="$root/$platform/20260909T120000Z"
   local build_id="${3:-build-$platform}"
-  local index
-
-  mkdir -p "$run_dir/screenshots" "$run_dir/call-surface"
-  printf '%s\n' "$build_id" > "$run_dir/candidate-build-id.txt"
-  # Mirror every field the native large-text runner writes, so duplicate-field
-  # coverage tracks the real producer rather than a minimal subset.
-  if [[ "$platform" == "ios" ]]; then
-    cat > "$run_dir/runner-metadata.txt" <<EOF
-platform=ios
-run_mode=release-gate
-candidate_build_id=$build_id
-app_id=com.example.chat
-device=iPhone SE (3rd generation)
-device_udid=00000000-0000-0000-0000-000000000000
-recorded_at_utc=2026-09-09T12:00:00Z
-EOF
-    printf '# iOS native readiness\n\n- Status: **READY**\n' > "$run_dir/ios-readiness.md"
-  else
-    cat > "$run_dir/runner-metadata.txt" <<EOF
-platform=android
-run_mode=release-gate
-candidate_build_id=$build_id
-app_id=com.example.chat
-device_serial=emulator-5554
-device_model=Smallest supported emulator
-android_release=16
-android_api=36
-screen_px=320x568
-screen_dp=320x568
-density_dpi=160
-user_rotation=0
-recorded_at_utc=2026-09-09T12:00:00Z
-EOF
-    printf 'applicationLabel=Chat\npermissions=android.permission.INTERNET\n' > "$run_dir/android-badging.txt"
-  fi
-  cat > "$run_dir/pass-fail-record.txt" <<EOF
-platform=$platform
-run_mode=release-gate
-candidate_build_id=$build_id
-status=PASS
-native_screenshot_count=11
-call_surface_screenshot_count=2
-recorded_at_utc=2026-09-09T12:30:00Z
-EOF
-  printf '{}\n' > "$run_dir/native-info.json"
-  printf '# Native branding validation\n\n- Status: **PASS**\n' > "$run_dir/native-branding-check.md"
-  printf '<testsuite tests="1" failures="0"></testsuite>\n' > "$run_dir/maestro-results.xml"
-  printf '<testsuite tests="1" failures="0"></testsuite>\n' > "$run_dir/sentry-maestro-results.xml"
-  cat > "$run_dir/sentry-trigger.txt" <<EOF
-platform=$platform
-candidate_build_id=$build_id
-marker=run-1234-$platform
-EOF
-  cat > "$run_dir/sentry-source-map-evidence.json" <<EOF
-{
-  "status": "PASS",
-  "eventId": "0123456789abcdef0123456789abcdef",
-  "platform": "$platform",
-  "candidateBuildId": "$build_id",
-  "marker": "run-1234-$platform",
-  "release": "chat-app@1.0.0+abc123",
-  "dist": "42",
-  "readableFrame": {
-    "filename": "artifacts/chat-app/lib/sentry.ts",
-    "function": "createNativeSourceMapProbeError",
-    "line": 55,
-    "column": 10
-  }
-}
-EOF
-  for index in $(seq 1 11); do
-    printf 'png-%s\n' "$index" > "$run_dir/screenshots/screen-$index.png"
-  done
-  for index in 1 2; do
-    printf 'call-%s\n' "$index" > "$run_dir/call-surface/call-$index.png"
-  done
+  write_native_large_text_evidence_fixture \
+    "$root" "$platform" "$build_id" \
+    "20260909T120000Z" \
+    "2026-09-09T12:00:00Z" \
+    "2026-09-09T12:30:00Z"
 }
 
 trusted_digest_manifest_for_run() {
@@ -1184,6 +1181,115 @@ assert_contains "$parser_error_junit_output" \
 assert_not_contains "$parser_error_junit_output" "$parser_error_maestro_marker"
 assert_not_contains "$parser_error_junit_output" "$parser_error_sentry_maestro_marker"
 
+# A JUnit upload that stops partway through is not well-formed XML. Both result
+# paths report the structural reason only; the partial report's own text never
+# reaches the log or the summary.
+truncated_junit_root="$TEST_ROOT/truncated-junit"
+write_valid_run "$truncated_junit_root" ios
+write_valid_run "$truncated_junit_root" android
+truncated_maestro_marker='truncated-maestro-marker-private'
+truncated_sentry_maestro_marker='truncated-sentry-maestro-marker-private'
+{
+  printf '<?xml version="1.0" encoding="UTF-8"?>\n'
+  printf '<testsuites name="maestro" tests="1" failures="1">\n'
+  printf '  <testsuite name="native-large-text" tests="1" failures="1">\n'
+  printf '    <testcase name="%s">\n' "$truncated_maestro_marker"
+} > "$truncated_junit_root/ios/20260909T120000Z/maestro-results.xml"
+{
+  printf '<testsuite tests="1" failures="1">\n'
+  printf '  <failure message="%s">\n' "$truncated_sentry_maestro_marker"
+} > "$truncated_junit_root/android/20260909T120000Z/sentry-maestro-results.xml"
+truncated_junit_summary_path="$TEST_ROOT/truncated-junit-summary.md"
+if truncated_junit_output="$(
+  GITHUB_STEP_SUMMARY="$truncated_junit_summary_path" \
+    bash "$CHECKER" "$truncated_junit_root" 2>&1
+)"; then
+  echo "truncated JUnit evidence case unexpectedly passed" >&2
+  exit 1
+fi
+truncated_junit_summary="$(cat "$truncated_junit_summary_path")"
+assert_contains "$truncated_junit_summary" \
+  "The JUnit result at $truncated_junit_root/ios/20260909T120000Z/maestro-results.xml is not well-formed XML."
+assert_contains "$truncated_junit_summary" \
+  "The controlled Sentry probe JUnit result at $truncated_junit_root/android/20260909T120000Z/sentry-maestro-results.xml is not well-formed XML."
+assert_not_contains_private_fixture "$truncated_junit_summary" \
+  "$truncated_maestro_marker" "truncated JUnit step summary"
+assert_not_contains_private_fixture "$truncated_junit_summary" \
+  "$truncated_sentry_maestro_marker" "truncated JUnit step summary"
+assert_contains "$truncated_junit_output" \
+  "The JUnit result at $truncated_junit_root/ios/20260909T120000Z/maestro-results.xml is not well-formed XML. Upload the complete Maestro JUnit output."
+assert_contains "$truncated_junit_output" \
+  "The controlled Sentry probe JUnit result at $truncated_junit_root/android/20260909T120000Z/sentry-maestro-results.xml is not well-formed XML."
+assert_not_contains_private_fixture "$truncated_junit_output" \
+  "$truncated_maestro_marker" "truncated JUnit diagnostic"
+assert_not_contains_private_fixture "$truncated_junit_output" \
+  "$truncated_sentry_maestro_marker" "truncated JUnit diagnostic"
+
+# A captured log that merely mentions a testsuite element is not a report.
+# Matching the element name alone accepted these, so both result paths keep a
+# regression that the surrounding text is rejected on structure.
+marker_text_junit_root="$TEST_ROOT/marker-text-junit"
+write_valid_run "$marker_text_junit_root" ios
+write_valid_run "$marker_text_junit_root" android
+marker_text_maestro_marker='maestro-log-dump-marker-private'
+marker_text_sentry_maestro_marker='sentry-log-dump-marker-private'
+printf 'Maestro aborted before writing a report. Raw log: <testsuite tests="1"> %s\n' \
+  "$marker_text_maestro_marker" \
+  > "$marker_text_junit_root/ios/20260909T120000Z/maestro-results.xml"
+printf '%s <testsuite name="sentry-probe"/>\n' "$marker_text_sentry_maestro_marker" \
+  > "$marker_text_junit_root/android/20260909T120000Z/sentry-maestro-results.xml"
+marker_text_junit_summary_path="$TEST_ROOT/marker-text-junit-summary.md"
+if marker_text_junit_output="$(
+  GITHUB_STEP_SUMMARY="$marker_text_junit_summary_path" \
+    bash "$CHECKER" "$marker_text_junit_root" 2>&1
+)"; then
+  echo "marker-only JUnit evidence case unexpectedly passed" >&2
+  exit 1
+fi
+marker_text_junit_summary="$(cat "$marker_text_junit_summary_path")"
+assert_contains "$marker_text_junit_summary" \
+  "The JUnit result at $marker_text_junit_root/ios/20260909T120000Z/maestro-results.xml is not well-formed XML."
+assert_contains "$marker_text_junit_summary" \
+  "The controlled Sentry probe JUnit result at $marker_text_junit_root/android/20260909T120000Z/sentry-maestro-results.xml is not well-formed XML."
+assert_not_contains_private_fixture "$marker_text_junit_summary" \
+  "$marker_text_maestro_marker" "marker-only JUnit step summary"
+assert_not_contains_private_fixture "$marker_text_junit_summary" \
+  "$marker_text_sentry_maestro_marker" "marker-only JUnit step summary"
+assert_contains "$marker_text_junit_output" \
+  "The JUnit result at $marker_text_junit_root/ios/20260909T120000Z/maestro-results.xml is not well-formed XML. Upload the complete Maestro JUnit output."
+assert_contains "$marker_text_junit_output" \
+  "The controlled Sentry probe JUnit result at $marker_text_junit_root/android/20260909T120000Z/sentry-maestro-results.xml is not well-formed XML."
+assert_not_contains_private_fixture "$marker_text_junit_output" \
+  "$marker_text_maestro_marker" "marker-only JUnit diagnostic"
+assert_not_contains_private_fixture "$marker_text_junit_output" \
+  "$marker_text_sentry_maestro_marker" "marker-only JUnit diagnostic"
+
+# Complete reports from the native runners keep passing on both result paths:
+# an XML declaration, a comment, a testsuites root, self-closing testcases, and
+# CDATA log output are all normal Maestro output.
+valid_junit_root="$TEST_ROOT/valid-junit"
+write_valid_run "$valid_junit_root" ios
+write_valid_run "$valid_junit_root" android
+for valid_junit_platform in ios android; do
+  cat > "$valid_junit_root/$valid_junit_platform/20260909T120000Z/maestro-results.xml" <<'XML'
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Maestro JUnit output -->
+<testsuites name="maestro" tests="2" failures="0">
+  <testsuite name="native-large-text" tests="2" failures="0" time="12.5">
+    <testcase name="opens the room" classname="flow" time="6.25"/>
+    <testcase name="sends a message" classname="flow" time="6.25">
+      <system-out><![CDATA[log line with <brackets> & an ampersand]]></system-out>
+    </testcase>
+  </testsuite>
+</testsuites>
+XML
+  printf '<testsuite name="sentry-probe" tests="1" failures="0"/>\n' \
+    > "$valid_junit_root/$valid_junit_platform/20260909T120000Z/sentry-maestro-results.xml"
+done
+valid_junit_output="$(bash "$CHECKER" "$valid_junit_root" 2>&1)"
+assert_not_contains "$valid_junit_output" "maestro-results.xml"
+assert_not_contains "$valid_junit_output" "sentry-maestro-results.xml"
+
 # A duplicate only silences the checks for that field; the remaining
 # single-declaration fields are still validated by value.
 partial_duplicate_root="$TEST_ROOT/partial-duplicate"
@@ -1483,12 +1589,24 @@ EOF
   assert_contains "$(cat "$blocked_result")" "status=BLOCKED"
   assert_contains "$(cat "$blocked_result")" "reason=native-evidence-validation-failed"
   assert_contains "$(cat "$tampered_summary_path")" "- Status: **FAIL**"
-  assert_not_contains "$validation_output" "$private_candidate_id"
-  assert_not_contains "$validation_output" "$private_reviewer"
-  assert_not_contains "$(cat "$tampered_summary_path")" "$private_candidate_id"
-  assert_not_contains "$(cat "$tampered_summary_path")" "$private_reviewer"
+  assert_not_contains_private_fixture \
+    "$validation_output" \
+    "$private_candidate_id" \
+    "$tampered_platform diagnostics"
+  assert_not_contains_private_fixture \
+    "$validation_output" \
+    "$private_reviewer" \
+    "$tampered_platform diagnostics"
+  assert_not_contains_private_fixture \
+    "$(cat "$tampered_summary_path")" \
+    "$private_candidate_id" \
+    "$tampered_platform summary"
+  assert_not_contains_private_fixture \
+    "$(cat "$tampered_summary_path")" \
+    "$private_reviewer" \
+    "$tampered_platform summary"
   if [[ -n "$HOSTED_TAMPER_FIXTURES_ROOT" ]]; then
-    echo "Hosted tampered $tampered_platform evidence recorded BLOCKED without invoking the submission stub."
+    echo "Hosted tampered $tampered_platform evidence recorded BLOCKED without invoking the submission stub. (validation deadline: ${HOSTED_TAMPER_DEADLINE:-not configured})."
   fi
 done
 
@@ -1572,13 +1690,148 @@ for artifact_mutation in ios-screenshot android-sentry; do
   assert_contains "$(cat "$blocked_result")" "status=BLOCKED"
   assert_contains "$(cat "$blocked_result")" "reason=native-evidence-validation-failed"
   assert_contains "$(cat "$tampered_summary_path")" "- Status: **FAIL**"
-  assert_not_contains "$validation_output" "$private_candidate_id"
-  assert_not_contains "$validation_output" "$private_reviewer"
-  assert_not_contains "$validation_output" "$private_evidence"
-  assert_not_contains "$(cat "$tampered_summary_path")" "$private_candidate_id"
-  assert_not_contains "$(cat "$tampered_summary_path")" "$private_reviewer"
-  assert_not_contains "$(cat "$tampered_summary_path")" "$private_evidence"
+  assert_not_contains_private_fixture \
+    "$validation_output" \
+    "$private_candidate_id" \
+    "$tampered_platform diagnostics"
+  assert_not_contains_private_fixture \
+    "$validation_output" \
+    "$private_reviewer" \
+    "$tampered_platform diagnostics"
+  assert_not_contains_private_fixture \
+    "$validation_output" \
+    "$private_evidence" \
+    "$tampered_platform diagnostics"
+  assert_not_contains_private_fixture \
+    "$(cat "$tampered_summary_path")" \
+    "$private_candidate_id" \
+    "$tampered_platform summary"
+  assert_not_contains_private_fixture \
+    "$(cat "$tampered_summary_path")" \
+    "$private_reviewer" \
+    "$tampered_platform summary"
+  assert_not_contains_private_fixture \
+    "$(cat "$tampered_summary_path")" \
+    "$private_evidence" \
+    "$tampered_platform summary"
 done
+
+# Exercise the publish summary branch after a controlled privacy failure. The
+# checker summary and the reviewer-visible publish summary must remain safe even
+# when the failed fixture directory contains private content.
+privacy_root="$TEST_ROOT/privacy-publish-boundary"
+privacy_checker_summary="$TEST_ROOT/privacy-checker-summary.md"
+privacy_publish_summary="$TEST_ROOT/privacy-publish-summary.md"
+privacy_submission_marker="$privacy_root/store-submission-command-ran"
+privacy_fixture_sentinel="privacy-fixture-contents-must-not-appear"
+mkdir -p "$privacy_root"
+printf '%s\n' "$privacy_fixture_sentinel" > "$privacy_root/private-fixture-content.txt"
+
+privacy_checker_status=0
+if privacy_checker_output="$(
+  GITHUB_STEP_SUMMARY="$privacy_checker_summary" \
+    bash "$ROOT_DIR/scripts/run-untrusted-checker.sh" \
+    bash "$CHECKER" "$privacy_root" 2>&1
+)"; then
+  privacy_checker_status=0
+else
+  privacy_checker_status=$?
+fi
+if [[ "$privacy_checker_status" == "0" ]]; then
+  echo "controlled failed privacy scenario unexpectedly passed" >&2
+  exit 1
+fi
+
+privacy_result=failure
+{
+  echo "## Native evidence privacy and submission-boundary regression"
+  echo
+  if [[ "$privacy_result" == "success" ]]; then
+    echo "- Status: **PASS**"
+    echo "- Result: privacy and submission-boundary checks passed."
+  else
+    echo "- Status: **BLOCKED**"
+    echo "- Result: privacy checks failed; store submission is blocked."
+    echo '- Details: Review the "Run native large-text evidence privacy and submission-boundary regression" step log for checker diagnostics.'
+  fi
+} > "$privacy_publish_summary"
+
+simulate_privacy_store_submission() {
+  printf 'submission-reached\n' > "$privacy_submission_marker"
+}
+if [[ "$privacy_result" == "success" ]]; then
+  simulate_privacy_store_submission
+fi
+
+assert_contains "$(cat "$privacy_publish_summary")" "- Status: **BLOCKED**"
+assert_contains "$(cat "$privacy_publish_summary")" \
+  "privacy checks failed; store submission is blocked."
+if [[ -e "$privacy_submission_marker" ]]; then
+  echo "failed privacy scenario reached the simulated store submission boundary" >&2
+  exit 1
+fi
+assert_not_contains_private_fixture \
+  "$privacy_checker_output" \
+  "$privacy_fixture_sentinel" \
+  "privacy checker diagnostics"
+assert_not_contains_private_fixture \
+  "$(cat "$privacy_checker_summary")" \
+  "$privacy_fixture_sentinel" \
+  "privacy checker summary"
+assert_not_contains_private_fixture \
+  "$(cat "$privacy_publish_summary")" \
+  "$privacy_fixture_sentinel" \
+  "privacy publish summary"
+
+if [[ -n "$PRIVACY_FAILURE_FIXTURE_ROOT" ]]; then
+  # Hosted release validation opts into one controlled failure of this real
+  # privacy command. The fault injection is explicit and inert for normal
+  # local and release runs.
+  privacy_failure_root="$PRIVACY_FAILURE_FIXTURE_ROOT"
+  privacy_failure_summary="$privacy_failure_root/privacy-checker-summary.md"
+  privacy_failure_sentinel="privacy-fixture-contents-must-not-appear"
+  rm -rf -- "$privacy_failure_root"
+  mkdir -p -- "$privacy_failure_root"
+  write_valid_run "$privacy_failure_root" ios "privacy-private-candidate"
+  write_valid_run "$privacy_failure_root" android "privacy-private-candidate"
+  write_review_record \
+    "$privacy_failure_root" \
+    ios \
+    APPROVED \
+    "2026-09-15T13:00:00Z" \
+    "privacy-private-candidate" \
+    "privacy-private-reviewer"
+  write_review_record \
+    "$privacy_failure_root" \
+    android \
+    APPROVED \
+    "2026-09-15T13:00:00Z" \
+    "privacy-private-candidate" \
+    "privacy-private-reviewer"
+  printf '%s\n' "$privacy_failure_sentinel" \
+    > "$privacy_failure_root/private-fixture-content.txt"
+  rm "$privacy_failure_root/ios/20260909T120000Z/runner-metadata.txt"
+
+  if privacy_failure_output="$(
+    GITHUB_STEP_SUMMARY="$privacy_failure_summary" \
+      bash "$CHECKER" "$privacy_failure_root" 2>&1
+  )"; then
+    echo "controlled failed privacy fixture unexpectedly passed" >&2
+    exit 1
+  fi
+  assert_contains "$privacy_failure_output" "[ios] Missing runner metadata and device details"
+  assert_contains "$(cat "$privacy_failure_summary")" "- Status: **FAIL**"
+  assert_not_contains_private_fixture \
+    "$privacy_failure_output" \
+    "$privacy_failure_sentinel" \
+    "privacy failure diagnostics"
+  assert_not_contains_private_fixture \
+    "$(cat "$privacy_failure_summary")" \
+    "$privacy_failure_sentinel" \
+    "privacy failure summary"
+  echo "Controlled native privacy failure fixture was rejected without exposing its contents."
+  exit 1
+fi
 
 cleanup_test_fixtures
 trap - EXIT

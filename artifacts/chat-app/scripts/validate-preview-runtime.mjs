@@ -3,6 +3,7 @@ import { spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { validateExpoGoNativeCompatibility } from "./expo-go-native-compatibility.mjs";
 
 const scriptDirectory = dirname(fileURLToPath(import.meta.url));
 const appRoot = join(scriptDirectory, "..");
@@ -97,6 +98,10 @@ function checkExpoPackageCompatibility() {
 }
 
 checkExpoPackageCompatibility();
+// `expo install --check` compares against the SDK defaults; the packages whose
+// native code lives inside Expo Go must instead match the Expo Go build the
+// simulator runs (see expo-go-native-modules.json).
+const expoGoNativeCompatibility = validateExpoGoNativeCompatibility();
 
 const configuredNixPackages = new Set(readNixPackages());
 const missingNixPackages = requiredNixPackages.filter(
@@ -135,5 +140,6 @@ if (missingNixPackages.length > 0 || toolingMismatches.length > 0) {
 console.log(
   `Expo preview runtime is aligned: @expo/cli ${installedTooling.expoCli}, ` +
     `react-native ${installedTooling.reactNative}, ` +
-    `${requiredNixPackages.length} required Nix packages present.`,
+    `${requiredNixPackages.length} required Nix packages present. ` +
+    `${expoGoNativeCompatibility.summary}.`,
 );

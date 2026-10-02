@@ -1,8 +1,10 @@
-// The form screens (SignIn, SignUp, Setup, NewRoom) mock this component in
-// their own suites, and scripts/validate-keyboard-strategy.mjs only checks
-// that they import it, so this is the one suite that renders the real
-// component. It is listed in androidLayoutSuites (jest.config.js) and runs
-// under both Jest projects:
+// The form screens (SignIn, SignUp, Setup, NewRoom) replace this component in
+// their own suites with the tagged stand-in from
+// test-utils/keyboardAwareScrollViewCompatMock.tsx (those suites prove each
+// form still renders inside it), and scripts/validate-keyboard-strategy.mjs
+// only forbids the wrong keyboard components, so this is the one suite that
+// renders the real component. It is listed in androidLayoutSuites
+// (jest.config.js) and runs under both Jest projects:
 // - on iOS and on Android a form must be handed to
 //   react-native-keyboard-controller's KeyboardAwareScrollView, which scrolls
 //   the focused input above the keyboard;
