@@ -7,4 +7,4 @@ Metro request evidence persistence must enqueue immutable rolling snapshots in F
 
 **Why:** High-volume native preview traffic can otherwise make Metro wait on repeated full-file rewrites, and overlapping writes can let an older snapshot overwrite newer evidence.
 
-**How to apply:** Keep request-finish handlers fire-and-forget, serialize asynchronous writes behind one queue, and convert write failures into one warning plus disabled persistence rather than unhandled rejections.
+**How to apply:** Keep request-finish handlers fire-and-forget, serialize asynchronous writes behind one queue, and convert write failures into one warning plus disabled persistence rather than unhandled rejections. Each write must also be atomic (sibling temp file + rename in the same directory): a plain writeFile truncates in place, so external pollers — or a reader right after a writer exits mid-queue — can observe an empty/partial evidence file even though a complete snapshot was written moments earlier.

@@ -275,7 +275,8 @@ test("an active banned member sees the explanation and sees it again on revisit"
       () => expect(roomParticipantCount(owner.page)).toHaveText("1 person"),
     );
 
-    const member = await createSignedInPage(browser, users[1]!, contexts);
+    const memberUser = users[1]!;
+    const member = await createSignedInPage(browser, memberUser, contexts);
 
     await runPhase(
       "navigation: member joins the room",
@@ -296,9 +297,14 @@ test("an active banned member sees the explanation and sees it again on revisit"
       PHASE_TIMEOUTS.roomState,
       async () => {
         await owner.page.getByTestId("room-users-button").click();
-        const banButton = owner.page.getByRole("button", {
+        const memberRow = owner.page.getByTestId(
+          `room-member-row-${memberUser.id}`,
+        );
+        await expect(memberRow).toHaveCount(1);
+        const banButton = memberRow.getByRole("button", {
           name: /^Ban .+ from this room$/,
         });
+        await expect(banButton).toHaveCount(1);
         await expect(banButton).toBeVisible();
         owner.page.once("dialog", (dialog) => dialog.accept());
         await banButton.click();

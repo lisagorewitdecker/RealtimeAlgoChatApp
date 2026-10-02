@@ -15,20 +15,54 @@ OpenAPI operation-id change from `development`, opens a temporary pull request,
 creates a second fixture commit for `synchronize`, closes and reopens the pull
 request, then edits only its description for `edited`. Before the edit,
 compatibility must fail. The edited description adds both required declarations,
-and compatibility must succeed on the unchanged head commit. The evidence record
-contains only run/job metadata and step conclusions:
+and compatibility must succeed on the unchanged head commit. The evidence
+record contains only the captured pull request, workflow runs, job URLs, failed
+step, compatibility conclusions, and cleanup confirmations:
 
 ```sh
 GITHUB_TOKEN="$TOKEN" \
 GITHUB_REPOSITORY="lisagorewitdecker/RealtimeAlgoChatApp" \
 node scripts/probe-api-codegen-events.mjs \
-  --output artifacts/chat-app/docs/api-codegen-event-probe-result.json
+  --record-dir artifacts/chat-app/docs/api-codegen-event-probes
 ```
+
+`--record-dir` creates a new UTC-dated Markdown file such as
+`api-codegen-event-probe-20260919T024012Z.md`. The directory is created when
+needed. The write is intentionally non-overwriting: a collision fails rather
+than replacing an earlier review record. To choose an exact path, use
+`--record-output`; the extension selects JSON for `.json` and Markdown for
+other extensions:
+
+```sh
+node scripts/probe-api-codegen-events.mjs \
+  --record-output artifacts/chat-app/docs/api-codegen-event-probes/check.json
+```
+
+Use `--record-format json` or `--record-format markdown` to override that
+inference. If a deliberate rerun must replace an existing record, add
+`--overwrite`; the replacement is written to a temporary file and renamed
+atomically. The legacy `--output PATH` option still writes the raw successful
+JSON result, while `--record-output` and `--record-dir` produce the
+reviewer-facing record.
+
+After a successful probe, inspect the generated Markdown locally, then publish
+the dated record with the normal change:
+
+```sh
+git add artifacts/chat-app/docs/api-codegen-event-probes/api-codegen-event-probe-*.md
+git commit -m "docs: record API codegen event probe"
+```
+
+Reviewers can open the committed Markdown record to follow the temporary pull
+request, each hosted workflow run, the failed generated-client step and its
+job, the compatibility result, and both cleanup confirmations. JSON records
+are useful for machine checks or comparisons; they contain the same metadata
+and do not contain pull-request description declarations.
 
 The command exits unsuccessfully unless the pull request is confirmed closed
 without merging and a follow-up branch lookup confirms that the temporary branch
 was deleted. Keep the token in the environment; do not pass it as a command-line
-argument. Use `--help` for timeout and branch options.
+argument. Use `--help` for timeout, branch, record, and overwrite options.
 
 ## Metadata
 

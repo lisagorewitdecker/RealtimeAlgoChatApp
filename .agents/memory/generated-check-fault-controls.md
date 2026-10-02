@@ -11,6 +11,12 @@ Environment variables that trigger test-only signals, failures, or fixture works
 
 Temporary checkout fixtures should be built from tracked files rather than recursive copies, then link installed dependencies from the real checkout. This excludes ignored caches and avoids restrictive native binaries that can make cleanup fail.
 
+Production Git-hook regressions should copy the hook, package command, and checker modules into the temporary repository before invoking `git commit`; invoking the source checker from the test checkout makes its default module-relative workspace point at the wrong repository.
+
+**Why:** The production checker intentionally derives its ordinary workspace from its installed module location, while a hook test needs that location and the Git index to be the same temporary repository.
+
+**How to apply:** Configure the fixture's `core.hooksPath`, run the real hook through `git commit`, and use a separate inherited workspace only for the no-opt-in rejection case.
+
 When a fixture is narrowed to an explicit manifest, include package-local dependency links for every TypeScript project reference used by the real command, plus repository-only contract inputs such as `.gitignore` and hook templates. A root `node_modules` link alone does not provide package-local peer/type resolution, and omitting contract inputs makes nested tests fail before the intended assertion.
 
 **Why:** The generated-client root validation runs both the API-spec test suite and `tsc --build`; its tests also inspect repository hook files. Broad copies supplied these files accidentally, so narrowing the fixture can otherwise turn a drift regression into an unrelated missing-file or missing-types failure.

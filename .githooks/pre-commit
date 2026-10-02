@@ -1,4 +1,5 @@
 #!/bin/sh
 set -eu
 
+pnpm run validate:repository-integrity
 pnpm run validate:staged-codegen-backups

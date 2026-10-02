@@ -12,8 +12,14 @@ import * as zod from 'zod/v4';
  * Returns server health status
  * @summary Health check
  */
+export const healthCheckResponseElapsedMsMin = 0;
+
+
+
 export const HealthCheckResponse = zod.object({
-  "status": zod.string()
+  "status": zod.string(),
+  "reason": zod.enum(['timeout', 'connection', 'unknown']).optional().describe('Sanitized category for the readiness failure'),
+  "elapsedMs": zod.int().min(healthCheckResponseElapsedMsMin).optional().describe('Elapsed time for the readiness check in milliseconds')
 })
 
 

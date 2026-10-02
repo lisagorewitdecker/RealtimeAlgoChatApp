@@ -59,6 +59,35 @@ export function captureNativeSourceMapProbe({
   return eventId;
 }
 
+export type RoomKeyRecoveryOperation = "save" | "load";
+
+export function captureRoomKeyPersistenceRetryFailure(
+  operation: RoomKeyRecoveryOperation,
+  nativeProbe?: {
+    marker: string;
+    platform: "ios" | "android";
+    candidateBuildId: string;
+  },
+): string {
+  const capture = () =>
+    Sentry.captureMessage("Room key persistence retry failed", {
+      level: "warning",
+      tags: { recovery_operation: operation },
+    });
+  if (!nativeProbe) return capture();
+
+  let eventId = "";
+  Sentry.withScope((scope) => {
+      scope.setTags({
+        mobile_storage_recovery_probe: nativeProbe.marker,
+        mobile_platform: nativeProbe.platform,
+        mobile_candidate_build_id: nativeProbe.candidateBuildId,
+      });
+    eventId = capture();
+  });
+  return eventId;
+}
+
 function createNativeSourceMapProbeError(marker: string): Error {
   return new Error(`Controlled native JavaScript source-map probe: ${marker}`);
 }

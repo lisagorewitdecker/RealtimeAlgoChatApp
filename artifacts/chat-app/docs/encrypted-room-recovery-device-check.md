@@ -146,9 +146,14 @@ For either option:
    The JSON contains status and byte-count summaries only. It does not contain
    the manifest URL, launch-asset URL, QR payload, credentials, account data,
    or message content. Copy its four boundary values into the record template
-   below. `expoGoLaunch=NOT_ASSESSED` and
-   `serverNativeRequestEvidence=NOT_ASSESSED` are expected until a physical
-   Android phone supplies those results.
+   below. `serverNativeRequestEvidence=NOT_ASSESSED` is expected until a
+   physical Android phone supplies that result. `expoGoLaunch` is copied from
+   the Expo Go iOS launch-evidence probe (see the iOS procedure in
+   `native-room-key-persistence-device-check.md`): `NOT_RUN` when the probe was
+   never armed, `STALE` when its result predates the current dev server, or
+   the probe status with `decided_at`, `age`, and counts. It describes the iOS
+   simulator session, not an Android phone, so the Android launch row still
+   comes from the phone.
 
 6. Append `validation-record.md` under
    `test-results/encrypted-room-recovery/android/<UTC timestamp>/`. Include

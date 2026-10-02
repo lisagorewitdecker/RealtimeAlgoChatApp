@@ -15,4 +15,22 @@ When a rule can be bypassed by moving the offending expression into another file
 
 **Why:** A same-file-only rule was documented as bypassable by a shared hook; a full module graph walk would turn a sub-second pre-test check into a bundler. Rejecting the unresolvable keeps the rule un-bypassable without that cost.
 
-**How to apply:** Give followed modules a context without a resolver (that is what bounds the depth), scope visited-keys per file, and skip declaration-name identifiers when walking a followed declaration or the function reports itself twice. Also scan every directory a helper could move into; absent optional directories are skipped, the core ones stay required.
+**How to apply:** Give followed modules a context without a resolver (that is what bounds the depth), scope visited-keys per file, and skip declaration-name identifiers when walking a followed declaration or the function reports itself twice.
+
+## Scope: enumerate top-level directories, pin only the exclusions
+
+A one-hop follow still misses a module-level violation (a re-export, a platform-split property consumed through a props spread) in a directory the scan never reads. Do not maintain a list of scanned directories; enumerate every top-level directory of the package and pin a short non-source exclusion list (dependencies, assets, test trees and their output, the package's own scripts, docs, build output, dot-directories). Required directories stay guarded and are scanned whatever the exclusions say. Root-level files are deliberately not scanned: they are Metro/Babel/Jest configuration, and Jest setup files legitimately name the forbidden components in mocks.
+
+**Why:** A scanned-directory list rotted as soon as `constants/` held a helper, and any new folder (`services/`, `store/`) would have been invisible until a scanned file imported from it.
+
+**How to apply:** Print the skipped directories in the pass message so a source folder that collides with an excluded name is visible in the run output; pin the exclusion list in the real-tree test and keep it in step with the written strategy note; fixtures put a violation in `constants/` and in a folder the check never heard of and expect module-level findings, plus one fixture with violations in every excluded name expecting none.
+
+## Presence rules: trace JSX nesting from the entry, never model `children`
+
+A "this provider must wrap the app" rule cannot be a per-file scan (the provider can be imported and rendered somewhere useless) and cannot live in Jest (the suites mock the provider as a pass-through). Trace the rendered tree from the root layout's default export, carrying an "inside provider" flag through JSX nesting only, following same-file components and one import hop, and report every navigator reached outside the flag plus "no navigator found" and any entry shape the trace cannot follow. A `children`-passing wrapper around the provider is deliberately reported as a failure, not modelled; if the layout is ever refactored to such a wrapper, extend the rule (or keep the provider element in the layout) rather than mocking around the check.
+
+Follow only rendered code: a component contributes the expressions it returns (own `return`s, concise body, class `render`), and a rendered expression contributes JSX children, conditional branches, `&&`/`||`/`??` operands, array elements, JSX-valued variables and what calls in rendered position return. Never `forEachChild`-walk a whole followed declaration — review caught that a blanket walk lets JSX in an unused variable, an effect callback or a prop satisfy the rule (root returns `null`, check still green) and lets an unwrapped navigator in a dead callback trip it.
+
+**Why:** Modelling prop plumbing turns the rule into a renderer, and an unproven "probably wrapped" is exactly the drift the rule exists to catch. Fixture roots for the per-file rules must then include a compliant root layout, or the whole-tree rule trips every unrelated fixture.
+
+**How to apply:** Test the rule against a copy of the real layout with the provider stripped (guard that the stripping actually changed the source), against each way the provider can go missing (self-closing, beside, below, conditional path, other package, moved to a child layout) so the message names the cause, and against dead code in both directions (wrapped navigator only in an unused local/effect/prop must fail; unwrapped navigator only there must pass).

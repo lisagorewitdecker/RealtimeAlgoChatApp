@@ -28,6 +28,21 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+        "503":
+          description: Database readiness unavailable
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/HealthStatus"
+                  - type: object
+                    properties:
+                      status:
+                        type: string
+                        enum: [unavailable]
+                    required:
+                      - reason
+                      - elapsedMs
 
   /profile:
     get:
@@ -172,6 +187,14 @@ components:
       properties:
         status:
           type: string
+        reason:
+          type: string
+          enum: [timeout, connection, unknown]
+          description: Sanitized category for the readiness failure
+        elapsedMs:
+          type: integer
+          minimum: 0
+          description: Elapsed time for the readiness check in milliseconds
       required:
         - status
 
