@@ -17,9 +17,14 @@ async function startServer(): Promise<void> {
   const httpServer = createServer(app);
   setupSocketIO(httpServer);
 
-  httpServer.on("error", (err) => {
+  httpServer.on("error", async (err) => {
     Sentry.captureException(err);
-    logger.error({ err }, "HTTP server error");
+    logger.fatal({ err }, "HTTP server error");
+    try {
+      await Sentry.flush(2_000);
+    } finally {
+      process.exit(1);
+    }
   });
 
   httpServer.listen(port, () => {
