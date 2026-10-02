@@ -214,3 +214,6 @@ allowBuilds:
   browser-tabs-lock: true
   core-js: true
   esbuild: true
+
+patchedDependencies:
+  node-forge@1.4.0: patches/node-forge@1.4.0.patch
