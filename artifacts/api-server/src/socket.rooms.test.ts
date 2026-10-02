@@ -1413,6 +1413,25 @@ describe("room Socket.IO lifecycle", () => {
       { attempts: 100, delayMs: 20 },
     );
 
+    mockLoadEncryptedMessagesAfter.mockClear();
+    mockLoadDeletedMessageIdsAfter.mockClear();
+    const recoveryBusy = waitForEvent<{ requestId: string; code: string }>(
+      dana,
+      "message-recovery-error",
+    );
+    dana.emit("recover-messages", {
+      requestId: "busy-recovery",
+      roomId,
+      afterMessageId: "known",
+      afterTimestamp: 0,
+    });
+    await expect(recoveryBusy).resolves.toEqual({
+      requestId: "busy-recovery",
+      code: "PERSISTENCE_BUSY",
+    });
+    expect(mockLoadEncryptedMessagesAfter).not.toHaveBeenCalled();
+    expect(mockLoadDeletedMessageIdsAfter).not.toHaveBeenCalled();
+
     const persistenceBusy = waitForEvent<{ code: string }>(dana, "error");
     dana.emit("message", {
       roomId,

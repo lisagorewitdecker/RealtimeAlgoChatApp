@@ -1435,7 +1435,7 @@ function setupConnectedSocket(
       let page: Awaited<ReturnType<typeof loadEncryptedMessagesAfter>>;
       let deletionPage: Awaited<ReturnType<typeof loadDeletedMessageIdsAfter>>;
       try {
-        [page, deletionPage] = await Promise.all([
+        const [pageResult, deletionPageResult] = await Promise.allSettled([
           loadEncryptedMessagesAfter(
             roomId,
             { id: afterMessageId, timestamp: afterTimestamp },
@@ -1447,6 +1447,12 @@ function setupConnectedSocket(
             MESSAGE_RECOVERY_PAGE_SIZE,
           ),
         ]);
+        if (pageResult.status === "rejected") throw pageResult.reason;
+        if (deletionPageResult.status === "rejected") {
+          throw deletionPageResult.reason;
+        }
+        page = pageResult.value;
+        deletionPage = deletionPageResult.value;
       } finally {
         releasePersistence(persistenceBudget);
       }
