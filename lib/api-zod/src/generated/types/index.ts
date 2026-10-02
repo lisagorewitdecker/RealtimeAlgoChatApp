@@ -7,7 +7,10 @@
  */
 
 export * from './createRoomRequest';
+export * from './healthCheck503';
+export * from './healthCheck503Status';
 export * from './healthStatus';
+export * from './healthStatusReason';
 export * from './profileResponse';
 export * from './publicKeyConflictResponse';
 export * from './publicKeyConflictResponseCode';

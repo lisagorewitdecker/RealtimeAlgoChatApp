@@ -28,6 +28,14 @@
 // counts: never a device name or id, host, URL, account, or session value.
 // The dev script's `Logged in as …` sign-in line runs before the launcher and
 // is never read or echoed by it.
+//
+// Every managed start (armed or not) also records its start time in
+// `.expo/preview-dev-server-start.json`. The preview-startup preflight copies
+// the latest result into the handoff record's `expoGoLaunch` boundary and
+// compares `decidedAt` with that start so a result from an earlier dev server
+// is reported as STALE. The preflight's own throwaway dev server sets
+// PREVIEW_LAUNCH_PROBE_PASSTHROUGH=1, which makes `--launch` a pure
+// pass-through: no marker is consumed and no start or result is written.
 
 import { spawn } from "node:child_process";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
@@ -46,8 +54,15 @@ export const EXPO_GO_IOS_APP_ID = "host.exp.Exponent";
 export const INSPECTOR_DEBUG_NAMESPACE = "Metro:InspectorProxy";
 export const PROBE_MARKER_FILENAME = "preview-launch-probe.armed";
 export const PROBE_RESULT_FILENAME = "preview-launch-evidence.json";
+export const DEV_SERVER_START_FILENAME = "preview-dev-server-start.json";
 export const PROBE_MARKER_SCHEMA = "ios-preview-launch-probe-marker/v1";
 export const PROBE_RESULT_SCHEMA = "ios-preview-launch-evidence/v1";
+export const DEV_SERVER_START_SCHEMA = "preview-dev-server-start/v1";
+export const PROBE_PASSTHROUGH_ENVIRONMENT_NAME =
+  "PREVIEW_LAUNCH_PROBE_PASSTHROUGH";
+// The probe writes `new Date().toISOString()`; anything else is corruption.
+const PROBE_TIMESTAMP_PATTERN =
+  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 export const DEFAULT_DEVICE_TIMEOUT_MS = 90_000;
 export const DEFAULT_SETTLE_TIMEOUT_MS = 30_000;
 const PROBE_LOG_PREFIX = "[preview-launch-probe]";
@@ -55,11 +70,11 @@ const PACKAGE_ROOT = resolve(import.meta.dirname, "..");
 const DEFAULT_STATE_DIRECTORY = resolve(PACKAGE_ROOT, ".expo");
 const EVALUATION_INTERVAL_MS = 250;
 const FORWARDED_SIGNALS = ["SIGTERM", "SIGINT", "SIGHUP"];
+const ANSI_ESCAPE = String.fromCharCode(27);
 // RFC 6455: 1000 = normal closure, 1001 = going away (reload/app backgrounded
 // by choice). Everything else, including 1006 (no close frame), is abnormal.
 const NORMAL_CLOSE_CODES = new Set([1000, 1001]);
-
-const ANSI_PATTERN = /\u001b\[[0-9;?]*[ -/]*[@-~]/g;
+const ANSI_PATTERN = new RegExp(`${ANSI_ESCAPE}\\[[0-9;?]*[ -/]*[@-~]`, "g");
 const ISO_TIMESTAMP = String.raw`\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z`;
 const LEADING_TIMESTAMP_PATTERN = new RegExp(`^\\s*(${ISO_TIMESTAMP}) `);
 // @react-native/dev-middleware InspectorProxy debug lines. The device name and
@@ -77,7 +92,7 @@ const IOS_CLIENT_LOG_PATTERN =
   /^\s*iOS\s{1,2}(LOG|INFO|WARN|ERROR|DEBUG|TRACE|GROUP|TABLE|DIR|ASSERT)\s/;
 const ERROR_CLIENT_LOG_LEVELS = new Set(["ERROR"]);
 
-function stripAnsi(text) {
+export function stripAnsi(text) {
   return text.replace(ANSI_PATTERN, "");
 }
 
@@ -327,6 +342,18 @@ export function createLaunchEvidenceClassifier(options = {}) {
         );
       }
       if (!session.bundle) {
+        const windowStart = state.metroReadyAt ?? state.startedAt;
+        const deviceBudgetElapsed =
+          nowMs != null &&
+          windowStart != null &&
+          nowMs - windowStart >= deviceTimeoutMs;
+        // Expo Go can briefly connect and close its inspector while reloading,
+        // then establish the real app session and request the bundle a few
+        // seconds later. Keep the live probe open for that replacement session
+        // instead of finalizing on the transient pre-bundle connection.
+        if (!final && !deviceBudgetElapsed) {
+          return { decided: false, observation: observation() };
+        }
         return decided(
           inconclusive,
           `The Expo Go iOS inspector connection closed abnormally (code ${code}) before any iOS Expo Go bundle HTTP 200 was logged.` +
@@ -443,7 +470,18 @@ function probePaths(stateDirectory) {
     directory,
     marker: resolve(directory, PROBE_MARKER_FILENAME),
     result: resolve(directory, PROBE_RESULT_FILENAME),
+    start: resolve(directory, DEV_SERVER_START_FILENAME),
   };
+}
+
+// Returns the epoch milliseconds of a probe-written timestamp, or null when
+// the value is not the exact ISO-8601 UTC form the probe writes.
+export function parseProbeTimestamp(value) {
+  if (typeof value !== "string" || !PROBE_TIMESTAMP_PATTERN.test(value)) {
+    return null;
+  }
+  const ms = Date.parse(value);
+  return Number.isFinite(ms) ? ms : null;
 }
 
 export async function armLaunchProbe({ stateDirectory, environment = process.env } = {}) {
@@ -482,7 +520,12 @@ function parseProbeRecord(contents, fileName) {
       `Launch-evidence probe JSON contains duplicate fields (${fileName}).`,
     );
   }
-  return JSON.parse(contents);
+  try {
+    return JSON.parse(contents);
+  } catch {
+    // JSON.parse quotes a fragment of the source in its message.
+    throw new Error(`Launch-evidence probe JSON is not valid JSON (${fileName}).`);
+  }
 }
 
 async function consumeMarker(paths) {
@@ -522,17 +565,15 @@ async function consumeMarker(paths) {
   };
 }
 
-export async function readLaunchProbeResult({ stateDirectory } = {}) {
+// Resolves to null when no result has been written; malformed results throw
+// without echoing their contents.
+export async function findLaunchProbeResult({ stateDirectory } = {}) {
   const paths = probePaths(stateDirectory);
   let contents;
   try {
     contents = await readFile(paths.result, "utf8");
   } catch (error) {
-    if (error.code === "ENOENT") {
-      throw new Error(
-        `No launch-evidence result at ${paths.result}. Arm the probe with --arm, restart the artifacts/chat-app: expo workflow once, and wait for the classification.`,
-      );
-    }
+    if (error.code === "ENOENT") return null;
     throw error;
   }
   const result = parseProbeRecord(contents, PROBE_RESULT_FILENAME);
@@ -543,6 +584,59 @@ export async function readLaunchProbeResult({ stateDirectory } = {}) {
     throw new Error(`Unexpected launch-evidence status in ${paths.result}.`);
   }
   return result;
+}
+
+export async function readLaunchProbeResult({ stateDirectory } = {}) {
+  const result = await findLaunchProbeResult({ stateDirectory });
+  if (!result) {
+    const paths = probePaths(stateDirectory);
+    throw new Error(
+      `No launch-evidence result at ${paths.result}. Arm the probe with --arm, restart the artifacts/chat-app: expo workflow once, and wait for the classification.`,
+    );
+  }
+  return result;
+}
+
+// The start record of the latest managed dev server start (null when none has
+// been recorded). Its only purpose is the STALE comparison in the preflight.
+export async function readDevServerStart({ stateDirectory } = {}) {
+  const paths = probePaths(stateDirectory);
+  let contents;
+  try {
+    contents = await readFile(paths.start, "utf8");
+  } catch (error) {
+    if (error.code === "ENOENT") return null;
+    throw error;
+  }
+  const record = parseProbeRecord(contents, DEV_SERVER_START_FILENAME);
+  if (record?.schema !== DEV_SERVER_START_SCHEMA) {
+    throw new Error(`Unexpected dev server start schema in ${paths.start}.`);
+  }
+  const startedAtMs = parseProbeTimestamp(record.startedAt);
+  if (startedAtMs === null) {
+    throw new Error(`Invalid dev server start timestamp in ${paths.start}.`);
+  }
+  return { startedAt: new Date(startedAtMs).toISOString(), startedAtMs };
+}
+
+async function recordDevServerStart(paths, log) {
+  try {
+    await mkdir(paths.directory, { recursive: true });
+    await writeFile(
+      paths.start,
+      `${JSON.stringify(
+        { schema: DEV_SERVER_START_SCHEMA, startedAt: new Date().toISOString() },
+        null,
+        2,
+      )}\n`,
+      "utf8",
+    );
+  } catch (error) {
+    log(
+      `${PROBE_LOG_PREFIX} could not record the dev server start (${error.code ?? "unknown error"}); ` +
+        "the preview preflight reports launch evidence as STALE until a start is recorded.",
+    );
+  }
 }
 
 function createLineFeeder(onLine) {
@@ -610,7 +704,20 @@ export async function launchDevServer({
     throw new Error("--launch requires the dev server command after `--`.");
   }
   const paths = probePaths(stateDirectory);
-  const armed = await consumeMarker(paths);
+  // The preview preflight starts its own throwaway dev server through the
+  // same dev script; it must neither consume an armed marker meant for the
+  // managed workflow nor overwrite the managed start and result records.
+  const passThrough =
+    environment[PROBE_PASSTHROUGH_ENVIRONMENT_NAME] === "1";
+  const armed = passThrough ? null : await consumeMarker(paths);
+  if (passThrough) {
+    log(
+      `${PROBE_LOG_PREFIX} ${PROBE_PASSTHROUGH_ENVIRONMENT_NAME}=1: pass-through start; ` +
+        "no armed marker is consumed and no start or launch-evidence record is written.",
+    );
+  } else {
+    await recordDevServerStart(paths, log);
+  }
 
   if (!armed) {
     const child = spawn(command, args, { cwd, env: environment, stdio: "inherit" });
@@ -624,7 +731,7 @@ export async function launchDevServer({
       restoreSignals();
       onExit(code, signal);
     });
-    return { armed: false, child };
+    return { armed: false, passThrough, child };
   }
 
   const startedAt = Date.now();
@@ -722,8 +829,12 @@ export async function launchDevServer({
 function printSummaryAndExit(result) {
   for (const line of formatLaunchEvidenceSummary(result)) console.log(line);
   if (result.status !== LAUNCH_EVIDENCE_STATUSES.running) {
+    const hint =
+      result.status === LAUNCH_EVIDENCE_STATUSES.bundleOnlyThenClosed
+        ? " A startup crash with no client log is the signature of JavaScript that does not match the native modules inside the Expo Go build (react-native-worklets / react-native-reanimated); compare targetExpoGoIosVersion in expo-go-native-modules.json with the Expo Go build that fetched the bundle before investigating the app itself."
+        : "";
     throw new Error(
-      `Expo Go iOS launch evidence is ${result.status}; do not treat the preview as launching until the probe reports RUNNING.`,
+      `Expo Go iOS launch evidence is ${result.status}; do not treat the preview as launching until the probe reports RUNNING.${hint}`,
     );
   }
 }

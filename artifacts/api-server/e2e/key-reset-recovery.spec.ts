@@ -26,8 +26,12 @@ const publishableKey = process.env["CLERK_PUBLISHABLE_KEY"];
 const secretKey = process.env["CLERK_SECRET_KEY"];
 const diagnosticContract =
   process.env["E2E_RECOVERY_DIAGNOSTIC_CONTRACT"] === "1";
-const diagnosticCleanupOperation =
-  process.env["E2E_RECOVERY_DIAGNOSTIC_CLEANUP"];
+const diagnosticCleanupOperations = new Set(
+  (process.env["E2E_RECOVERY_DIAGNOSTIC_CLEANUP"] ?? "")
+    .split(",")
+    .map((operation) => operation.trim())
+    .filter(Boolean),
+);
 const diagnosticPhasesSucceed =
   process.env["E2E_RECOVERY_DIAGNOSTIC_PHASES_SUCCEED"] === "1";
 const CONTEXT_CLEANUP_TIMEOUT_MS = diagnosticContract ? 250 : 5_000;
@@ -640,7 +644,7 @@ test("reports stalled recovery phases", async ({ browser }) => {
     console.info("[key-reset-recovery-e2e] diagnostic cleanup executed");
     const cleanupErrors: unknown[] = [];
     if (context) {
-      if (diagnosticCleanupOperation === "browser") {
+      if (diagnosticCleanupOperations.has("browser")) {
         const realClose = context.close.bind(context);
         context.close = () => new Promise<void>(() => {});
         const result = await Promise.allSettled([
@@ -653,7 +657,7 @@ test("reports stalled recovery phases", async ({ browser }) => {
       }
       await context.close();
     }
-    if (diagnosticCleanupOperation === "database") {
+    if (diagnosticCleanupOperations.has("database")) {
       const result = await Promise.allSettled([
         withCleanupTimeout(
           "Recovery room database cleanup",
@@ -665,7 +669,7 @@ test("reports stalled recovery phases", async ({ browser }) => {
         cleanupErrors.push(result[0].reason);
       }
     }
-    if (diagnosticCleanupOperation === "clerk-user") {
+    if (diagnosticCleanupOperations.has("clerk-user")) {
       const result = await Promise.allSettled([
         withCleanupTimeout(
           "Clerk user cleanup for diagnostic-user",
@@ -677,7 +681,7 @@ test("reports stalled recovery phases", async ({ browser }) => {
         cleanupErrors.push(result[0].reason);
       }
     }
-    if (diagnosticCleanupOperation === "pool") {
+    if (diagnosticCleanupOperations.has("pool")) {
       const result = await Promise.allSettled([
         withCleanupTimeout(
           "Recovery database pool shutdown",

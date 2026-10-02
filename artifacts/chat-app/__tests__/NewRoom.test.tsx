@@ -1,6 +1,7 @@
 import React from "react";
 import { act, fireEvent, render } from "@testing-library/react-native";
 import NewRoomScreen from "../app/new-room";
+import { withinKeyboardAwareScrollViewCompat } from "../test-utils/keyboardAwareScrollViewCompatMock";
 
 const mockRouter = {
   back: jest.fn(),
@@ -31,19 +32,11 @@ jest.mock("react-native-safe-area-context", () => ({
   useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
 }));
 
-jest.mock("@/components/KeyboardAwareScrollViewCompat", () => {
-  const RN = require("react-native");
-  const mockReact = require("react");
-  return {
-    KeyboardAwareScrollViewCompat: ({
-      children,
-      ...props
-    }: {
-      children: React.ReactNode;
-      [key: string]: unknown;
-    }) => mockReact.createElement(RN.ScrollView, props, children),
-  };
-});
+// The shared stand-in tags its host element so the suite can prove the form
+// renders inside the compat component, not merely inside some scroll view.
+jest.mock("@/components/KeyboardAwareScrollViewCompat", () =>
+  jest.requireActual("../test-utils/keyboardAwareScrollViewCompatMock"),
+);
 
 jest.mock("@/contexts/CryptoContext", () => {
   class MockRoomKeyPersistenceError extends Error {
@@ -115,6 +108,27 @@ describe("new room encryption-key setup", () => {
         return true;
       },
     );
+  });
+
+  it("renders both room forms and the submit button inside KeyboardAwareScrollViewCompat", () => {
+    const view = render(<NewRoomScreen />);
+
+    // The scroll element, each mode's input and the submit button are looked
+    // up inside the compat component's host element: a plain ScrollView
+    // carrying the same testID and props would pass the prop expectations
+    // while phones lose keyboard-aware scrolling on this form. This suite
+    // runs under the iOS and Android Jest projects, so both are covered.
+    const form = withinKeyboardAwareScrollViewCompat(view);
+    const scroll = form.getByTestId("new-room-scroll");
+    expect(scroll.props.keyboardShouldPersistTaps).toBe("handled");
+    expect(scroll.props.keyboardDismissMode).toBe("interactive");
+    expect(scroll.props.bottomOffset).toBe(72);
+    expect(form.getByTestId("room-name-input")).toBeTruthy();
+    expect(form.getByTestId("room-submit-button")).toBeTruthy();
+
+    fireEvent.press(form.getByTestId("new-room-mode-join"));
+    expect(form.getByTestId("room-id-input")).toBeTruthy();
+    expect(form.getByTestId("room-submit-button")).toBeTruthy();
   });
 
   it("keeps the room closed until the existing in-memory key is saved", async () => {

@@ -5,8 +5,27 @@
  * RealtimeAlgoChatApp Studio API — secure rooms, profiles, and E2EE collaboration
  * OpenAPI spec version: 0.2.0
  */
+/**
+ * Sanitized category for the readiness failure
+ */
+export type HealthStatusReason = typeof HealthStatusReason[keyof typeof HealthStatusReason];
+
+
+export const HealthStatusReason = {
+  timeout: 'timeout',
+  connection: 'connection',
+  unknown: 'unknown',
+} as const;
+
 export interface HealthStatus {
   status: string;
+  /** Sanitized category for the readiness failure */
+  reason?: HealthStatusReason;
+  /**
+     * Elapsed time for the readiness check in milliseconds
+     * @minimum 0
+     */
+  elapsedMs?: number;
 }
 
 /**
@@ -142,3 +161,16 @@ export interface RoomResponse {
 export type UnauthorizedResponse = {
   error: string;
 };
+
+export type HealthCheck503Status = typeof HealthCheck503Status[keyof typeof HealthCheck503Status];
+
+
+export const HealthCheck503Status = {
+  unavailable: 'unavailable',
+} as const;
+
+export type HealthCheck503 = HealthStatus & {
+  status?: HealthCheck503Status;
+} & Required<Pick<HealthStatus & {
+  status?: HealthCheck503Status;
+}, 'reason' | 'elapsedMs'>>;

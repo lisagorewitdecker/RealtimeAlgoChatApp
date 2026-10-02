@@ -17,6 +17,14 @@ public-key registration at the API boundary, then leaves the client untouched
 for 75 seconds. It fails if another public-key `PUT /api/profile` succeeds after
 Clerk's token refresh interval.
 
+The reduce-transparency tab bar scenario signs in one client, opens the Profile
+tab, and reads the computed style of the classic tab bar that expo-router's
+vendored react-navigation `BottomTabBar` renders, before and after pressing the
+"Reduce transparency" switch. Off, the bar itself is transparent over the
+palette's translucent `rgba(14, 17, 24, 0.85)` surface; on, the bar is the
+opaque palette background (`#0E1118`) with no surface element, and it keeps its
+top border, 84pt height, and absolute position.
+
 ## Prerequisites
 
 - The API Server and Chat App Expo workflows are running.
@@ -49,6 +57,34 @@ E2E_CHAT_URL="https://${REPLIT_EXPO_DEV_DOMAIN}" \
 E2E_API_URL="https://${REPLIT_DEV_DOMAIN}" \
 pnpm --filter @workspace/api-server run test:e2e:idle-profile-registration
 ```
+
+For the reduce-transparency tab bar, run:
+
+```sh
+E2E_CHAT_URL="https://${REPLIT_EXPO_DEV_DOMAIN}" \
+E2E_API_URL="https://${REPLIT_DEV_DOMAIN}" \
+pnpm --filter @workspace/api-server run test:e2e:reduce-transparency-tab-bar
+```
+
+## Release failure evidence
+
+The mobile release workflow always attempts to upload the idle-profile browser
+output as `idle-profile-registration-browser-evidence`, including when the
+release check fails. When reviewing a blocked run, open the workflow's
+**Artifacts** section and download that archive. It should contain one
+Playwright result directory with exactly these members:
+
+- `test-failed-1.png` — the failed browser page screenshot.
+- `trace.zip` — the Playwright trace.
+- `error-context.md` — the Playwright failure context.
+
+Open `error-context.md` and the PNG directly after extracting the archive. To
+inspect the browser timeline locally, run `pnpm --filter @workspace/api-server
+exec playwright show-trace trace.zip` from the extracted result directory.
+The secret-free `idle-profile-browser-evidence-contract` job performs the same
+upload/download round trip with a controlled local browser failure so changes
+to the Playwright configuration or artifact path fail CI before a release
+review depends on them.
 
 The test scripts install the Chromium revision pinned by `@playwright/test`
 and run a browser-runtime preflight before recovery diagnostics. The Chromium

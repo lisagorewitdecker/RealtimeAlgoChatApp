@@ -9,7 +9,9 @@ import { fileURLToPath } from "node:url";
 
 import {
   findReadableSourceMappedFrame,
+  findSensitiveStorageContent,
   validateNativeSentryEvent,
+  validateStorageRecoverySentryEvent,
   verifyNativeSentryEvent,
   verifyNativeSentryEvidence,
 } from "../verify-sentry-native-event.mjs";
@@ -68,6 +70,64 @@ const expected = {
   dist: "42",
 };
 
+function storageEventFixture(overrides = {}) {
+  return {
+    eventID: "fedcba9876543210fedcba9876543210",
+    release: { version: expected.release },
+    dist: expected.dist,
+    message: "Room key persistence retry failed",
+    tags: [
+      { key: "recovery_operation", value: "save" },
+      { key: "mobile_storage_recovery_probe", value: expected.marker },
+      { key: "mobile_platform", value: expected.platform },
+      { key: "mobile_candidate_build_id", value: expected.candidateBuildId },
+    ],
+    ...overrides,
+  };
+}
+
+function savedEvidenceFixture() {
+  return {
+    ...validateNativeSentryEvent(eventFixture(), expected),
+    storageRecovery: validateStorageRecoverySentryEvent(
+      storageEventFixture(),
+      expected,
+    ),
+  };
+}
+
+test("accepts the fixed privacy-safe storage recovery warning", () => {
+  assert.deepEqual(validateStorageRecoverySentryEvent(storageEventFixture(), expected), {
+    eventId: "fedcba9876543210fedcba9876543210",
+    message: "Room key persistence retry failed",
+    operation: "save",
+  });
+});
+
+for (const [label, payload] of [
+  ["room IDs", { contexts: { recovery: { roomId: "private-room" } } }],
+  ["key material", { extra: { key_material: "private-key" } }],
+  ["ciphertext", { breadcrumbs: [{ data: { ciphertext: "encrypted-value" } }] }],
+  ["secure-store values", { extra: { secureStoreValue: "stored-secret" } }],
+]) {
+  test(`rejects storage recovery events containing ${label}`, () => {
+    assert.ok(findSensitiveStorageContent(payload));
+    assert.throws(
+      () => validateStorageRecoverySentryEvent(storageEventFixture(payload), expected),
+      /privacy-safe storage event/,
+    );
+  });
+}
+
+test("rejects a storage recovery warning without the save operation tag", () => {
+  const event = storageEventFixture();
+  event.tags[0].value = "load";
+  assert.throws(
+    () => validateStorageRecoverySentryEvent(event, expected),
+    /recovery operation tag/,
+  );
+});
+
 test("accepts a candidate-bound event with a readable source frame", () => {
   const evidence = validateNativeSentryEvent(eventFixture(), expected);
   assert.equal(evidence.status, "PASS");
@@ -113,6 +173,8 @@ test("retries transient Sentry API failures", async () => {
     new Response("temporarily unavailable", { status: 503 }),
     Response.json([{ eventID: "0123456789abcdef0123456789abcdef" }]),
     Response.json(eventFixture()),
+    Response.json([{ eventID: "fedcba9876543210fedcba9876543210" }]),
+    Response.json(storageEventFixture()),
   ];
   const fetchImpl = async () => responses.shift();
 
@@ -128,6 +190,7 @@ test("retries transient Sentry API failures", async () => {
   });
 
   assert.equal(evidence.status, "PASS");
+  assert.equal(evidence.storageRecovery.operation, "save");
   assert.equal(responses.length, 0);
 });
 
@@ -252,7 +315,7 @@ test("accepts a redacted saved evidence file", async () => {
 
   await writeFile(
     evidencePath,
-    `${JSON.stringify(validateNativeSentryEvent(eventFixture(), expected))}\n`,
+    `${JSON.stringify(savedEvidenceFixture())}\n`,
   );
   await writeFile(
     triggerPath,
@@ -319,7 +382,7 @@ test("rejects duplicate trigger metadata fields", async () => {
 
   await writeFile(
     evidencePath,
-    `${JSON.stringify(validateNativeSentryEvent(eventFixture(), expected))}\n`,
+    `${JSON.stringify(savedEvidenceFixture())}\n`,
   );
   await writeFile(
     triggerPath,
@@ -350,7 +413,7 @@ test("rejects trigger metadata values containing '='", async () => {
 
   await writeFile(
     evidencePath,
-    `${JSON.stringify(validateNativeSentryEvent(eventFixture(), expected))}\n`,
+    `${JSON.stringify(savedEvidenceFixture())}\n`,
   );
   await writeFile(
     triggerPath,
@@ -383,7 +446,7 @@ test("rejects trigger metadata with missing required fields", async () => {
 
   await writeFile(
     evidencePath,
-    `${JSON.stringify(validateNativeSentryEvent(eventFixture(), expected))}\n`,
+    `${JSON.stringify(savedEvidenceFixture())}\n`,
   );
   await writeFile(
     triggerPath,
@@ -432,7 +495,7 @@ test("allows non-credential authorization text in saved evidence", async () => {
   const tempDir = await mkdtemp(path.join(tmpdir(), "sentry-evidence-authorization-"));
   const evidencePath = path.join(tempDir, "sentry-source-map-evidence.json");
   const triggerPath = path.join(tempDir, "sentry-trigger.txt");
-  const evidenceRecord = validateNativeSentryEvent(eventFixture(), expected);
+  const evidenceRecord = savedEvidenceFixture();
 
   await writeFile(
     evidencePath,
@@ -464,7 +527,7 @@ test("rejects nested credential-bearing evidence fields", async () => {
   const tempDir = await mkdtemp(path.join(tmpdir(), "sentry-evidence-secret-"));
   const evidencePath = path.join(tempDir, "sentry-source-map-evidence.json");
   const triggerPath = path.join(tempDir, "sentry-trigger.txt");
-  const evidenceRecord = validateNativeSentryEvent(eventFixture(), expected);
+  const evidenceRecord = savedEvidenceFixture();
 
   await writeFile(
     evidencePath,
@@ -505,7 +568,7 @@ test("rejects non-empty object values under credential-named evidence fields", a
   const tempDir = await mkdtemp(path.join(tmpdir(), "sentry-evidence-object-secret-"));
   const evidencePath = path.join(tempDir, "sentry-source-map-evidence.json");
   const triggerPath = path.join(tempDir, "sentry-trigger.txt");
-  const evidenceRecord = validateNativeSentryEvent(eventFixture(), expected);
+  const evidenceRecord = savedEvidenceFixture();
 
   await writeFile(
     evidencePath,
@@ -573,7 +636,7 @@ test("rejects credential-like token text embedded in evidence strings", async ()
   const tempDir = await mkdtemp(path.join(tmpdir(), "sentry-evidence-text-secret-"));
   const evidencePath = path.join(tempDir, "sentry-source-map-evidence.json");
   const triggerPath = path.join(tempDir, "sentry-trigger.txt");
-  const evidenceRecord = validateNativeSentryEvent(eventFixture(), expected);
+  const evidenceRecord = savedEvidenceFixture();
 
   await writeFile(
     evidencePath,
@@ -610,7 +673,7 @@ test("rejects credential-like token text embedded in parsed escaped evidence str
   const tempDir = await mkdtemp(path.join(tmpdir(), "sentry-evidence-escaped-secret-"));
   const evidencePath = path.join(tempDir, "sentry-source-map-evidence.json");
   const triggerPath = path.join(tempDir, "sentry-trigger.txt");
-  const evidenceRecord = validateNativeSentryEvent(eventFixture(), expected);
+  const evidenceRecord = savedEvidenceFixture();
   const escapedDiagnostic = JSON.stringify(
     "captured sentry_auth_token=secret-value during test",
   ).replace("=", "\\u003d");
@@ -657,7 +720,7 @@ test("rejects saved evidence with non-positive frame coordinates", async () => {
   const tempDir = await mkdtemp(path.join(tmpdir(), "sentry-evidence-frame-"));
   const evidencePath = path.join(tempDir, "sentry-source-map-evidence.json");
   const triggerPath = path.join(tempDir, "sentry-trigger.txt");
-  const evidenceRecord = validateNativeSentryEvent(eventFixture(), expected);
+  const evidenceRecord = savedEvidenceFixture();
 
   await writeFile(
     evidencePath,
@@ -701,7 +764,7 @@ test("cli uses evidence verification mode for environment-only inputs", async ()
 
   await writeFile(
     evidencePath,
-    `${JSON.stringify(validateNativeSentryEvent(eventFixture(), expected))}\n`,
+    `${JSON.stringify(savedEvidenceFixture())}\n`,
   );
   await writeFile(
     triggerPath,

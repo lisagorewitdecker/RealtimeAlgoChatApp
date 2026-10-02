@@ -28,7 +28,7 @@ import { useSocket } from "@/contexts/SocketContext";
 import { ScaledText as Text } from "@/components/ScaledText";
 import { ScaledTextInput } from "@/components/ScaledTextInput";
 import { useColors } from "@/hooks/useColors";
-import { Sentry } from "@/lib/sentry";
+import { captureRoomKeyPersistenceRetryFailure } from "@/lib/sentry";
 import { textLengthBucket, trackEvent } from "@/utils/analytics";
 
 interface Message {
@@ -411,7 +411,6 @@ export default function RoomScreen() {
         });
       } else {
         recoveryRequestRef.current = null;
-        setMessageReplayGap(false);
       }
     }
     function onMessageRecoveryError(data: { requestId?: string }) {
@@ -694,15 +693,12 @@ export default function RoomScreen() {
   );
 
   const retrySavingRoomKey = useCallback(async () => {
+    const recoveryOperation =
+      roomKeyPersistenceFailure?.kind === "load" ? "load" : "save";
     const reportRetryFailure = () => {
-      const recoveryOperation =
-        roomKeyPersistenceFailure?.kind === "load" ? "load" : "save";
       if (!reportedPersistenceRetryFailuresRef.current.has(recoveryOperation)) {
         reportedPersistenceRetryFailuresRef.current.add(recoveryOperation);
-        Sentry.captureMessage("Room key persistence retry failed", {
-          level: "warning",
-          tags: { recovery_operation: recoveryOperation },
-        });
+        captureRoomKeyPersistenceRetryFailure(recoveryOperation);
       }
     };
 
@@ -710,6 +706,9 @@ export default function RoomScreen() {
     try {
       const persisted = await retryRoomKeyPersistence(roomId);
       if (persisted) {
+        // A successful retry ends this operation's outage episode. A later
+        // failure is a distinct outage and may emit one new diagnostic.
+        reportedPersistenceRetryFailuresRef.current.delete(recoveryOperation);
         setHasRoomKey(!!getRoomKey(roomId));
       } else {
         reportRetryFailure();
@@ -1006,7 +1005,11 @@ export default function RoomScreen() {
             </Text>
           ) : null}
           {users.map((u) => (
-            <View key={u.userId} style={styles.userRow}>
+            <View
+              key={u.userId}
+              testID={`room-member-row-${u.userId}`}
+              style={styles.userRow}
+            >
               <View style={[styles.userAvatar, { backgroundColor: colors.secondary }]}>
                 <Text style={styles.userAvatarText}>
                   {u.avatarEmoji || u.username.charAt(0).toUpperCase()}
@@ -1082,6 +1085,17 @@ export default function RoomScreen() {
               reconnects. Newer messages are shown below.
             </Text>
           </View>
+          <TouchableOpacity
+            testID="room-message-gap-dismiss"
+            accessibilityRole="button"
+            accessibilityLabel="Dismiss reconnect history warning"
+            onPress={() => setMessageReplayGap(false)}
+            style={[styles.keyWarningButton, { borderColor: colors.destructive }]}
+          >
+            <Text style={[styles.keyWarningButtonText, { color: colors.destructive }]}>
+              Dismiss
+            </Text>
+          </TouchableOpacity>
         </View>
       ) : null}
 

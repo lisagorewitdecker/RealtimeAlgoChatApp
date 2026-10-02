@@ -53,6 +53,7 @@ import {
 } from "expo-router/build/react-navigation/native";
 import { BottomTabBarHeightContext as PublicBottomTabBarHeightContext } from "expo-router/js-tabs";
 import { useTabBarContentInset } from "../hooks/useTabBarContentInset";
+import { createAssumptionCheck } from "../test-utils/vendoredAssumption";
 
 // The one thing that keeps the vendored navigator out of Jest: its linking
 // helpers require query-string@7, whose decode-uri-component dependency the
@@ -108,32 +109,15 @@ const layoutTabBarStyle: ViewStyle = {
   elevation: 0,
 };
 
-type Assumption = { file: string; claim: string };
-
 /**
  * Re-throws an assertion failure with the vendored file and the assumption it
- * contradicts in front of Jest's diff, keeping the original code frame.
+ * contradicts in front of Jest's diff (test-utils/vendoredAssumption.ts).
  */
-function checkAssumption({ file, claim }: Assumption, verify: () => void): void {
-  try {
-    verify();
-  } catch (error) {
-    if (!(error instanceof Error)) {
-      throw error;
-    }
-    const stack = error.stack ?? "";
-    const firstFrame = stack.search(/\n\s+at\s/);
-    const frames = firstFrame === -1 ? "" : stack.slice(firstFrame);
-    error.message =
-      `Vendored ${file} no longer matches the assumption that ${claim}. ` +
-      "The Tabs stand-in in __tests__/TabLayout.test.tsx and " +
-      "hooks/useTabBarContentInset.ts rely on it: re-verify the classic tab bar " +
-      "on a phone (app/(tabs)/_layout.tsx) before updating them.\n\n" +
-      error.message;
-    error.stack = `${error.name}: ${error.message}${frames}`;
-    throw error;
-  }
-}
+const checkAssumption = createAssumptionCheck(
+  "The Tabs stand-in in __tests__/TabLayout.test.tsx and " +
+    "hooks/useTabBarContentInset.ts rely on it: re-verify the classic tab bar " +
+    "on a phone (app/(tabs)/_layout.tsx) before updating them.",
+);
 
 // --- Stub navigator state -------------------------------------------------
 

@@ -23,7 +23,10 @@ export function AppleSignInButton({
       accessibilityLabel="Continue with Apple"
       disabled={disabled}
       onPress={onPress}
-      style={[styles.button, { borderRadius: colors.radius }]}
+      style={[
+        styles.button,
+        { borderColor: colors.border, borderRadius: colors.radius },
+      ]}
     >
       <View style={styles.content}>
         <FontAwesome name="apple" size={20} color="#FFFFFF" style={styles.icon} />
@@ -39,6 +42,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "#000000",
+    borderWidth: 1,
     paddingHorizontal: 12,
     paddingVertical: 12,
   },
