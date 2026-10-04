@@ -1425,18 +1425,37 @@ function setupConnectedSocket(
         });
         return;
       }
-      const [page, deletionPage] = await Promise.all([
-        loadEncryptedMessagesAfter(
-          roomId,
-          { id: afterMessageId, timestamp: afterTimestamp },
-          MESSAGE_RECOVERY_PAGE_SIZE,
-        ),
-        loadDeletedMessageIdsAfter(
-          roomId,
-          { id: deletedAfterId, deletedAt: deletedAfter },
-          MESSAGE_RECOVERY_PAGE_SIZE,
-        ),
-      ]);
+      if (!reservePersistence(persistenceBudget)) {
+        socket.emit("message-recovery-error", {
+          requestId,
+          code: "PERSISTENCE_BUSY",
+        });
+        return;
+      }
+      let page: Awaited<ReturnType<typeof loadEncryptedMessagesAfter>>;
+      let deletionPage: Awaited<ReturnType<typeof loadDeletedMessageIdsAfter>>;
+      try {
+        const [pageResult, deletionPageResult] = await Promise.allSettled([
+          loadEncryptedMessagesAfter(
+            roomId,
+            { id: afterMessageId, timestamp: afterTimestamp },
+            MESSAGE_RECOVERY_PAGE_SIZE,
+          ),
+          loadDeletedMessageIdsAfter(
+            roomId,
+            { id: deletedAfterId, deletedAt: deletedAfter },
+            MESSAGE_RECOVERY_PAGE_SIZE,
+          ),
+        ]);
+        if (pageResult.status === "rejected") throw pageResult.reason;
+        if (deletionPageResult.status === "rejected") {
+          throw deletionPageResult.reason;
+        }
+        page = pageResult.value;
+        deletionPage = deletionPageResult.value;
+      } finally {
+        releasePersistence(persistenceBudget);
+      }
       if (
         socket.data.roomId !== roomId ||
         !socket.rooms.has(roomId) ||

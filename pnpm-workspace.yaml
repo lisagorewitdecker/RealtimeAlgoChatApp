@@ -62,9 +62,9 @@ catalog:
   '@replit/vite-plugin-runtime-error-modal': ^0.0.6
   '@tailwindcss/vite': ^4.3.3
   '@tanstack/react-query': ^5.102.8
-  '@types/node': ^26.6.2
+  '@types/node': ^26.6.3
   '@types/react': ^19.2.18
-  '@types/react-dom': ^19.2.5
+  '@types/react-dom': ^19.3.0
   '@vitejs/plugin-react': ^5.2.0
   class-variance-authority: ^0.7.1
   clsx: ^2.1.1
@@ -73,8 +73,7 @@ catalog:
   lucide-react: ^0.545.0
   # Must be this exact version because Expo SDK 57 requires it.
   react: 19.2.3
-  # Must be this exact version because Expo SDK 57 requires it.
-  react-dom: 19.2.3
+  react-dom: 19.3.0
   tailwind-merge: ^3.7.0
   tailwindcss: ^4.3.3
   tsx: ^4.23.12
@@ -189,17 +188,17 @@ overrides:
   browserslist: "4.28.7"
   decode-uri-component: "0.5.0"
   qs: "6.16.0"
-  markdown-it: "14.3.0"
+  markdown-it: "14.3.1"
   linkify-it: "5.0.2"
   js-yaml: "4.3.2"
-  "brace-expansion@<2.0.0": "1.1.18"
+  "brace-expansion@<2.0.0": "1.1.21"
   "brace-expansion@>=2.0.0 <3.0.0": "2.1.4"
   "brace-expansion@>=3.0.0 <4.0.0": "3.0.6"
-  "brace-expansion@>=4.0.0": "5.0.9"
+  "brace-expansion@>=4.0.0": "5.0.12"
   tar: "7.5.22"
   shell-quote: "1.10.0"
   body-parser: "2.3.0"
-  fast-uri: "3.1.7"
+  fast-uri: "3.1.8"
   postcss: "8.5.26"
   "@xmldom/xmldom@0.8.13": "0.8.15"
   "@xmldom/xmldom@0.9.10": "0.9.12"
@@ -215,3 +214,6 @@ allowBuilds:
   browser-tabs-lock: true
   core-js: true
   esbuild: true
+
+patchedDependencies:
+  node-forge@1.4.0: patches/node-forge@1.4.0.patch

@@ -23,6 +23,14 @@ const workflowPath = path.join(
 );
 const workflow = YAML.parse(readFileSync(workflowPath, "utf8"));
 const workflowText = readFileSync(workflowPath, "utf8");
+const realPlatformWorkflowText = readFileSync(
+  path.join(
+    workspaceRoot,
+    ".github/workflows/preview-startup-real-platform.yml",
+  ),
+  "utf8",
+);
+const realPlatformWorkflow = YAML.parse(realPlatformWorkflowText);
 const validatorPath = path.join(
   workspaceRoot,
   "artifacts/chat-app/scripts/validate-preview-startup.mjs",
@@ -95,17 +103,20 @@ function runWorkflowVerificationStep() {
   );
   writeFileSync(scriptPath, verificationStep.run);
 
+  const environment = {
+    ...process.env,
+    GITHUB_STEP_SUMMARY: githubStepSummaryPath,
+    REVIEWED_REF: "preview-startup-summary-regression-test-ref",
+  };
+  delete environment.PREVIEW_PUBLIC_URL;
+  delete environment.REPLIT_EXPO_DEV_DOMAIN;
+
   const result = spawnSync(
     "bash",
     ["-euo", "pipefail", "-c", ". \"$1\"", "bash", scriptPath],
     {
       cwd: workspaceRoot,
-      env: {
-        ...process.env,
-        GITHUB_STEP_SUMMARY: githubStepSummaryPath,
-        REVIEWED_REF: "preview-startup-summary-regression-test-ref",
-        REPLIT_EXPO_DEV_DOMAIN: "fallback-preview.example.test",
-      },
+      env: environment,
       encoding: "utf8",
     },
   );
@@ -182,6 +193,10 @@ test("hosted preview startup summary regression checks the reviewed revision", (
   assert.match(
     verification,
     /GITHUB_STEP_SUMMARY="\$failure_summary_path"\s+\\\s*\n\s+PREVIEW_STARTUP_TEST_FIXTURE=missing-runtime-library-long-path/,
+  );
+  assert.match(
+    verification,
+    /PREVIEW_STARTUP_TEST_FIXTURE=missing-runtime-library-long-path\s+\\\s*\n\s+REPLIT_EXPO_DEV_DOMAIN=fallback-preview\.example\.test/,
   );
   assert.match(verification, /Expo preview startup output is healthy:/);
   assert.match(
@@ -304,6 +319,31 @@ test("hosted preview timing evidence covers every supported runner profile", () 
     "macos-latest",
     "windows-latest",
   ]);
+  const checkoutStep = timingJob.steps[0];
+  assert.equal(checkoutStep.name, "Check out reviewed revision");
+  assert.equal(checkoutStep.uses, "actions/checkout@v4");
+  assert.equal(checkoutStep.with["persist-credentials"], false);
+  assert.equal(checkoutStep.with["sparse-checkout-cone-mode"], false);
+  assert.deepEqual(checkoutStep.with["sparse-checkout"].trim().split("\n"), [
+    "/package.json",
+    "/pnpm-lock.yaml",
+    "/pnpm-workspace.yaml",
+    "/.npmrc",
+    "/patches/",
+    "/artifacts/chat-app/",
+    "/lib/",
+    "/vendor/",
+    "/scripts/",
+  ]);
+  assert.ok(
+    realPlatformWorkflow.jobs["verify-real-launcher"].steps[0].with[
+      "sparse-checkout"
+    ]
+      .trim()
+      .split("\n")
+      .includes("/patches/"),
+    "the real-platform workflow checkout must include patched dependency files",
+  );
   const timingStep = timingJob.steps.at(-1);
   assert.equal(timingStep.name, "Measure startup, public preview, and local handoff phases");
   assert.match(timingStep.run, /PREVIEW_STARTUP_REAL_LAUNCHER=1/);
@@ -323,6 +363,18 @@ test("hosted preview timing evidence covers every supported runner profile", () 
 test("hosted preview startup checks remain read-only", () => {
   assert.doesNotMatch(workflowText, /self-hosted/);
   assert.doesNotMatch(workflowText, /\b(publish|deploy|submit)\b/i);
+});
+
+test("real platform launcher workflow sanitizes captured launcher output before logging it", () => {
+  assert.match(
+    realPlatformWorkflowText,
+    /emit_sanitized_log\(\) \{[\s\S]*sanitize_workflow_stream <"\$log_path" >&2/,
+  );
+  assert.doesNotMatch(realPlatformWorkflowText, /cat "\$console_path" >&2/);
+  assert.doesNotMatch(
+    realPlatformWorkflowText,
+    /cat "\$RUNNER_TEMP\/expo-startup-\$\{\{ matrix\.os \}\}\.revalidated\.log" >&2/,
+  );
 });
 
 test("hosted preview startup workflow summary matches validator output exactly", () => {

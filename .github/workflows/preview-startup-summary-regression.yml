@@ -129,6 +129,7 @@ jobs:
 
           if GITHUB_STEP_SUMMARY="$failure_summary_path" \
             PREVIEW_STARTUP_TEST_FIXTURE=missing-runtime-library-long-path \
+            REPLIT_EXPO_DEV_DOMAIN=fallback-preview.example.test \
             node artifacts/chat-app/scripts/validate-preview-startup.mjs > /tmp/preview-startup-failure.log 2>&1; then
             echo "The missing-runtime-library-long-path preview startup scenario unexpectedly passed." >&2
             exit 1
@@ -273,6 +274,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
           if GITHUB_STEP_SUMMARY="$unexpected_summary_path" \
+            REPLIT_EXPO_DEV_DOMAIN=fallback-preview.example.test \
             PREVIEW_STARTUP_TEST_FIXTURE=unexpected-startup-failure \
             node artifacts/chat-app/scripts/validate-preview-startup.mjs > /tmp/preview-startup-unexpected-failure.log 2>&1; then
             echo "The unexpected preview startup scenario unexpectedly passed." >&2
@@ -398,6 +400,19 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha || inputs.reviewed_ref }}
           fetch-depth: 1
           persist-credentials: false
+          # Git for Windows cannot materialize the repository's documentation
+          # fixture paths, and this job only needs the preview workspace.
+          sparse-checkout: |
+            /package.json
+            /pnpm-lock.yaml
+            /pnpm-workspace.yaml
+            /.npmrc
+            /patches/
+            /artifacts/chat-app/
+            /lib/
+            /vendor/
+            /scripts/
+          sparse-checkout-cone-mode: false
 
       - name: Set up pnpm
         uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0

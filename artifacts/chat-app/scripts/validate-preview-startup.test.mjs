@@ -824,6 +824,7 @@ async function withLocalManifestServer(manifest, run, options = {}) {
     observedPlatforms.push(request.headers["expo-platform"]);
     observedRequests.push({
       path: request.url,
+      host: request.headers.host,
       platform: request.headers["expo-platform"],
     });
     if (request.url === "/") {
@@ -840,7 +841,7 @@ async function withLocalManifestServer(manifest, run, options = {}) {
     response.end(options.bundleBody ?? "console.log('ios');");
   });
 
-  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  await new Promise((resolve) => server.listen(0, "localhost", resolve));
   const address = server.address();
   assert.notEqual(typeof address, "string");
 
@@ -868,6 +869,10 @@ test("local iOS handoff probe requests the manifest launch asset path", async ()
       assert.deepEqual(
         observedRequests.map(({ path }) => path),
         ["/", "/_expo/static/js/ios-bundle"],
+      );
+      assert.deepEqual(
+        observedRequests.map(({ host }) => host),
+        [`localhost:${port}`, `localhost:${port}`],
       );
       assert.equal(result.signedInDeveloper, false);
     },
@@ -1552,7 +1557,7 @@ globalThis.fetch = async (url, options = {}) => {
     );
   }
   if (
-    requestUrl.hostname === "127.0.0.1" &&
+    requestUrl.hostname === "localhost" &&
     requestUrl.pathname === "/_expo/static/js/bundle"
   ) {
     return new Response("local response contains private-secret", {
@@ -1753,7 +1758,7 @@ globalThis.fetch = async (url, options = {}) => {
     );
   }
   if (
-    requestUrl.hostname === "127.0.0.1" &&
+    requestUrl.hostname === "localhost" &&
     requestUrl.pathname === "/_expo/static/js/bundle"
   ) {
     await new Promise((resolve, reject) => {
@@ -1883,7 +1888,7 @@ globalThis.fetch = async (url, options = {}) => {
     );
   }
   if (
-    requestUrl.hostname === "127.0.0.1" &&
+    requestUrl.hostname === "localhost" &&
     requestUrl.pathname === "/_expo/static/js/bundle"
   ) {
     await new Promise((resolve, reject) => {
@@ -2155,6 +2160,42 @@ globalThis.fetch = async (url, options = {}) => {
         assert.ok(timing.phases[phase].elapsedMs < timing.budgetsMs[phase]);
       }
       assert.doesNotMatch(JSON.stringify(timing), /public-preview\.test|https?:\/\//);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
+  "live Metro handoff ignores the non-fatal React Native DevTools install warning",
+  { timeout: 5_000 },
+  () => {
+    const directory = mkdtempSync(join(tmpdir(), "preview-devtools-warning-"));
+    const timingPath = join(directory, "preview-startup-timing.json");
+
+    try {
+      const result = spawnSync(process.execPath, [validatorPath], {
+        env: {
+          ...process.env,
+          REPLIT_EXPO_SESSION_SECRET: "",
+          PREVIEW_STARTUP_REAL_LAUNCHER: "1",
+          PREVIEW_STARTUP_REAL_HANDOFF: "1",
+          PREVIEW_STARTUP_SKIP_PUBLIC: "1",
+          PREVIEW_STARTUP_TIMEOUT_MS: "1000",
+          PREVIEW_HANDOFF_TIMEOUT_MS: "1000",
+          PREVIEW_STARTUP_TEST_FIXTURE: "handoff-server",
+          PREVIEW_STARTUP_TEST_DEVTOOLS_INSTALL_WARNING: "1",
+          PREVIEW_TIMING_OUTPUT: timingPath,
+        },
+        encoding: "utf8",
+        timeout: 4_000,
+      });
+
+      assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+      const timing = JSON.parse(readFileSync(timingPath, "utf8"));
+      assert.equal(timing.phases.startup.status, "PASS");
+      assert.equal(timing.phases.localHandoff.status, "PASS");
+      assert.doesNotMatch(result.stderr, /Expo preview startup error:/);
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }

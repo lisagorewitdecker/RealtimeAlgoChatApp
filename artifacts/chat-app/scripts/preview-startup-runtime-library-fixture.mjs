@@ -139,13 +139,19 @@ if (
           response.write('{"launchAsset":');
           return;
         }
-        response.end(
-          JSON.stringify({
-            launchAsset: {
-              url: "https://preview.example.test/_expo/static/js/bundle",
-            },
-          }),
-        );
+        const sendManifest = () =>
+          response.end(
+            JSON.stringify({
+              launchAsset: {
+                url: "https://preview.example.test/_expo/static/js/bundle",
+              },
+            }),
+          );
+        if (process.env.PREVIEW_STARTUP_TEST_DEVTOOLS_INSTALL_WARNING === "1") {
+          setTimeout(sendManifest, 500);
+        } else {
+          sendManifest();
+        }
         return;
       }
 
@@ -166,6 +172,13 @@ if (
     process.once("SIGINT", shutdown);
     server.listen(port, "127.0.0.1", () => {
       process.stdout.write("Starting Metro Bundler\n");
+      if (process.env.PREVIEW_STARTUP_TEST_DEVTOOLS_INSTALL_WARNING === "1") {
+        setTimeout(() => {
+          process.stderr.write(
+            "ERROR An unknown error occurred while installing React Native DevTools. Details:\n",
+          );
+        }, 10);
+      }
     });
   } else {
     const output =
