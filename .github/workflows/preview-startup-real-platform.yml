@@ -34,6 +34,7 @@ jobs:
             /pnpm-lock.yaml
             /pnpm-workspace.yaml
             /.npmrc
+            /patches/
             /artifacts/chat-app/
             /lib/
             /vendor/

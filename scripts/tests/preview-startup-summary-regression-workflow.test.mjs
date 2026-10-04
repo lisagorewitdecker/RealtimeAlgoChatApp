@@ -30,6 +30,7 @@ const realPlatformWorkflowText = readFileSync(
   ),
   "utf8",
 );
+const realPlatformWorkflow = YAML.parse(realPlatformWorkflowText);
 const validatorPath = path.join(
   workspaceRoot,
   "artifacts/chat-app/scripts/validate-preview-startup.mjs",
@@ -328,11 +329,21 @@ test("hosted preview timing evidence covers every supported runner profile", () 
     "/pnpm-lock.yaml",
     "/pnpm-workspace.yaml",
     "/.npmrc",
+    "/patches/",
     "/artifacts/chat-app/",
     "/lib/",
     "/vendor/",
     "/scripts/",
   ]);
+  assert.ok(
+    realPlatformWorkflow.jobs["verify-real-launcher"].steps[0].with[
+      "sparse-checkout"
+    ]
+      .trim()
+      .split("\n")
+      .includes("/patches/"),
+    "the real-platform workflow checkout must include patched dependency files",
+  );
   const timingStep = timingJob.steps.at(-1);
   assert.equal(timingStep.name, "Measure startup, public preview, and local handoff phases");
   assert.match(timingStep.run, /PREVIEW_STARTUP_REAL_LAUNCHER=1/);
