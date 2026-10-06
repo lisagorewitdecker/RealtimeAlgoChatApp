@@ -787,6 +787,7 @@ export function setupSocketIO(httpServer: HttpServer) {
     },
   });
   activeServer = io;
+  let revocationListenerGeneration = 0;
   const revocationListener = startSocketRevocationListener(
     (revocation) => {
       if (revocation.type === "account-ban") {
@@ -800,6 +801,7 @@ export function setupSocketIO(httpServer: HttpServer) {
       );
     },
     (error) => {
+      revocationListenerGeneration += 1;
       logger.error(
         { err: error },
         "Socket revocation listener disconnected; closing realtime sessions",
@@ -811,6 +813,7 @@ export function setupSocketIO(httpServer: HttpServer) {
 
   io.use(async (socket: AppSocket, next) => {
     await revocationListener.waitUntilReady();
+    const listenerGeneration = revocationListenerGeneration;
     // Wraps the whole handshake, not just the Clerk-token branch: a failure
     // anywhere here (getAccountAccess giving up on a throttled Clerk,
     // getAccountProfile hitting a down database) must still resolve `next()`
@@ -826,6 +829,17 @@ export function setupSocketIO(httpServer: HttpServer) {
       return;
     }
     socket.data.connectionLease = lease;
+    const rejectIfRevocationListenerChanged = () => {
+      if (listenerGeneration === revocationListenerGeneration) return false;
+      rejectHandshake(
+        next,
+        connectionRegistry,
+        lease,
+        "Socket revocation listener disconnected. Please retry.",
+        "revocation_listener_disconnected",
+      );
+      return true;
+    };
 
     try {
       const auth = getRecord(socket.handshake.auth);
@@ -872,6 +886,7 @@ export function setupSocketIO(httpServer: HttpServer) {
           );
           return;
         }
+        if (rejectIfRevocationListenerChanged()) return;
         socket.data.authenticatedUser = {
           userId: capability.userId,
           username: capability.username,
@@ -939,6 +954,7 @@ export function setupSocketIO(httpServer: HttpServer) {
       }
       const profile = await getAccountProfile(userId);
 
+      if (rejectIfRevocationListenerChanged()) return;
       socket.data.authenticatedUser = {
         userId,
         username: profile.username,

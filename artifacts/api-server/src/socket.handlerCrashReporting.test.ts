@@ -22,7 +22,8 @@ const mockSocketRevocation = vi.hoisted(() => ({
                 banned: boolean;
               },
         ) => void)
-      | undefined,
+        | undefined,
+  onUnavailable: undefined as ((error: Error) => void) | undefined,
 }));
 
 vi.mock("@clerk/express", () => ({
@@ -44,8 +45,12 @@ vi.mock("./lib/sandboxAssistant", () => ({
 
 vi.mock("./lib/socketRevocations", () => ({
   publishSocketRevocation: vi.fn(),
-  startSocketRevocationListener: (handler: typeof mockSocketRevocation.handler) => {
+  startSocketRevocationListener: (
+    handler: typeof mockSocketRevocation.handler,
+    onUnavailable: typeof mockSocketRevocation.onUnavailable,
+  ) => {
     mockSocketRevocation.handler = handler;
+    mockSocketRevocation.onUnavailable = onUnavailable;
     return { waitUntilReady: async () => undefined, close: vi.fn() };
   },
 }));
@@ -112,6 +117,7 @@ vi.mock("drizzle-orm", () => ({
 }));
 
 import { setupSocketIO } from "./socket.js";
+import { createRoomAccessCapability } from "./lib/roomAccess.js";
 
 let httpServer: HttpServer;
 let socketServer: ReturnType<typeof setupSocketIO>;
@@ -128,6 +134,8 @@ beforeEach(async () => {
   mockCaptureException.mockReset();
   mockDbLimit.mockReset();
   mockSocketRevocation.handler = undefined;
+  mockSocketRevocation.onUnavailable = undefined;
+  process.env["SESSION_SECRET"] = "socket-listener-generation-test-secret";
 
   httpServer = createServer();
   socketServer = setupSocketIO(httpServer);
@@ -146,6 +154,14 @@ afterEach(async () => {
 
 function waitForEvent<T>(socket: ClientSocket, event: string) {
   return new Promise<T>((resolve) => socket.once(event, (payload: T) => resolve(payload)));
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
 }
 
 function connect(auth: Record<string, unknown>) {
@@ -190,6 +206,49 @@ describe("Socket.IO handler crash reporting", () => {
 
     await expect(revoked).resolves.toEqual({ reason: "banned" });
     await expect(disconnected).resolves.toBe("io server disconnect");
+  });
+
+  it("rejects a pending Clerk handshake when the revocation listener drops during profile lookup", async () => {
+    const profile = deferred<{ username: string; avatarEmoji: string }>();
+    mockGetAccountProfile.mockReturnValueOnce(profile.promise);
+
+    const client = connect({ token: "good-token" });
+    const connectError = waitForEvent<Error>(client, "connect_error");
+    await vi.waitFor(() => expect(mockGetAccountProfile).toHaveBeenCalled());
+
+    mockSocketRevocation.onUnavailable?.(new Error("listener disconnected"));
+    profile.resolve({ username: "Ada", avatarEmoji: "👩‍💻" });
+
+    await expect(connectError).resolves.toMatchObject({
+      message: "Socket revocation listener disconnected. Please retry.",
+    });
+
+    const retry = connect({ token: "good-token" });
+    await waitForEvent(retry, "connect");
+    expect(retry.connected).toBe(true);
+  });
+
+  it("rejects a pending room-capability handshake when the revocation listener drops", async () => {
+    const access = deferred<{ allowed: boolean }>();
+    mockGetAccountAccess.mockReturnValueOnce(access.promise);
+    const token = createRoomAccessCapability({
+      roomId: "room-capability",
+      userId: "user-ada",
+      username: "Ada",
+      avatarEmoji: "👩‍💻",
+      purpose: "call",
+    });
+
+    const client = connect({ token });
+    const connectError = waitForEvent<Error>(client, "connect_error");
+    await vi.waitFor(() => expect(mockGetAccountAccess).toHaveBeenCalled());
+
+    mockSocketRevocation.onUnavailable?.(new Error("listener disconnected"));
+    access.resolve({ allowed: true });
+
+    await expect(connectError).resolves.toMatchObject({
+      message: "Socket revocation listener disconnected. Please retry.",
+    });
   });
 
   it("does not crash the server or leave the room broken after a join-room failure, and lets a retry succeed", async () => {
