@@ -203,7 +203,7 @@ overrides:
   source-map-js: "1.2.2"
   proxy-addr: "2.0.8"
   compression: "1.8.2"
-  fast-copy: "4.1.2"
+  fast-copy: "4.1.1"
   "@xmldom/xmldom@0.8.13": "0.8.15"
   "@xmldom/xmldom@0.9.10": "0.9.12"
   socket.io-parser: "4.2.7"
