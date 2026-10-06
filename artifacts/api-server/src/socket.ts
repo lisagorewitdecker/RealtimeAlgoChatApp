@@ -63,7 +63,7 @@ import {
 } from "./lib/socketMonitoring";
 import { ROOM_MESSAGE_HISTORY_LIMIT } from "./lib/roomLimits";
 import {
-  publishSocketRevocation,
+  publishSocketRevocationInTransaction,
   startSocketRevocationListener,
 } from "./lib/socketRevocations";
 
@@ -506,17 +506,6 @@ async function flushSandboxSaves(
   releasePersistence(persistenceBudget);
 }
 
-async function setKickCooldown(roomId: string, userId: string): Promise<void> {
-  const expiresAt = new Date(Date.now() + KICK_COOLDOWN_MS);
-  await db
-    .insert(roomKickCooldownsTable)
-    .values({ roomId, userId, expiresAt })
-    .onConflictDoUpdate({
-      target: [roomKickCooldownsTable.roomId, roomKickCooldownsTable.userId],
-      set: { expiresAt },
-    });
-}
-
 async function hasKickCooldown(
   roomId: string,
   userId: string,
@@ -773,7 +762,22 @@ export async function kickRoomMember(
   }
   if (isConfiguredAdmin(targetId)) return "protected-target";
 
-  await setKickCooldown(roomId, targetId);
+  await db.transaction(async (transaction) => {
+    const expiresAt = new Date(Date.now() + KICK_COOLDOWN_MS);
+    await transaction
+      .insert(roomKickCooldownsTable)
+      .values({ roomId, userId: targetId, expiresAt })
+      .onConflictDoUpdate({
+        target: [roomKickCooldownsTable.roomId, roomKickCooldownsTable.userId],
+        set: { expiresAt },
+      });
+    await publishSocketRevocationInTransaction(transaction, {
+      type: "room-revocation",
+      roomId,
+      userId: targetId,
+      banned: false,
+    });
+  });
   const io = activeServer;
   const target = rooms.get(roomId)?.users.get(targetId);
   if (io && target) {

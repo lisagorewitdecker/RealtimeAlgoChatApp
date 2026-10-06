@@ -14,11 +14,14 @@ import {
 } from "../lib/moderationHistory";
 import { requireAuthorizedUser } from "../lib/requireAccountAccess";
 import {
+  publishSocketRevocationInTransaction,
+  queueAccountBanRevocation,
+} from "../lib/socketRevocations";
+import {
   broadcastMessageDeletion,
   disconnectBannedUser,
   kickRoomMember,
   kickRoomUser,
-  publishSocketRevocation,
 } from "../socket";
 import { createIpRateLimit } from "../middlewares/rateLimit";
 
@@ -133,12 +136,6 @@ router.post("/:roomId/kick", async (req, res) => {
 
   const result = await kickRoomMember(roomId, actorId, targetId);
   if (result === "ok") {
-    await publishSocketRevocation({
-      type: "room-revocation",
-      roomId,
-      userId: targetId,
-      banned: false,
-    });
     res.json({ ok: true });
     return;
   }
@@ -259,22 +256,24 @@ router.post("/:roomId/ban", async (req, res, next) => {
     const expiresAt = actorIsAdmin
       ? null
       : new Date(Date.now() + 24 * 60 * 60 * 1000);
-    await db.insert(roomBansTable).values({
-      id: makeId(),
-      roomId,
-      userId: targetId,
-      bannedBy: actorId,
-      isPermanent: actorIsAdmin,
-      expiresAt,
-      reason: typeof reason === "string" ? reason.slice(0, 200) : null,
+    await db.transaction(async (transaction) => {
+      await transaction.insert(roomBansTable).values({
+        id: makeId(),
+        roomId,
+        userId: targetId,
+        bannedBy: actorId,
+        isPermanent: actorIsAdmin,
+        expiresAt,
+        reason: typeof reason === "string" ? reason.slice(0, 200) : null,
+      });
+      await publishSocketRevocationInTransaction(transaction, {
+        type: "room-revocation",
+        roomId,
+        userId: targetId,
+        banned: true,
+      });
     });
     await kickRoomUser(roomId, targetId, true);
-    await publishSocketRevocation({
-      type: "room-revocation",
-      roomId,
-      userId: targetId,
-      banned: true,
-    });
     res.json({ ok: true, isPermanent: actorIsAdmin, expiresAt });
   } catch (error) {
     next(error);
@@ -302,7 +301,7 @@ router.post("/ban", async (req, res, next) => {
   try {
     await setAccountBan(targetId, true);
     disconnectBannedUser(targetId);
-    await publishSocketRevocation({ type: "account-ban", userId: targetId });
+    await queueAccountBanRevocation(targetId);
     res.json({ ok: true });
     void recordModerationAction("ban", actorId, targetId);
   } catch (error) {

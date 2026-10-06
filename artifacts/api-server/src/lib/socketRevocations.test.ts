@@ -18,7 +18,9 @@ vi.mock("./logger", () => ({
 }));
 
 import {
+  publishSocketRevocationInTransaction,
   publishSocketRevocation,
+  queueAccountBanRevocation,
   startSocketRevocationListener,
 } from "./socketRevocations.js";
 
@@ -51,6 +53,43 @@ describe("socket revocation notifications", () => {
     expect(mockPool.query.mock.calls[0]?.[1]?.[1]).toContain(
       '"userId":"user-banned"',
     );
+  });
+
+  it("publishes a revocation through the caller's transaction", async () => {
+    const transaction = { execute: vi.fn().mockResolvedValue(undefined) };
+
+    await publishSocketRevocationInTransaction(transaction, {
+      type: "room-revocation",
+      roomId: "room-123",
+      userId: "user-kicked",
+      banned: false,
+    });
+
+    expect(transaction.execute).toHaveBeenCalledOnce();
+    expect(transaction.execute).toHaveBeenCalledWith(expect.anything());
+    expect(mockPool.query).not.toHaveBeenCalled();
+  });
+
+  it("retains account-ban revocations in the outbox when publication fails", async () => {
+    mockPool.query
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [{ id: 7, user_id: "user-banned" }] })
+      .mockRejectedValueOnce(new Error("notification query failed"));
+
+    await expect(
+      queueAccountBanRevocation("user-banned"),
+    ).resolves.toBeUndefined();
+
+    expect(mockPool.query).toHaveBeenNthCalledWith(
+      1,
+      "INSERT INTO socket_revocation_outbox (user_id) VALUES ($1)",
+      ["user-banned"],
+    );
+    expect(mockPool.query).toHaveBeenNthCalledWith(
+      2,
+      "SELECT id, user_id FROM socket_revocation_outbox ORDER BY id LIMIT 100",
+    );
+    expect(mockPool.query).toHaveBeenCalledTimes(3);
   });
 
   it("waits for LISTEN and handles only valid notifications from other instances", async () => {

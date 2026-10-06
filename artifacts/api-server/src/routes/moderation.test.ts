@@ -11,7 +11,8 @@ const mockSearchAccounts = vi.hoisted(() => vi.fn());
 const mockDisconnectBannedUser = vi.hoisted(() => vi.fn());
 const mockKickRoomMember = vi.hoisted(() => vi.fn());
 const mockKickRoomUser = vi.hoisted(() => vi.fn());
-const mockPublishSocketRevocation = vi.hoisted(() => vi.fn());
+const mockPublishSocketRevocationInTransaction = vi.hoisted(() => vi.fn());
+const mockQueueAccountBanRevocation = vi.hoisted(() => vi.fn());
 const mockListModerationActions = vi.hoisted(() => vi.fn());
 const mockRecordModerationAction = vi.hoisted(() => vi.fn());
 const mockRecordMessageDeletion = vi.hoisted(() => vi.fn());
@@ -19,9 +20,13 @@ const mockBroadcastMessageDeletion = vi.hoisted(() => vi.fn());
 const mockDbLimit = vi.hoisted(() => vi.fn());
 const mockDbValues = vi.hoisted(() => vi.fn());
 const mockDbReturning = vi.hoisted(() => vi.fn());
+const mockTransactionValues = vi.hoisted(() => vi.fn());
+const mockTransaction = vi.hoisted(() => ({ insert: vi.fn() }));
+const mockDbTransaction = vi.hoisted(() => vi.fn());
 
 vi.mock("@workspace/db", () => ({
   db: {
+    transaction: mockDbTransaction,
     select: vi.fn(() => ({
       from: () => ({
         where: () => ({
@@ -91,12 +96,17 @@ vi.mock("../lib/moderationHistory", () => ({
   recordModerationAction: mockRecordModerationAction,
 }));
 
+vi.mock("../lib/socketRevocations", () => ({
+  publishSocketRevocationInTransaction:
+    mockPublishSocketRevocationInTransaction,
+  queueAccountBanRevocation: mockQueueAccountBanRevocation,
+}));
+
 vi.mock("../socket", () => ({
   broadcastMessageDeletion: mockBroadcastMessageDeletion,
   disconnectBannedUser: mockDisconnectBannedUser,
   kickRoomMember: mockKickRoomMember,
   kickRoomUser: mockKickRoomUser,
-  publishSocketRevocation: mockPublishSocketRevocation,
 }));
 
 import moderationRouter, { resetModerationHistoryRateLimits } from "./moderation.js";
@@ -132,7 +142,16 @@ beforeEach(() => {
   mockDisconnectBannedUser.mockReset();
   mockKickRoomMember.mockReset();
   mockKickRoomUser.mockReset().mockResolvedValue(undefined);
-  mockPublishSocketRevocation.mockReset().mockResolvedValue(undefined);
+  mockPublishSocketRevocationInTransaction.mockReset().mockResolvedValue(undefined);
+  mockQueueAccountBanRevocation.mockReset().mockResolvedValue(undefined);
+  mockTransactionValues.mockReset().mockResolvedValue(undefined);
+  mockTransaction.insert.mockReset().mockImplementation(() => ({
+    values: mockTransactionValues,
+  }));
+  mockDbTransaction.mockReset().mockImplementation(
+    async (callback: (transaction: unknown) => Promise<unknown>) =>
+      callback(mockTransaction),
+  );
   mockDbLimit.mockReset().mockResolvedValue([]);
   mockDbValues.mockReset().mockResolvedValue(undefined);
   mockListModerationActions.mockReset().mockResolvedValue({ entries: [], nextCursor: null });
@@ -249,12 +268,7 @@ describe("room kicks", () => {
       "admin-ada",
       "user-ben",
     );
-    expect(mockPublishSocketRevocation).toHaveBeenCalledWith({
-      type: "room-revocation",
-      roomId: "room-123",
-      userId: "user-ben",
-      banned: false,
-    });
+    expect(mockPublishSocketRevocationInTransaction).not.toHaveBeenCalled();
   });
 
   it("preserves protected-admin results and normalizes the target ID", async () => {
@@ -294,7 +308,7 @@ describe("room bans", () => {
     });
 
     expect(response.status).toBe(200);
-    expect(mockDbValues).toHaveBeenCalledWith(
+    expect(mockTransactionValues).toHaveBeenCalledWith(
       expect.objectContaining({
         roomId: "room-123",
         userId: "user-ben",
@@ -308,12 +322,18 @@ describe("room bans", () => {
       "user-ben",
       true,
     );
-    expect(mockPublishSocketRevocation).toHaveBeenCalledWith({
-      type: "room-revocation",
-      roomId: "room-123",
-      userId: "user-ben",
-      banned: true,
-    });
+    expect(mockPublishSocketRevocationInTransaction).toHaveBeenCalledWith(
+      mockTransaction,
+      {
+        type: "room-revocation",
+        roomId: "room-123",
+        userId: "user-ben",
+        banned: true,
+      },
+    );
+    expect(mockTransactionValues.mock.invocationCallOrder[0]).toBeLessThan(
+      mockPublishSocketRevocationInTransaction.mock.invocationCallOrder[0]!,
+    );
   });
 
   it("denies a non-admin when persisted room ownership belongs to someone else", async () => {
@@ -328,7 +348,7 @@ describe("room bans", () => {
     });
 
     expect(response.status).toBe(403);
-    expect(mockDbValues).not.toHaveBeenCalled();
+    expect(mockTransactionValues).not.toHaveBeenCalled();
     expect(mockKickRoomUser).not.toHaveBeenCalled();
   });
 
@@ -348,7 +368,7 @@ describe("room bans", () => {
     });
 
     expect(response.status).toBe(200);
-    expect(mockDbValues).toHaveBeenCalledWith(
+    expect(mockTransactionValues).toHaveBeenCalledWith(
       expect.objectContaining({
         isPermanent: true,
         expiresAt: null,
@@ -373,7 +393,7 @@ describe("room bans", () => {
     await expect(response.json()).resolves.toEqual({
       error: "Administrators cannot be banned from rooms.",
     });
-    expect(mockDbValues).not.toHaveBeenCalled();
+    expect(mockTransactionValues).not.toHaveBeenCalled();
     expect(mockKickRoomUser).not.toHaveBeenCalled();
   });
 });
@@ -444,10 +464,7 @@ describe("account ban and restore", () => {
     expect(response.status).toBe(200);
     expect(mockSetAccountBan).toHaveBeenCalledWith("user-ben", true);
     expect(mockDisconnectBannedUser).toHaveBeenCalledWith("user-ben");
-    expect(mockPublishSocketRevocation).toHaveBeenCalledWith({
-      type: "account-ban",
-      userId: "user-ben",
-    });
+    expect(mockQueueAccountBanRevocation).toHaveBeenCalledWith("user-ben");
     await vi.waitFor(() =>
       expect(mockRecordModerationAction).toHaveBeenCalledWith(
         "ban",

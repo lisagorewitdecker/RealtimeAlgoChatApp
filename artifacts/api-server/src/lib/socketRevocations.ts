@@ -1,9 +1,11 @@
 import { randomUUID } from "node:crypto";
 import { pool } from "@workspace/db";
+import { sql, type SQL } from "drizzle-orm";
 import { logger } from "./logger";
 
 const SOCKET_REVOCATION_CHANNEL = "realtimealgo_socket_revocations";
 const RECONNECT_DELAY_MS = 1_000;
+const OUTBOX_RETRY_INTERVAL_MS = 5_000;
 const instanceId = randomUUID();
 
 export type SocketRevocation =
@@ -39,6 +41,56 @@ export async function publishSocketRevocation(
   ]);
 }
 
+export async function publishSocketRevocationInTransaction(
+  transaction: { execute(query: SQL): Promise<unknown> },
+  revocation: SocketRevocation,
+): Promise<void> {
+  await transaction.execute(
+    sql`SELECT pg_notify(${SOCKET_REVOCATION_CHANNEL}, ${JSON.stringify({
+      ...revocation,
+      source: instanceId,
+    })})`,
+  );
+}
+
+export async function queueAccountBanRevocation(userId: string): Promise<void> {
+  await pool.query(
+    "INSERT INTO socket_revocation_outbox (user_id) VALUES ($1)",
+    [userId],
+  );
+  await flushAccountBanRevocationOutbox();
+}
+
+async function flushAccountBanRevocationOutbox(): Promise<void> {
+  let entries: Array<{ id: number; user_id: string }>;
+  try {
+    const result = await pool.query<{ id: number; user_id: string }>(
+      "SELECT id, user_id FROM socket_revocation_outbox ORDER BY id LIMIT 100",
+    );
+    entries = result.rows;
+  } catch (error) {
+    logger.warn({ err: error }, "Unable to read the socket revocation outbox");
+    return;
+  }
+
+  for (const entry of entries) {
+    try {
+      await publishSocketRevocation({
+        type: "account-ban",
+        userId: entry.user_id,
+      });
+      await pool.query("DELETE FROM socket_revocation_outbox WHERE id = $1", [
+        entry.id,
+      ]);
+    } catch (error) {
+      logger.warn(
+        { err: error, outboxId: entry.id },
+        "Socket account-ban revocation remains queued for retry",
+      );
+    }
+  }
+}
+
 export function startSocketRevocationListener(
   onRevocation: (revocation: SocketRevocation) => void,
   onUnavailable: (error: Error) => void,
@@ -50,6 +102,22 @@ export function startSocketRevocationListener(
   let closed = false;
   let reconnectTimer: NodeJS.Timeout | undefined;
   let reconnectDelayMs = RECONNECT_DELAY_MS;
+  let outboxFlushRunning = false;
+  const flushOutbox = async () => {
+    if (outboxFlushRunning) return;
+    outboxFlushRunning = true;
+    try {
+      await flushAccountBanRevocationOutbox();
+    } finally {
+      outboxFlushRunning = false;
+    }
+  };
+  const outboxRetryTimer = setInterval(
+    () => void flushOutbox(),
+    OUTBOX_RETRY_INTERVAL_MS,
+  );
+  outboxRetryTimer.unref();
+  void flushOutbox();
   let ready = false;
   let removeClientListeners: (() => void) | undefined;
   let resolveReady: (() => void) | undefined;
@@ -174,6 +242,7 @@ export function startSocketRevocationListener(
     },
     close() {
       closed = true;
+      clearInterval(outboxRetryTimer);
       if (reconnectTimer) clearTimeout(reconnectTimer);
       const activeClient = client;
       client = undefined;
