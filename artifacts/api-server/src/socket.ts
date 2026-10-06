@@ -809,7 +809,7 @@ export function setupSocketIO(httpServer: HttpServer) {
       io.disconnectSockets(true);
     },
   );
-  io.engine.on("close", revocationListener.close);
+  httpServer.once("close", revocationListener.close);
 
   io.use(async (socket: AppSocket, next) => {
     await revocationListener.waitUntilReady();
