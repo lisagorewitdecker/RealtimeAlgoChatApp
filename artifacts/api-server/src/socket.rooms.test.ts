@@ -53,6 +53,14 @@ vi.mock("./lib/sandboxAssistant", () => ({
   streamSandboxAssistant: mockStreamSandboxAssistant,
 }));
 
+vi.mock("./lib/socketRevocations", () => ({
+  publishSocketRevocation: vi.fn(),
+  startSocketRevocationListener: () => ({
+    waitUntilReady: async () => undefined,
+    close: vi.fn(),
+  }),
+}));
+
 import {
   disconnectBannedUser,
   getRooms,
@@ -1335,6 +1343,32 @@ describe("room Socket.IO lifecycle", () => {
     expect(getRooms()).toEqual([
       expect.objectContaining({ id: roomId, userCount: 1 }),
     ]);
+  });
+
+  it("rejects a pending authentication when the account is banned during profile lookup", async () => {
+    let resolveProfile!: (profile: { username: string; avatarEmoji: string }) => void;
+    let profileLookupStarted!: () => void;
+    const profileStarted = new Promise<void>((resolve) => {
+      profileLookupStarted = resolve;
+    });
+    mockGetAccountProfile.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveProfile = resolve;
+          profileLookupStarted();
+        }),
+    );
+    const ben = createRoomClient("token-ben");
+    const connectError = waitForEvent<Error>(ben, "connect_error");
+
+    await profileStarted;
+    disconnectBannedUser("user-ben");
+    resolveProfile({ username: "Ben", avatarEmoji: "🦊" });
+
+    await expect(connectError).resolves.toMatchObject({
+      message: "Your RealtimeAlgoChatApp Studio account has been banned.",
+    });
+    expect(ben.connected).toBe(false);
   });
 
   it("allows a configured admin to kick a non-admin from another creator's room", async () => {

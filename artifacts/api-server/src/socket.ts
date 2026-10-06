@@ -110,6 +110,8 @@ const rooms = new Map<string, Room>();
 const pendingRoomJoins = new Map<string, Set<PendingRoomJoin>>();
 const DEFAULT_AVATAR_EMOJI = "🧑‍💻";
 const ASSISTANT_REQUEST_ID_PATTERN = /^[a-zA-Z0-9_-]{8,80}$/;
+let accountBanSequence = 0;
+const accountBanSequences = new Map<string, number>();
 
 function roomUserJoinKey(roomId: string, userId: string): string {
   return JSON.stringify([roomId, userId]);
@@ -805,6 +807,8 @@ export async function kickRoomUser(
 }
 
 export function disconnectBannedUser(userId: string): void {
+  accountBanSequence += 1;
+  accountBanSequences.set(userId, accountBanSequence);
   const io = activeServer;
   if (!io) return;
   for (const socket of io.sockets.sockets.values()) {
@@ -856,6 +860,7 @@ export function setupSocketIO(httpServer: HttpServer) {
   httpServer.once("close", revocationListener.close);
 
   io.use(async (socket: AppSocket, next) => {
+    const authStartedAtAccountBanSequence = accountBanSequence;
     await revocationListener.waitUntilReady();
     const listenerGeneration = revocationListenerGeneration;
     // Wraps the whole handshake, not just the Clerk-token branch: a failure
@@ -931,6 +936,19 @@ export function setupSocketIO(httpServer: HttpServer) {
           return;
         }
         if (rejectIfRevocationListenerChanged()) return;
+        if (
+          (accountBanSequences.get(capability.userId) ?? 0) >
+          authStartedAtAccountBanSequence
+        ) {
+          rejectHandshake(
+            next,
+            connectionRegistry,
+            lease,
+            "Your RealtimeAlgoChatApp Studio account has been banned.",
+            "banned",
+          );
+          return;
+        }
         socket.data.authenticatedUser = {
           userId: capability.userId,
           username: capability.username,
@@ -999,6 +1017,19 @@ export function setupSocketIO(httpServer: HttpServer) {
       const profile = await getAccountProfile(userId);
 
       if (rejectIfRevocationListenerChanged()) return;
+      if (
+        (accountBanSequences.get(userId) ?? 0) >
+        authStartedAtAccountBanSequence
+      ) {
+        rejectHandshake(
+          next,
+          connectionRegistry,
+          lease,
+          "Your RealtimeAlgoChatApp Studio account has been banned.",
+          "banned",
+        );
+        return;
+      }
       socket.data.authenticatedUser = {
         userId,
         username: profile.username,
