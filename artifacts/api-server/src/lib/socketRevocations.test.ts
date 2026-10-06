@@ -29,6 +29,7 @@ afterEach(() => {
   stopListener = undefined;
   mockPool.connect.mockReset();
   mockPool.query.mockReset();
+  vi.useRealTimers();
 });
 
 describe("socket revocation notifications", () => {
@@ -113,5 +114,42 @@ describe("socket revocation notifications", () => {
     );
     expect(client.release).toHaveBeenCalledOnce();
     stopListener = undefined;
+  });
+
+  it("handles a client error during LISTEN only once", async () => {
+    vi.useFakeTimers();
+    let rejectListen: (error: Error) => void = () => {};
+    const listenPromise = new Promise<void>((_resolve, reject) => {
+      rejectListen = reject;
+    });
+    const client = Object.assign(new EventEmitter(), {
+      query: vi.fn().mockReturnValue(listenPromise),
+      release: vi.fn(),
+    });
+    mockPool.connect.mockImplementation(
+      (callback: (error: Error | null, client: unknown) => void) => {
+        callback(null, client);
+      },
+    );
+
+    const onRevocation = vi.fn();
+    const onUnavailable = vi.fn();
+    const listener = startSocketRevocationListener(onRevocation, onUnavailable);
+    stopListener = listener.close;
+
+    await Promise.resolve();
+    expect(client.query).toHaveBeenCalledWith(
+      "LISTEN realtimealgo_socket_revocations",
+    );
+    const error = new Error("connection lost");
+    client.emit("error", error);
+    rejectListen(error);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(client.release).toHaveBeenCalledExactlyOnceWith(error);
+    expect(client.listenerCount("error")).toBe(0);
+    expect(onUnavailable).not.toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(1);
   });
 });

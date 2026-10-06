@@ -70,18 +70,36 @@ export function startSocketRevocationListener(
   const connect = async () => {
     if (closed || client) return;
     let nextClient: RevocationClient | undefined;
+    let failureHandled = false;
+    let removeNextClientListeners: (() => void) | undefined;
+
+    const handleClientError = (error: Error) => {
+      if (failureHandled || !nextClient) return;
+      failureHandled = true;
+      const wasActiveClient = client === nextClient;
+      removeNextClientListeners?.();
+      if (wasActiveClient) {
+        client = undefined;
+        ready = false;
+        if (removeClientListeners === removeNextClientListeners) {
+          removeClientListeners = undefined;
+        }
+        readyPromise = new Promise<void>((resolve) => {
+          resolveReady = resolve;
+        });
+        if (!closed) onUnavailable(error);
+      } else if (!closed) {
+        logger.error(
+          { err: error },
+          "Socket revocation listener could not connect",
+        );
+      }
+      releaseClient(nextClient, error);
+      scheduleReconnect();
+    };
+
     try {
       nextClient = await acquireClient();
-      await nextClient.query(`LISTEN ${SOCKET_REVOCATION_CHANNEL}`);
-      if (closed) {
-        releaseClient(nextClient);
-        return;
-      }
-
-      client = nextClient;
-      ready = true;
-      reconnectDelayMs = RECONNECT_DELAY_MS;
-      resolveReady?.();
       const onNotification = (notification: Notification) => {
         if (
           notification.channel !== SOCKET_REVOCATION_CHANNEL ||
@@ -114,31 +132,34 @@ export function startSocketRevocationListener(
           logger.warn({ err: error }, "Ignoring malformed socket revocation");
         }
       };
-      const onClientError = (error: Error) => {
-        if (client !== nextClient) return;
-        client = undefined;
-        ready = false;
-        removeClientListeners?.();
-        removeClientListeners = undefined;
-        readyPromise = new Promise<void>((resolve) => {
-          resolveReady = resolve;
-        });
-        onUnavailable(error);
-        if (nextClient) releaseClient(nextClient, error);
-        scheduleReconnect();
-      };
-      nextClient.on("notification", onNotification);
-      nextClient.on("error", onClientError);
-      removeClientListeners = () => {
+      const onClientError = (error: Error) => handleClientError(error);
+      removeNextClientListeners = () => {
         nextClient?.removeListener("notification", onNotification);
         nextClient?.removeListener("error", onClientError);
       };
+      nextClient.on("error", onClientError);
+      await nextClient.query(`LISTEN ${SOCKET_REVOCATION_CHANNEL}`);
+      if (failureHandled) return;
+      if (closed) {
+        failureHandled = true;
+        removeNextClientListeners();
+        releaseClient(nextClient);
+        return;
+      }
+
+      nextClient.on("notification", onNotification);
+      client = nextClient;
+      ready = true;
+      reconnectDelayMs = RECONNECT_DELAY_MS;
+      resolveReady?.();
+      removeClientListeners = removeNextClientListeners;
     } catch (error) {
+      if (failureHandled) return;
       if (nextClient) {
-        releaseClient(
-          nextClient,
-          error instanceof Error ? error : undefined,
+        handleClientError(
+          error instanceof Error ? error : new Error(String(error)),
         );
+        return;
       }
       logger.error({ err: error }, "Socket revocation listener could not connect");
       scheduleReconnect();
