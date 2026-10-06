@@ -57,6 +57,7 @@ import {
   disconnectBannedUser,
   getRooms,
   kickRoomMember,
+  kickRoomUser,
   setRoomActiveForModeration,
   setupSocketIO,
 } from "./socket.js";
@@ -1303,6 +1304,37 @@ describe("room Socket.IO lifecycle", () => {
 
     await expect(revoked).resolves.toEqual({ reason: "banned" });
     await expect(disconnected).resolves.toBeTruthy();
+  });
+
+  it("rejects a pending room join revoked during public-key lookup", async () => {
+    const roomId = `pending-kick-${Date.now()}`;
+    const ada = createRoomClient("token-ada");
+    const ben = createRoomClient("token-ben");
+    await Promise.all([waitForEvent(ada, "connect"), waitForEvent(ben, "connect")]);
+
+    const adaJoined = waitForEvent(ada, "room-joined");
+    ada.emit("join-room", { roomId });
+    await adaJoined;
+
+    let resolveBenPublicKey!: (publicKey: string | null) => void;
+    mockGetPublicKey.mockImplementation((userId: string) =>
+      userId === "user-ben"
+        ? new Promise<string | null>((resolve) => {
+            resolveBenPublicKey = resolve;
+          })
+        : Promise.resolve(null),
+    );
+    const benError = waitForEvent<{ code: string }>(ben, "error");
+    ben.emit("join-room", { roomId, createIfMissing: false });
+    await vi.waitFor(() => expect(resolveBenPublicKey).toBeDefined());
+
+    await kickRoomUser(roomId, "user-ben", true);
+    resolveBenPublicKey("ben-public-key");
+
+    await expect(benError).resolves.toMatchObject({ code: "ROOM_BANNED" });
+    expect(getRooms()).toEqual([
+      expect.objectContaining({ id: roomId, userCount: 1 }),
+    ]);
   });
 
   it("allows a configured admin to kick a non-admin from another creator's room", async () => {

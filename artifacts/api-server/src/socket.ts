@@ -101,9 +101,51 @@ interface Room {
   isActive: boolean;
 }
 
+interface PendingRoomJoin {
+  revoked: boolean;
+  banned: boolean;
+}
+
 const rooms = new Map<string, Room>();
+const pendingRoomJoins = new Map<string, Set<PendingRoomJoin>>();
 const DEFAULT_AVATAR_EMOJI = "🧑‍💻";
 const ASSISTANT_REQUEST_ID_PATTERN = /^[a-zA-Z0-9_-]{8,80}$/;
+
+function roomUserJoinKey(roomId: string, userId: string): string {
+  return JSON.stringify([roomId, userId]);
+}
+
+function registerPendingRoomJoin(roomId: string, userId: string) {
+  const key = roomUserJoinKey(roomId, userId);
+  const pendingJoin: PendingRoomJoin = { revoked: false, banned: false };
+  let joins = pendingRoomJoins.get(key);
+  if (!joins) {
+    joins = new Set();
+    pendingRoomJoins.set(key, joins);
+  }
+  joins.add(pendingJoin);
+  return {
+    pendingJoin,
+    release() {
+      const currentJoins = pendingRoomJoins.get(key);
+      currentJoins?.delete(pendingJoin);
+      if (currentJoins?.size === 0) pendingRoomJoins.delete(key);
+    },
+  };
+}
+
+function revokePendingRoomJoins(
+  roomId: string,
+  userId: string,
+  banned: boolean,
+): void {
+  const joins = pendingRoomJoins.get(roomUserJoinKey(roomId, userId));
+  if (!joins) return;
+  for (const pendingJoin of joins) {
+    pendingJoin.revoked = true;
+    pendingJoin.banned ||= banned;
+  }
+}
 
 type SessionPurpose = "chat" | RoomAccessPurpose;
 
@@ -703,6 +745,7 @@ export function resetSocketRoomStateForTest(): void {
     throw new Error("Socket room state can only be reset by tests.");
   }
   rooms.clear();
+  pendingRoomJoins.clear();
   activeServer = null;
 }
 
@@ -747,6 +790,7 @@ export async function kickRoomUser(
   userId: string,
   banned: boolean,
 ): Promise<void> {
+  revokePendingRoomJoins(roomId, userId, banned);
   const io = activeServer;
   const room = rooms.get(roomId);
   const target = room?.users.get(userId);
@@ -1134,6 +1178,9 @@ function setupConnectedSocket(
     const roomHydrationRelease: { current?: () => void } = {};
     let coldHydrationRoom: Room | null = null;
     let coldHydrationVerified = false;
+    let pendingJoinRegistration:
+      | ReturnType<typeof registerPendingRoomJoin>
+      | undefined;
     try {
       const data = getRecord(payload);
       const roomId = getRoomId(data?.["roomId"]);
@@ -1148,6 +1195,11 @@ function setupConnectedSocket(
         socket.emit("error", { message: "This room access session is restricted." });
         return;
       }
+
+      pendingJoinRegistration = registerPendingRoomJoin(
+        roomId,
+        authenticatedUser.userId,
+      );
 
       if (await hasActiveRoomBan(roomId, authenticatedUser.userId)) {
         socket.emit("error", {
@@ -1305,6 +1357,22 @@ function setupConnectedSocket(
           userId: authenticatedUser.userId,
         });
       }
+      const pendingJoin = pendingJoinRegistration.pendingJoin;
+      if (pendingJoin.revoked) {
+        socket.emit(
+          "error",
+          pendingJoin.banned
+            ? {
+                code: "ROOM_BANNED",
+                message: "You are banned from this room",
+              }
+            : {
+                message:
+                  "You were recently removed from this room. Please wait a few minutes before rejoining.",
+              },
+        );
+        return;
+      }
       const user =
         existingUser ?? {
           userId: authenticatedUser.userId,
@@ -1421,6 +1489,7 @@ function setupConnectedSocket(
         }
       }
       roomHydrationRelease.current?.();
+      pendingJoinRegistration?.release();
       roomJoinInFlight = false;
     }
   });
