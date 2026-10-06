@@ -45,6 +45,7 @@ vi.mock("./lib/sandboxAssistant", () => ({
 
 vi.mock("./lib/socketRevocations", () => ({
   publishSocketRevocation: vi.fn(),
+  publishSocketRevocationInTransaction: vi.fn().mockResolvedValue(undefined),
   startSocketRevocationListener: (
     handler: typeof mockSocketRevocation.handler,
     onUnavailable: typeof mockSocketRevocation.onUnavailable,

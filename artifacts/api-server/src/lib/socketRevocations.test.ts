@@ -189,6 +189,6 @@ describe("socket revocation notifications", () => {
     expect(client.release).toHaveBeenCalledExactlyOnceWith(error);
     expect(client.listenerCount("error")).toBe(0);
     expect(onUnavailable).not.toHaveBeenCalled();
-    expect(vi.getTimerCount()).toBe(1);
+    expect(vi.getTimerCount()).toBe(2);
   });
 });
