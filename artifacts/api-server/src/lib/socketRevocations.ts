@@ -49,6 +49,7 @@ export function startSocketRevocationListener(
   let client: RevocationClient | undefined;
   let closed = false;
   let reconnectTimer: NodeJS.Timeout | undefined;
+  let reconnectDelayMs = RECONNECT_DELAY_MS;
   let ready = false;
   let removeClientListeners: (() => void) | undefined;
   let resolveReady: (() => void) | undefined;
@@ -61,7 +62,8 @@ export function startSocketRevocationListener(
     reconnectTimer = setTimeout(() => {
       reconnectTimer = undefined;
       void connect();
-    }, RECONNECT_DELAY_MS);
+    }, reconnectDelayMs);
+    reconnectDelayMs = Math.min(reconnectDelayMs * 2, 30_000);
     reconnectTimer.unref();
   };
 
@@ -72,12 +74,13 @@ export function startSocketRevocationListener(
       nextClient = await acquireClient();
       await nextClient.query(`LISTEN ${SOCKET_REVOCATION_CHANNEL}`);
       if (closed) {
-        nextClient.release();
+        releaseClient(nextClient);
         return;
       }
 
       client = nextClient;
       ready = true;
+      reconnectDelayMs = RECONNECT_DELAY_MS;
       resolveReady?.();
       const onNotification = (notification: Notification) => {
         if (
@@ -121,7 +124,7 @@ export function startSocketRevocationListener(
           resolveReady = resolve;
         });
         onUnavailable(error);
-        nextClient?.release(error);
+        if (nextClient) releaseClient(nextClient, error);
         scheduleReconnect();
       };
       nextClient.on("notification", onNotification);
@@ -131,7 +134,12 @@ export function startSocketRevocationListener(
         nextClient?.removeListener("error", onClientError);
       };
     } catch (error) {
-      nextClient?.release(error instanceof Error ? error : undefined);
+      if (nextClient) {
+        releaseClient(
+          nextClient,
+          error instanceof Error ? error : undefined,
+        );
+      }
       logger.error({ err: error }, "Socket revocation listener could not connect");
       scheduleReconnect();
     }
@@ -152,10 +160,26 @@ export function startSocketRevocationListener(
       if (activeClient) {
         removeClientListeners?.();
         removeClientListeners = undefined;
-        activeClient.release();
+        releaseClient(activeClient);
       }
     },
   };
+}
+
+function releaseClient(client: RevocationClient, error?: Error): void {
+  if (error) {
+    client.release(error);
+    return;
+  }
+  void client.query(`UNLISTEN ${SOCKET_REVOCATION_CHANNEL}`).then(
+    () => client.release(),
+    (releaseError: unknown) =>
+      client.release(
+        releaseError instanceof Error
+          ? releaseError
+          : new Error("Unable to stop the socket revocation listener."),
+      ),
+  );
 }
 
 function acquireClient(): Promise<RevocationClient> {

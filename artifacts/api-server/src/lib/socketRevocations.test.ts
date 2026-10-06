@@ -106,6 +106,11 @@ describe("socket revocation notifications", () => {
     });
     expect(onUnavailable).not.toHaveBeenCalled();
     listener.close();
+    await vi.waitFor(() =>
+      expect(client.query).toHaveBeenCalledWith(
+        "UNLISTEN realtimealgo_socket_revocations",
+      ),
+    );
     expect(client.release).toHaveBeenCalledOnce();
     stopListener = undefined;
   });
