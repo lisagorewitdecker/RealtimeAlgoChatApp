@@ -713,9 +713,6 @@ export async function kickRoomMember(
 ): Promise<
   "ok" | "room-not-found" | "forbidden" | "protected-target" | "target-not-found"
 > {
-  const io = activeServer;
-  const room = rooms.get(roomId);
-  if (!io || !room) return "room-not-found";
   if (actorId === targetId) {
     return "forbidden";
   }
@@ -731,15 +728,16 @@ export async function kickRoomMember(
   }
   if (isConfiguredAdmin(targetId)) return "protected-target";
 
-  const target = room.users.get(targetId);
-  if (!target) return "target-not-found";
-
   await setKickCooldown(roomId, targetId);
-  for (const socketId of [...target.socketIds]) {
-    const targetSocket = io.sockets.sockets.get(socketId) as AppSocket | undefined;
-    if (!targetSocket) continue;
-    targetSocket.emit("kicked", { roomId, userId: targetId });
-    leaveRoom(targetSocket, io, roomId);
+  const io = activeServer;
+  const target = rooms.get(roomId)?.users.get(targetId);
+  if (io && target) {
+    for (const socketId of [...target.socketIds]) {
+      const targetSocket = io.sockets.sockets.get(socketId) as AppSocket | undefined;
+      if (!targetSocket) continue;
+      targetSocket.emit("kicked", { roomId, userId: targetId });
+      leaveRoom(targetSocket, io, roomId);
+    }
   }
   return "ok";
 }

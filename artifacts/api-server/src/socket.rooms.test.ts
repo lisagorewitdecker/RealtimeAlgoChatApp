@@ -1333,6 +1333,37 @@ describe("room Socket.IO lifecycle", () => {
     ]);
   });
 
+  it("persists a kick when the target is not connected to this replica", async () => {
+    const roomId = `kick-remote-${Date.now()}`;
+    const ben = createRoomClient("token-ben");
+    const ada = createRoomClient("token-ada");
+    await Promise.all([waitForEvent(ben, "connect"), waitForEvent(ada, "connect")]);
+
+    const benJoined = waitForEvent(ben, "room-joined");
+    ben.emit("join-room", { roomId });
+    await benJoined;
+
+    const adaJoined = waitForEvent(ada, "room-joined");
+    ada.emit("join-room", { roomId, createIfMissing: false });
+    await adaJoined;
+
+    mockIsConfiguredAdmin.mockImplementation(
+      (userId: string) => userId === "user-ada",
+    );
+    await expect(
+      kickRoomMember(roomId, "user-ada", "user-cara"),
+    ).resolves.toBe("ok");
+
+    const cara = createRoomClient("token-cara");
+    await waitForEvent(cara, "connect");
+    const denied = waitForEvent<{ message: string }>(cara, "error");
+    cara.emit("join-room", { roomId, createIfMissing: false });
+    await expect(denied).resolves.toMatchObject({
+      message:
+        "You were recently removed from this room. Please wait a few minutes before rejoining.",
+    });
+  });
+
   it("keeps a kicked member on cooldown after the socket server restarts", async () => {
     const roomId = `kick-restart-${Date.now()}`;
     const ada = createRoomClient("token-ada");
