@@ -1,5 +1,4 @@
 import { randomUUID } from "node:crypto";
-import type { PoolClient } from "pg";
 import { pool } from "@workspace/db";
 import { logger } from "./logger";
 
@@ -17,6 +16,19 @@ export type SocketRevocation =
     };
 
 type PublishedSocketRevocation = SocketRevocation & { source: string };
+type Notification = { channel?: string; payload?: string };
+
+interface RevocationClient {
+  query(queryText: string): Promise<unknown>;
+  on(event: "notification", listener: (notification: Notification) => void): this;
+  on(event: "error", listener: (error: Error) => void): this;
+  removeListener(
+    event: "notification",
+    listener: (notification: Notification) => void,
+  ): this;
+  removeListener(event: "error", listener: (error: Error) => void): this;
+  release(error?: Error): void;
+}
 
 export async function publishSocketRevocation(
   revocation: SocketRevocation,
@@ -34,7 +46,7 @@ export function startSocketRevocationListener(
   waitUntilReady(): Promise<void>;
   close(): void;
 } {
-  let client: PoolClient | undefined;
+  let client: RevocationClient | undefined;
   let closed = false;
   let reconnectTimer: NodeJS.Timeout | undefined;
   let ready = false;
@@ -55,9 +67,9 @@ export function startSocketRevocationListener(
 
   const connect = async () => {
     if (closed || client) return;
-    let nextClient: PoolClient | undefined;
+    let nextClient: RevocationClient | undefined;
     try {
-      nextClient = await pool.connect();
+      nextClient = await acquireClient();
       await nextClient.query(`LISTEN ${SOCKET_REVOCATION_CHANNEL}`);
       if (closed) {
         nextClient.release();
@@ -67,10 +79,7 @@ export function startSocketRevocationListener(
       client = nextClient;
       ready = true;
       resolveReady?.();
-      const onNotification = (notification: {
-        channel?: string;
-        payload?: string;
-      }) => {
+      const onNotification = (notification: Notification) => {
         if (
           notification.channel !== SOCKET_REVOCATION_CHANNEL ||
           !notification.payload
@@ -88,7 +97,16 @@ export function startSocketRevocationListener(
           ) {
             return;
           }
-          onRevocation(event);
+          onRevocation(
+            event.type === "account-ban"
+              ? { type: event.type, userId: event.userId }
+              : {
+                  type: event.type,
+                  roomId: event.roomId,
+                  userId: event.userId,
+                  banned: event.banned,
+                },
+          );
         } catch (error) {
           logger.warn({ err: error }, "Ignoring malformed socket revocation");
         }
@@ -138,6 +156,18 @@ export function startSocketRevocationListener(
       }
     },
   };
+}
+
+function acquireClient(): Promise<RevocationClient> {
+  return new Promise((resolve, reject) => {
+    pool.connect((error, connectedClient) => {
+      if (error || !connectedClient) {
+        reject(error ?? new Error("PostgreSQL did not provide a listener client."));
+        return;
+      }
+      resolve(connectedClient as unknown as RevocationClient);
+    });
+  });
 }
 
 function isSocketRevocation(

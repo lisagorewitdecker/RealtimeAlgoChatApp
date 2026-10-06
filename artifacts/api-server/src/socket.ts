@@ -1972,7 +1972,7 @@ function getWebRtcSignal(value: unknown): Record<string, unknown> | null {
 
 function makeSystemMsg(content: string): Message {
   return {
-    id: randomUUID(),
+    id: `${Date.now()}-${randomUUID()}`,
     content, userId: "system", username: "System",
     avatarEmoji: DEFAULT_AVATAR_EMOJI,
     timestamp: Date.now(), type: "system",

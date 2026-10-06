@@ -1,5 +1,4 @@
 import { EventEmitter } from "node:events";
-import type { PoolClient } from "pg";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const mockPool = vi.hoisted(() => ({
@@ -57,8 +56,12 @@ describe("socket revocation notifications", () => {
     const client = Object.assign(new EventEmitter(), {
       query: vi.fn().mockResolvedValue(undefined),
       release: vi.fn(),
-    }) as unknown as PoolClient;
-    mockPool.connect.mockResolvedValue(client);
+    });
+    mockPool.connect.mockImplementation(
+      (callback: (error: Error | null, client: unknown) => void) => {
+        callback(null, client);
+      },
+    );
     const onRevocation = vi.fn();
     const onUnavailable = vi.fn();
     const listener = startSocketRevocationListener(onRevocation, onUnavailable);
@@ -100,7 +103,6 @@ describe("socket revocation notifications", () => {
       roomId: "room-123",
       userId: "user-banned",
       banned: true,
-      source: "another-instance",
     });
     expect(onUnavailable).not.toHaveBeenCalled();
     listener.close();

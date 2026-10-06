@@ -9,6 +9,21 @@ const mockGetAccountProfile = vi.hoisted(() => vi.fn());
 const mockCaptureMessage = vi.hoisted(() => vi.fn());
 const mockCaptureException = vi.hoisted(() => vi.fn());
 const mockDbLimit = vi.hoisted(() => vi.fn());
+const mockSocketRevocation = vi.hoisted(() => ({
+  handler:
+    undefined as
+      | ((
+          revocation:
+            | { type: "account-ban"; userId: string }
+            | {
+                type: "room-revocation";
+                roomId: string;
+                userId: string;
+                banned: boolean;
+              },
+        ) => void)
+      | undefined,
+}));
 
 vi.mock("@clerk/express", () => ({
   verifyToken: mockVerifyToken,
@@ -29,10 +44,10 @@ vi.mock("./lib/sandboxAssistant", () => ({
 
 vi.mock("./lib/socketRevocations", () => ({
   publishSocketRevocation: vi.fn(),
-  startSocketRevocationListener: () => ({
-    waitUntilReady: async () => undefined,
-    close: vi.fn(),
-  }),
+  startSocketRevocationListener: (handler: typeof mockSocketRevocation.handler) => {
+    mockSocketRevocation.handler = handler;
+    return { waitUntilReady: async () => undefined, close: vi.fn() };
+  },
 }));
 
 // Real socketMonitoring runs here (not mocked) so this test exercises the
@@ -112,6 +127,7 @@ beforeEach(async () => {
   mockCaptureMessage.mockReset();
   mockCaptureException.mockReset();
   mockDbLimit.mockReset();
+  mockSocketRevocation.handler = undefined;
 
   httpServer = createServer();
   socketServer = setupSocketIO(httpServer);
@@ -157,7 +173,23 @@ describe("Socket.IO handler crash reporting", () => {
       code: "ROOM_BANNED",
       message: "You are banned from this room",
     });
+
     expect(mockCaptureException).not.toHaveBeenCalled();
+  });
+
+  it("disconnects a session when another API instance publishes an account ban", async () => {
+    const client = connect({ token: "good-token" });
+    await waitForEvent(client, "connect");
+    const revoked = waitForEvent<{ reason: string }>(client, "access-revoked");
+    const disconnected = waitForEvent<string>(client, "disconnect");
+
+    mockSocketRevocation.handler?.({
+      type: "account-ban",
+      userId: "user-ada",
+    });
+
+    await expect(revoked).resolves.toEqual({ reason: "banned" });
+    await expect(disconnected).resolves.toBe("io server disconnect");
   });
 
   it("does not crash the server or leave the room broken after a join-room failure, and lets a retry succeed", async () => {
