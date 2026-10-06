@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { Router } from "express";
 import { db, messagesTable, roomBansTable, roomsTable } from "@workspace/db";
 import { and, eq, gt, isNull, or } from "drizzle-orm";
@@ -17,6 +18,7 @@ import {
   disconnectBannedUser,
   kickRoomMember,
   kickRoomUser,
+  publishSocketRevocation,
 } from "../socket";
 import { createIpRateLimit } from "../middlewares/rateLimit";
 
@@ -47,7 +49,7 @@ const moderationHistoryByIp = new Map<string, ModerationHistoryWindow>();
 router.use(moderationRateLimit);
 
 function makeId() {
-  return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  return randomUUID();
 }
 
 router.get("/search", async (req, res, next) => {
@@ -131,6 +133,12 @@ router.post("/:roomId/kick", async (req, res) => {
 
   const result = await kickRoomMember(roomId, actorId, targetId);
   if (result === "ok") {
+    await publishSocketRevocation({
+      type: "room-revocation",
+      roomId,
+      userId: targetId,
+      banned: false,
+    });
     res.json({ ok: true });
     return;
   }
@@ -261,6 +269,12 @@ router.post("/:roomId/ban", async (req, res, next) => {
       reason: typeof reason === "string" ? reason.slice(0, 200) : null,
     });
     await kickRoomUser(roomId, targetId, true);
+    await publishSocketRevocation({
+      type: "room-revocation",
+      roomId,
+      userId: targetId,
+      banned: true,
+    });
     res.json({ ok: true, isPermanent: actorIsAdmin, expiresAt });
   } catch (error) {
     next(error);
@@ -288,6 +302,7 @@ router.post("/ban", async (req, res, next) => {
   try {
     await setAccountBan(targetId, true);
     disconnectBannedUser(targetId);
+    await publishSocketRevocation({ type: "account-ban", userId: targetId });
     res.json({ ok: true });
     void recordModerationAction("ban", actorId, targetId);
   } catch (error) {

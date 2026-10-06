@@ -62,6 +62,12 @@ import {
   reportSocketHandlerError,
 } from "./lib/socketMonitoring";
 import { ROOM_MESSAGE_HISTORY_LIMIT } from "./lib/roomLimits";
+import {
+  publishSocketRevocation,
+  startSocketRevocationListener,
+} from "./lib/socketRevocations";
+
+export { publishSocketRevocation } from "./lib/socketRevocations";
 
 interface User {
   userId: string;
@@ -783,8 +789,30 @@ export function setupSocketIO(httpServer: HttpServer) {
     },
   });
   activeServer = io;
+  const revocationListener = startSocketRevocationListener(
+    (revocation) => {
+      if (revocation.type === "account-ban") {
+        disconnectBannedUser(revocation.userId);
+        return;
+      }
+      void kickRoomUser(
+        revocation.roomId,
+        revocation.userId,
+        revocation.banned,
+      );
+    },
+    (error) => {
+      logger.error(
+        { err: error },
+        "Socket revocation listener disconnected; closing realtime sessions",
+      );
+      io.disconnectSockets(true);
+    },
+  );
+  io.engine.on("close", revocationListener.close);
 
   io.use(async (socket: AppSocket, next) => {
+    await revocationListener.waitUntilReady();
     // Wraps the whole handshake, not just the Clerk-token branch: a failure
     // anywhere here (getAccountAccess giving up on a throttled Clerk,
     // getAccountProfile hitting a down database) must still resolve `next()`
@@ -1944,7 +1972,7 @@ function getWebRtcSignal(value: unknown): Record<string, unknown> | null {
 
 function makeSystemMsg(content: string): Message {
   return {
-    id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    id: randomUUID(),
     content, userId: "system", username: "System",
     avatarEmoji: DEFAULT_AVATAR_EMOJI,
     timestamp: Date.now(), type: "system",

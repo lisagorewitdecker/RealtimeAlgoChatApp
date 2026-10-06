@@ -27,6 +27,14 @@ vi.mock("./lib/sandboxAssistant", () => ({
   streamSandboxAssistant: vi.fn(),
 }));
 
+vi.mock("./lib/socketRevocations", () => ({
+  publishSocketRevocation: vi.fn(),
+  startSocketRevocationListener: () => ({
+    waitUntilReady: async () => undefined,
+    close: vi.fn(),
+  }),
+}));
+
 // Real socketMonitoring runs here (not mocked) so this test exercises the
 // full path from a broken handler through to a reported Sentry issue. Only
 // the Sentry SDK itself is mocked.

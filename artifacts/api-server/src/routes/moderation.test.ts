@@ -11,6 +11,7 @@ const mockSearchAccounts = vi.hoisted(() => vi.fn());
 const mockDisconnectBannedUser = vi.hoisted(() => vi.fn());
 const mockKickRoomMember = vi.hoisted(() => vi.fn());
 const mockKickRoomUser = vi.hoisted(() => vi.fn());
+const mockPublishSocketRevocation = vi.hoisted(() => vi.fn());
 const mockListModerationActions = vi.hoisted(() => vi.fn());
 const mockRecordModerationAction = vi.hoisted(() => vi.fn());
 const mockRecordMessageDeletion = vi.hoisted(() => vi.fn());
@@ -95,6 +96,7 @@ vi.mock("../socket", () => ({
   disconnectBannedUser: mockDisconnectBannedUser,
   kickRoomMember: mockKickRoomMember,
   kickRoomUser: mockKickRoomUser,
+  publishSocketRevocation: mockPublishSocketRevocation,
 }));
 
 import moderationRouter, { resetModerationHistoryRateLimits } from "./moderation.js";
@@ -130,6 +132,7 @@ beforeEach(() => {
   mockDisconnectBannedUser.mockReset();
   mockKickRoomMember.mockReset();
   mockKickRoomUser.mockReset().mockResolvedValue(undefined);
+  mockPublishSocketRevocation.mockReset().mockResolvedValue(undefined);
   mockDbLimit.mockReset().mockResolvedValue([]);
   mockDbValues.mockReset().mockResolvedValue(undefined);
   mockListModerationActions.mockReset().mockResolvedValue({ entries: [], nextCursor: null });
@@ -246,6 +249,12 @@ describe("room kicks", () => {
       "admin-ada",
       "user-ben",
     );
+    expect(mockPublishSocketRevocation).toHaveBeenCalledWith({
+      type: "room-revocation",
+      roomId: "room-123",
+      userId: "user-ben",
+      banned: false,
+    });
   });
 
   it("preserves protected-admin results and normalizes the target ID", async () => {
@@ -299,6 +308,12 @@ describe("room bans", () => {
       "user-ben",
       true,
     );
+    expect(mockPublishSocketRevocation).toHaveBeenCalledWith({
+      type: "room-revocation",
+      roomId: "room-123",
+      userId: "user-ben",
+      banned: true,
+    });
   });
 
   it("denies a non-admin when persisted room ownership belongs to someone else", async () => {
@@ -429,6 +444,10 @@ describe("account ban and restore", () => {
     expect(response.status).toBe(200);
     expect(mockSetAccountBan).toHaveBeenCalledWith("user-ben", true);
     expect(mockDisconnectBannedUser).toHaveBeenCalledWith("user-ben");
+    expect(mockPublishSocketRevocation).toHaveBeenCalledWith({
+      type: "account-ban",
+      userId: "user-ben",
+    });
     await vi.waitFor(() =>
       expect(mockRecordModerationAction).toHaveBeenCalledWith(
         "ban",
