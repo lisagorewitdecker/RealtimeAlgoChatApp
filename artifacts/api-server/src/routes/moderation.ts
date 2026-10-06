@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { Router } from "express";
 import { db, messagesTable, roomBansTable, roomsTable } from "@workspace/db";
 import { and, eq, gt, isNull, or } from "drizzle-orm";
@@ -12,6 +13,10 @@ import {
   recordModerationAction,
 } from "../lib/moderationHistory";
 import { requireAuthorizedUser } from "../lib/requireAccountAccess";
+import {
+  publishSocketRevocationInTransaction,
+  queueAccountBanRevocation,
+} from "../lib/socketRevocations";
 import {
   broadcastMessageDeletion,
   disconnectBannedUser,
@@ -47,7 +52,7 @@ const moderationHistoryByIp = new Map<string, ModerationHistoryWindow>();
 router.use(moderationRateLimit);
 
 function makeId() {
-  return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  return randomUUID();
 }
 
 router.get("/search", async (req, res, next) => {
@@ -251,14 +256,22 @@ router.post("/:roomId/ban", async (req, res, next) => {
     const expiresAt = actorIsAdmin
       ? null
       : new Date(Date.now() + 24 * 60 * 60 * 1000);
-    await db.insert(roomBansTable).values({
-      id: makeId(),
-      roomId,
-      userId: targetId,
-      bannedBy: actorId,
-      isPermanent: actorIsAdmin,
-      expiresAt,
-      reason: typeof reason === "string" ? reason.slice(0, 200) : null,
+    await db.transaction(async (transaction) => {
+      await transaction.insert(roomBansTable).values({
+        id: makeId(),
+        roomId,
+        userId: targetId,
+        bannedBy: actorId,
+        isPermanent: actorIsAdmin,
+        expiresAt,
+        reason: typeof reason === "string" ? reason.slice(0, 200) : null,
+      });
+      await publishSocketRevocationInTransaction(transaction, {
+        type: "room-revocation",
+        roomId,
+        userId: targetId,
+        banned: true,
+      });
     });
     await kickRoomUser(roomId, targetId, true);
     res.json({ ok: true, isPermanent: actorIsAdmin, expiresAt });
@@ -288,6 +301,7 @@ router.post("/ban", async (req, res, next) => {
   try {
     await setAccountBan(targetId, true);
     disconnectBannedUser(targetId);
+    await queueAccountBanRevocation(targetId);
     res.json({ ok: true });
     void recordModerationAction("ban", actorId, targetId);
   } catch (error) {

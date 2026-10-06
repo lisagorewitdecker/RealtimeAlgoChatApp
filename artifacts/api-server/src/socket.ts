@@ -62,6 +62,12 @@ import {
   reportSocketHandlerError,
 } from "./lib/socketMonitoring";
 import { ROOM_MESSAGE_HISTORY_LIMIT } from "./lib/roomLimits";
+import {
+  publishSocketRevocationInTransaction,
+  startSocketRevocationListener,
+} from "./lib/socketRevocations";
+
+export { publishSocketRevocation } from "./lib/socketRevocations";
 
 interface User {
   userId: string;
@@ -95,9 +101,53 @@ interface Room {
   isActive: boolean;
 }
 
+interface PendingRoomJoin {
+  revoked: boolean;
+  banned: boolean;
+}
+
 const rooms = new Map<string, Room>();
+const pendingRoomJoins = new Map<string, Set<PendingRoomJoin>>();
 const DEFAULT_AVATAR_EMOJI = "🧑‍💻";
 const ASSISTANT_REQUEST_ID_PATTERN = /^[a-zA-Z0-9_-]{8,80}$/;
+let accountBanSequence = 0;
+const accountBanSequences = new Map<string, number>();
+
+function roomUserJoinKey(roomId: string, userId: string): string {
+  return JSON.stringify([roomId, userId]);
+}
+
+function registerPendingRoomJoin(roomId: string, userId: string) {
+  const key = roomUserJoinKey(roomId, userId);
+  const pendingJoin: PendingRoomJoin = { revoked: false, banned: false };
+  let joins = pendingRoomJoins.get(key);
+  if (!joins) {
+    joins = new Set();
+    pendingRoomJoins.set(key, joins);
+  }
+  joins.add(pendingJoin);
+  return {
+    pendingJoin,
+    release() {
+      const currentJoins = pendingRoomJoins.get(key);
+      currentJoins?.delete(pendingJoin);
+      if (currentJoins?.size === 0) pendingRoomJoins.delete(key);
+    },
+  };
+}
+
+function revokePendingRoomJoins(
+  roomId: string,
+  userId: string,
+  banned: boolean,
+): void {
+  const joins = pendingRoomJoins.get(roomUserJoinKey(roomId, userId));
+  if (!joins) return;
+  for (const pendingJoin of joins) {
+    pendingJoin.revoked = true;
+    pendingJoin.banned ||= banned;
+  }
+}
 
 type SessionPurpose = "chat" | RoomAccessPurpose;
 
@@ -456,17 +506,6 @@ async function flushSandboxSaves(
   releasePersistence(persistenceBudget);
 }
 
-async function setKickCooldown(roomId: string, userId: string): Promise<void> {
-  const expiresAt = new Date(Date.now() + KICK_COOLDOWN_MS);
-  await db
-    .insert(roomKickCooldownsTable)
-    .values({ roomId, userId, expiresAt })
-    .onConflictDoUpdate({
-      target: [roomKickCooldownsTable.roomId, roomKickCooldownsTable.userId],
-      set: { expiresAt },
-    });
-}
-
 async function hasKickCooldown(
   roomId: string,
   userId: string,
@@ -697,6 +736,7 @@ export function resetSocketRoomStateForTest(): void {
     throw new Error("Socket room state can only be reset by tests.");
   }
   rooms.clear();
+  pendingRoomJoins.clear();
   activeServer = null;
 }
 
@@ -707,9 +747,6 @@ export async function kickRoomMember(
 ): Promise<
   "ok" | "room-not-found" | "forbidden" | "protected-target" | "target-not-found"
 > {
-  const io = activeServer;
-  const room = rooms.get(roomId);
-  if (!io || !room) return "room-not-found";
   if (actorId === targetId) {
     return "forbidden";
   }
@@ -725,15 +762,31 @@ export async function kickRoomMember(
   }
   if (isConfiguredAdmin(targetId)) return "protected-target";
 
-  const target = room.users.get(targetId);
-  if (!target) return "target-not-found";
-
-  await setKickCooldown(roomId, targetId);
-  for (const socketId of [...target.socketIds]) {
-    const targetSocket = io.sockets.sockets.get(socketId) as AppSocket | undefined;
-    if (!targetSocket) continue;
-    targetSocket.emit("kicked", { roomId, userId: targetId });
-    leaveRoom(targetSocket, io, roomId);
+  await db.transaction(async (transaction) => {
+    const expiresAt = new Date(Date.now() + KICK_COOLDOWN_MS);
+    await transaction
+      .insert(roomKickCooldownsTable)
+      .values({ roomId, userId: targetId, expiresAt })
+      .onConflictDoUpdate({
+        target: [roomKickCooldownsTable.roomId, roomKickCooldownsTable.userId],
+        set: { expiresAt },
+      });
+    await publishSocketRevocationInTransaction(transaction, {
+      type: "room-revocation",
+      roomId,
+      userId: targetId,
+      banned: false,
+    });
+  });
+  const io = activeServer;
+  const target = rooms.get(roomId)?.users.get(targetId);
+  if (io && target) {
+    for (const socketId of [...target.socketIds]) {
+      const targetSocket = io.sockets.sockets.get(socketId) as AppSocket | undefined;
+      if (!targetSocket) continue;
+      targetSocket.emit("kicked", { roomId, userId: targetId });
+      leaveRoom(targetSocket, io, roomId);
+    }
   }
   return "ok";
 }
@@ -743,6 +796,7 @@ export async function kickRoomUser(
   userId: string,
   banned: boolean,
 ): Promise<void> {
+  revokePendingRoomJoins(roomId, userId, banned);
   const io = activeServer;
   const room = rooms.get(roomId);
   const target = room?.users.get(userId);
@@ -757,6 +811,8 @@ export async function kickRoomUser(
 }
 
 export function disconnectBannedUser(userId: string): void {
+  accountBanSequence += 1;
+  accountBanSequences.set(userId, accountBanSequence);
   const io = activeServer;
   if (!io) return;
   for (const socket of io.sockets.sockets.values()) {
@@ -783,8 +839,34 @@ export function setupSocketIO(httpServer: HttpServer) {
     },
   });
   activeServer = io;
+  let revocationListenerGeneration = 0;
+  const revocationListener = startSocketRevocationListener(
+    (revocation) => {
+      if (revocation.type === "account-ban") {
+        disconnectBannedUser(revocation.userId);
+        return;
+      }
+      void kickRoomUser(
+        revocation.roomId,
+        revocation.userId,
+        revocation.banned,
+      );
+    },
+    (error) => {
+      revocationListenerGeneration += 1;
+      logger.error(
+        { err: error },
+        "Socket revocation listener disconnected; closing realtime sessions",
+      );
+      io.disconnectSockets(true);
+    },
+  );
+  httpServer.once("close", revocationListener.close);
 
   io.use(async (socket: AppSocket, next) => {
+    const authStartedAtAccountBanSequence = accountBanSequence;
+    await revocationListener.waitUntilReady();
+    const listenerGeneration = revocationListenerGeneration;
     // Wraps the whole handshake, not just the Clerk-token branch: a failure
     // anywhere here (getAccountAccess giving up on a throttled Clerk,
     // getAccountProfile hitting a down database) must still resolve `next()`
@@ -800,6 +882,17 @@ export function setupSocketIO(httpServer: HttpServer) {
       return;
     }
     socket.data.connectionLease = lease;
+    const rejectIfRevocationListenerChanged = () => {
+      if (listenerGeneration === revocationListenerGeneration) return false;
+      rejectHandshake(
+        next,
+        connectionRegistry,
+        lease,
+        "Socket revocation listener disconnected. Please retry.",
+        "revocation_listener_disconnected",
+      );
+      return true;
+    };
 
     try {
       const auth = getRecord(socket.handshake.auth);
@@ -843,6 +936,20 @@ export function setupSocketIO(httpServer: HttpServer) {
             lease,
             "Too many realtime connections for this account. Please close another connection first.",
             "connection_limit",
+          );
+          return;
+        }
+        if (rejectIfRevocationListenerChanged()) return;
+        if (
+          (accountBanSequences.get(capability.userId) ?? 0) >
+          authStartedAtAccountBanSequence
+        ) {
+          rejectHandshake(
+            next,
+            connectionRegistry,
+            lease,
+            "Your RealtimeAlgoChatApp Studio account has been banned.",
+            "banned",
           );
           return;
         }
@@ -913,6 +1020,20 @@ export function setupSocketIO(httpServer: HttpServer) {
       }
       const profile = await getAccountProfile(userId);
 
+      if (rejectIfRevocationListenerChanged()) return;
+      if (
+        (accountBanSequences.get(userId) ?? 0) >
+        authStartedAtAccountBanSequence
+      ) {
+        rejectHandshake(
+          next,
+          connectionRegistry,
+          lease,
+          "Your RealtimeAlgoChatApp Studio account has been banned.",
+          "banned",
+        );
+        return;
+      }
       socket.data.authenticatedUser = {
         userId,
         username: profile.username,
@@ -1092,6 +1213,9 @@ function setupConnectedSocket(
     const roomHydrationRelease: { current?: () => void } = {};
     let coldHydrationRoom: Room | null = null;
     let coldHydrationVerified = false;
+    let pendingJoinRegistration:
+      | ReturnType<typeof registerPendingRoomJoin>
+      | undefined;
     try {
       const data = getRecord(payload);
       const roomId = getRoomId(data?.["roomId"]);
@@ -1106,6 +1230,11 @@ function setupConnectedSocket(
         socket.emit("error", { message: "This room access session is restricted." });
         return;
       }
+
+      pendingJoinRegistration = registerPendingRoomJoin(
+        roomId,
+        authenticatedUser.userId,
+      );
 
       if (await hasActiveRoomBan(roomId, authenticatedUser.userId)) {
         socket.emit("error", {
@@ -1263,6 +1392,22 @@ function setupConnectedSocket(
           userId: authenticatedUser.userId,
         });
       }
+      const pendingJoin = pendingJoinRegistration.pendingJoin;
+      if (pendingJoin.revoked) {
+        socket.emit(
+          "error",
+          pendingJoin.banned
+            ? {
+                code: "ROOM_BANNED",
+                message: "You are banned from this room",
+              }
+            : {
+                message:
+                  "You were recently removed from this room. Please wait a few minutes before rejoining.",
+              },
+        );
+        return;
+      }
       const user =
         existingUser ?? {
           userId: authenticatedUser.userId,
@@ -1379,6 +1524,7 @@ function setupConnectedSocket(
         }
       }
       roomHydrationRelease.current?.();
+      pendingJoinRegistration?.release();
       roomJoinInFlight = false;
     }
   });
@@ -1944,7 +2090,7 @@ function getWebRtcSignal(value: unknown): Record<string, unknown> | null {
 
 function makeSystemMsg(content: string): Message {
   return {
-    id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    id: `${Date.now()}-${randomUUID()}`,
     content, userId: "system", username: "System",
     avatarEmoji: DEFAULT_AVATAR_EMOJI,
     timestamp: Date.now(), type: "system",

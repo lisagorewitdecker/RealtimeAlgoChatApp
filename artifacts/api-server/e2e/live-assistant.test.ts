@@ -39,6 +39,13 @@ vi.mock("@workspace/db", () => ({
   roomKickCooldownsTable,
   roomsTable,
 }));
+vi.mock("./../src/lib/socketRevocations", () => ({
+  publishSocketRevocation: vi.fn(),
+  startSocketRevocationListener: () => ({
+    waitUntilReady: async () => undefined,
+    close: vi.fn(),
+  }),
+}));
 vi.mock("drizzle-orm", () => ({
   and: vi.fn(),
   eq: vi.fn(),
