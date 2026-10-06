@@ -8,3 +8,4 @@ export * from "./sandbox";
 export * from "./users";
 export * from "./conversations";
 export * from "./ai-messages";
+export * from "./socketRevocationOutbox";

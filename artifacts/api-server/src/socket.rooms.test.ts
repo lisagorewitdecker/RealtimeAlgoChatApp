@@ -53,10 +53,20 @@ vi.mock("./lib/sandboxAssistant", () => ({
   streamSandboxAssistant: mockStreamSandboxAssistant,
 }));
 
+vi.mock("./lib/socketRevocations", () => ({
+  publishSocketRevocation: vi.fn(),
+  publishSocketRevocationInTransaction: vi.fn().mockResolvedValue(undefined),
+  startSocketRevocationListener: () => ({
+    waitUntilReady: async () => undefined,
+    close: vi.fn(),
+  }),
+}));
+
 import {
   disconnectBannedUser,
   getRooms,
   kickRoomMember,
+  kickRoomUser,
   setRoomActiveForModeration,
   setupSocketIO,
 } from "./socket.js";
@@ -1305,6 +1315,63 @@ describe("room Socket.IO lifecycle", () => {
     await expect(disconnected).resolves.toBeTruthy();
   });
 
+  it("rejects a pending room join revoked during public-key lookup", async () => {
+    const roomId = `pending-kick-${Date.now()}`;
+    const ada = createRoomClient("token-ada");
+    const ben = createRoomClient("token-ben");
+    await Promise.all([waitForEvent(ada, "connect"), waitForEvent(ben, "connect")]);
+
+    const adaJoined = waitForEvent(ada, "room-joined");
+    ada.emit("join-room", { roomId });
+    await adaJoined;
+
+    let resolveBenPublicKey!: (publicKey: string | null) => void;
+    mockGetPublicKey.mockImplementation((userId: string) =>
+      userId === "user-ben"
+        ? new Promise<string | null>((resolve) => {
+            resolveBenPublicKey = resolve;
+          })
+        : Promise.resolve(null),
+    );
+    const benError = waitForEvent<{ code: string }>(ben, "error");
+    ben.emit("join-room", { roomId, createIfMissing: false });
+    await vi.waitFor(() => expect(resolveBenPublicKey).toBeDefined());
+
+    await kickRoomUser(roomId, "user-ben", true);
+    resolveBenPublicKey("ben-public-key");
+
+    await expect(benError).resolves.toMatchObject({ code: "ROOM_BANNED" });
+    expect(getRooms()).toEqual([
+      expect.objectContaining({ id: roomId, userCount: 1 }),
+    ]);
+  });
+
+  it("rejects a pending authentication when the account is banned during profile lookup", async () => {
+    let resolveProfile!: (profile: { username: string; avatarEmoji: string }) => void;
+    let profileLookupStarted!: () => void;
+    const profileStarted = new Promise<void>((resolve) => {
+      profileLookupStarted = resolve;
+    });
+    mockGetAccountProfile.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveProfile = resolve;
+          profileLookupStarted();
+        }),
+    );
+    const ben = createRoomClient("token-ben");
+    const connectError = waitForEvent<Error>(ben, "connect_error");
+
+    await profileStarted;
+    disconnectBannedUser("user-ben");
+    resolveProfile({ username: "Ben", avatarEmoji: "🦊" });
+
+    await expect(connectError).resolves.toMatchObject({
+      message: "Your RealtimeAlgoChatApp Studio account has been banned.",
+    });
+    expect(ben.connected).toBe(false);
+  });
+
   it("allows a configured admin to kick a non-admin from another creator's room", async () => {
     const roomId = `kick-restart-${Date.now()}`;
     const ben = createRoomClient("token-ben");
@@ -1331,6 +1398,37 @@ describe("room Socket.IO lifecycle", () => {
     expect(getRooms()).toEqual([
       expect.objectContaining({ id: roomId, userCount: 1 }),
     ]);
+  });
+
+  it("persists a kick when the target is not connected to this replica", async () => {
+    const roomId = `kick-remote-${Date.now()}`;
+    const ben = createRoomClient("token-ben");
+    const ada = createRoomClient("token-ada");
+    await Promise.all([waitForEvent(ben, "connect"), waitForEvent(ada, "connect")]);
+
+    const benJoined = waitForEvent(ben, "room-joined");
+    ben.emit("join-room", { roomId });
+    await benJoined;
+
+    const adaJoined = waitForEvent(ada, "room-joined");
+    ada.emit("join-room", { roomId, createIfMissing: false });
+    await adaJoined;
+
+    mockIsConfiguredAdmin.mockImplementation(
+      (userId: string) => userId === "user-ada",
+    );
+    await expect(
+      kickRoomMember(roomId, "user-ada", "user-cara"),
+    ).resolves.toBe("ok");
+
+    const cara = createRoomClient("token-cara");
+    await waitForEvent(cara, "connect");
+    const denied = waitForEvent<{ message: string }>(cara, "error");
+    cara.emit("join-room", { roomId, createIfMissing: false });
+    await expect(denied).resolves.toMatchObject({
+      message:
+        "You were recently removed from this room. Please wait a few minutes before rejoining.",
+    });
   });
 
   it("keeps a kicked member on cooldown after the socket server restarts", async () => {
