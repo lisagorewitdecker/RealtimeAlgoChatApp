@@ -99,7 +99,8 @@ index 35b2c41..8211c5b 100644
 +    const q = queueOwner(parent).queue;
  
      if (node.invalid || node.dollar) {
-       q.push(append(q.pop(), stringify(node, options)));
+-      q.push(append(q.pop(), stringify(node, options)));
++      q.push(append(q.pop(), stringify(node, { ...options, maxDepth: maxDepth - depth + 1 })));
 @@ -72,13 +85,7 @@ const expand = (ast, options = {}) => {
      }
  
