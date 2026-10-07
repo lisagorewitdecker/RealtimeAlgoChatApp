@@ -34,3 +34,27 @@ test("braces rejects deeply nested patterns before recursive processing", () => 
     );
   }
 });
+
+test("braces bounds recursive processing of externally supplied ASTs", () => {
+  let ast = { type: "text", value: "x" };
+  for (let index = 0; index < 101; index += 1) {
+    ast = { type: "brace", nodes: [ast] };
+  }
+  ast = { type: "root", nodes: [ast] };
+
+  for (const process of [braces.compile, braces.expand, braces.stringify]) {
+    assert.throws(() => process(ast), {
+      name: "RangeError",
+    });
+  }
+});
+
+test("braces rejects cyclic AST parent chains during expansion", () => {
+  const ast = { type: "paren", nodes: [{ type: "text", value: "x" }] };
+  ast.parent = ast;
+
+  assert.throws(() => braces.expand(ast), {
+    name: "RangeError",
+    message: "AST parent chain contains a cycle",
+  });
+});
