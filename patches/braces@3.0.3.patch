@@ -60,7 +60,7 @@ index 35b2c41..8211c5b 100644
  
  const append = (queue = '', stash = '', enclose = false) => {
    const result = [];
-@@ -30,19 +31,31 @@ const append = (queue = '', stash = '', enclose = false) => {
+@@ -30,21 +31,33 @@ const append = (queue = '', stash = '', enclose = false) => {
    return utils.flatten(result);
  };
  
@@ -101,6 +101,8 @@ index 35b2c41..8211c5b 100644
      if (node.invalid || node.dollar) {
 -      q.push(append(q.pop(), stringify(node, options)));
 +      q.push(append(q.pop(), stringify(node, { ...options, maxDepth: maxDepth - depth + 1 })));
+       return;
+     }
 @@ -72,13 +85,7 @@ const expand = (ast, options = {}) => {
      }
  

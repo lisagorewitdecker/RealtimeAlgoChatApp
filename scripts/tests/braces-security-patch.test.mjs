@@ -48,27 +48,27 @@ test("braces bounds recursive operations on deeply nested ASTs", () => {
   }
 });
 
-test("braces preserves the global depth limit when expanding invalid AST nodes", () => {
-  let nested = { type: "text", value: "value" };
-  for (let depth = 0; depth < 99; depth++) {
-    const parent = { type: "brace", nodes: [nested] };
-    nested.parent = parent;
-    nested = parent;
+test("braces expand applies the global depth limit to invalid AST subtrees", () => {
+  let node = { type: "text", value: "value" };
+  for (let depth = 0; depth < 2; depth++) {
+    const parent = { type: "brace", nodes: [node] };
+    node.parent = parent;
+    node = parent;
   }
 
-  let delegated = { type: "brace", invalid: true, nodes: [nested] };
-  nested.parent = delegated;
+  node = { type: "brace", invalid: true, nodes: [node] };
+  node.nodes[0].parent = node;
 
   for (let depth = 0; depth < 99; depth++) {
-    const parent = { type: "brace", nodes: [delegated] };
-    delegated.parent = parent;
-    delegated = parent;
+    const parent = { type: "brace", nodes: [node] };
+    node.parent = parent;
+    node = parent;
   }
 
-  const ast = { type: "root", nodes: [delegated] };
-  delegated.parent = ast;
+  const ast = { type: "root", nodes: [node] };
+  node.parent = ast;
 
-  assert.throws(() => braces.expand(ast), /exceeds max depth/);
+  assert.throws(() => braces.expand(ast), /AST depth .* exceeds max depth \(1\)/);
 });
 
 test("braces still expands patterns within the depth limit", () => {
