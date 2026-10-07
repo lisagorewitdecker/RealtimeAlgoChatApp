@@ -1,0 +1,31 @@
+diff --git a/lib/parse.js b/lib/parse.js
+--- a/lib/parse.js
++++ b/lib/parse.js
+@@ -1,6 +1,7 @@
+ 'use strict';
+ 
+ const stringify = require('./stringify');
++const MAX_NESTING_DEPTH = 100;
+ 
+ /**
+  * Constants
+@@ -103,6 +104,9 @@ const parse = (input, options = {}) => {
+      */
+ 
+     if (value === CHAR_LEFT_PARENTHESES) {
++      if (stack.length > MAX_NESTING_DEPTH) {
++        throw new SyntaxError(`Input nesting exceeds maximum depth (${MAX_NESTING_DEPTH})`);
++      }
+       block = push({ type: 'paren', nodes: [] });
+       stack.push(block);
+       push({ type: 'text', value });
+@@ -154,6 +158,9 @@ const parse = (input, options = {}) => {
+      */
+ 
+     if (value === CHAR_LEFT_CURLY_BRACE) {
++      if (stack.length > MAX_NESTING_DEPTH) {
++        throw new SyntaxError(`Input nesting exceeds maximum depth (${MAX_NESTING_DEPTH})`);
++      }
+       depth++;
+ 
+       const dollar = prev.value && prev.value.slice(-1) === '$' || block.dollar === true;
