@@ -181,7 +181,7 @@ packageExtensionsChecksum: sha256-L46y8gHGkHzhGpYQTjBAm8nja76/qe6Crj/ItXtWZSQ=
 
 patchedDependencies:
   braces@3.0.3:
-    hash: 048bb74d1e216b6455a60c3af2d30673b1c0fa6b04d7efc82d34378db0e872b3
+    hash: d088a8740d548a6e449dcce4f4ecd58dc168aac7add429415be1cf542467f3a9
     path: patches/braces@3.0.3.patch
   node-forge@1.4.0:
     hash: 4fa957cddb4b4601a48b535053d0fec7ed013f9d075660a38365f285fc830fe0
@@ -13293,7 +13293,7 @@ snapshots:
     dependencies:
       balanced-match: 4.0.4
 
-  braces@3.0.3(patch_hash=048bb74d1e216b6455a60c3af2d30673b1c0fa6b04d7efc82d34378db0e872b3):
+  braces@3.0.3(patch_hash=d088a8740d548a6e449dcce4f4ecd58dc168aac7add429415be1cf542467f3a9):
     dependencies:
       fill-range: 7.1.1
 
@@ -16016,7 +16016,7 @@ snapshots:
 
   micromatch@4.0.8:
     dependencies:
-      braces: 3.0.3(patch_hash=048bb74d1e216b6455a60c3af2d30673b1c0fa6b04d7efc82d34378db0e872b3)
+      braces: 3.0.3(patch_hash=d088a8740d548a6e449dcce4f4ecd58dc168aac7add429415be1cf542467f3a9)
       picomatch: 2.3.2
 
   mime-db@1.52.0: {}

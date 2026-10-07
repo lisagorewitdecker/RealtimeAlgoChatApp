@@ -29,7 +29,7 @@ test("braces rejects deeply nested patterns before recursive processing", () => 
       () => braces(pattern),
       {
         name: "SyntaxError",
-        message: "Input nesting exceeds maximum depth (100)",
+        message: "Input depth (101), exceeds max depth (100)",
       },
     );
   }
