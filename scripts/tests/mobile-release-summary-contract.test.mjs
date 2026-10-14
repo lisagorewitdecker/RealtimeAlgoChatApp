@@ -2409,6 +2409,108 @@ test("hosted native evidence regression preserves iOS when Android artifact is m
   );
 });
 
+for (const missingPlatform of ["ios", "android"]) {
+  test(`hosted native evidence ${missingPlatform} outage assertions accept a downloaded marker-only artifact`, () => {
+    const steps = workflow.jobs["native-evidence-summary-regression"].steps;
+    const availablePlatform = missingPlatform === "ios" ? "android" : "ios";
+    const fixtureStep = steps.find(
+      (step) =>
+        step.name ===
+        (missingPlatform === "ios"
+          ? "Upload controlled Android artifact for missing iOS scenario"
+          : "Upload controlled iOS artifact for missing Android scenario"),
+    );
+    const downloadStep = steps.find(
+      (step) =>
+        step.name ===
+        (missingPlatform === "ios"
+          ? "Download controlled Android artifact after iOS failure"
+          : "Download controlled iOS artifact before Android failure"),
+    );
+    const checkerStep = steps.find(
+      (step) =>
+        step.name ===
+        (missingPlatform === "ios"
+          ? "Run checker after controlled artifact outage"
+          : "Run checker after controlled Android artifact outage"),
+    );
+    const blockerStep = steps.find(
+      (step) =>
+        step.name ===
+        (missingPlatform === "ios"
+          ? "Confirm controlled outage blocks promotion and preserves both sections"
+          : "Confirm controlled Android outage blocks promotion and preserves both sections"),
+    );
+    const runnerTemp = mkdtempSync(
+      path.join(tmpdir(), "native-evidence-artifact-outage-"),
+    );
+    const summaryPath = path.join(runnerTemp, "job-summary.md");
+    const env = {
+      ...process.env,
+      RUNNER_TEMP: runnerTemp,
+      GITHUB_STEP_SUMMARY: summaryPath,
+      REVIEWED_REF: "controlled-artifact-outage",
+      NATIVE_IOS_EVIDENCE_ARTIFACT_URL: "",
+      NATIVE_ANDROID_EVIDENCE_ARTIFACT_URL: "",
+      NATIVE_IOS_EVIDENCE_DOWNLOAD_RESULT:
+        missingPlatform === "ios" ? "failure" : "success",
+      NATIVE_ANDROID_EVIDENCE_DOWNLOAD_RESULT:
+        missingPlatform === "android" ? "failure" : "success",
+    };
+    const runStep = (step, stepEnv = env) =>
+      spawnSync(bashPath, ["-e", "-o", "pipefail", "-c", step.run], {
+        cwd: workspaceRoot,
+        env: stepEnv,
+        encoding: "utf8",
+      });
+
+    try {
+      const fixture = runStep(fixtureStep);
+      assert.equal(fixture.status, 0, fixture.stderr);
+      const downloadPath = downloadStep.with.path.replace(
+        "${{ runner.temp }}",
+        runnerTemp,
+      );
+      mkdirSync(downloadPath, { recursive: true });
+      renameSync(
+        path.join(
+          runnerTemp,
+          missingPlatform === "ios"
+            ? "native-evidence-summary-download-fixture"
+            : "native-evidence-summary-android-outage-fixture",
+          availablePlatform,
+          "controlled-marker.txt",
+        ),
+        path.join(downloadPath, "controlled-marker.txt"),
+      );
+
+      const checker = runStep(checkerStep);
+      assert.equal(checker.status, 1, checker.stdout + checker.stderr);
+      const blocker = runStep(blockerStep, {
+        ...env,
+        CHECK_RESULT: "failure",
+        IOS_DOWNLOAD_RESULT: env.NATIVE_IOS_EVIDENCE_DOWNLOAD_RESULT,
+        IOS_DOWNLOAD_CONCLUSION: "success",
+        ANDROID_DOWNLOAD_RESULT: env.NATIVE_ANDROID_EVIDENCE_DOWNLOAD_RESULT,
+        CONTROLLED_SUMMARY_PATH: blockerStep.env.CONTROLLED_SUMMARY_PATH.replace(
+          "${{ runner.temp }}",
+          runnerTemp,
+        ),
+      });
+      assert.equal(blocker.status, 0, blocker.stdout + blocker.stderr);
+      const summary = readFileSync(summaryPath, "utf8");
+      assert.match(summary, /- Download continuation: \*\*PASS\*\*/);
+      assert.match(summary, /- Promotion blocker: \*\*PASS\*\*/);
+      assert.match(
+        summary,
+        /download reported success, but no timestamped evidence run directory exists/,
+      );
+    } finally {
+      rmSync(runnerTemp, { recursive: true, force: true });
+    }
+  });
+}
+
 test("hosted release validation exercises nested evidence readers without publishing contents", () => {
   const regressionJob = workflow.jobs["native-evidence-tamper-regression"];
   assert.ok(
