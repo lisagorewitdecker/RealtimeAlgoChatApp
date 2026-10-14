@@ -98,6 +98,32 @@ if [[ -e "$fresh_checkout/artifacts" ]]; then
   exit 1
 fi
 
+# An incomplete trailing block used to fail only after the checker had already
+# written a passing summary, with the syntax diagnostic redirected to /dev/null.
+printf '\nif true; then\n' >> "$fresh_checkout/scripts/check-native-large-text-evidence.sh"
+syntax_summary="$TEST_ROOT/syntax-summary.md"
+set +e
+syntax_output="$(
+  cd "$fresh_checkout" &&
+    GITHUB_STEP_SUMMARY="$syntax_summary" \
+      env -u NATIVE_EVIDENCE_TAMPER_FIXTURES_ROOT bash "$SUITE_RELATIVE_PATH" 2>&1
+)"
+syntax_status=$?
+set -e
+if ((syntax_status != 1)); then
+  printf 'Expected the malformed checker to fail the suite with exit 1; got %s:\n%s\n' \
+    "$syntax_status" "$syntax_output" >&2
+  exit 1
+fi
+if [[ "$syntax_output" != "Native evidence checker failed Bash syntax validation; evidence validation was not run." ]]; then
+  printf 'Expected a fixed checker syntax diagnostic; got:\n%s\n' "$syntax_output" >&2
+  exit 1
+fi
+if [[ -e "$syntax_summary" ]]; then
+  echo "The malformed checker wrote an evidence summary before syntax validation." >&2
+  exit 1
+fi
+
 cleanup_test_fixtures
 trap - EXIT
 
