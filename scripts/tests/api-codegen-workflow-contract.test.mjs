@@ -11,6 +11,7 @@ import {
   readFileSync,
   rmSync,
   symlinkSync,
+  writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -76,6 +77,7 @@ const pullRequestTrigger = workflow.on?.pull_request;
 const generatedClientValidationFixturePaths = [
   "package.json",
   "pnpm-workspace.yaml",
+  "patches",
   "replit.md",
   ".gitignore",
   ".githooks/pre-commit",
@@ -302,6 +304,19 @@ function createGeneratedClientFixture() {
       mkdirSync(path.dirname(destination), { recursive: true });
       copyFileSync(source, destination);
     }
+
+    // The fixture tests drift handling, not the API-spec unit suite. That suite
+    // runs separately in the root gate and the generated-client validation.
+    const apiSpecPackagePath = path.join(
+      fixtureRoot,
+      "lib/api-spec/package.json",
+    );
+    const apiSpecPackage = JSON.parse(readFileSync(apiSpecPackagePath, "utf8"));
+    apiSpecPackage.scripts.test = "node -e 0";
+    writeFileSync(
+      apiSpecPackagePath,
+      `${JSON.stringify(apiSpecPackage, null, 2)}\n`,
+    );
 
     const mirrorNodeModules = (relativePath) => {
       const source = path.join(workspaceRoot, relativePath, "node_modules");
