@@ -9,6 +9,11 @@ SAVED_TEST_STATUS="$ROOT_DIR/artifacts/api-server/test-results/.last-run.json"
 HOSTED_TAMPER_FIXTURES_ROOT="${NATIVE_EVIDENCE_TAMPER_FIXTURES_ROOT:-}"
 HOSTED_TAMPER_DEADLINE="${NATIVE_EVIDENCE_TAMPER_DEADLINE:-}"
 PRIVACY_FAILURE_FIXTURE_ROOT="${NATIVE_EVIDENCE_PRIVACY_FAILURE_FIXTURE_ROOT:-}"
+if ! bash -n "$CHECKER" >/dev/null 2>&1; then
+  echo "Native evidence checker failed Bash syntax validation; evidence validation was not run." >&2
+  exit 1
+fi
+
 TEST_PARENT="$(mktemp -d)"
 TEST_ROOT="$TEST_PARENT/fixtures"
 CLEANUP_GUARD="$TEST_PARENT/cleanup-must-not-escape-fixtures"
