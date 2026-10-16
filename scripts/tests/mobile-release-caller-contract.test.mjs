@@ -1457,6 +1457,48 @@ test("workflow hardening pins actions, runs for every pull request, and bounds d
   );
 });
 
+test("native evidence tamper regression installs workspace dependencies before running its pnpm test", () => {
+  const tamperSteps =
+    workflow.jobs?.["native-evidence-tamper-regression"]?.steps ?? [];
+  const pnpmSetupIndex = tamperSteps.findIndex(
+    (step) => step.name === "Set up pnpm",
+  );
+  const nodeSetupIndex = tamperSteps.findIndex(
+    (step) => step.name === "Set up Node.js",
+  );
+  const installIndex = tamperSteps.findIndex(
+    (step) => step.name === "Install workspace dependencies",
+  );
+  const regressionIndex = tamperSteps.findIndex(
+    (step) =>
+      step.name === "Run strict tamper block check against downloaded fixtures",
+  );
+
+  assert.ok(pnpmSetupIndex >= 0, "tamper regression must set up pnpm");
+  assert.ok(
+    nodeSetupIndex > pnpmSetupIndex,
+    "tamper regression must set up Node.js after pnpm",
+  );
+  assert.ok(
+    installIndex > nodeSetupIndex,
+    "tamper regression must install dependencies after setting up Node.js",
+  );
+  assert.equal(
+    tamperSteps[installIndex].run,
+    "pnpm install --frozen-lockfile",
+    "tamper regression must install the locked workspace dependencies",
+  );
+  assert.ok(
+    regressionIndex > installIndex,
+    "tamper regression must run after dependency installation",
+  );
+  assert.match(
+    tamperSteps[regressionIndex].run,
+    /pnpm run test:native-large-text-evidence/,
+    "tamper regression must run its focused native evidence test",
+  );
+});
+
 test("publish job runs the evidence privacy and submission-boundary regression before approval validation and submission", () => {
   const publishSteps = workflow.jobs?.["mobile-publish"]?.steps ?? [];
   const privacyIndex = publishSteps.findIndex(
