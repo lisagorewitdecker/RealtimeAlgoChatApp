@@ -9,6 +9,6 @@
     "test:compatibility": "node ./scripts/check-contract-compatibility.test.mjs"
   },
   "devDependencies": {
-    "orval": "^8.27.0"
+    "orval": "^8.43.0"
   }
 }
