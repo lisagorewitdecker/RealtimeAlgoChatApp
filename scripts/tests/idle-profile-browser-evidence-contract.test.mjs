@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import test from "node:test";
@@ -39,6 +40,28 @@ const downloadArtifactAction =
 const evidencePath = "artifacts/api-server/test-results/**";
 const contractArtifactName =
   "idle-profile-registration-browser-evidence-contract";
+
+test("the browser evidence contract can install patches with a frozen lockfile", () => {
+  const workspace = YAML.parse(
+    readFileSync(path.join(workspaceRoot, "pnpm-workspace.yaml"), "utf8"),
+  );
+  const lockfile = YAML.parse(
+    readFileSync(path.join(workspaceRoot, "pnpm-lock.yaml"), "utf8"),
+  );
+  const expectedPatches = Object.fromEntries(
+    Object.entries(workspace.patchedDependencies).map(([name, patchPath]) => [
+      name,
+      {
+        hash: createHash("sha256")
+          .update(readFileSync(path.join(workspaceRoot, patchPath)))
+          .digest("hex"),
+        path: patchPath,
+      },
+    ]),
+  );
+
+  assert.deepEqual(lockfile.patchedDependencies, expectedPatches);
+});
 
 test("the idle-profile evidence contract runs without production secrets", () => {
   const job = workflow.jobs?.["idle-profile-browser-evidence-contract"];
