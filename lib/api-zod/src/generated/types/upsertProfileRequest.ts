@@ -10,16 +10,21 @@ import type { UpsertProfileRequestAvatar } from './upsertProfileRequestAvatar';
 export interface UpsertProfileRequest {
   /** @maxLength 64 */
   username?: string;
-  /** @maxLength 16 */
+  /**
+     * @maxLength 16
+     * @nullable
+     */
   avatar?: UpsertProfileRequestAvatar;
   /**
      * Base64-encoded X25519 public key
      * @maxLength 64
+     * @nullable
      */
   publicKey?: string | null;
   /**
      * Compare-and-set guard for publicKey: the key currently registered for the account (null when none). Omitted, publicKey only registers a first key or re-sends the current one; replacing a different key without naming it is rejected with 409.
      * @maxLength 64
+     * @nullable
      */
   previousPublicKey?: string | null;
   /**

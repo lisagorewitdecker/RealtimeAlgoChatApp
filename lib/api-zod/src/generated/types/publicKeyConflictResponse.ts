@@ -10,11 +10,15 @@ import type { PublicKeyConflictResponseCode } from './publicKeyConflictResponseC
 export interface PublicKeyConflictResponse {
   error: string;
   code: PublicKeyConflictResponseCode;
-  /** The public key the account currently holds */
+  /**
+     * The public key the account currently holds
+     * @nullable
+     */
   publicKey?: string | null;
   /**
      * The authoritative account revision currently stored
      * @minimum 0
+     * @nullable
      */
   registrationVersion?: bigint | null;
 }

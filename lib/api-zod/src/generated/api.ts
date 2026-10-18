@@ -34,7 +34,7 @@ export const GetProfileResponse = zod.object({
   "profile": zod.object({
   "userId": zod.string(),
   "username": zod.string(),
-  "avatar": zod.enum(['🧑‍💻', '🚀', '🦊', '🐼', '🐸', '🐙', '🦄', '🌻', '🍕', '🎮', '🔥', '💎']).nullish(),
+  "avatar": zod.union([zod.literal('🧑‍💻'),zod.literal('🚀'),zod.literal('🦊'),zod.literal('🐼'),zod.literal('🐸'),zod.literal('🐙'),zod.literal('🦄'),zod.literal('🌻'),zod.literal('🍕'),zod.literal('🎮'),zod.literal('🔥'),zod.literal('💎'),zod.literal(null)]).nullish(),
   "publicKey": zod.string().nullish().describe('Base64-encoded X25519 public key for E2EE'),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()
@@ -59,7 +59,7 @@ export const upsertProfileBodyRegistrationVersionMin = 0;
 
 export const UpsertProfileBody = zod.object({
   "username": zod.string().max(upsertProfileBodyUsernameMax).optional(),
-  "avatar": zod.enum(['🧑‍💻', '🚀', '🦊', '🐼', '🐸', '🐙', '🦄', '🌻', '🍕', '🎮', '🔥', '💎']).nullish(),
+  "avatar": zod.union([zod.literal('🧑‍💻'),zod.literal('🚀'),zod.literal('🦊'),zod.literal('🐼'),zod.literal('🐸'),zod.literal('🐙'),zod.literal('🦄'),zod.literal('🌻'),zod.literal('🍕'),zod.literal('🎮'),zod.literal('🔥'),zod.literal('💎'),zod.literal(null)]).nullish(),
   "publicKey": zod.string().max(upsertProfileBodyPublicKeyMax).nullish().describe('Base64-encoded X25519 public key'),
   "previousPublicKey": zod.string().max(upsertProfileBodyPreviousPublicKeyMax).nullish().describe('Compare-and-set guard for publicKey: the key currently registered for the account (null when none). Omitted, publicKey only registers a first key or re-sends the current one; replacing a different key without naming it is rejected with 409.'),
   "registrationVersion": zod.int().min(upsertProfileBodyRegistrationVersionMin).optional().describe('Optional monotonic version for this public-key registration. Writes must advance the authoritative account revision by exactly one; older or future-skewed writes are rejected without changing the registered key. Omit for compatibility with older clients.')
@@ -73,7 +73,7 @@ export const UpsertProfileResponse = zod.object({
   "profile": zod.object({
   "userId": zod.string(),
   "username": zod.string(),
-  "avatar": zod.enum(['🧑‍💻', '🚀', '🦊', '🐼', '🐸', '🐙', '🦄', '🌻', '🍕', '🎮', '🔥', '💎']).nullish(),
+  "avatar": zod.union([zod.literal('🧑‍💻'),zod.literal('🚀'),zod.literal('🦊'),zod.literal('🐼'),zod.literal('🐸'),zod.literal('🐙'),zod.literal('🦄'),zod.literal('🌻'),zod.literal('🍕'),zod.literal('🎮'),zod.literal('🔥'),zod.literal('💎'),zod.literal(null)]).nullish(),
   "publicKey": zod.string().nullish().describe('Base64-encoded X25519 public key for E2EE'),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()

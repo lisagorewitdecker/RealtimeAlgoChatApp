@@ -9,11 +9,15 @@ import type { UserProfile } from './userProfile';
 
 export interface ProfileResponse {
   profile: UserProfile;
-  /** The account's registered X25519 public key */
+  /**
+     * The account's registered X25519 public key
+     * @nullable
+     */
   publicKey?: string | null;
   /**
      * The monotonic version of the registered public key
      * @minimum 0
+     * @nullable
      */
   registrationVersion?: bigint | null;
 }

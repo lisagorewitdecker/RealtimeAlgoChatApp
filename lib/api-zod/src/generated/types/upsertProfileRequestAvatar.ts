@@ -8,6 +8,7 @@
 
 /**
  * @maxLength 16
+ * @nullable
  */
 export type UpsertProfileRequestAvatar = typeof UpsertProfileRequestAvatar[keyof typeof UpsertProfileRequestAvatar] | null;
 
