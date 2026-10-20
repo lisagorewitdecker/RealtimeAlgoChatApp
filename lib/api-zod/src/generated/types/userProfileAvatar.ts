@@ -8,6 +8,7 @@
 
 /**
  * @maxLength 16
+ * @nullable
  */
 export type UserProfileAvatar = typeof UserProfileAvatar[keyof typeof UserProfileAvatar] | null;
 

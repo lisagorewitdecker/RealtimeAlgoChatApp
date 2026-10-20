@@ -10,9 +10,15 @@ import type { UserProfileAvatar } from './userProfileAvatar';
 export interface UserProfile {
   userId: string;
   username: string;
-  /** @maxLength 16 */
+  /**
+     * @maxLength 16
+     * @nullable
+     */
   avatar?: UserProfileAvatar;
-  /** Base64-encoded X25519 public key for E2EE */
+  /**
+     * Base64-encoded X25519 public key for E2EE
+     * @nullable
+     */
   publicKey?: string | null;
   createdAt: Date;
   updatedAt: Date;

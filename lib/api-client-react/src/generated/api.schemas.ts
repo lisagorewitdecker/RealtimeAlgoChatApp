@@ -30,6 +30,7 @@ export interface HealthStatus {
 
 /**
  * @maxLength 16
+ * @nullable
  */
 export type UserProfileAvatar = typeof UserProfileAvatar[keyof typeof UserProfileAvatar] | null;
 
@@ -52,9 +53,15 @@ export const UserProfileAvatar = {
 export interface UserProfile {
   userId: string;
   username: string;
-  /** @maxLength 16 */
+  /**
+     * @maxLength 16
+     * @nullable
+     */
   avatar?: UserProfileAvatar;
-  /** Base64-encoded X25519 public key for E2EE */
+  /**
+     * Base64-encoded X25519 public key for E2EE
+     * @nullable
+     */
   publicKey?: string | null;
   createdAt: string;
   updatedAt: string;
@@ -62,17 +69,22 @@ export interface UserProfile {
 
 export interface ProfileResponse {
   profile: UserProfile;
-  /** The account's registered X25519 public key */
+  /**
+     * The account's registered X25519 public key
+     * @nullable
+     */
   publicKey?: string | null;
   /**
      * The monotonic version of the registered public key
      * @minimum 0
+     * @nullable
      */
   registrationVersion?: number | null;
 }
 
 /**
  * @maxLength 16
+ * @nullable
  */
 export type UpsertProfileRequestAvatar = typeof UpsertProfileRequestAvatar[keyof typeof UpsertProfileRequestAvatar] | null;
 
@@ -95,16 +107,21 @@ export const UpsertProfileRequestAvatar = {
 export interface UpsertProfileRequest {
   /** @maxLength 64 */
   username?: string;
-  /** @maxLength 16 */
+  /**
+     * @maxLength 16
+     * @nullable
+     */
   avatar?: UpsertProfileRequestAvatar;
   /**
      * Base64-encoded X25519 public key
      * @maxLength 64
+     * @nullable
      */
   publicKey?: string | null;
   /**
      * Compare-and-set guard for publicKey: the key currently registered for the account (null when none). Omitted, publicKey only registers a first key or re-sends the current one; replacing a different key without naming it is rejected with 409.
      * @maxLength 64
+     * @nullable
      */
   previousPublicKey?: string | null;
   /**
@@ -126,11 +143,15 @@ export const PublicKeyConflictResponseCode = {
 export interface PublicKeyConflictResponse {
   error: string;
   code: PublicKeyConflictResponseCode;
-  /** The public key the account currently holds */
+  /**
+     * The public key the account currently holds
+     * @nullable
+     */
   publicKey?: string | null;
   /**
      * The authoritative account revision currently stored
      * @minimum 0
+     * @nullable
      */
   registrationVersion?: number | null;
 }
