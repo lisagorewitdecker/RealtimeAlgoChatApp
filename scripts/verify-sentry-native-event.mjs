@@ -13,6 +13,8 @@ const EXPECTED_PROBE_FUNCTION = "createNativeSourceMapProbeError";
 const EXPECTED_STORAGE_RECOVERY_MESSAGE = "Room key persistence retry failed";
 const EXPECTED_STORAGE_RECOVERY_OPERATION = "save";
 const EXPECTED_TRIGGER_KEYS = new Set(["platform", "candidate_build_id", "marker"]);
+const wait = (milliseconds) =>
+  new Promise((resolve) => setTimeout(resolve, milliseconds));
 const CREDENTIAL_FIELD_PATTERN =
   /^(?:authorization[_-]?token|auth[_-]?token|sentry_auth_token|access[_-]?token|refresh[_-]?token)$/i;
 const BEARER_TOKEN_PATTERN = /^bearer\s+[A-Za-z0-9._~+/-]{8,}$/i;
@@ -481,7 +483,7 @@ export async function verifyNativeSentryEvent({
       lastValidationError = error;
     }
     if (attempt < attempts) {
-      await new Promise((resolve) => setTimeout(resolve, intervalMs));
+      await wait(intervalMs);
     }
   }
 

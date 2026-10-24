@@ -195,7 +195,7 @@ test("Node engine range validation rejects malformed and unsupported syntax", ()
     "latest",
   ];
 
-  for (const range of invalidRanges) {
+  invalidRanges.forEach((range) => {
     assert.throws(
       () => nodeVersionSatisfiesRange("24.0.0", range),
       (error) => {
@@ -212,7 +212,7 @@ test("Node engine range validation rejects malformed and unsupported syntax", ()
       },
       `the invalid range ${JSON.stringify(range)} must be rejected`,
     );
-  }
+  });
 });
 
 test("malformed mobile release workflow expressions fail with line-specific diagnostics", () => {
@@ -1100,7 +1100,7 @@ test("blank mobile release Node versions identify the affected job and required 
     "the blank YAML fixture must exercise YAML's native null value",
   );
 
-  for (const configuredVersion of ["", yamlBlankNodeVersion]) {
+  ["", yamlBlankNodeVersion].forEach((configuredVersion) => {
     const fixture = structuredClone(workflow);
     const setupNodeStep = fixture.jobs[jobId].steps.find((step) =>
       String(step.uses ?? "").startsWith("actions/setup-node@"),
@@ -1132,7 +1132,7 @@ test("blank mobile release Node versions identify the affected job and required 
       },
       `the blank Node version ${JSON.stringify(configuredVersion)} must be rejected`,
     );
-  }
+  });
 });
 
 test("whitespace-only mobile release Node versions identify the affected job and required configuration", () => {
