@@ -262,8 +262,6 @@ script's `--launch` mode; unarmed, that is a transparent pass-through.
      result records. A corrupt result or start record fails the preflight
      before Metro starts, naming the file but never echoing its contents.
 
-| `preview_launch_evidence` | Meaning | Handoff row |
-| --- | --- | --- |
 - **`NO_DEVICE` — `Expo Go launch` = BLOCKED.** No
   `app=host.exp.Exponent` inspector connection arrived within the device
   budget. Android Expo Go, DevTools, browser, and curl traffic do not count.
