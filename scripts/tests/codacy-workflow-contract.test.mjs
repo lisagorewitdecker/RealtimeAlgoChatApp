@@ -27,3 +27,21 @@ test("Codacy scan uses the updated analysis CLI action", () => {
     /codacy\/codacy-analysis-cli-action@d840f886c4bd4edc059706d09c6a1586111c540b/,
   );
 });
+
+test("Codacy SARIF uploads stay within GitHub's 20-run limit", () => {
+  assert.match(workflowText, /max_runs_per_upload = 20/);
+  assert.match(
+    workflowText,
+    /range\(0, len\(runs\), max_runs_per_upload\)/,
+  );
+  assert.match(
+    workflowText,
+    /runs\[start : start \+ max_runs_per_upload\]/,
+  );
+  assert.match(workflowText, /sarif_file: results-part-1\.sarif/);
+  assert.match(workflowText, /sarif_file: results-part-2\.sarif/);
+  assert.match(
+    workflowText,
+    /if: \$\{\{ hashFiles\('results-part-2\.sarif'\) != '' \}\}/,
+  );
+});
