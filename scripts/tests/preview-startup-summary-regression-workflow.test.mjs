@@ -49,12 +49,10 @@ function extractWorkflowHereDoc(variableName) {
     .filter((line) => line.length > 0)
     .map((line) => line.match(/^ */)?.[0].length ?? 0);
   const sharedIndent = indents.length > 0 ? Math.min(...indents) : 0;
-  return (
-    body
-      .split("\n")
-      .map((line) => line.slice(sharedIndent))
-      .join("\n") + "\n\n"
-  );
+  return `${body
+    .split("\n")
+    .map((line) => line.slice(sharedIndent))
+    .join("\n")}\n\n`;
 }
 
 function runValidator(env) {
