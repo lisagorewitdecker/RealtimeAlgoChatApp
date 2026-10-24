@@ -9,9 +9,9 @@
  * Zero external dependencies — uses only Node.js built-ins (http, fs, path).
  */
 
-const http = require("http");
-const fs = require("fs");
-const path = require("path");
+const http = require("node:http");
+const fs = require("node:fs");
+const path = require("node:path");
 
 const TEMPLATE_PATH = path.resolve(__dirname, "templates", "landing-page.html");
 const basePath = (process.env.BASE_PATH || "/").replace(/\/+$/, "");
@@ -217,7 +217,7 @@ function createStaticServer() {
         "content-type": "application/json; charset=utf-8",
       });
       res.end(JSON.stringify({ status: "ok" }));
-      return;
+      return undefined;
     }
 
     if (pathname === "/" || pathname === "/manifest") {
