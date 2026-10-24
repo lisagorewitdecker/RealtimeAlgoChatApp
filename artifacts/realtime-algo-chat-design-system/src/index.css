@@ -1,7 +1,7 @@
 /* GENERATED FROM tokens.json BY scripts/build-tokens.mjs -- DO NOT EDIT.
  * Edit tokens.json instead; the dev server regenerates this file on change. */
-@import "tailwindcss";
-@import "tw-animate-css";
+@import url("tailwindcss");
+@import url("tw-animate-css");
 @plugin "@tailwindcss/typography";
 
 /* Register this package's own components so any consumer that imports this
@@ -313,8 +313,7 @@
   .border.hover-elevate:not(.no-hover-interaction-elevate)::after,
   .border.active-elevate:not(.no-active-interaction-elevate)::after,
   .border.hover-elevate-2:not(.no-hover-interaction-elevate)::after,
-  .border.active-elevate-2:not(.no-active-interaction-elevate)::after,
-  .border.hover-elevate:not(.no-hover-interaction-elevate)::after {
+  .border.active-elevate-2:not(.no-active-interaction-elevate)::after {
     inset: -1px;
   }
 }
