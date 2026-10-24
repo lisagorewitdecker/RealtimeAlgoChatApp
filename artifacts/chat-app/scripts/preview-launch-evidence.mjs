@@ -664,20 +664,24 @@ function describeExit(code, signal) {
 function forwardSignals(child) {
   const handlers = new Map();
   for (const signal of FORWARDED_SIGNALS) {
-    const handler = () => {
-      if (child.exitCode == null && child.signalCode == null) {
-        try {
-          child.kill(signal);
-        } catch {
-          // The child is already gone; its exit handler finishes the launcher.
-        }
-      }
-    };
+    const handler = createSignalHandler(child, signal);
     handlers.set(signal, handler);
     process.on(signal, handler);
   }
   return () => {
     for (const [signal, handler] of handlers) process.off(signal, handler);
+  };
+}
+
+function createSignalHandler(child, signal) {
+  return () => {
+    if (child.exitCode == null && child.signalCode == null) {
+      try {
+        child.kill(signal);
+      } catch {
+        // The child is already gone; its exit handler finishes the launcher.
+      }
+    }
   };
 }
 

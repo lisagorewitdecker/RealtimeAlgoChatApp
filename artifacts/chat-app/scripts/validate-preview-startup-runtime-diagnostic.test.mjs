@@ -121,7 +121,7 @@ function installedPackageVersion(packageName) {
 
 function writeIndependentCaptureArtifacts(directory, suffix = "") {
   mkdirSync(directory, { recursive: true });
-  for (const platform of ["linux", "macos", "windows"]) {
+  ["linux", "macos", "windows"].forEach((platform) => {
     const samples = Object.fromEntries(
       CAPTURED_LOADER_SAMPLES.filter(
         (sample) => sample.platform === platform,
@@ -144,7 +144,7 @@ function writeIndependentCaptureArtifacts(directory, suffix = "") {
       )}\n`,
       "utf8",
     );
-  }
+  });
 }
 
 const capturedLoaderSampleNames = CAPTURED_LOADER_SAMPLES.map(
