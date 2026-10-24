@@ -52,11 +52,11 @@ test("braces bounds recursive processing of externally supplied ASTs", () => {
   }
   ast = { type: "root", nodes: [ast] };
 
-  for (const process of [braces.compile, braces.expand, braces.stringify]) {
+  [braces.compile, braces.expand, braces.stringify].forEach((process) => {
     assert.throws(() => process(ast), {
       name: "RangeError",
     });
-  }
+  });
 });
 
 test("braces rejects cyclic AST parent chains during expansion", () => {
