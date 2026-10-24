@@ -165,6 +165,15 @@ the public and local probes it runs itself, and the `expoGoLaunch` boundary it
 copies from the latest launch-evidence probe result (next section). The last
 row requires filtered server-side logs from the physical iPhone session.
 
+| Handoff boundary | Status | Evidence |
+| --- | --- | --- |
+| Public manifest reachability | Replace | Replace |
+| Local handoff probe (manifest and bundle) | Replace | Replace |
+| Expo Go launch on physical iPhone | Replace | Replace |
+| Server-side native request evidence | Replace | Replace |
+
+Allowed statuses and evidence for each row:
+
 - **Public manifest reachability — PASS / FAIL.** Preflight
   `publicManifestReachability`; status and byte count only.
 - **Local handoff probe (manifest and bundle) — PASS / FAIL / NOT_RUN.**
