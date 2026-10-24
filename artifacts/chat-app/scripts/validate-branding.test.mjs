@@ -26,6 +26,26 @@ const approvedPermissionDescriptions = {
     "RealtimeAlgoChatApp uses your microphone for voice and video calls.",
 };
 
+function assertMissingIOSPermission(field) {
+  const metadata = {
+    CFBundleDisplayName: "RealtimeAlgoChatApp",
+    CFBundleName: "RealtimeAlgoChatApp",
+    NSCameraUsageDescription: approvedPermissionDescriptions.camera,
+    NSMicrophoneUsageDescription: approvedPermissionDescriptions.microphone,
+  };
+  delete metadata[field];
+  assert.throws(
+    () =>
+      validateNativeArtifactMetadata({
+        platform: "ios",
+        productName: "RealtimeAlgoChatApp",
+        expectedPermissionDescriptions: approvedPermissionDescriptions,
+        metadata,
+      }),
+    new RegExp(`Native iOS metadata is missing ${field}`),
+  );
+}
+
 /** Asserts the summary properties every failed native check must keep. */
 function assertActionableFailure(summary, buildId) {
   assert.match(summary, /Status: \*\*FAIL\*\*/);
@@ -233,23 +253,7 @@ test("names each missing iOS permission field", () => {
     "NSCameraUsageDescription",
     "NSMicrophoneUsageDescription",
   ]) {
-    const metadata = {
-      CFBundleDisplayName: "RealtimeAlgoChatApp",
-      CFBundleName: "RealtimeAlgoChatApp",
-      NSCameraUsageDescription: approvedPermissionDescriptions.camera,
-      NSMicrophoneUsageDescription: approvedPermissionDescriptions.microphone,
-    };
-    delete metadata[field];
-    assert.throws(
-      () =>
-        validateNativeArtifactMetadata({
-          platform: "ios",
-          productName: "RealtimeAlgoChatApp",
-          expectedPermissionDescriptions: approvedPermissionDescriptions,
-          metadata,
-        }),
-      new RegExp(`Native iOS metadata is missing ${field}`),
-    );
+    assertMissingIOSPermission(field);
   }
 });
 

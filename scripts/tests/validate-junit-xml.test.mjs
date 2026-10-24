@@ -16,6 +16,12 @@ import {
 
 const ESCAPE = String.fromCharCode(0x1b);
 
+function registerReportCase(action, description, reportText, expectedVerdict) {
+  test(`${action} ${description}`, () => {
+    assert.equal(inspectJUnitReportText(reportText), expectedVerdict);
+  });
+}
+
 // The exact documents the native runners and the release fixtures produce. A
 // change that rejects any of these blocks a real release.
 const producerReports = {
@@ -50,6 +56,7 @@ const producerReports = {
 };
 
 for (const [description, reportText] of Object.entries(producerReports)) {
+  registerReportCase("accepts", description, reportText, JUNIT_REPORT_VALID);
   test(`accepts ${description}`, () => {
     assert.equal(inspectJUnitReportText(reportText), JUNIT_REPORT_VALID);
   });
@@ -135,6 +142,12 @@ const notWellFormedReports = {
 };
 
 for (const [description, reportText] of Object.entries(notWellFormedReports)) {
+  registerReportCase(
+    "rejects",
+    description,
+    reportText,
+    JUNIT_REPORT_NOT_WELL_FORMED,
+  );
   test(`rejects ${description}`, () => {
     assert.equal(
       inspectJUnitReportText(reportText),
@@ -153,6 +166,12 @@ const noTestsuiteReports = {
 };
 
 for (const [description, reportText] of Object.entries(noTestsuiteReports)) {
+  registerReportCase(
+    "reports",
+    description + " as no testsuite",
+    reportText,
+    JUNIT_REPORT_NO_TESTSUITE,
+  );
   test(`reports ${description} as no testsuite`, () => {
     assert.equal(inspectJUnitReportText(reportText), JUNIT_REPORT_NO_TESTSUITE);
   });
