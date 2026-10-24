@@ -168,14 +168,27 @@ jobs:
             automation_details["id"] = candidate_id
             assigned_ids.add(candidate_id)
 
-          temp_output_path = "results.sarif.tmp"
-          with open(temp_output_path, "w", encoding="utf-8") as sarif_file:
-            json.dump(sarif_data, sarif_file)
-          os.replace(temp_output_path, "results.sarif")
+          max_runs_per_upload = 20
+          if len(runs) > max_runs_per_upload * 2:
+            raise ValueError(f"Codacy produced {len(runs)} SARIF runs; this workflow supports up to 40.")
+
+          for part, start in enumerate(range(0, len(runs), max_runs_per_upload), start=1):
+            output_path = f"results-part-{part}.sarif"
+            temp_output_path = f"{output_path}.tmp"
+            sarif_part = {**sarif_data, "runs": runs[start : start + max_runs_per_upload]}
+            with open(temp_output_path, "w", encoding="utf-8") as sarif_file:
+              json.dump(sarif_part, sarif_file)
+            os.replace(temp_output_path, output_path)
           PY
 
-      # Upload the SARIF file generated in the previous step
-      - name: Upload SARIF results file
+      # GitHub accepts at most 20 SARIF runs per upload.
+      - name: Upload first SARIF results file
         uses: github/codeql-action/upload-sarif@6f5948dfacef28e207b48d0905cf90c03365536d
         with:
-          sarif_file: results.sarif
+          sarif_file: results-part-1.sarif
+
+      - name: Upload second SARIF results file
+        if: ${{ hashFiles('results-part-2.sarif') != '' }}
+        uses: github/codeql-action/upload-sarif@6f5948dfacef28e207b48d0905cf90c03365536d
+        with:
+          sarif_file: results-part-2.sarif
