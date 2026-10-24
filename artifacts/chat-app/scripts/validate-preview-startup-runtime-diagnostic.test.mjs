@@ -132,7 +132,7 @@ function writeIndependentCaptureArtifacts(directory, suffix = "") {
     );
     writeFileSync(
       join(directory, `${platform}.json`),
-      JSON.stringify(
+      `${JSON.stringify(
         {
           platform,
           expoCli: installedPackageVersion("@expo/cli"),
@@ -141,7 +141,7 @@ function writeIndependentCaptureArtifacts(directory, suffix = "") {
         },
         null,
         2,
-      ) + "\n",
+      )}\n`,
       "utf8",
     );
   }
