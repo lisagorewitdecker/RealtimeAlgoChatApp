@@ -16,6 +16,12 @@ import {
 
 const ESCAPE = String.fromCharCode(0x1b);
 
+function registerReportCase(action, description, reportText, expectedVerdict) {
+  test(`${action} ${description}`, () => {
+    assert.equal(inspectJUnitReportText(reportText), expectedVerdict);
+  });
+}
+
 // The exact documents the native runners and the release fixtures produce. A
 // change that rejects any of these blocks a real release.
 const producerReports = {
@@ -50,9 +56,7 @@ const producerReports = {
 };
 
 for (const [description, reportText] of Object.entries(producerReports)) {
-  test("accepts " + description, () => {
-    assert.equal(inspectJUnitReportText(reportText), JUNIT_REPORT_VALID);
-  });
+  registerReportCase("accepts", description, reportText, JUNIT_REPORT_VALID);
 }
 
 // Each entry is a document that an XML parser rejects. A release gate that
@@ -137,12 +141,12 @@ const notWellFormedReports = {
 };
 
 for (const [description, reportText] of Object.entries(notWellFormedReports)) {
-  test("rejects " + description, () => {
-    assert.equal(
-      inspectJUnitReportText(reportText),
-      JUNIT_REPORT_NOT_WELL_FORMED,
-    );
-  });
+  registerReportCase(
+    "rejects",
+    description,
+    reportText,
+    JUNIT_REPORT_NOT_WELL_FORMED,
+  );
 }
 
 // Well-formed XML that is not a testsuite report keeps its own verdict, so the
@@ -155,9 +159,12 @@ const noTestsuiteReports = {
 };
 
 for (const [description, reportText] of Object.entries(noTestsuiteReports)) {
-  test("reports " + description + " as no testsuite", () => {
-    assert.equal(inspectJUnitReportText(reportText), JUNIT_REPORT_NO_TESTSUITE);
-  });
+  registerReportCase(
+    "reports",
+    description + " as no testsuite",
+    reportText,
+    JUNIT_REPORT_NO_TESTSUITE,
+  );
 }
 
 test("verdicts never carry report content", () => {
