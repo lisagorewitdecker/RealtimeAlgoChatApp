@@ -330,7 +330,7 @@ async function startMetro(expoPublicDomain, expoPublicReplId) {
   }
 
   for (let i = 0; i < 60; i++) {
-    await new Promise((resolve) => setTimeout(resolve, 1000));
+    await delay(1000);
 
     const healthy = await checkMetroHealth();
     if (healthy) {
@@ -402,6 +402,10 @@ async function downloadBundle(platform, timestamp) {
   console.log(`Fetching ${platform} bundle...`);
   await downloadFile(url.toString(), output);
   console.log(`${platform} bundle ready`);
+}
+
+function delay(milliseconds) {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
 async function downloadManifest(platform) {
