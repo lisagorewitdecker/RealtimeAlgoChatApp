@@ -93,7 +93,7 @@ test("the job runs on a GitHub-hosted Mac for the provisioning inputs, weekly, a
     "a weekly schedule catches macos-latest image changes between edits",
   );
   assert.ok(
-    Object.prototype.hasOwnProperty.call(triggers, "workflow_dispatch"),
+    Object.hasOwn(triggers, "workflow_dispatch"),
     "the job must be runnable on demand",
   );
   assert.deepEqual(workflow.permissions, { contents: "read" });
