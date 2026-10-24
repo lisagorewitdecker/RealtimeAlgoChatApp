@@ -4,7 +4,8 @@ Read `artifacts/realtime-algo-chat-design-system/docs/AGENTS.md` first. React Na
 not consume the web CSS or DOM components. It imports portable tokens, native
 theme/hooks, and native components directly from this package. If the Expo app
 still contains scaffolded or existing local theme/hooks/components, also read
-`artifacts/realtime-algo-chat-design-system/docs/migrating-expo.md` before writing UI.
+`artifacts/realtime-algo-chat-design-system/docs/migrating-expo.md` before
+writing UI.
 
 ## Native theme and fonts
 
@@ -77,6 +78,6 @@ Set `app.json`'s literal `splash.backgroundColor` from
 ## Verify
 
 Import and render
-`@workspace/realtime-algo-chat-design-system/components/native/button`, then run Expo
-typecheck and the development workflow. The import, native theme, and font hook
-must resolve before broader screen work begins.
+`@workspace/realtime-algo-chat-design-system/components/native/button`, then
+run Expo typecheck and the development workflow. The import, native theme, and
+font hook must resolve before broader screen work begins.
