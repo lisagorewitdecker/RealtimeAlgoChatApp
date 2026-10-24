@@ -77,9 +77,9 @@ catalog:
   tailwind-merge: ^3.7.0
   tailwindcss: ^4.3.3
   tsx: ^4.23.12
-  vite: ^7.3.6
+  vite: ^8.1.6
   wouter: ^3.3.5
-  zod: ^3.25.76
+  zod: ^4.6.6
 
 autoInstallPeers: false
 
