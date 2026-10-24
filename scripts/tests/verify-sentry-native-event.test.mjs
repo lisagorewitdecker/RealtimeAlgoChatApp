@@ -104,12 +104,12 @@ test("accepts the fixed privacy-safe storage recovery warning", () => {
   });
 });
 
-for (const [label, payload] of [
+[
   ["room IDs", { contexts: { recovery: { roomId: "private-room" } } }],
   ["key material", { extra: { key_material: "private-key" } }],
   ["ciphertext", { breadcrumbs: [{ data: { ciphertext: "encrypted-value" } }] }],
   ["secure-store values", { extra: { secureStoreValue: "stored-secret" } }],
-]) {
+].forEach(([label, payload]) => {
   test(`rejects storage recovery events containing ${label}`, () => {
     assert.ok(findSensitiveStorageContent(payload));
     assert.throws(
@@ -117,7 +117,7 @@ for (const [label, payload] of [
       /privacy-safe storage event/,
     );
   });
-}
+});
 
 test("rejects a storage recovery warning without the save operation tag", () => {
   const event = storageEventFixture();

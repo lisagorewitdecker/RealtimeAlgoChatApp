@@ -104,6 +104,7 @@
 
 /* LIGHT MODE */
 :root {
+  --button-outline: rgba(0,0,0, .10);
   --button-outline: rgb(0 0 0 / 10%);
   --badge-outline: rgb(0 0 0 / 5%);
 
