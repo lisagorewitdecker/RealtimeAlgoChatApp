@@ -2029,7 +2029,7 @@ async function validateLivePreview(
           } else if (recordOutput) {
             try {
               await writeHandoffPreflight(recordOutput, record);
-            } catch (recordError) {
+            } catch {
               finalError = new Error(formatRecordWriteFailure(phase));
             }
           }

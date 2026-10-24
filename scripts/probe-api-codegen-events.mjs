@@ -116,6 +116,26 @@ async function readResponseJson(response) {
   }
 }
 
+async function consumeResponse(allowNotFound, response) {
+  if (response.status === 404 && allowNotFound) {
+    return { kind: "value", value: null };
+  }
+  if (!response.ok) {
+    return {
+      kind: "http-error",
+      response,
+      text: await readResponseText(response),
+    };
+  }
+  return {
+    kind: "value",
+    value:
+      response.status === 204
+        ? undefined
+        : await readResponseJson(response),
+  };
+}
+
 function unwrapRequestError(error) {
   return error instanceof GitHubTransportError ||
     error instanceof GitHubResponseBodyError
@@ -229,32 +249,13 @@ export class GitHubClient {
         ...(body ? { body: JSON.stringify(body) } : {}),
       };
       let outcome;
-      const consumeResponse = async (response) => {
-        if (response.status === 404 && allowNotFound) {
-          return { kind: "value", value: null };
-        }
-        if (!response.ok) {
-          return {
-            kind: "http-error",
-            response,
-            text: await readResponseText(response),
-          };
-        }
-        return {
-          kind: "value",
-          value:
-            response.status === 204
-              ? undefined
-              : await readResponseJson(response),
-        };
-      };
       try {
         outcome = await this.fetchWithDeadline(
           `${this.apiUrl}${path}`,
           requestInit,
           retryDeadline,
           path,
-          consumeResponse,
+          consumeResponse.bind(null, allowNotFound),
         );
       } catch (error) {
         if (
