@@ -96,7 +96,7 @@ function parseArguments(argv) {
 
 function printHelp() {
   process.stdout.write(
-    [
+    `${[
       "Refresh the versioned Expo preview loader evidence.",
       "",
       "Usage:",
@@ -114,7 +114,7 @@ function printHelp() {
       "generated metadata, sample inventory, and output block together.",
       "No file is written unless all required platforms and samples are",
       "present and version-aligned. Use --output PATH for a temporary review copy.",
-    ].join("\n") + "\n",
+    ].join("\n")}\n`,
   );
 }
 
