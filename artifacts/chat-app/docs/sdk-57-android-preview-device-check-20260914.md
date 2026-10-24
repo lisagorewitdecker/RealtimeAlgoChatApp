@@ -1,6 +1,8 @@
 # SDK 57 Android preview runtime dependency check
 
-**Result: PASS — preview runtime dependencies are aligned**
+## Result
+
+PASS — preview runtime dependencies are aligned.
 
 This record documents the native runtime review that must accompany an Expo or
 React Native upgrade. The stock Expo Go Android handoff is a separate physical
@@ -9,14 +11,13 @@ preview.
 
 ## Current metadata
 
-| Field | Result |
-| --- | --- |
-| App | Chat App |
-| Expo SDK | 57 (`expo` `~57.0.24`) |
-| Expo CLI | `57.0.20` |
-| React Native | `0.86.3` |
-| Native diagnostic binary | Optional React Native DevTools launcher bundled by Expo CLI |
-| Runtime configuration | `.replit` Nix packages on `stable-25_05` |
+- **App:** Chat App
+- **Expo SDK:** 57 (`expo` `~57.0.24`)
+- **Expo CLI:** `57.0.20`
+- **React Native:** `0.86.3`
+- **Native diagnostic binary:** Optional React Native DevTools launcher
+  bundled by Expo CLI
+- **Runtime configuration:** `.replit` Nix packages on `stable-25_05`
 
 ## Upgrade review procedure
 
