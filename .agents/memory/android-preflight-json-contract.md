@@ -3,6 +3,8 @@ name: Android preflight JSON contract
 description: The review-safe policy for machine-readable Android preview handoff artifacts.
 ---
 
+# Android preflight JSON contract
+
 Machine-readable Android preview preflight artifacts are optional sidecars for
 legacy Markdown-only records, but any sidecar present beside a handoff record
 must satisfy the redacted four-boundary contract. Public reachability and local
@@ -17,9 +19,9 @@ review evidence, while older records without a sidecar must remain readable.
 status enums, and sensitive evidence. Report only fixed boundary-level
 diagnostics; never echo parsed JSON content.
 
-Hosted verification fixtures must include the delegated preflight validator and
-use its accepted redacted evidence vocabulary; syntactically valid JSON alone
-is insufficient.
+Hosted verification fixtures must include the delegated preflight validator
+and use its accepted redacted evidence vocabulary; syntactically valid JSON
+alone is insufficient.
 
 **Why:** The hosted gate validates the full redacted schema, not only JSON
 syntax or the Markdown record.
