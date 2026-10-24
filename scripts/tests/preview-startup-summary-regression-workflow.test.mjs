@@ -378,6 +378,22 @@ test("real platform launcher workflow sanitizes captured launcher output before 
   );
 });
 
+test("real platform launcher workflow does not cache untrusted reviewed revisions", () => {
+  const steps = realPlatformWorkflow.jobs["verify-real-launcher"].steps;
+  const nodeSetupStep = steps.find((step) =>
+    String(step.uses ?? "").startsWith("actions/setup-node@"),
+  );
+
+  assert.ok(nodeSetupStep, "the real-platform job must configure Node.js");
+  assert.equal(nodeSetupStep.with?.cache, undefined);
+  assert.ok(
+    steps.every(
+      (step) => !String(step.uses ?? "").startsWith("actions/cache@"),
+    ),
+    "the real-platform job must not use GitHub Actions cache",
+  );
+});
+
 test("hosted preview startup workflow summary matches validator output exactly", () => {
   const result = runValidator({
     PREVIEW_STARTUP_TEST_FIXTURE: "missing-runtime-library-long-path",
