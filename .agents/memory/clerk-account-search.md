@@ -3,6 +3,8 @@ name: Clerk account search
 description: How to let an admin find a Clerk-backed account by name or email without building custom search infrastructure.
 ---
 
+# Clerk account search
+
 Clerk's backend SDK (`clerkClient.users.getUserList({ query, limit })`) already
 performs a case-insensitive partial match across email addresses, phone
 numbers, usernames, Web3 wallets, user IDs, first names, and last names.

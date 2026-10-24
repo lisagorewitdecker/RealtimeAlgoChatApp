@@ -31,7 +31,7 @@ pull-request path. The hosted reviewer rendering remains unconfirmed.
 | Base branch | `development` at `6c9c2c4ce4681fd3c4b4a12b0e8d240ecbb05829` |
 | Workflow | `.github/workflows/api-codegen.yml` (`pull_request`, development) |
 | Probe pull request | [#194](https://github.com/lisagorewitdecker/RealtimeAlgoChatApp/pull/194), closed unmerged |
-| Probe branch | `task-474-generated-client-summary-20260915`, deleted after verification |
+| Probe branch | `task-474-generated-client-summary-20260915` (deleted) |
 | Probe head | `12ef5f6dab0237ee52e2a7d13f259d82108dfe34` |
 | Hosted run | [#35019409426](https://github.com/lisagorewitdecker/RealtimeAlgoChatApp/actions/runs/35019409426) |
 | Hosted check job | [Check generated API clients, job 104551058148](https://github.com/lisagorewitdecker/RealtimeAlgoChatApp/actions/runs/35019409426/job/104551058148) |
@@ -63,6 +63,26 @@ pull-request path. The hosted reviewer rendering remains unconfirmed.
   confirmation.
 - **Opening the failed check requires privileged job-log access — PASS.** The
   direct Checks page opens while signed out. The job-log endpoint returned
+- **PASS — Real pull-request workflow on a controlled stale generated client.**
+  Run `#35019409426` completed with overall `failure`; `Verify generated API
+  clients` failed at the intended boundary, while the compatibility step
+  completed successfully.
+- **PASS — Failed check appears in the reviewer-facing Checks UI.** The direct
+  check view opens without log access and shows `Check generated API clients`
+  as failed with its annotations.
+- **INCONCLUSIVE — Changed generated paths appear in the rendered summary.**
+  The hosted run used the current `check-generated.mjs`, and local tests confirm
+  its report lists `lib/api-client-react/src/generated/api.schemas.ts`. The
+  signed-in rendered summary was not available in this workspace.
+- **INCONCLUSIVE — Bounded report appears in the rendered summary.** The same
+  checker revision writes bounded `formatDriftReport` output inside a fenced
+  `diff` block, and the focused API-spec test passed all 29 tests. Hosted
+  rendering still needs reviewer confirmation.
+- **INCONCLUSIVE — Regeneration command appears in the rendered summary.**
+  The hosted checker revision contains the exact command and the focused
+  summary test asserts it; hosted rendering still needs reviewer confirmation.
+- **PASS — Opening the failed check requires no privileged job-log access.**
+  The direct Checks page opens while signed out. The job-log endpoint returned
   `403 Forbidden`, and no job log was used to establish this access result.
 
 ## Summary contract to inspect
@@ -73,7 +93,8 @@ that remain to be confirmed in GitHub's signed-in rendered view, are:
 ````markdown
 ## Generated API drift detected
 
-Regenerate with `pnpm --filter @workspace/api-spec run codegen` and commit the generated output.
+Regenerate with `pnpm --filter @workspace/api-spec run codegen` and commit the
+generated output.
 
 ```diff
 <bounded generated-path report, including lib/api-client-react/src/generated/api.schemas.ts>
