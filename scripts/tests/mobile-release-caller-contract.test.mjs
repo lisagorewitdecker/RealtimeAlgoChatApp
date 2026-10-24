@@ -1372,7 +1372,7 @@ test("blocked release diagnostics identify the supported Node range safely", () 
 
 test("workflow hardening pins actions, runs for every pull request, and bounds duplicate release work", () => {
   assert.ok(
-    Object.prototype.hasOwnProperty.call(workflow.on ?? {}, "pull_request"),
+    Object.hasOwn(workflow.on ?? {}, "pull_request"),
     "pull_request runs must stay enabled so the required Android preview evidence check is always created",
   );
   assert.equal(
@@ -1684,7 +1684,7 @@ test("iOS preview evidence validation succeeds when no handoff record changed", 
 
 test("Android preview evidence runs for every pull request", () => {
   assert.ok(
-    Object.prototype.hasOwnProperty.call(workflow.on ?? {}, "pull_request"),
+    Object.hasOwn(workflow.on ?? {}, "pull_request"),
     "mobile release workflow must support pull_request",
   );
   assert.equal(
@@ -1708,7 +1708,7 @@ test("Android preview evidence runs for every pull request", () => {
 
 test("iOS preview evidence runs for every pull request", () => {
   assert.ok(
-    Object.prototype.hasOwnProperty.call(workflow.on ?? {}, "pull_request"),
+    Object.hasOwn(workflow.on ?? {}, "pull_request"),
     "mobile release workflow must support pull_request",
   );
   assert.equal(

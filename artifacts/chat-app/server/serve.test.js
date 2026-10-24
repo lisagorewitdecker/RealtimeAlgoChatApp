@@ -4,10 +4,10 @@ const {
   loadStaticFiles,
   resolveStaticPath,
 } = require("./serve");
-const fs = require("fs");
-const http = require("http");
-const os = require("os");
-const path = require("path");
+const fs = require("node:fs");
+const http = require("node:http");
+const os = require("node:os");
+const path = require("node:path");
 
 function getHttpResponse(url) {
   return new Promise((resolve, reject) => {
