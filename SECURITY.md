@@ -17,4 +17,4 @@ Please include the following in your report:
 - Steps to reproduce the issue
 - Any relevant code snippets or screenshots
 
-You can expect an initial response within 7 days. If the vulnerability is confirmed, a fix will be prioritized and you will be notified when it is resolved. If the report is declined, you will receive an explanation. Please do not disclose the vulnerability publicly until it has been addressed.
+You can expect an initial response within 7 days. If we confirm the vulnerability, we will prioritize a fix and notify you when it is resolved. If we decline the report, we will explain why. Please do not disclose the vulnerability publicly until we have addressed it.
