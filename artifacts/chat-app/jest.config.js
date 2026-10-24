@@ -13,8 +13,8 @@
 // Run one platform with `jest --selectProjects iOS` or
 // `jest --selectProjects Android`; a bare path filter runs the file under
 // every project that lists it.
-const fs = require("fs");
-const path = require("path");
+const fs = require("node:fs");
+const path = require("node:path");
 
 const shared = {
   setupFiles: ["<rootDir>/jest.setup.js"],
