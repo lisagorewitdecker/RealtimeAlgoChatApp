@@ -1,6 +1,7 @@
 # Encrypted-room recovery validation — iOS
 
-**Overall result:** BLOCKED — required physical-device validation could not run  
+**Overall result:** BLOCKED — required physical-device validation could not
+run
 **Recorded at (UTC):** 2026-09-10T21:05:11Z  
 **Source revision:** `aebcfc4`
 **Project SDK:** Expo SDK 57.0.0  
@@ -11,8 +12,8 @@
 
 | Item | Result |
 | --- | --- |
-| Same signed release build on both iPhones | BLOCKED — no signed release candidate is available to this workspace |
-| Prepared macOS/iOS runner | BLOCKED — `xcrun`, `eas`, and iOS device tooling are missing |
+| Both iPhones use the same build | BLOCKED — no signed candidate |
+| macOS/iOS runner | BLOCKED — missing `xcrun`, `eas`, and device tools |
 | iPhone A and iPhone B model/OS | Not available |
 | Dedicated account labels A/B/C | Not available to this runner |
 | Device identifiers, screenshots, logs | None collected |
@@ -21,14 +22,19 @@
 
 | Check | Result | Evidence / blocker |
 | --- | --- | --- |
-| Room creation and key registration before join | BLOCKED | No reachable iOS devices or signed candidate |
-| Envelope exchange and live/history/sandbox decryption | BLOCKED | No controlled two-device session |
-| Ciphertext-only backend boundary | BLOCKED | No device-originated session to inspect |
-| Force-close and network-loss recovery | BLOCKED | Keychain and device networking not exercised |
-| No unintended room-key replacement | BLOCKED | No physical persistence session |
-| Supported identity reset and fresh envelope | BLOCKED | No physical identity reset; no user-facing reset control |
-| Non-participant envelope denial | BLOCKED | No physical access-boundary session |
-| Encrypted-room assistant rejection | BLOCKED | No physical room session |
+- **Room/key setup before join — BLOCKED:** No iOS devices or signed candidate.
+- **Envelope exchange and live/history/sandbox decryption — BLOCKED:** No
+  controlled two-device session.
+- **Ciphertext-only backend boundary — BLOCKED:** No device session to inspect.
+- **Force-close and network-loss recovery — BLOCKED:** Keychain and networking
+  were not exercised.
+- **No unintended room-key replacement — BLOCKED:** No physical persistence
+  session.
+- **Identity reset and fresh envelope — BLOCKED:** No physical reset or
+  user-facing reset control.
+- **Non-participant envelope denial — BLOCKED:** No physical access-boundary
+  session.
+- **Encrypted-room assistant rejection — BLOCKED:** No physical room session.
 
 Automated companion coverage passed in `automated-regression.txt`, including
 rejection of valid-Base64 values that are shorter or longer than the
