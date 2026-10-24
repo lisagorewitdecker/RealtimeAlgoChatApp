@@ -179,6 +179,8 @@
 
   --opaque-button-border-intensity: 9;  /* In terms of percentages */
 
+  --elevate-1: rgba(255,255,255, .04);
+  --elevate-2: rgba(255,255,255, 9%);
   --elevate-1: rgb(255 255 255 / 4%);
   --elevate-2: rgb(255 255 255 / 9%);
 
