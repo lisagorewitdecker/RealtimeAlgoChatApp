@@ -374,9 +374,9 @@ function listSteps() {
           step.name ?? step.id ?? step.uses ?? "unnamed"
         })`,
         env: {
-          ...(workflow.env ?? {}),
-          ...(job.env ?? {}),
-          ...(step.env ?? {}),
+          ...workflow.env,
+          ...job.env,
+          ...step.env,
         },
       });
     });
@@ -3516,7 +3516,7 @@ test("Android preview evidence keeps its pull-request validation and privacy con
   );
 
   assert.ok(
-    Object.prototype.hasOwnProperty.call(workflow.on ?? {}, "pull_request"),
+    Object.hasOwn(workflow.on ?? {}, "pull_request"),
     "the release workflow must support pull_request",
   );
   assert.equal(
@@ -6302,7 +6302,7 @@ test("iOS gate keeps private values out of logs and the readiness report while r
         readiness,
         new RegExp(
           String.raw`### Blocking prerequisites[\s\S]*\n` +
-            String.raw`(` + "```" + String.raw`+)\n` +
+            String.raw`(\x60{3,})\n` +
             readinessDiagnostic.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") +
             String.raw`\n\1`,
         ),
@@ -6492,7 +6492,7 @@ test("Android preflight keeps private values out of its log and step summary", (
         run.summary,
         new RegExp(
           String.raw`### Blocking prerequisites[\s\S]*\n` +
-            String.raw`(` + "```" + String.raw`+)\n` +
+            String.raw`(\x60{3,})\n` +
             scenario.diagnostic.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") +
             String.raw`\n\1`,
         ),
@@ -6504,8 +6504,8 @@ test("Android preflight keeps private values out of its log and step summary", (
 
 function renderSummaryStepEnv(summaryStep, { resultsDir, outcome }) {
   const contextEnv = {
-    ...(workflow.env ?? {}),
-    ...(summaryStep.job.env ?? {}),
+    ...workflow.env,
+    ...summaryStep.job.env,
     NATIVE_SMOKE_RESULTS_DIR: resultsDir,
   };
   const placeholders = {
@@ -6742,7 +6742,7 @@ test("workflow summaries show candidate build IDs without exposing private value
         iosSummary,
         new RegExp(
           String.raw`### Readiness diagnostics[\s\S]*\n` +
-            String.raw`(` + "```" + String.raw`+)\n` +
+            String.raw`(\x60{3,})\n` +
             summaryDiagnostic.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") +
             String.raw`\n\1`,
         ),
@@ -8230,7 +8230,7 @@ test("release summary writers keep hostile diagnostics literal and line-broken",
     readinessSummary,
     new RegExp(
       String.raw`### Readiness diagnostics[\s\S]*\n` +
-        String.raw`(` + "```" + String.raw`+)\n` +
+        String.raw`(\x60{3,})\n` +
         hostileDiagnostic
           .split("\n")
           .map((line) => line.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
