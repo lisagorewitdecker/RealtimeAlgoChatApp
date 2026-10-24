@@ -374,9 +374,9 @@ function listSteps() {
           step.name ?? step.id ?? step.uses ?? "unnamed"
         })`,
         env: {
-          ...(workflow.env ?? {}),
-          ...(job.env ?? {}),
-          ...(step.env ?? {}),
+          ...workflow.env,
+          ...job.env,
+          ...step.env,
         },
       });
     });
@@ -3512,7 +3512,7 @@ test("Android preview evidence keeps its pull-request validation and privacy con
   );
 
   assert.ok(
-    Object.prototype.hasOwnProperty.call(workflow.on ?? {}, "pull_request"),
+    Object.hasOwn(workflow.on ?? {}, "pull_request"),
     "the release workflow must support pull_request",
   );
   assert.equal(
@@ -6500,8 +6500,8 @@ test("Android preflight keeps private values out of its log and step summary", (
 
 function renderSummaryStepEnv(summaryStep, { resultsDir, outcome }) {
   const contextEnv = {
-    ...(workflow.env ?? {}),
-    ...(summaryStep.job.env ?? {}),
+    ...workflow.env,
+    ...summaryStep.job.env,
     NATIVE_SMOKE_RESULTS_DIR: resultsDir,
   };
   const placeholders = {
