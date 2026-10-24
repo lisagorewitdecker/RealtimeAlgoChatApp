@@ -695,7 +695,13 @@ function resolveImport(reference, context) {
     }
   }
   for (const property of reference.properties) {
-    targets = targets.flatMap((target) => propertyTargets(target, property));
+    const propertyTargetsForReference = [];
+    for (const target of targets) {
+      for (const propertyTarget of propertyTargets(target, property)) {
+        propertyTargetsForReference.push(propertyTarget);
+      }
+    }
+    targets = propertyTargetsForReference;
   }
   return { status: "resolved", record, targets, platformVariants };
 }
@@ -1066,12 +1072,12 @@ function behaviorExpressionFor(attribute) {
  *   it such values are reported as coming from another file.
  * @returns {Array<{ file: string, rule: string, line: number, detail: string }>}
  */
-export function scanKeyboardStrategySource({
-  file,
-  source,
-  packageRelativePath = file,
-  resolveModule = null,
-}) {
+export function scanKeyboardStrategySource(options) {
+  const { file, source, resolveModule = null } = options;
+  const packageRelativePath =
+    options.packageRelativePath === undefined
+      ? file
+      : options.packageRelativePath;
   const sourceFile = parseSource(file, source);
   const facts = collectFacts(sourceFile);
   const context = createContext(sourceFile, facts, resolveModule);
@@ -1683,7 +1689,12 @@ function locateModuleFiles(base) {
  * @param {{ packageRoot: string, workspaceRoot?: string }} options
  * @returns {{ resolverFor: (absoluteFile: string) => (specifier: string) => ({ record: object | null, platformVariants: string[] } | null) }}
  */
-export function createModuleLoader({ packageRoot, workspaceRoot = path.resolve(packageRoot, "../..") }) {
+export function createModuleLoader(options) {
+  const { packageRoot } = options;
+  const workspaceRoot =
+    options.workspaceRoot === undefined
+      ? path.resolve(packageRoot, "../..")
+      : options.workspaceRoot;
   const records = new Map();
   const load = (absoluteFile) => {
     let record = records.get(absoluteFile);
@@ -1772,12 +1783,16 @@ function scanRootLayout({ packageRoot, workspaceRoot, loader }) {
  * @returns {{ scanned: string[], skipped: string[] }} names sorted by name;
  *   `skipped` lists the existing top-level directories the scan left out.
  */
-export function listSourceDirectories({
-  packageRoot,
-  workspaceRoot = path.resolve(packageRoot, "../.."),
-  excludedDirectories = NON_SOURCE_DIRECTORIES,
-  requiredDirectories = REQUIRED_DIRECTORIES,
-}) {
+export function listSourceDirectories(options) {
+  const {
+    packageRoot,
+    excludedDirectories = NON_SOURCE_DIRECTORIES,
+    requiredDirectories = REQUIRED_DIRECTORIES,
+  } = options;
+  const workspaceRoot =
+    options.workspaceRoot === undefined
+      ? path.resolve(packageRoot, "../..")
+      : options.workspaceRoot;
   for (const directory of requiredDirectories) {
     const absoluteDirectory = path.join(packageRoot, directory);
     if (!isDirectory(absoluteDirectory)) {
@@ -1816,12 +1831,23 @@ export function listSourceDirectories({
  *   no default export, …). `packagePath` is the package root relative to
  *   `workspaceRoot` ("" when they coincide).
  */
-export function scanKeyboardStrategy({
-  packageRoot = defaultPackageRoot(),
-  workspaceRoot = path.resolve(packageRoot, "../.."),
-  excludedDirectories = NON_SOURCE_DIRECTORIES,
-  requiredDirectories = REQUIRED_DIRECTORIES,
-} = {}) {
+export function scanKeyboardStrategy(options = {}) {
+  const packageRoot =
+    options.packageRoot === undefined
+      ? defaultPackageRoot()
+      : options.packageRoot;
+  const workspaceRoot =
+    options.workspaceRoot === undefined
+      ? path.resolve(packageRoot, "../..")
+      : options.workspaceRoot;
+  const excludedDirectories =
+    options.excludedDirectories === undefined
+      ? NON_SOURCE_DIRECTORIES
+      : options.excludedDirectories;
+  const requiredDirectories =
+    options.requiredDirectories === undefined
+      ? REQUIRED_DIRECTORIES
+      : options.requiredDirectories;
   const findings = [];
   const scannedFiles = [];
   const { scanned: scannedDirectories, skipped: skippedDirectories } = listSourceDirectories({
