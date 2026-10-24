@@ -3,6 +3,8 @@ name: Local pre-rebase guard blocks platform task merges
 description: Why a task merge can fail with "Rebase onto the main repl failed (UNKNOWN)" and no conflict files, and how to scope the local pre-rebase guard so it still protects against GitHub replays.
 ---
 
+# Pre-rebase guard and task merges
+
 A local `pre-rebase` hook that refuses large replays will also refuse the
 platform's task merge, which rebases the task branch onto the main Repl's HEAD
 (`refs/heads/main-repl/main`). Exempt that target explicitly; keep the guard for
@@ -17,6 +19,7 @@ pointless retries or a destructive branch reset. A long-lived task branch easily
 exceeds a 25-commit replay threshold once unrelated lineage accumulates.
 
 **How to apply:**
+
 - Diagnose by the shape of the failure: repeated `UNKNOWN`, empty
   `conflictFiles`, clean `git status`, and no `rebase-merge`/`rebase-apply`
   directory. Then check `git config --get core.hooksPath` and run the
