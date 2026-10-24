@@ -1,9 +1,9 @@
 # Migrating web UI to RealtimeAlgoChatApp Design System
 
 Read `artifacts/realtime-algo-chat-design-system/docs/AGENTS.md` and
-`artifacts/realtime-algo-chat-design-system/docs/consuming-web.md` first. Use this guide
-when a web app, including a fresh scaffold, already has local theme or component
-copies.
+`artifacts/realtime-algo-chat-design-system/docs/consuming-web.md` first. Use
+this guide when a web app, including a fresh scaffold, already has local theme
+or component copies.
 
 ## Replace the local theme
 
@@ -23,7 +23,8 @@ Rewrite every local import for a module this package provides:
 - `@/components/ui/<name>` →
   `@workspace/realtime-algo-chat-design-system/components/ui/<name>`
 - `@/lib/utils` (`cn`) → `@workspace/realtime-algo-chat-design-system/lib/utils`
-- `@/hooks/use-toast` → `@workspace/realtime-algo-chat-design-system/hooks/use-toast`
+- `@/hooks/use-toast` →
+  `@workspace/realtime-algo-chat-design-system/hooks/use-toast`
 
 Judge component ownership by the imported module, not by the file doing the
 import. App-specific components may remain local, but they must import shared
@@ -34,7 +35,8 @@ primitives from this package.
 - Delete package-provided files from the app's `src/components/ui/`; remove the
   directory if it becomes empty.
 - Delete local `src/lib/utils.ts` when it only provided `cn`.
-- Delete local `src/hooks/use-toast.ts` after every caller uses the package hook.
+- Delete local `src/hooks/use-toast.ts` after every caller uses the package
+  hook.
 - Remove dependencies used only by the deleted local component library when the
   design-system package already supplies them transitively.
 
