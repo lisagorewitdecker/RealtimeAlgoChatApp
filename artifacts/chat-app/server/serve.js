@@ -217,7 +217,7 @@ function createStaticServer() {
         "content-type": "application/json; charset=utf-8",
       });
       res.end(JSON.stringify({ status: "ok" }));
-      return;
+      return undefined;
     }
 
     if (pathname === "/" || pathname === "/manifest") {

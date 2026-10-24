@@ -24,17 +24,17 @@ function dimensions(width, height, type) {
 }
 
 function readPng(input) {
-  if (input.length < 24 || input.toString("ascii", 1, 4) !== "PNG") return;
+  if (input.length < 24 || input.toString("ascii", 1, 4) !== "PNG") return undefined;
   return dimensions(input.readUInt32BE(16), input.readUInt32BE(20), "png");
 }
 
 function readGif(input) {
-  if (input.length < 10 || (input.toString("ascii", 0, 6) !== "GIF87a" && input.toString("ascii", 0, 6) !== "GIF89a")) return;
+  if (input.length < 10 || (input.toString("ascii", 0, 6) !== "GIF87a" && input.toString("ascii", 0, 6) !== "GIF89a")) return undefined;
   return dimensions(input.readUInt16LE(6), input.readUInt16LE(8), "gif");
 }
 
 function readBmp(input) {
-  if (input.length < 26 || input.toString("ascii", 0, 2) !== "BM") return;
+  if (input.length < 26 || input.toString("ascii", 0, 2) !== "BM") return undefined;
   const dibLength = input.readUInt32LE(14);
   if (dibLength === 12 && input.length >= 26) {
     return dimensions(input.readUInt16LE(18), input.readUInt16LE(20), "bmp");
@@ -45,7 +45,7 @@ function readBmp(input) {
 }
 
 function readJpeg(input) {
-  if (input.length < 4 || input[0] !== 0xff || input[1] !== 0xd8) return;
+  if (input.length < 4 || input[0] !== 0xff || input[1] !== 0xd8) return undefined;
   let offset = 2;
   while (offset + 4 <= input.length) {
     if (input[offset] !== 0xff) {
@@ -66,7 +66,7 @@ function readJpeg(input) {
 }
 
 function readWebp(input) {
-  if (input.length < 30 || input.toString("ascii", 0, 4) !== "RIFF" || input.toString("ascii", 8, 12) !== "WEBP") return;
+  if (input.length < 30 || input.toString("ascii", 0, 4) !== "RIFF" || input.toString("ascii", 8, 12) !== "WEBP") return undefined;
   const subtype = input.toString("ascii", 12, 16);
   if (subtype === "VP8X" && input.length >= 30) {
     return dimensions(1 + input.readUIntLE(24, 3), 1 + input.readUIntLE(27, 3), "webp");
@@ -81,14 +81,14 @@ function readWebp(input) {
 }
 
 function readPsd(input) {
-  if (input.length < 26 || input.toString("ascii", 0, 4) !== "8BPS") return;
+  if (input.length < 26 || input.toString("ascii", 0, 4) !== "8BPS") return undefined;
   return dimensions(input.readUInt32BE(18), input.readUInt32BE(14), "psd");
 }
 
 function readSvg(input) {
   const source = input.toString("utf8", 0, Math.min(input.length, 64 * 1024));
   const tag = source.match(/<svg\b[^>]*>/i);
-  if (!tag) return;
+  if (!tag) return undefined;
   const width = tag[0].match(/\bwidth=["']?\s*([0-9]+(?:\.[0-9]+)?)/i);
   const height = tag[0].match(/\bheight=["']?\s*([0-9]+(?:\.[0-9]+)?)/i);
   if (width && height) return dimensions(Math.round(Number(width[1])), Math.round(Number(height[1])), "svg");
@@ -97,15 +97,15 @@ function readSvg(input) {
 }
 
 function readTiff(input) {
-  if (input.length < 8) return;
+  if (input.length < 8) return undefined;
   const littleEndian = input.toString("ascii", 0, 2) === "II";
   const bigEndian = input.toString("ascii", 0, 2) === "MM";
-  if (!littleEndian && !bigEndian) return;
+  if (!littleEndian && !bigEndian) return undefined;
   const read16 = littleEndian ? Buffer.prototype.readUInt16LE : Buffer.prototype.readUInt16BE;
   const read32 = littleEndian ? Buffer.prototype.readUInt32LE : Buffer.prototype.readUInt32BE;
-  if (read16.call(input, 2) !== 42) return;
+  if (read16.call(input, 2) !== 42) return undefined;
   const directory = read32.call(input, 4);
-  if (directory + 2 > input.length) return;
+  if (directory + 2 > input.length) return undefined;
   const entries = read16.call(input, directory);
   let width;
   let height;
@@ -126,9 +126,9 @@ function readTiff(input) {
 
 function readKtx(input) {
   const signature = "«KTX 11»\r\n\u001a\n";
-  if (input.length < 44 || input.toString("latin1", 0, 12) !== signature) return;
+  if (input.length < 44 || input.toString("latin1", 0, 12) !== signature) return undefined;
   const endianness = input.readUInt32LE(12);
-  if (endianness !== 0x04030201) return;
+  if (endianness !== 0x04030201) return undefined;
   return dimensions(input.readUInt32LE(36), input.readUInt32LE(40), "ktx");
 }
 
@@ -146,7 +146,7 @@ function imageSize(input, callback) {
           }
         }
       });
-      return;
+      return undefined;
     }
     return imageSize(fs.readFileSync(filePath));
   }
