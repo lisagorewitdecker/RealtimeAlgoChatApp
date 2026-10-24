@@ -1,6 +1,8 @@
 ---
 name: GitHub candidate ID migration
-description: GitHub Actions secret values cannot be read back through the repository API, so candidate IDs need a non-secret source before migration.
+description: >-
+  GitHub Actions secret values cannot be read back through the repository API,
+  so candidate IDs need a non-secret source before migration.
 ---
 
 # GitHub candidate ID migration
