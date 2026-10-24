@@ -29,7 +29,7 @@ result: status 2 at the Maestro prerequisite check. The iOS runner remains
 unprepared, so this record continues to be a blocker rather than passing
 evidence.
 
-## Result
+## iOS result
 
 The manual supplement was **not run**. No device model, iOS version,
 keyboard/locale, screenshots, permission observations, keyboard-obscured
@@ -89,7 +89,7 @@ The repository runner was also invoked with
 with status 2 at the prerequisite check: `Required command not found: maestro`.
 The command therefore did not launch the app or exercise any user flow.
 
-## Result
+## Android result
 
 The Android manual supplement was **not run**. No device model, Android version,
 OEM skin, keyboard/locale, screenshots, permission observations,
