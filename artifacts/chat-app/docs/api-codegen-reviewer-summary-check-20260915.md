@@ -29,7 +29,7 @@ pull-request path. The hosted reviewer rendering remains unconfirmed.
 | Check time (UTC) | 2026-09-15 20:24 to 20:25 |
 | Repository | `lisagorewitdecker/RealtimeAlgoChatApp` |
 | Base branch | `development` at `6c9c2c4ce4681fd3c4b4a12b0e8d240ecbb05829` |
-| Workflow | `.github/workflows/api-codegen.yml` (`pull_request` to `development`) |
+| Workflow | `.github/workflows/api-codegen.yml` (`pull_request`, development) |
 | Probe pull request | [#194](https://github.com/lisagorewitdecker/RealtimeAlgoChatApp/pull/194), closed unmerged |
 | Probe branch | `task-474-generated-client-summary-20260915`, deleted after verification |
 | Probe head | `12ef5f6dab0237ee52e2a7d13f259d82108dfe34` |
