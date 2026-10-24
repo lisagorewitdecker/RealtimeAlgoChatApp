@@ -192,12 +192,19 @@ describe("withSentryNativeUpload", () => {
   });
 
   test("rejects an authToken plugin option because app.json is committed", () => {
-    for (const authToken of ["inline-token", ""]) {
-      assert.throws(
-        () => withSentryNativeUpload(baseConfig(), { ...props, authToken }),
-        /remove "authToken"/,
-      );
-    }
+    assert.throws(
+      () =>
+        withSentryNativeUpload(baseConfig(), {
+          ...props,
+          authToken: "inline-token",
+        }),
+      /remove "authToken"/,
+    );
+    assert.throws(
+      () =>
+        withSentryNativeUpload(baseConfig(), { ...props, authToken: "" }),
+      /remove "authToken"/,
+    );
   });
 });
 
