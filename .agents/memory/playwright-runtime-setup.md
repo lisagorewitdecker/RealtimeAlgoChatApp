@@ -1,7 +1,11 @@
 ---
 name: Playwright runtime setup
-description: How browser-based diagnostics should handle Chromium dependencies in Replit test environments.
+description: >-
+  How browser-based diagnostics should handle Chromium dependencies in Replit
+  test environments.
 ---
+
+# Playwright runtime setup
 
 Declare Chromium's native runtime libraries through Replit's Nix system
 dependencies and run a real browser-launch preflight before diagnostic tests.
