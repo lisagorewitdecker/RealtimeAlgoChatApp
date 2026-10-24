@@ -789,6 +789,14 @@ function discoverReleaseEvidenceJsonParses(
 // Invoked script discovery
 // ---------------------------------------------------------------------------
 
+function workspaceDirectories(parent) {
+  return existsSync(parent)
+    ? readdirSync(parent, { withFileTypes: true })
+        .filter((entry) => entry.isDirectory())
+        .map((entry) => path.join(parent, entry.name))
+    : [];
+}
+
 /** Workspace packages by name, so `pnpm --filter <name> <script>` resolves. */
 function workspacePackages() {
   const { packages = [] } = YAML.parse(
@@ -806,11 +814,7 @@ function workspacePackages() {
     let directories;
     if (pattern.endsWith("/*")) {
       const parent = path.join(workspaceRoot, pattern.slice(0, -2));
-      directories = existsSync(parent)
-        ? readdirSync(parent, { withFileTypes: true })
-            .filter((entry) => entry.isDirectory())
-            .map((entry) => path.join(parent, entry.name))
-        : [];
+      directories = workspaceDirectories(parent);
     } else {
       directories = [path.join(workspaceRoot, pattern)];
     }
@@ -2409,7 +2413,7 @@ test("hosted native evidence regression preserves iOS when Android artifact is m
   );
 });
 
-for (const missingPlatform of ["ios", "android"]) {
+["ios", "android"].forEach((missingPlatform) => {
   test(`hosted native evidence ${missingPlatform} outage assertions accept a downloaded marker-only artifact`, () => {
     const steps = workflow.jobs["native-evidence-summary-regression"].steps;
     const availablePlatform = missingPlatform === "ios" ? "android" : "ios";
@@ -2509,7 +2513,7 @@ for (const missingPlatform of ["ios", "android"]) {
       rmSync(runnerTemp, { recursive: true, force: true });
     }
   });
-}
+});
 
 test("hosted release validation exercises nested evidence readers without publishing contents", () => {
   const regressionJob = workflow.jobs["native-evidence-tamper-regression"];
@@ -5978,7 +5982,7 @@ function loadScript(relativePath) {
   };
 }
 
-for (const relativePath of Object.keys(scriptContracts)) {
+Object.keys(scriptContracts).forEach((relativePath) => {
   test(`${relativePath} keeps private values out of diagnostics, logs, and its summary`, () => {
     const script = loadScript(relativePath);
     const classes = new Set(script.privateNames.values());
@@ -6003,7 +6007,7 @@ for (const relativePath of Object.keys(scriptContracts)) {
     }
     assertNoProblems(problems, `${relativePath} private value handling:`);
   });
-}
+});
 
 // ---------------------------------------------------------------------------
 // Behavioral runs with sentinel secrets
