@@ -41,6 +41,21 @@ const evidencePath = "artifacts/api-server/test-results/**";
 const contractArtifactName =
   "idle-profile-registration-browser-evidence-contract";
 
+test("the browser evidence contract locks the design-system Zod manifest specifier", () => {
+  const lockfile = YAML.parse(
+    readFileSync(path.join(workspaceRoot, "pnpm-lock.yaml"), "utf8"),
+  );
+  const importerPath = "artifacts/realtime-algo-chat-design-system";
+  const manifest = JSON.parse(
+    readFileSync(path.join(workspaceRoot, importerPath, "package.json"), "utf8"),
+  );
+  assert.equal(
+    lockfile.importers[importerPath].dependencies.zod.specifier,
+    manifest.dependencies.zod,
+    "the design-system Zod dependency must match the manifest for frozen installs",
+  );
+});
+
 test("the browser evidence contract can install patches with a frozen lockfile", () => {
   const workspace = YAML.parse(
     readFileSync(path.join(workspaceRoot, "pnpm-workspace.yaml"), "utf8"),
