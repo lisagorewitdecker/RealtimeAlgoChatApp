@@ -364,6 +364,7 @@ test("hosted preview startup checks remain read-only", () => {
 });
 
 test("real platform launcher workflow sanitizes captured launcher output before logging it", () => {
+  assert.doesNotMatch(realPlatformWorkflowText, /cache:\s*pnpm/);
   assert.match(
     realPlatformWorkflowText,
     /emit_sanitized_log\(\) \{[\s\S]*sanitize_workflow_stream <"\$log_path" >&2/,
