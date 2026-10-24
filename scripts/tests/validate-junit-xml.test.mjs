@@ -57,6 +57,9 @@ const producerReports = {
 
 for (const [description, reportText] of Object.entries(producerReports)) {
   registerReportCase("accepts", description, reportText, JUNIT_REPORT_VALID);
+  test(`accepts ${description}`, () => {
+    assert.equal(inspectJUnitReportText(reportText), JUNIT_REPORT_VALID);
+  });
 }
 
 // Each entry is a document that an XML parser rejects. A release gate that
@@ -119,17 +122,15 @@ const notWellFormedReports = {
   "a non-character in text": "<testsuite>\uffff</testsuite>",
   "an unpaired surrogate in text": "<testsuite>\ud800</testsuite>",
   "a terminal escape byte in element text":
-    "<testsuite><system-out>" + ESCAPE + "[31mred</system-out></testsuite>",
+    `<testsuite><system-out>${ESCAPE}[31mred</system-out></testsuite>`,
   "a terminal escape byte inside CDATA":
-    "<testsuite><system-out><![CDATA[" +
-    ESCAPE +
-    "[31mred]]></system-out></testsuite>",
+    `<testsuite><system-out><![CDATA[${ESCAPE}[31mred]]></system-out></testsuite>`,
   "a terminal escape byte in an attribute value":
-    '<testsuite><failure message="' + ESCAPE + '[31mexpected"/></testsuite>',
+    `<testsuite><failure message="${ESCAPE}[31mexpected"/></testsuite>`,
   "a terminal escape byte inside a comment":
-    "<testsuite><!-- " + ESCAPE + "[31m --></testsuite>",
+    `<testsuite><!-- ${ESCAPE}[31m --></testsuite>`,
   "a terminal escape byte inside a processing instruction":
-    "<testsuite><?maestro " + ESCAPE + "?></testsuite>",
+    `<testsuite><?maestro ${ESCAPE}?></testsuite>`,
   // Release evidence is decoded as UTF-8, so no other encoding may be declared.
   "a declared encoding other than UTF-8":
     '<?xml version="1.0" encoding="ISO-8859-1"?><testsuite/>',
@@ -147,6 +148,12 @@ for (const [description, reportText] of Object.entries(notWellFormedReports)) {
     reportText,
     JUNIT_REPORT_NOT_WELL_FORMED,
   );
+  test(`rejects ${description}`, () => {
+    assert.equal(
+      inspectJUnitReportText(reportText),
+      JUNIT_REPORT_NOT_WELL_FORMED,
+    );
+  });
 }
 
 // Well-formed XML that is not a testsuite report keeps its own verdict, so the
@@ -165,6 +172,9 @@ for (const [description, reportText] of Object.entries(noTestsuiteReports)) {
     reportText,
     JUNIT_REPORT_NO_TESTSUITE,
   );
+  test(`reports ${description} as no testsuite`, () => {
+    assert.equal(inspectJUnitReportText(reportText), JUNIT_REPORT_NO_TESTSUITE);
+  });
 }
 
 test("verdicts never carry report content", () => {
@@ -177,11 +187,11 @@ test("verdicts never carry report content", () => {
   ]);
   const marker = "private-report-marker";
   for (const reportText of [
-    "<testsuite><failure>" + marker + "</failure>",
-    marker + "<testsuite/>",
-    '<testsuite name="' + marker + '"',
-    "<junit>" + marker + "</junit>",
-    "<testsuite>&" + marker + ";</testsuite>",
+    `<testsuite><failure>${marker}</failure>`,
+    `${marker}<testsuite/>`,
+    `<testsuite name="${marker}"`,
+    `<junit>${marker}</junit>`,
+    `<testsuite>&${marker};</testsuite>`,
   ]) {
     const verdict = inspectJUnitReportText(reportText);
     assert.ok(
@@ -213,7 +223,7 @@ test("file verdicts fail closed without inspecting the file", () => {
     const oversizedPath = path.join(directory, "oversized-results.xml");
     writeFileSync(
       oversizedPath,
-      '<testsuite name="' + "x".repeat(262145) + '"/>\n',
+      `<testsuite name="${"x".repeat(262145)}"/>\n`,
     );
     assert.equal(inspectJUnitReportFile(oversizedPath), JUNIT_REPORT_TOO_LARGE);
 

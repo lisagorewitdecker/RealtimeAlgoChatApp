@@ -718,7 +718,7 @@ function platformDependency(node, context, visited = new Set()) {
   if (!node) return null;
   const { sourceFile, platformNames, namespaceNames } = context;
   const platformLabel = (local, member) =>
-    `${local}${member ? `.${member}` : ""}${local === "Platform" ? "" : " (Platform imported as " + local + ")"}`;
+    `${local}${member ? `.${member}` : ""}${local === "Platform" ? "" : ` (Platform imported as ${local})`}`;
 
   const follow = (reference) => {
     if (visited.has(reference.key)) return null;
