@@ -40,14 +40,30 @@ pull-request path. The hosted reviewer rendering remains unconfirmed.
 
 ## Acceptance result
 
-| Check | Status | Evidence |
-| --- | --- | --- |
-| Real pull-request workflow runs against a controlled stale generated client | PASS | Run `#35019409426` completed with overall `failure`; the `Verify generated API clients` step failed and the compatibility step still completed successfully. |
-| Failed check is available from the reviewer-facing Checks UI | PASS | The direct check view opens without log access and shows `Check generated API clients` as failed with its annotations. |
-| Changed generated paths are included in the rendered reviewer-visible summary | INCONCLUSIVE | The hosted run used the current `check-generated.mjs`, and local tests confirm its report lists `lib/api-client-react/src/generated/api.schemas.ts`; the signed-in rendered summary was not available in this workspace. |
-| Bounded report is included in the rendered reviewer-visible summary | INCONCLUSIVE | The same checker revision writes the bounded `formatDriftReport` output inside a fenced `diff` block, and the focused API-spec test passed all 29 tests; hosted rendering still needs reviewer confirmation. |
-| Regeneration command is included in the rendered reviewer-visible summary | INCONCLUSIVE | The hosted checker revision contains the exact command and the focused summary test asserts it; hosted rendering still needs reviewer confirmation. |
-| Opening the failed check requires privileged job-log access | PASS | The direct Checks page opens while signed out. The job-log endpoint returned `403 Forbidden`, and no job log was used to establish this access result. |
+- **Real pull-request workflow runs against a controlled stale generated
+  client — PASS.** Run `#35019409426` completed with overall `failure`; the
+  `Verify generated API clients` step failed and the compatibility step still
+  completed successfully.
+- **Failed check is available from the reviewer-facing Checks UI — PASS.** The
+  direct check view opens without log access and shows
+  `Check generated API clients` as failed with its annotations.
+- **Changed generated paths are included in the rendered reviewer-visible
+  summary — INCONCLUSIVE.** The hosted run used the current
+  `check-generated.mjs`, and local tests confirm its report lists
+  `lib/api-client-react/src/generated/api.schemas.ts`; the signed-in rendered
+  summary was not available in this workspace.
+- **Bounded report is included in the rendered reviewer-visible summary —
+  INCONCLUSIVE.** The same checker revision writes the bounded
+  `formatDriftReport` output inside a fenced `diff` block, and the focused
+  API-spec test passed all 29 tests; hosted rendering still needs reviewer
+  confirmation.
+- **Regeneration command is included in the rendered reviewer-visible summary —
+  INCONCLUSIVE.** The hosted checker revision contains the exact command and
+  the focused summary test asserts it; hosted rendering still needs reviewer
+  confirmation.
+- **Opening the failed check requires privileged job-log access — PASS.** The
+  direct Checks page opens while signed out. The job-log endpoint returned
+  `403 Forbidden`, and no job log was used to establish this access result.
 
 ## Summary contract to inspect
 
