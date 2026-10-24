@@ -3,6 +3,8 @@ name: Native artifact outage summary
 description: Hosted release checks for continued artifact downloads and blocked native evidence summaries
 ---
 
+# Native artifact outage summary
+
 For a GitHub Actions artifact-outage regression, inspect `steps.<id>.outcome`
 for the real download result: a `continue-on-error` download can have a
 successful step conclusion while its outcome is `failure`.
