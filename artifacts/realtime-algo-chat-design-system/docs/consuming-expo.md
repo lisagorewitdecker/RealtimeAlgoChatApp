@@ -3,8 +3,8 @@
 Read `artifacts/realtime-algo-chat-design-system/docs/AGENTS.md` first. React
 Native does not consume the web CSS or DOM components. It imports portable
 tokens, native theme/hooks, and native components directly from this package.
-If the Expo app
-still contains scaffolded or existing local theme/hooks/components, also read
+If the Expo app still contains scaffolded or existing local
+theme/hooks/components, also read
 `artifacts/realtime-algo-chat-design-system/docs/migrating-expo.md` before
 writing UI.
 
