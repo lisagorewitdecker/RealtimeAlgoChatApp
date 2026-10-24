@@ -6298,7 +6298,7 @@ test("iOS gate keeps private values out of logs and the readiness report while r
         readiness,
         new RegExp(
           String.raw`### Blocking prerequisites[\s\S]*\n` +
-            String.raw`(` + "```" + String.raw`+)\n` +
+            String.raw`(\x60{3,})\n` +
             readinessDiagnostic.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") +
             String.raw`\n\1`,
         ),
@@ -6488,7 +6488,7 @@ test("Android preflight keeps private values out of its log and step summary", (
         run.summary,
         new RegExp(
           String.raw`### Blocking prerequisites[\s\S]*\n` +
-            String.raw`(` + "```" + String.raw`+)\n` +
+            String.raw`(\x60{3,})\n` +
             scenario.diagnostic.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") +
             String.raw`\n\1`,
         ),
@@ -6738,7 +6738,7 @@ test("workflow summaries show candidate build IDs without exposing private value
         iosSummary,
         new RegExp(
           String.raw`### Readiness diagnostics[\s\S]*\n` +
-            String.raw`(` + "```" + String.raw`+)\n` +
+            String.raw`(\x60{3,})\n` +
             summaryDiagnostic.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") +
             String.raw`\n\1`,
         ),
@@ -8226,7 +8226,7 @@ test("release summary writers keep hostile diagnostics literal and line-broken",
     readinessSummary,
     new RegExp(
       String.raw`### Readiness diagnostics[\s\S]*\n` +
-        String.raw`(` + "```" + String.raw`+)\n` +
+        String.raw`(\x60{3,})\n` +
         hostileDiagnostic
           .split("\n")
           .map((line) => line.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
