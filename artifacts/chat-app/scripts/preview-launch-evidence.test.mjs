@@ -719,7 +719,14 @@ test("an armed launch with no device reports NO_DEVICE after the device budget",
     const lines = probeLines(launcher.output.stdout);
     assert.ok(lines.includes("[preview-launch-probe] metro_ready=yes"));
     assert.ok(lines.includes("[preview-launch-probe] expo_go_ios_connections=0"));
-    assert.ok(lines.some((line) => /reason=No Expo Go iOS device \(app=host\.exp\.Exponent\) connected to the Metro inspector within 1\.5 s of Metro startup\.$/.test(line)), lines.join("\n"));
+    assert.ok(
+      lines.some((line) =>
+        line.endsWith(
+          "reason=No Expo Go iOS device (app=host.exp.Exponent) connected to the Metro inspector within 1.5 s of Metro startup.",
+        ),
+      ),
+      lines.join("\n"),
+    );
     assert.ok(lines.includes("[preview-launch-probe] request_log_lines=0"));
     const exit = await launcher.terminate();
     assert.deepEqual(exit, { code: 0, signal: null });
