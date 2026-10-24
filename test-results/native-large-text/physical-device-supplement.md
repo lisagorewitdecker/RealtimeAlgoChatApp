@@ -58,7 +58,7 @@ time, the tested candidate build ID, and `decision=APPROVED`, and
 **Required pass:** One representative Android device in portrait mode with text
 size 140%, High contrast on, and Reduced motion on.
 
-## Environment check
+## Android environment check
 
 This workspace is running on Linux (`x86_64`). The required Android execution
 prerequisites are unavailable:
