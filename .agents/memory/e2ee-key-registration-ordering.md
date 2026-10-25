@@ -11,7 +11,9 @@ An encrypted-room client must wait until the server confirms the current public 
 
 ## Rotating the device key (user-facing reset)
 
-- Keep locally saved room keys when rotating the device keypair. The server only accepts room-key envelopes from a room's creator, so wiping local room keys would permanently lose every room the device created.
+- Keep locally saved room keys when rotating the device keypair. The server only
+  accepts room-key envelopes from a room's creator, so wiping local room keys
+  would permanently lose every room the device created.
 - Persist the new secret key before swapping the in-memory identity; a storage failure must leave the device on the identity the server already knows.
 - Refuse a rotation while the current key is still loading or registering, and refuse re-entrant rotations.
 - Drop readiness on rotation so the room screen leaves and only re-joins after the replacement key is confirmed; a re-join emits `user-joined` with the new key, which is what makes the creator send a fresh envelope.
@@ -35,7 +37,9 @@ Public-key writes are guarded by the key they replace: a write without an assert
 
 Versioned replacements advance the server's authoritative account revision by exactly one. Never use a client timestamp or accept an arbitrary larger value.
 
-**Why:** Device clocks and local counters are not globally ordered. A future-skewed or maximum client value could otherwise block every later reset, turning sequencing into a durable denial of key recovery.
+**Why:** Device clocks and local counters are not globally ordered. A
+future-skewed or maximum client value could otherwise block every later reset,
+turning sequencing into a durable denial of key recovery.
 
 **How to apply:** Read the server revision before an intentional takeover, submit only the next revision, and re-read/retry after stale or ahead responses. Preserve the new local identity while retrying, but do not mark it ready until the server confirms its key.
 

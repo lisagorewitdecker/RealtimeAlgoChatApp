@@ -19,6 +19,8 @@ value was read or written while producing it.
   workflow, and documentation changes recorded below
 - **Script under test:** `scripts/provision-ios-runner.sh` (one-command macOS
   runner setup)
+- **Script under test:** `scripts/provision-ios-runner.sh`
+  (one-command macOS runner setup)
 - **Workflow under test:** `.github/workflows/mobile-release.yml`
   (`native-ios` job)
 - **Required runner name and labels:** `ios-release-mac`; `self-hosted`,
@@ -26,6 +28,10 @@ value was read or written while producing it.
 - **Required runner tooling:** Xcode with `simctl`, an iOS simulator runtime,
   booted `iPhone SE (3rd generation)`, Node 24, pnpm `10.26.1`, Java 17+,
   Maestro, Playwright Chromium, and actions/runner `2.337.0`
+- **Required runner tooling:**
+  - Xcode with `simctl` and an iOS simulator runtime
+  - Booted `iPhone SE (3rd generation)`, Node 24, pnpm `10.26.1`, Java 17+
+  - Maestro, Playwright Chromium, actions/runner `2.337.0`
 - **Live GitHub runner count:** 0 (see evidence below)
 
 ## Acceptance result
@@ -48,6 +54,25 @@ value was read or written while producing it.
   new `.path` and `.env`) instead of stopping and starting it. This is covered
   by `service-started-when-stopped-after-environment-change`.
 - **bash 3.2 compatibility — PASS.** bash 3.2.57 was built from source on
+- **Pinned runner release and digests still current — PASS:** actions/runner
+  `v2.337.0` is the latest release. The published `actions-runner-osx-arm64`
+  and `actions-runner-osx-x64` SHA-256 digests match
+  `RUNNER_SHA256_OSX_ARM64` and `RUNNER_SHA256_OSX_X64` in the script.
+- **Token handoff matches the runner's contract — PASS:**
+  `src/Runner.Listener/CommandSettings.cs` at `v2.337.0` reads
+  `ACTIONS_RUNNER_INPUT_TOKEN`, masks it, removes it from the environment
+  block, and uses it when `--token` is absent, so the script never places
+  the token on a command line.
+- **`svc.sh` status wording matches the script's parsing — PASS:**
+  `src/Misc/layoutbin/darwin.svc.sh.template` at `v2.337.0` prints
+  `not installed`, `Stopped`, or `Started:` plus the plist path, which is
+  exactly what `install_service` matches. Reading it also showed that
+  `svc.sh stop` runs `launchctl unload` and exits on its failure, which an
+  installed-but-unloaded agent can trigger. The script now starts a stopped
+  agent (which reads the new `.path`/`.env` anyway) instead of stopping and
+  starting it (regression case
+  `service-started-when-stopped-after-environment-change`).
+- **bash 3.2 compatibility — PASS:** bash 3.2.57 was built from source on
   Linux; `bash -n`, `--help`, the full `--dry-run`, and all 29 harness cases
   pass with the script and its stubs running under it
   (`PROVISION_TEST_BASH=/tmp/bash32/install/bin/bash`). No bash 4+ construct
@@ -68,6 +93,22 @@ value was read or written while producing it.
   no macOS, Xcode, `xcrun`, `launchctl`, or `svc.sh`, so no host here can
   execute the real run.
 - **Runner online and able to complete the iOS job — BLOCKED.** No runner
+- **`simctl` text-listing tolerance — PASS (precautionary):**
+  `latest_ios_runtime`, `find_simulator_udid`, the workflow's "Verify
+  prepared iPhone SE simulator" step, and
+  `artifacts/chat-app/e2e/native-large-text/run.sh` now accept trailing
+  whitespace after the runtime identifier and the `(Booted)` state. The
+  simulated-macOS harness case feeds padded listings and expects the
+  runtime, the booted device, and the launch agent to be reported READY.
+- **Simulator launch agent loading — PASS (precautionary):**
+  `launchctl bootstrap` is retried briefly after `bootout` because the unload
+  completes asynchronously; the harness fails the first bootstrap and
+  expects a second attempt.
+- **Self-hosted runner registered with required labels — BLOCKED:** GitHub
+  `/actions/runners` for the repository returns an empty runner list. This
+  workspace has no macOS, Xcode, `xcrun`, `launchctl`, or `svc.sh`, so no host
+  here can execute the real run.
+- **Runner online and able to complete the iOS job — BLOCKED:** No runner
   exists, so online status, reboot survival, and a real iOS job run cannot be
   demonstrated.
 
