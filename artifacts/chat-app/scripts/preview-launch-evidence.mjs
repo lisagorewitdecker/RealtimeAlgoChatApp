@@ -1,3 +1,4 @@
+/* jshint esversion: 11, node: true */
 // Launch-evidence probe for the Chat App development preview.
 //
 // The preview-startup preflight proves that Metro serves the manifest and the
