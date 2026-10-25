@@ -1,17 +1,22 @@
 # Encrypted-room recovery validation — Android
 
-**Overall result:** BLOCKED — required physical-device validation could not run  
+**Overall result:** BLOCKED — required physical-device validation could not
+run\
 **Recorded at (UTC):** 2026-09-10T16:51:52Z  
-**Source revision used for automated checks:** dddebef13472c705888d52d5dac68cb0f01ec68b  
-**Backend target:** Replit development API (`REPLIT_DEV_DOMAIN`); no production data was used.  
-**Procedure:** `artifacts/chat-app/docs/encrypted-room-recovery-device-check.md`  
-**Previous record:** `../20260903T190238Z/validation-record.md` (BLOCKED, revision `c3abfdbb`)
+**Source revision used for automated checks:**
+dddebef13472c705888d52d5dac68cb0f01ec68b\
+**Backend target:** Replit development API (`REPLIT_DEV_DOMAIN`); no production
+data was used.\
+**Procedure:**
+`artifacts/chat-app/docs/encrypted-room-recovery-device-check.md`\
+**Previous record:** `../20260903T190238Z/validation-record.md` (BLOCKED,
+revision `c3abfdbb`)
 
 ## Release and device metadata
 
 | Item | Result |
 | --- | --- |
-| Exact installed release build ID | Not available — no Android release candidate exists for this workspace (no `eas.json`, no `NATIVE_SMOKE_ANDROID_BUILD_ID`/`NATIVE_SMOKE_ANDROID_APP_ID` values) |
+| Exact installed release build ID | Not available |
 | Android phone A model / Android version (API level) | Not available |
 | Android phone B model / Android version (API level) | Not available |
 | Android device identifiers | Not collected |
@@ -20,6 +25,9 @@
 | App account C (non-participant) | Not available to this runner |
 | Network profile | Not exercised |
 | Screenshots or plaintext room content | None collected |
+
+This workspace has no `eas.json` or `NATIVE_SMOKE_ANDROID_BUILD_ID`/
+`NATIVE_SMOKE_ANDROID_APP_ID` values.
 
 ## Environment check
 
@@ -47,17 +55,29 @@ fix.
 
 | Check | Result | Evidence / blocker |
 | --- | --- | --- |
-| Phone A creates encrypted room | BLOCKED | No reachable Android device or installed release build |
-| Phone B registers its public key before joining | BLOCKED | No reachable Android device or installed release build |
-| Key envelope exchange and usable decryption | BLOCKED | No two-device session |
-| Live/history message and sandbox-state decryption | BLOCKED | No two-device session; no plaintext recorded |
-| API/storage boundary holds ciphertext and nonce only | BLOCKED | No device-originated traffic to inspect; automated relay/persistence coverage passed |
-| Force-close/reopen restores the persisted key | BLOCKED | Keystore-backed SecureStore behavior not exercised |
-| Temporary network loss and registration retry | BLOCKED | No device/network exercise |
-| No unintended replacement room key | BLOCKED | No device/network exercise |
-| Identity reset/re-registration and fresh envelope | BLOCKED | No physical identity reset exercise; see limitation below |
-| Non-participant cannot obtain a usable envelope | BLOCKED | No physical access-boundary exercise |
-| Encrypted-room assistant remains unavailable | BLOCKED | No physical UI/session exercise; server-side rejection covered by automated test |
+- **Phone A creates encrypted room — BLOCKED:** No reachable Android device or
+  installed release build.
+- **Phone B registers its public key before joining — BLOCKED:** No reachable
+  Android device or installed release build.
+- **Key envelope exchange and usable decryption — BLOCKED:** No two-device
+  session.
+- **Live/history message and sandbox-state decryption — BLOCKED:** No
+  two-device session; no plaintext recorded.
+- **API/storage boundary holds ciphertext and nonce only — BLOCKED:** No
+  device-originated traffic to inspect; automated relay/persistence coverage
+  passed.
+- **Force-close/reopen restores the persisted key — BLOCKED:** Keystore-backed
+  SecureStore behavior not exercised.
+- **Temporary network loss and registration retry — BLOCKED:** No
+  device/network exercise.
+- **No unintended replacement room key — BLOCKED:** No device/network
+  exercise.
+- **Identity reset/re-registration and fresh envelope — BLOCKED:** No physical
+  identity reset exercise; see limitation below.
+- **Non-participant cannot obtain a usable envelope — BLOCKED:** No physical
+  access-boundary exercise.
+- **Encrypted-room assistant remains unavailable — BLOCKED:** No physical
+  UI/session exercise; server-side rejection covered by automated test.
 
 ## Identity-rotation limitation
 
