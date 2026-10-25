@@ -2,6 +2,9 @@
 name: Version-pinned packageExtensions go stale after upgrades
 description: Why a Chat App publish failed with a missing @babel/generator after the Expo SDK upgrade, and what to check when upgrading.
 ---
+
+# Version-pinned package extensions
+
 `pnpm-workspace.yaml` `packageExtensions` keyed to an exact version
 (`react-native-worklets@0.5.1`) stop applying the moment an upgrade installs a
 different version, and nothing warns about it.
@@ -14,6 +17,7 @@ kept working from the previously installed tree. The durable fix was adding
 `@babel/generator` as a root dependency rather than re-pinning the extension.
 
 **How to apply:**
+
 - After any dependency upgrade, grep `pnpm-workspace.yaml` for `@<version>`
   extension keys and confirm each still matches the installed version. The
   worklets key is a `0.10.x` range since 2026-09-19 (the Expo Go pin moved the
@@ -34,4 +38,5 @@ kept working from the previously installed tree. The durable fix was adding
   `artifacts/chat-app`, `require("react-native-worklets/plugin")` and resolve
   `@babel/generator` with the plugin directory as the search path.
 - The local export writes under `artifacts/chat-app/static-build/`, which is
-  gitignored as a whole, so reproducing the publish build never dirties the tree.
+  gitignored as a whole, so reproducing the publish build never dirties the
+  tree.
