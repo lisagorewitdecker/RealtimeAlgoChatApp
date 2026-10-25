@@ -16,8 +16,10 @@ workflow, and the generated-client validation completed successfully.**
 | Workflow run | [Run #35410373743](https://github.com/lisagorewitdecker/RealtimeAlgoChatApp/actions/runs/35410373743) |
 | Run result | `completed` / `success` |
 | Generated-client job | [Check generated API clients](https://github.com/lisagorewitdecker/RealtimeAlgoChatApp/actions/runs/35410373743/job/105808660828) |
-| Generated-client step | `Verify generated API clients` — `completed` / `success` |
-| Follow-on checks | `Verify generated API-break guidance` — `success`; `Check API contract compatibility` — `success` |
+| Generated-client step | `Verify generated API clients` |
+| Step result | `completed` / `success` |
+| Follow-on check | `Verify generated API-break guidance` — `success` |
+| Follow-on check | `Check API contract compatibility` — `success` |
 
 The generated-client job and validation step are visible in the public Actions
 run without requiring access to workflow logs or repository secrets. Drift-only
