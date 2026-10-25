@@ -17,12 +17,17 @@ value was read or written while producing it.
 - **App:** Chat App
 - **Workspace revision:** `aa9419f` (local `main`) plus the script, harness,
   workflow, and documentation changes recorded below
+- **Script under test:** `scripts/provision-ios-runner.sh` (one-command macOS
+  runner setup)
 - **Script under test:** `scripts/provision-ios-runner.sh`
   (one-command macOS runner setup)
 - **Workflow under test:** `.github/workflows/mobile-release.yml`
   (`native-ios` job)
 - **Required runner name and labels:** `ios-release-mac`; `self-hosted`,
   `macos`, `ios`, `smallest-simulator`
+- **Required runner tooling:** Xcode with `simctl`, an iOS simulator runtime,
+  booted `iPhone SE (3rd generation)`, Node 24, pnpm `10.26.1`, Java 17+,
+  Maestro, Playwright Chromium, and actions/runner `2.337.0`
 - **Required runner tooling:**
   - Xcode with `simctl` and an iOS simulator runtime
   - Booted `iPhone SE (3rd generation)`, Node 24, pnpm `10.26.1`, Java 17+
@@ -31,6 +36,24 @@ value was read or written while producing it.
 
 ## Acceptance result
 
+- **Pinned runner release and digests still current — PASS.** The
+  `actions/runner` `v2.337.0` release is the latest; the published
+  `actions-runner-osx-arm64` and `actions-runner-osx-x64` SHA-256 digests match
+  `RUNNER_SHA256_OSX_ARM64` and `RUNNER_SHA256_OSX_X64` in the script.
+- **Token handoff matches the runner's contract — PASS.**
+  `src/Runner.Listener/CommandSettings.cs` at `v2.337.0` reads
+  `ACTIONS_RUNNER_INPUT_TOKEN`, masks it, removes it from the environment
+  block, and uses it when `--token` is absent. The script never places the
+  token on a command line.
+- **`svc.sh` status wording matches the script's parsing — PASS.**
+  `src/Misc/layoutbin/darwin.svc.sh.template` at `v2.337.0` prints
+  `not installed`, `Stopped`, or `Started:` plus the plist path, matching
+  what `install_service` expects. Reading it also showed that `svc.sh stop`
+  runs `launchctl unload` and exits on failure, which an installed-but-unloaded
+  agent can trigger. The script now starts a stopped agent (which reads the
+  new `.path` and `.env`) instead of stopping and starting it. This is covered
+  by `service-started-when-stopped-after-environment-change`.
+- **bash 3.2 compatibility — PASS.** bash 3.2.57 was built from source on
 - **Pinned runner release and digests still current — PASS:** actions/runner
   `v2.337.0` is the latest release. The published `actions-runner-osx-arm64`
   and `actions-runner-osx-x64` SHA-256 digests match
@@ -54,6 +77,22 @@ value was read or written while producing it.
   pass with the script and its stubs running under it
   (`PROVISION_TEST_BASH=/tmp/bash32/install/bin/bash`). No bash 4+ construct
   was found.
+- **`simctl` text-listing tolerance — PASS (precautionary).**
+  `latest_ios_runtime`, `find_simulator_udid`, the workflow's
+  "Verify prepared iPhone SE simulator" step, and
+  `artifacts/chat-app/e2e/native-large-text/run.sh` now accept trailing
+  whitespace after the runtime identifier and the `(Booted)` state. The
+  simulated-macOS harness feeds padded listings and expects the runtime,
+  booted device, and launch agent to be reported READY.
+- **Simulator launch agent loading — PASS (precautionary).**
+  `launchctl bootstrap` is retried briefly after `bootout` because the unload
+  completes asynchronously; the harness fails the first bootstrap and expects
+  a second attempt.
+- **Self-hosted runner registered with required labels — BLOCKED.** GitHub's
+  `/actions/runners` endpoint returns an empty runner list. This workspace has
+  no macOS, Xcode, `xcrun`, `launchctl`, or `svc.sh`, so no host here can
+  execute the real run.
+- **Runner online and able to complete the iOS job — BLOCKED.** No runner
 - **`simctl` text-listing tolerance — PASS (precautionary):**
   `latest_ios_runtime`, `find_simulator_udid`, the workflow's "Verify
   prepared iPhone SE simulator" step, and
@@ -76,8 +115,10 @@ value was read or written while producing it.
 ## Exact workspace blocking evidence
 
 ```text
-GitHub GET /repos/lisagorewitdecker/RealtimeAlgoChatApp/actions/runners: 200, runners: [], total_count: 0 (2026-09-18 14:05 UTC)
-GitHub GET /repos/lisagorewitdecker/RealtimeAlgoChatApp/environments/mobile-release: 200 (environment exists)
+GitHub GET /repos/lisagorewitdecker/RealtimeAlgoChatApp/actions/runners:
+  200, runners: [], total_count: 0 (2026-09-18 14:05 UTC)
+GitHub GET /repos/lisagorewitdecker/RealtimeAlgoChatApp/
+  environments/mobile-release: 200 (environment exists)
 uname -s: Linux
 xcrun: command not found
 xcode-select: command not found
