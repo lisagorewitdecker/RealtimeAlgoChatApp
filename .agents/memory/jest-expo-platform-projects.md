@@ -11,6 +11,7 @@ convention, and platform-dependent expectations are keyed on `Platform.OS`
 inside shared suites rather than skipped.
 
 **Why:**
+
 - The default `jest-expo` preset keeps Jest's default `testMatch`
   (`**/__tests__/**/*.[jt]s?(x)`), so an `X.test.android.tsx` file would
   also run under the iOS project. Only `jest-expo/ios` and `jest-expo/android`
