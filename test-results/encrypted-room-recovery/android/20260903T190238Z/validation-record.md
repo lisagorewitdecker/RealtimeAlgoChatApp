@@ -1,5 +1,10 @@
 # Encrypted-room recovery validation — Android
 
+- **Overall result:** BLOCKED — physical-device validation could not run
+- **Recorded at (UTC):** 2026-09-03T19:02:38Z
+- **Automated check revision:** `c3abfdbb1f0db194c38eef4df027f00f08660955`
+- **Backend target:** Replit development API (`REPLIT_DEV_DOMAIN`);
+  no production data was used.
 - **Overall result:** BLOCKED — required physical-device validation could not
   run
 - **Recorded at (UTC):** 2026-09-03T19:02:38Z
@@ -30,6 +35,18 @@ phone.
 
 | Check | Result | Blocker |
 | --- | --- | --- |
+| Phone A room creation | BLOCKED | No device or release build |
+| Phone B key registration before join | BLOCKED | No device or release build |
+| Key exchange/decryption | BLOCKED | No two-device session |
+| Live/history/sandbox-state decryption | BLOCKED | No two-device session |
+| Persisted key after force-close/reopen | BLOCKED | SecureStore not exercised |
+| Network loss and registration retry | BLOCKED | No device/network exercise |
+| No unintended replacement room key | BLOCKED | No device/network exercise |
+| Identity reset and fresh envelope | BLOCKED | No physical reset exercise |
+| Non-participant envelope access | BLOCKED | No physical access-boundary test |
+| Encrypted-room assistant | BLOCKED | No physical UI/session exercise |
+
+No plaintext was recorded during the live/history and sandbox-state check.
 | Phone A encrypted-room creation | BLOCKED | No Android device/build |
 | Phone B key registration before join | BLOCKED | No Android device/build |
 | Key exchange and usable decryption | BLOCKED | No two-device session |
