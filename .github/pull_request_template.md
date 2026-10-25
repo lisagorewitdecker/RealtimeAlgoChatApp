@@ -17,5 +17,4 @@ API_BREAKING_CHANGE_JUSTIFICATION:
 API_BREAKING_CHANGE_MIGRATION_PLAN:
   <how existing consumers move to the new contract>
 ```
-
 <!-- END GENERATED API-BREAK GUIDANCE -->
