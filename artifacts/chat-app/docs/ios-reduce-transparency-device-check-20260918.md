@@ -27,7 +27,7 @@ without a restart, can only be seen on a real iPhone.
 | Reviewed revision | `eba59d1c67dd399e0fb1c333613b6343c750a4a3` |
 | Target device model | **BLOCKED** — no iPhone or simulator attached |
 | Target iOS version | **BLOCKED** — no iPhone or simulator attached |
-| App container (Expo Go / development build) | **BLOCKED** — no session was available |
+| App container (Expo Go / development build) | **BLOCKED** — no session |
 | Check timestamp | 2026-09-18 UTC |
 
 The one-time availability probe (Linux `x86_64` workspace) found no `adb`,
@@ -44,20 +44,37 @@ opened the preview; none was available here.
 
 ## Automated coverage at the reviewed revision
 
-`pnpm --filter @workspace/chat-app exec jest __tests__/AccessibilityContext.test.tsx __tests__/TabLayout.test.tsx __tests__/ProfileModeration.test.tsx`
+```sh
+pnpm --filter @workspace/chat-app exec jest \
+  __tests__/AccessibilityContext.test.tsx \
+  __tests__/TabLayout.test.tsx \
+  __tests__/ProfileModeration.test.tsx
+```
+
 passed on 2026-09-18 (5 suites across the iOS and Android Jest projects,
 152 tests, 0 failures). The cases that cover this behaviour are:
 
-| Behaviour | Test |
-| --- | --- |
-| System setting applied on launch when no in-app choice is saved | `applies the system reduce-transparency setting during initial load` |
-| Saved in-app choice wins over the system setting after a restart | `keeps a saved reduce-transparency choice of false after restart when the system setting is enabled` |
-| `reduceTransparencyChanged` flips the preference while running, and is ignored once the in-app toggle was set | `responds to system reduce-transparency changes` |
-| Failed system query leaves the option off | `leaves reduce transparency off when the system query fails` |
-| Platforms without the setting start off | `starts with reduce transparency off where the platform has no system setting to read` |
-| Classic iOS bar swaps the blur for the opaque palette background | `replaces the iOS blur with the opaque palette background` |
-| Classic iOS bar stays opaque with high contrast also on | `makes iOS opaque instead of drawing the high-contrast panel when both options are on` |
-| Liquid Glass bar asks for an opaque background only while the option is on | `asks for an opaque bar while Reduce transparency is on`, `returns to Liquid Glass when Reduce transparency is turned off again` |
+- System setting applied on launch when no in-app choice is saved:
+  `applies the system reduce-transparency setting during initial load`
+- Saved in-app choice wins over the system setting after a restart:
+  `keeps a saved reduce-transparency choice of false after restart when the
+  system setting is enabled`
+- `reduceTransparencyChanged` flips the preference while running and is ignored
+  once the in-app toggle was set: `responds to system reduce-transparency
+  changes`
+- Failed system query leaves the option off:
+  `leaves reduce transparency off when the system query fails`
+- Platforms without the setting start off:
+  `starts with reduce transparency off where the platform has no system setting
+  to read`
+- Classic iOS bar swaps the blur for the opaque palette background:
+  `replaces the iOS blur with the opaque palette background`
+- Classic iOS bar stays opaque with high contrast also on:
+  `makes iOS opaque instead of drawing the high-contrast panel when both
+  options are on`
+- Liquid Glass bar asks for an opaque background only while the option is on:
+  `asks for an opaque bar while Reduce transparency is on`,
+  `returns to Liquid Glass when Reduce transparency is turned off again`
 
 These tests mock `AccessibilityInfo.isReduceTransparencyEnabled` and emit
 `reduceTransparencyChanged` themselves. They do **not** prove that iOS
@@ -66,11 +83,12 @@ device draws.
 
 ## Device result
 
-| Scenario (from the acceptance criteria) | Status | Evidence |
-| --- | --- | --- |
-| System Reduce Transparency on before launch → classic tab bar opaque, Profile toggle reads "Reduce transparency: on" | **BLOCKED** | No device |
-| Toggling the system setting while the app is in the foreground flips the bar between see-through and solid without a restart | **BLOCKED** | No device |
-| After setting the in-app toggle by hand, the system setting no longer affects the bar, and the in-app choice survives a relaunch | **BLOCKED** | No device |
+- System Reduce Transparency on before launch → classic tab bar opaque; Profile
+  toggle reads "Reduce transparency: on" — **BLOCKED**: No device.
+- Toggling the system setting while the app is in the foreground flips the bar
+  between see-through and solid without a restart — **BLOCKED**: No device.
+- After setting the in-app toggle by hand, the system setting no longer affects
+  the bar, and the in-app choice survives a relaunch — **BLOCKED**: No device.
 
 ## Tester report received 2026-09-18 (not accepted as evidence)
 
@@ -78,17 +96,17 @@ After the procedure below was sent to the project owner, a form reply came
 back with these values. They are reproduced as reported; nothing here was
 observed by the workspace.
 
-| Field | Tester report |
-| --- | --- |
-| Device | "iPhone 17 Max Pro" |
-| iOS version | Not reported |
-| App container | Development build (build ID and native revision not reported) |
-| Tab bar seen | "Not sure" (classic or Liquid Glass) |
-| Scenario 1 (system setting on before launch) | Skipped |
-| Scenario 2 (system setting flipped while in the foreground) | "Changed only after a delay, tab switch, or scroll" — which of the three was not stated |
-| Scenario 3 (in-app toggle overrides and survives relaunch) | Pass |
-| Screenshots | None attached |
-| Free-text notes | None |
+- **Device:** "iPhone 17 Max Pro"
+- **iOS version:** Not reported
+- **App container:** Development build (build ID and native revision not
+  reported)
+- **Tab bar seen:** "Not sure" (classic or Liquid Glass)
+- **Scenario 1 (system setting on before launch):** Skipped
+- **Scenario 2 (setting flipped in foreground):** "Changed only after a delay,
+  tab switch, or scroll"; which of the three was not stated
+- **Scenario 3 (in-app toggle overrides and survives relaunch):** Pass
+- **Screenshots:** None attached
+- **Free-text notes:** None
 
 Why this report does not change the BLOCKED rows:
 
