@@ -122,10 +122,15 @@ physical-device evidence.
 
 ## Evidence inventory
 
-| Platform | Available evidence              | Review record                       | Physical-device result                                                                                    |
-| -------- | ------------------------------- | ----------------------------------- | --------------------------------------------------------------------------------------------------------- |
-| iOS      | `ios/runner-check.txt` only     | None — diagnostics are not evidence | Blocked before simulator/device discovery because the Linux workspace lacks Maestro and iOS tooling       |
-| Android  | `android/runner-check.txt` only | None — diagnostics are not evidence | Blocked before device discovery because the workspace lacks Maestro, Android SDK tooling, Java, and `adb` |
+- **iOS:** Available evidence: `ios/runner-check.txt` only. Review record:
+  None —
+  diagnostics are not evidence. Physical-device result: Blocked before
+  simulator/device discovery because the Linux workspace lacks Maestro and iOS
+  tooling.
+- **Android:** Available evidence: `android/runner-check.txt` only. Review
+  record: None — diagnostics are not evidence. Physical-device result: Blocked
+  before device discovery because the workspace lacks Maestro, Android SDK
+  tooling, Java, and `adb`.
 
 Neither platform has a timestamped `maestro-results.xml`, JUnit result, native
 screenshot set, call-surface screenshot set, device model, OS version,
@@ -154,14 +159,23 @@ The documented pass requires the same accessibility settings on both platforms:
 portrait orientation, text size 140%, High contrast on, and Reduced motion on.
 The following shared flows therefore have no verified platform parity yet:
 
-| Flow                                                          | iOS     | Android | Required review evidence                                                                          |
-| ------------------------------------------------------------- | ------- | ------- | ------------------------------------------------------------------------------------------------- |
-| Sign-in, client-trust verification, and password reset        | Not run | Not run | Wrapping, scroll reachability, focused input above keyboard, and trust/reset actions              |
-| Setup with invalid and valid display names                    | Not run | Not run | Error and hint visibility, keyboard-safe Sign out and Enter workspace actions                     |
-| Room create/join and room-key warning                         | Not run | Not run | Wrapped retry label and reachable submit action                                                   |
-| Room members, long names, multiline composer, and moderation  | Not run | Not run | Header/member actions, composer, send action, and keyboard-obscured controls                      |
-| Call permissions, loading/retry states, and embedded controls | Not run | Not run | Camera/microphone prompts, readable blocked copy, retry, and independent call-surface screenshots |
-| Profile save and accessibility settings                       | Not run | Not run | Full-page scrolling, saved settings, and reachable save action                                    |
+- **Sign-in, client-trust verification, and password reset:** iOS: Not run;
+  Android: Not run. Required review evidence: Wrapping, scroll reachability,
+  focused input above keyboard, and trust/reset actions.
+- **Setup with invalid and valid display names:** iOS: Not run; Android: Not
+  run. Required review evidence: Error and hint visibility, keyboard-safe Sign
+  out and Enter workspace actions.
+- **Room create/join and room-key warning:** iOS: Not run; Android: Not run.
+  Required review evidence: Wrapped retry label and reachable submit action.
+- **Room members, long names, multiline composer, and moderation:** iOS: Not
+  run; Android: Not run. Required review evidence: Header/member actions,
+  composer, send action, and keyboard-obscured controls.
+- **Call permissions, loading/retry states, and embedded controls:** iOS: Not
+  run; Android: Not run. Required review evidence: Camera/microphone prompts,
+  readable blocked copy, retry, and independent call-surface screenshots.
+- **Profile save and accessibility settings:** iOS: Not run; Android: Not run.
+  Required review evidence: Full-page scrolling, saved settings, and reachable
+  save action.
 
 Because every row is unverified on both platforms, this review cannot claim
 equivalent coverage or clear the release gate.
