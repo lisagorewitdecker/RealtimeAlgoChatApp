@@ -19,30 +19,49 @@ check-runs API.
 
 ## Metadata
 
-| Field | Result |
-| --- | --- |
-| Check date (UTC) | 2026-09-18 |
-| Repository | `lisagorewitdecker/RealtimeAlgoChatApp` (public) |
-| Base branch | `development` at `fa3cc64c4d1e01eb1424f0dd7aa9f363e2a9bab5` |
-| Workflow | `.github/workflows/api-codegen.yml` (`pull_request` to `development`) |
-| Probe pull request | [#264](https://github.com/lisagorewitdecker/RealtimeAlgoChatApp/pull/264), closed unmerged |
-| Probe branch | `task-474-check-run-evidence-20260918`, deleted after verification |
-| Probe head | `8df4d1e1b8ceee1ec19e809c07e32b74135d147b` |
-| Hosted run | [#35379915838](https://github.com/lisagorewitdecker/RealtimeAlgoChatApp/actions/runs/35379915838) |
-| Verification job | `Check generated API clients`, job `105713384851`, concluded `failure` |
-| Published evidence check | `Generated client drift evidence`, check run `105713584242` |
-| Changed generated path | `lib/api-client-react/src/generated/api.schemas.ts` |
+- **Check date (UTC):** 2026-09-18
+- **Repository:** `lisagorewitdecker/RealtimeAlgoChatApp` (public)
+- **Base branch:** `development` at
+  `fa3cc64c4d1e01eb1424f0dd7aa9f363e2a9bab5`
+- **Workflow:** `.github/workflows/api-codegen.yml`
+  (`pull_request` to `development`)
+- **Probe pull request:** [#264](https://github.com/lisagorewitdecker/RealtimeAlgoChatApp/pull/264),
+  closed unmerged
+- **Probe branch:** `task-474-check-run-evidence-20260918`, deleted after
+  verification
+- **Probe head:** `8df4d1e1b8ceee1ec19e809c07e32b74135d147b`
+- **Hosted run:** [#35379915838](https://github.com/lisagorewitdecker/RealtimeAlgoChatApp/actions/runs/35379915838)
+- **Verification job:** `Check generated API clients`, job `105713384851`,
+  concluded `failure`
+- **Published evidence check:** `Generated client drift evidence`, check run
+  `105713584242`
+- **Changed generated path:**
+  `lib/api-client-react/src/generated/api.schemas.ts`
 
 ## Acceptance result
 
-| Check | Status | Evidence |
-| --- | --- | --- |
-| A real pull-request run exercises a controlled stale generated client | PASS | The probe branch added a stale block to `api.schemas.ts`; the `Verify generated API clients` step failed on exactly that drift. |
-| The failed check is reachable from the reviewer-facing Checks UI | PASS | Both `Check generated API clients` and `Generated client drift evidence` appear on the pull request's Checks tab. |
-| The changed generated paths are in the reviewer-visible summary | PASS | The rendered summary and the API response both contain `lib/api-client-react/src/generated/api.schemas.ts (modified: -6)`. |
-| The bounded report is in the reviewer-visible summary | PASS | The summary contains the fenced `diff` block with the hunk header and the per-file and total line limits (`at most 200 lines per file and 1000 lines in total`). |
-| The regeneration command is in the reviewer-visible summary | PASS | The summary contains ``Regenerate with `pnpm --filter @workspace/api-spec run codegen` and commit the generated output.`` |
-| No secret or privileged log access is required | PASS | The evidence was read twice without credentials: an unauthenticated `GET /repos/.../check-runs/105713584242` returned the full summary, and a signed-out browser rendered it on the Checks tab. Job logs were never downloaded; that endpoint still returns `403`. |
+- **A real pull-request run exercises a controlled stale generated client —
+  PASS.**
+  The probe branch added a stale block to `api.schemas.ts`; the
+  `Verify generated API clients` step failed on exactly that drift.
+- **The failed check is reachable from the reviewer-facing Checks UI — PASS.**
+  Both `Check generated API clients` and `Generated client drift evidence`
+  appear on the pull request's Checks tab.
+- **The changed generated paths are in the reviewer-visible summary — PASS.**
+  The rendered summary and the API response both contain
+  `lib/api-client-react/src/generated/api.schemas.ts (modified: -6)`.
+- **The bounded report is in the reviewer-visible summary — PASS.** The
+  summary contains the fenced `diff` block with the hunk header and the per-file
+  and total line limits (at most 200 lines per file and 1000 lines in total).
+- **The regeneration command is in the reviewer-visible summary — PASS.** The
+  summary contains the command to run
+  `pnpm --filter @workspace/api-spec run codegen` and commit the generated
+  output.
+- **No secret or privileged log access is required — PASS.** The evidence was
+  read twice without credentials: an unauthenticated request to
+  `/repos/.../check-runs/105713584242` returned the full summary, and a
+  signed-out browser rendered it on the Checks tab. Job logs were never
+  downloaded; that endpoint still returns `403`.
 
 ## Evidence read without any credentials
 
@@ -60,12 +79,14 @@ output.summary (762 characters):
 ````markdown
 ## Generated API drift detected
 
-Regenerate with `pnpm --filter @workspace/api-spec run codegen` and commit the generated output.
+Regenerate with `pnpm --filter @workspace/api-spec run codegen` and commit the
+generated output.
 
 ```diff
 - lib/api-client-react/src/generated/api.schemas.ts (modified: -6)
 
-Regeneration diff (a/ = current files, b/ = regenerated output; showing at most 200 lines per file and 1000 lines in total):
+Regeneration diff (a/ = current files, b/ = regenerated output; showing at most
+200 lines per file and 1000 lines in total):
 
 --- a/lib/api-client-react/src/generated/api.schemas.ts
 +++ b/lib/api-client-react/src/generated/api.schemas.ts
@@ -83,6 +104,7 @@ Regeneration diff (a/ = current files, b/ = regenerated output; showing at most 
 ````
 
 A signed-out Chromium session (fresh context, no stored credentials) loaded
+the PR Checks page at
 `https://github.com/lisagorewitdecker/RealtimeAlgoChatApp/pull/264/checks?check_run_id=105713584242`
 and rendered the same heading, regeneration command, changed path, and diff
 block, while the page still offered "Sign in" and never exposed the job log.
@@ -101,8 +123,8 @@ request was closed and its branch deleted.
 The published evidence was independently revalidated without creating another
 branch or pull request:
 
-- A public, unauthenticated `GET
-  https://api.github.com/repos/lisagorewitdecker/RealtimeAlgoChatApp/check-runs/105713584242`
+- A public, unauthenticated `GET` request to
+  `https://api.github.com/repos/lisagorewitdecker/RealtimeAlgoChatApp/check-runs/105713584242`
   returned `200 OK` and the same 762-character summary.
 - The public response still contained the changed generated path, the bounded
   fenced `diff` report, and
