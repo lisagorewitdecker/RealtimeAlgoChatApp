@@ -3,6 +3,8 @@ name: GitHub ruleset required status checks
 description: Provider behavior for adding required status-check rules through the GitHub repository ruleset API.
 ---
 
+# GitHub ruleset required status checks
+
 When adding a required status-check rule through the GitHub ruleset API, omit
 `integration_id` when the check is not tied to a specific GitHub App. Sending
 `integration_id: null` can be rejected as an invalid ruleset property even

@@ -2,17 +2,51 @@
 
 Source: `artifacts/chat-app` in this workspace.
 
-| Family | Reference | Dependencies | Evidence | Chunk | Status |
-|---|---|---|---|---|---|
-| Scaled text | `components/scaled-text.md` | Accessibility font scale | Used across the app | Pilot | implemented |
-| Scaled text input | `components/scaled-text-input.md` | Scaled text behavior | Used in all major forms | Pilot | implemented |
-| Room card | `components/room-card.md` | Scaled text, theme | Primary room list | Pilot | implemented |
-| Message bubble | `components/message-bubble.md` | Scaled text, theme | Core room conversation | Pilot | implemented |
-| Device status card | `components/status-card.md` | Theme, confirmation | Profile security surface | Pilot | implemented |
-| Keyboard-aware form container | `components/keyboard-aware-form.md` | Keyboard controller | Four major forms | 2 | implemented |
-| Apple sign-in button | `components/apple-sign-in-button.md` | Apple policy, vector icon | Sign-in and sign-up | 2 | implemented |
-| Error boundary and fallback | `components/error-boundary.md` | Expo reload, modal | Global app root | 2 | implemented |
-| App footer | `components/app-footer.md` | Scaled text | Auth and setup screens | 2 | implemented |
+- **Scaled text**
+  - Reference: `components/scaled-text.md`
+  - Dependencies: Accessibility font scale
+  - Evidence: Used across the app
+  - Chunk: Pilot; Status: implemented
+- **Scaled text input**
+  - Reference: `components/scaled-text-input.md`
+  - Dependencies: Scaled text behavior
+  - Evidence: Used in all major forms
+  - Chunk: Pilot; Status: implemented
+- **Room card**
+  - Reference: `components/room-card.md`
+  - Dependencies: Scaled text, theme
+  - Evidence: Primary room list
+  - Chunk: Pilot; Status: implemented
+- **Message bubble**
+  - Reference: `components/message-bubble.md`
+  - Dependencies: Scaled text, theme
+  - Evidence: Core room conversation
+  - Chunk: Pilot; Status: implemented
+- **Device status card**
+  - Reference: `components/status-card.md`
+  - Dependencies: Theme, confirmation
+  - Evidence: Profile security surface
+  - Chunk: Pilot; Status: implemented
+- **Keyboard-aware form container**
+  - Reference: `components/keyboard-aware-form.md`
+  - Dependencies: Keyboard controller
+  - Evidence: Four major forms
+  - Chunk: 2; Status: implemented
+- **Apple sign-in button**
+  - Reference: `components/apple-sign-in-button.md`
+  - Dependencies: Apple policy, vector icon
+  - Evidence: Sign-in and sign-up
+  - Chunk: 2; Status: implemented
+- **Error boundary and fallback**
+  - Reference: `components/error-boundary.md`
+  - Dependencies: Expo reload, modal
+  - Evidence: Global app root
+  - Chunk: 2; Status: implemented
+- **App footer**
+  - Reference: `components/app-footer.md`
+  - Dependencies: Scaled text
+  - Evidence: Auth and setup screens
+  - Chunk: 2; Status: implemented
 
 The pilot was ranked by shared usage and product importance. App-specific screen
 compositions such as the AI panel are excluded.
