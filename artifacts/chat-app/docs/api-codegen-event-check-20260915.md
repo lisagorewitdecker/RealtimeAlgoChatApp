@@ -66,20 +66,26 @@ argument. Use `--help` for timeout, branch, record, and overwrite options.
 
 ## Metadata
 
-| Field | Result |
-| --- | --- |
-| Latest check time (UTC) | 2026-09-19 02:37 to 02:40 |
-| Workflow | `.github/workflows/api-codegen.yml` (`pull_request` to `development`) |
-| Hosted baseline | `development` at `7732e844b0577b44e1233a1327f4fcba1d897b72` |
-| Probe pull request | [#274](https://github.com/lisagorewitdecker/RealtimeAlgoChatApp/pull/274), closed unmerged |
-| Probe branch | `api-codegen-stale-client-probe-20260919023739-5874`, deleted after verification |
-| Opened head | `630e9e9ca1e42892c1d182f79f5e5fd661710a2c` |
-| Synchronize/reopened/edited head | `5625ef811d97ec20f77d34dcaf51f3559df29e00` |
-| Changed files | `lib/api-client-react/src/generated/api.schemas.ts` and `lib/api-spec/openapi.yaml` |
+- **Latest check time (UTC):** 2026-09-19 02:37 to 02:40
+- **Workflow:** `.github/workflows/api-codegen.yml`
+  (`pull_request` to `development`)
+- **Hosted baseline:** `development` at
+  `7732e844b0577b44e1233a1327f4fcba1d897b72`
+- **Probe pull request:** [#274][probe-pr] (closed unmerged)
+- **Probe branch:**
+  `api-codegen-stale-client-probe-20260919023739-5874`, deleted after
+  verification
+- **Opened head:** `630e9e9ca1e42892c1d182f79f5e5fd661710a2c`
+- **Synchronize/reopened/edited head:**
+  `5625ef811d97ec20f77d34dcaf51f3559df29e00`
+- **Changed files:** `lib/api-client-react/src/generated/api.schemas.ts` and
+  `lib/api-spec/openapi.yaml`
+
+[probe-pr]: https://github.com/lisagorewitdecker/RealtimeAlgoChatApp/pull/274
 
 ## Acceptance result
 
-| Event | Workflow run | Check-generated job | Required step | Compatibility step |
+| Event | Run | Job | Required check | Compatibility |
 | --- | --- | --- | --- | --- |
 | Opened control | [#35416216394](https://github.com/lisagorewitdecker/RealtimeAlgoChatApp/actions/runs/35416216394) | [job 105825299044](https://github.com/lisagorewitdecker/RealtimeAlgoChatApp/actions/runs/35416216394/job/105825299044) | `Verify generated API clients`: **failure** | `Check API contract compatibility`: **failure** |
 | Synchronize after branch update | [#35416256288](https://github.com/lisagorewitdecker/RealtimeAlgoChatApp/actions/runs/35416256288) | [job 105825413589](https://github.com/lisagorewitdecker/RealtimeAlgoChatApp/actions/runs/35416256288/job/105825413589) | `Verify generated API clients`: **failure** | `Check API contract compatibility`: **failure** |
