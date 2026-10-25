@@ -1,3 +1,6 @@
+/* jshint esversion: 11, node: true */
+/* jshint esversion: 6 */
+
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { mkdtemp, writeFile } from "node:fs/promises";
