@@ -2,8 +2,8 @@
 
 This package defines the visual language for the project. Use it whenever you
 build or restyle UI so every surface looks like the same product. It is a real
-workspace package (`@workspace/realtime-algo-chat-design-system`): other artifacts depend
-on it and import its theme and components directly.
+workspace package (`@workspace/realtime-algo-chat-design-system`): other
+artifacts depend on it and import its theme and components directly.
 
 ## What's here
 
@@ -16,7 +16,8 @@ on it and import its theme and components directly.
 - `public/favicon.svg` — GENERATED app icon from `tokens.json` + the title.
 - `src/components/ui/` — the initial shadcn scaffold, exported as
   `./components/*`. Generated systems keep and theme it; Figma imports prune and
-  restyle it; code imports replace it with the source component library.
+  restyle it; code imports replace it with the source component
+  library.
 - `src/lib/` (`cn`) and `src/hooks/` — exported as `./lib/*` and `./hooks/*`.
 - `src/App.tsx` — the entry point for the living style guide.
 - `src/preview/DesignSystemBrowser.tsx` — the persistent grouped navigation,
@@ -66,10 +67,10 @@ not add `.ts` files here.
 
 Components import each other with relative paths internally, so they resolve
 correctly when another package imports them through
-`@workspace/realtime-algo-chat-design-system/components/...`. Never use a `@/` alias inside
-this package. Components added through shadcn may use this package's
-`#components/*`, `#lib/*`, and `#hooks/*` imports from `package.json`; those are
-consumer-safe because they resolve against this package.
+`@workspace/realtime-algo-chat-design-system/components/...`. Never use a `@/`
+alias inside this package. Components added through shadcn may use this
+package's `#components/*`, `#lib/*`, and `#hooks/*` imports from `package.json`;
+those are consumer-safe because they resolve against this package.
 
 ## Editing and maintaining the design system
 
@@ -109,8 +110,8 @@ dependency back in before the user saves the template.
 ## Prototyping on the canvas
 
 Use the mockup-sandbox skill's "Design systems" flow. It creates a sandbox entry
-for `@workspace/realtime-algo-chat-design-system` and renders mockups using this package's
-theme and components.
+for `@workspace/realtime-algo-chat-design-system` and renders mockups using this
+package's theme and components.
 
 ## Consuming this package
 
