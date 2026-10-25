@@ -20,14 +20,29 @@ ID, job IDs, and public URLs.
 
 The preflight is a capability check, not release evidence:
 
-| Capability | Read-only or safe request | Required result |
-| --- | --- | --- |
-| Branch lookup | `GET /repos/<owner>/<repo>/branches/main` | `200`; the response's commit SHA is the baseline |
-| Dispatch | `POST /repos/<owner>/<repo>/actions/workflows/mobile-release.yml/dispatches` with the baseline ref, `node_range_override=not-a-valid-node-range`, and `publish=false` | accepted; this known invalid range must fail in the Node guard before credential, native, or publish jobs can run |
-| Run metadata | `GET /repos/<owner>/<repo>/actions/runs/<run_id>` | `200`; the uniquely correlated run belongs to the expected workflow, ref, and repository |
-| Job metadata | `GET /repos/<owner>/<repo>/actions/runs/<run_id>/jobs` | `200`; job IDs and conclusions are available |
-| Annotations | `GET /repos/<owner>/<repo>/check-runs/<check_run_id>/annotations` for the relevant jobs | `200`; annotation-only evidence is available |
-| Raw job logs | `GET /repos/<owner>/<repo>/actions/jobs/<job_id>/logs`, following redirects | final `200` for log-capable access, or a classified `403`/`404` limitation; never record a signed redirect URL |
+- **Branch lookup:** Request
+  `GET /repos/<owner>/<repo>/branches/main`. Require `200`; the response's
+  commit SHA is the baseline.
+- **Dispatch:** Send
+  `POST /repos/<owner>/<repo>/actions/workflows/mobile-release.yml/dispatches`
+  with the baseline ref, `node_range_override=not-a-valid-node-range`, and
+  `publish=false`. The request must be accepted; this known invalid range
+  must fail in the Node guard before credential, native, or publish jobs can
+  run.
+- **Run metadata:** Request
+  `GET /repos/<owner>/<repo>/actions/runs/<run_id>`. Require `200`; the
+  uniquely correlated run must belong to the expected workflow, ref, and
+  repository.
+- **Job metadata:** Request
+  `GET /repos/<owner>/<repo>/actions/runs/<run_id>/jobs`. Require `200`; job
+  IDs and conclusions must be available.
+- **Annotations:** Request
+  `GET /repos/<owner>/<repo>/check-runs/<check_run_id>/annotations` for the
+  relevant jobs. Require `200`; annotation-only evidence must be available.
+- **Raw job logs:** Request
+  `GET /repos/<owner>/<repo>/actions/jobs/<job_id>/logs`, following redirects.
+  Require final `200` for log-capable access, or classify a
+  `403`/`404` limitation. Never record a signed redirect URL.
 
 The dispatch request must use the known invalid range above and must never set
 `publish=true`. That fixture is intentionally secret-free: the Node guard
@@ -87,19 +102,40 @@ cleanly and must not be hidden by the original error.
 
 ## Acceptance result
 
-| Check | Status | Evidence |
-| --- | --- | --- |
-| Hosted workflow dispatch accepted the invalid-range fixture | PASS | Run `#35282160003`, event `workflow_dispatch`, `publish=false` |
-| Node range guard ran before release checks | PASS | Guard job completed checkout and range read, then failed in `Reject invalid Node range before release checks` |
-| Offending range was rejected | PASS | GitHub check-run annotation: `Unable to find Node version 'not-a-valid-node-range' for platform linux and architecture x64.` |
-| API-readable guard evidence identifies the configured field and offending range | PASS (local contract) | The [guard workflow annotation source](../../../.github/workflows/mobile-release.yml) emits a bounded, sanitized check annotation: `package.json engines.node: <offending range>`. |
-| Updated hosted run captures the new API-readable annotation | BLOCKED | The recorded run predates this implementation. The connected GitHub identity could read existing checks but could not publish a temporary workflow commit: workflow-file writes returned `403 Forbidden` and the commit mutation was denied. No newer hosted run is claimed. |
-| Guard reported a failed release-blocking check | PASS | Guard job conclusion `failure`; the setup-node resolution step failed and the rejection step failed |
-| iOS/Android preview evidence jobs started | PASS | `iOS preview evidence` and `Android preview evidence` both concluded `skipped` with no steps |
-| Browser/idle-profile release work started | PASS | `Idle profile registration` concluded `skipped` with no steps |
-| Native release work started | PASS | `Native large-text smoke (iOS)`, `Android release runner preflight`, `Native evidence summary regression`, and `Native large-text smoke (Android)` all concluded `skipped` with no steps |
-| Release gate started | PASS | `Mobile release gate` concluded `skipped` with no steps |
-| Publish work started | PASS | `Publish tested mobile builds` concluded `skipped` with no steps |
+- **Hosted workflow dispatch accepted the invalid-range fixture — PASS:** Run
+  `#35282160003`, event `workflow_dispatch`, `publish=false`.
+- **Node range guard ran before release checks — PASS:** The guard job
+  completed checkout and range read, then failed in
+  `Reject invalid Node range before release checks`.
+- **Offending range was rejected — PASS:** The GitHub check-run annotation
+  reported `Unable to find Node version 'not-a-valid-node-range' for platform
+  linux and architecture x64.`
+- **API-readable guard evidence identifies the configured field and
+  offending range — PASS (local contract):** The
+  [guard workflow annotation source](../../../.github/workflows/mobile-release.yml) emits a bounded,
+  sanitized check annotation:
+  `package.json engines.node: <offending range>`.
+- **Updated hosted run captures the new API-readable annotation —
+  BLOCKED:** The recorded run predates this implementation. The connected
+  GitHub identity could read existing checks but could not publish a
+  temporary workflow commit: workflow-file writes returned `403 Forbidden`
+  and the commit mutation was denied. No newer hosted run is claimed.
+- **Guard reported a failed release-blocking check — PASS:** The guard job
+  conclusion was `failure`; the setup-node resolution step failed and the
+  rejection step failed.
+- **iOS/Android preview evidence jobs started — PASS:** `iOS preview
+  evidence` and `Android preview evidence` both concluded `skipped` with no
+  steps.
+- **Browser/idle-profile release work started — PASS:** `Idle profile
+  registration` concluded `skipped` with no steps.
+- **Native release work started — PASS:** `Native large-text smoke (iOS)`,
+  `Android release runner preflight`, `Native evidence summary regression`,
+  and `Native large-text smoke (Android)` all concluded `skipped` with no
+  steps.
+- **Release gate started — PASS:** `Mobile release gate` concluded
+  `skipped` with no steps.
+- **Publish work started — PASS:** `Publish tested mobile builds` concluded
+  `skipped` with no steps.
 
 ## Hosted job evidence
 
@@ -112,10 +148,11 @@ Guard steps:
   Read package.json Node range — success
   Resolve configured Node range — success
   Reject invalid Node range before release checks — failure
+```
 
 GitHub check-run annotation:
-  Unable to find Node version 'not-a-valid-node-range' for platform linux and architecture x64.
-```
+`Unable to find Node version 'not-a-valid-node-range' for platform linux and
+architecture x64.`
 
 The workflow's rejection step now also emits the same bounded, sanitized value
 as an API-readable check annotation before writing the step summary:
@@ -134,8 +171,8 @@ the raw Actions job-log download, so this record does not claim to reproduce
 the rendered step-summary bytes. The hosted failure and the exact offending
 range are independently visible in the linked run and its setup-node
 check-run annotation. A fresh hosted dispatch is required before the custom
-`package.json engines.node` annotation can be independently confirmed through
-the API.
+`package.json engines.node` annotation can be independently confirmed
+through the API.
 
 ## Cleanup
 
