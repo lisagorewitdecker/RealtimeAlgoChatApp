@@ -50,6 +50,7 @@ pnpm --filter @workspace/chat-app exec jest \
   __tests__/TabLayout.test.tsx \
   __tests__/ProfileModeration.test.tsx
 ```
+
 passed on 2026-09-18 (5 suites across the iOS and Android Jest projects,
 152 tests, 0 failures). The cases that cover this behaviour are:
 
