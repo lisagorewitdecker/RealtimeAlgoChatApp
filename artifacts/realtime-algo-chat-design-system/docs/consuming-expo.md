@@ -4,6 +4,11 @@ Read `artifacts/realtime-algo-chat-design-system/docs/AGENTS.md` first. React Na
 not consume the web CSS or DOM components. It imports portable tokens, native
 theme/hooks, and native components directly from this package. If the Expo app
 still contains scaffolded or existing local theme/hooks/components, also read
+Read `artifacts/realtime-algo-chat-design-system/docs/AGENTS.md` first. React
+Native does not consume the web CSS or DOM components. It imports portable
+tokens, native theme/hooks, and native components directly from this package.
+If the Expo app still contains scaffolded or existing local
+theme/hooks/components, also read
 `artifacts/realtime-algo-chat-design-system/docs/migrating-expo.md` before
 writing UI.
 
@@ -22,8 +27,8 @@ const radius = tokens.radius.endsWith("rem")
 ```
 
 Export `useColors` from `src/hooks/use-colors.tsx`. Export a font hook from
-`src/hooks/use-fonts.tsx` that loads every required weight through `useFonts` and
-returns `fontsLoaded` and `fontError`. Use exact registered names such as
+`src/hooks/use-fonts.tsx` that loads every required weight through `useFonts`
+and returns `fontsLoaded` and `fontError`. Use exact registered names such as
 `Inter_400Regular`, not CSS family names.
 
 Expo imports these concrete paths directly:
@@ -73,7 +78,8 @@ or token values. Loose binary assets may still need copying into Expo because
 Metro does not watch sibling artifact folders by default.
 
 Set `app.json`'s literal `splash.backgroundColor` from
-`tokens.color.light.background` and keep it synchronized when that token changes.
+`tokens.color.light.background` and keep it synchronized when that token
+changes.
 
 ## Verify
 
@@ -81,3 +87,6 @@ Import and render
 `@workspace/realtime-algo-chat-design-system/components/native/button`, then
 run Expo typecheck and the development workflow. The import, native theme, and
 font hook must resolve before broader screen work begins.
+run Expo
+typecheck and the development workflow. The import, native theme, and font hook
+must resolve before broader screen work begins.

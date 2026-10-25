@@ -3,6 +3,8 @@ name: Hosted root contract gate environment
 description: Differences between GitHub's ubuntu-latest runner and the workspace that affected the Root contract checks pull-request gate, and how to debug a red run.
 ---
 
+# Hosted root contract gate environment
+
 The `Root contract checks` workflow runs the root install/typecheck/unit/codegen
 set on `ubuntu-latest`; the workspace toolchain is not identical, and the
 differences below each caused or nearly caused a red run.
