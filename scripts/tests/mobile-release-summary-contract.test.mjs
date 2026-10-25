@@ -1061,7 +1061,7 @@ test("candidate build IDs use non-secret variables or reusable-workflow inputs",
   );
   assert.equal(
     workflow.env.NATIVE_SMOKE_IOS_BUILD_ID,
-    "${{ inputs.native_smoke_ios_build_id || vars.NATIVE_SMOKE_IOS_BUILD_ID }}",
+    "$" + "{{ inputs.native_smoke_ios_build_id || vars.NATIVE_SMOKE_IOS_BUILD_ID }}",
   );
   assert.equal(
     workflow.env.NATIVE_SMOKE_ANDROID_BUILD_ID,
@@ -1113,7 +1113,7 @@ test("iOS preflight clears stale evidence before it can block evidence uploads",
   );
   assert.equal(
     uploadStep.if,
-    "${{ always() && steps.ios-native-evidence-size.outcome == 'success' }}",
+    "$" + "{{ always() && steps.ios-native-evidence-size.outcome == 'success' }}",
     "the evidence upload must wait for the bounded-size check after the preflight clears stale evidence",
   );
 });
@@ -1133,7 +1133,7 @@ test("idle-profile registration check blocks release and reports its result", ()
   assert.equal(configStep.env.E2E_API_URL, "${{ secrets.E2E_API_URL }}");
   assert.equal(
     configStep.env.CLERK_PUBLISHABLE_KEY,
-    "${{ secrets.CLERK_PUBLISHABLE_KEY }}",
+    "$" + "{{ secrets.CLERK_PUBLISHABLE_KEY }}",
   );
   assert.equal(configStep.env.CLERK_SECRET_KEY, "${{ secrets.CLERK_SECRET_KEY }}");
   assert.equal(configStep.env.DATABASE_URL, "${{ secrets.DATABASE_URL }}");
@@ -1166,7 +1166,7 @@ test("idle-profile registration check blocks release and reports its result", ()
   );
   assert.equal(
     chatPreflightStep.if,
-    "${{ steps.idle-profile-config.outputs.browser_targets_configured == 'true' }}",
+    "$" + "{{ steps.idle-profile-config.outputs.browser_targets_configured == 'true' }}",
     "Chat App preflight must run only when browser target configuration is present",
   );
   assert.equal(
@@ -1209,7 +1209,7 @@ test("idle-profile registration check blocks release and reports its result", ()
   }
   assert.equal(
     preflightRecordStep.if,
-    "${{ always() && steps.idle-profile-config.outputs.browser_targets_configured == 'true' }}",
+    "$" + "{{ always() && steps.idle-profile-config.outputs.browser_targets_configured == 'true' }}",
   );
   assert.deepEqual(preflightRecordStep.env, {
     IDLE_PROFILE_CHAT_PREFLIGHT_RESULT:
@@ -1349,7 +1349,7 @@ test("idle-profile registration check blocks release and reports its result", ()
   );
   assert.equal(
     blockingStep.env.IDLE_PROFILE_RESULT,
-    "${{ needs.idle-profile-registration.result }}",
+    "$" + "{{ needs.idle-profile-registration.result }}",
   );
   assert.equal(
     blockingStep.env.SUMMARY_REGRESSION_RESULT,
@@ -1404,11 +1404,11 @@ test("native hosted release jobs skip cleanly when release configuration is abse
   );
   assert.equal(
     configStep.env.NATIVE_SMOKE_IOS_APP_ID,
-    "${{ secrets.NATIVE_SMOKE_IOS_APP_ID }}",
+    "$" + "{{ secrets.NATIVE_SMOKE_IOS_APP_ID }}",
   );
   assert.equal(
     configStep.env.NATIVE_SMOKE_ANDROID_APP_ID,
-    "${{ secrets.NATIVE_SMOKE_ANDROID_APP_ID }}",
+    "$" + "{{ secrets.NATIVE_SMOKE_ANDROID_APP_ID }}",
   );
   assert.equal(configStep.env.NATIVE_SMOKE_EMAIL, "${{ secrets.NATIVE_SMOKE_EMAIL }}");
   assert.equal(
@@ -1425,7 +1425,7 @@ test("native hosted release jobs skip cleanly when release configuration is abse
   );
   assert.equal(
     configStep.env.NATIVE_SMOKE_IOS_SENTRY_DIST,
-    "${{ secrets.NATIVE_SMOKE_IOS_SENTRY_DIST }}",
+    "$" + "{{ secrets.NATIVE_SMOKE_IOS_SENTRY_DIST }}",
   );
   assert.equal(
     configStep.env.NATIVE_SMOKE_ANDROID_SENTRY_RELEASE,
@@ -1678,7 +1678,7 @@ test("failed native evidence checks remain reviewable before blocking release", 
   );
   assert.equal(
     evidenceStep.env.NATIVE_IOS_EVIDENCE_DOWNLOAD_RESULT,
-    "${{ steps.download-ios-native-smoke.outcome == 'success' && 'success' || steps.retry-ios-native-smoke.outcome }}",
+    "$" + "{{ steps.download-ios-native-smoke.outcome == 'success' && 'success' || steps.retry-ios-native-smoke.outcome }}",
     "the evidence checker must receive the iOS initial or retry artifact download result",
   );
   assert.equal(
@@ -1693,7 +1693,7 @@ test("failed native evidence checks remain reviewable before blocking release", 
   );
   assert.equal(
     blockingStep.if,
-    "${{ always() }}",
+    "$" + "{{ always() }}",
     "the native evidence blocker must run after a failed validation",
   );
   assert.equal(
@@ -2010,7 +2010,7 @@ test("hosted native evidence regression keeps cleanup failures visible", () => {
     verifyStep,
     "the hosted cleanup scenario must verify its fixed redacted summary",
   );
-  assert.equal(verifyStep.if, "${{ always() }}");
+  assert.equal(verifyStep.if, "$" + "{{ always() }}");
   assert.equal(
     verifyStep.env.CLEANUP_RESULT,
     "${{ steps.cleanup-forced-ios.outcome }}",
@@ -2128,7 +2128,7 @@ test("hosted privacy regression blocks the publish boundary and keeps fixture co
     verifyStep,
     "the hosted regression must verify the failed summary and submission boundary",
   );
-  assert.equal(verifyStep.if, "${{ always() }}");
+  assert.equal(verifyStep.if, "$" + "{{ always() }}");
   assert.equal(
     verifyStep.env.PRIVACY_RESULT,
     "${{ steps.native-evidence-privacy.outcome }}",
@@ -2278,11 +2278,11 @@ test("hosted native evidence regression exercises real artifact download continu
   );
   assert.equal(
     checkerStep?.env?.NATIVE_IOS_EVIDENCE_DOWNLOAD_RESULT,
-    "${{ steps.download-controlled-ios.outcome }}",
+    "$" + "{{ steps.download-controlled-ios.outcome }}",
   );
   assert.equal(
     checkerStep?.env?.NATIVE_ANDROID_EVIDENCE_DOWNLOAD_RESULT,
-    "${{ steps.download-controlled-android.outcome }}",
+    "$" + "{{ steps.download-controlled-android.outcome }}",
   );
   assert.equal(
     blockerStep?.env?.IOS_DOWNLOAD_CONCLUSION,
@@ -2377,7 +2377,7 @@ test("hosted native evidence regression preserves iOS when Android artifact is m
   );
   assert.equal(
     checkerStep?.env?.NATIVE_IOS_EVIDENCE_DOWNLOAD_RESULT,
-    "${{ steps.download-controlled-ios-android-outage.outcome }}",
+    "$" + "{{ steps.download-controlled-ios-android-outage.outcome }}",
   );
   assert.equal(
     checkerStep?.env?.NATIVE_ANDROID_EVIDENCE_DOWNLOAD_RESULT,
@@ -2472,7 +2472,7 @@ test("hosted native evidence regression preserves iOS when Android artifact is m
       const fixture = runStep(fixtureStep);
       assert.equal(fixture.status, 0, fixture.stderr);
       const downloadPath = downloadStep.with.path.replace(
-        "${{ runner.temp }}",
+        "$" + "{{ runner.temp }}",
         runnerTemp,
       );
       mkdirSync(downloadPath, { recursive: true });
@@ -2560,7 +2560,7 @@ test("hosted release validation exercises nested evidence readers without publis
   );
   assert.equal(
     summaryStep.if,
-    "${{ always() }}",
+    "$" + "{{ always() }}",
     "the nested reader summary must remain visible when its check fails",
   );
   assert.equal(
@@ -2793,7 +2793,7 @@ test("publish requires candidate-bound approvals from the current run attempt", 
   );
   assert.equal(
     evidenceStep?.env?.NATIVE_IOS_EVIDENCE_ARTIFACT_URL,
-    "${{ needs.native-ios.outputs.native_evidence_artifact_url }}",
+    "$" + "{{ needs.native-ios.outputs.native_evidence_artifact_url }}",
     "the evidence checker must receive the uploaded iOS artifact URL",
   );
   assert.equal(
@@ -2894,7 +2894,7 @@ test("publish requires candidate-bound approvals from the current run attempt", 
     assert.ok(step, `publish job must define "${stepName}"`);
     assert.equal(
       step.if,
-      "${{ steps.native-evidence-privacy.outcome == 'success' }}",
+      "$" + "{{ steps.native-evidence-privacy.outcome == 'success' }}",
       `${stepName} must be unreachable after a failed privacy check`,
     );
     assert.ok(
@@ -2918,7 +2918,7 @@ test("publish requires candidate-bound approvals from the current run attempt", 
   );
   assert.equal(
     publishSteps[strictIndex].env.NATIVE_IOS_EVIDENCE_ARTIFACT_URL,
-    "${{ needs.mobile-release-gate.outputs.ios_native_evidence_artifact_url }}",
+    "$" + "{{ needs.mobile-release-gate.outputs.ios_native_evidence_artifact_url }}",
     "publish evidence validation must retain the iOS artifact link",
   );
   assert.equal(
@@ -3507,7 +3507,7 @@ test("Android preview evidence keeps its pull-request validation and privacy con
     )?.env,
     {
       ANDROID_PREVIEW_BASE_SHA:
-        "${{ github.event.pull_request.base.sha }}",
+        "$" + "{{ github.event.pull_request.base.sha }}",
       ANDROID_PREVIEW_HEAD_SHA:
         "${{ github.event.pull_request.head.sha }}",
       REVIEWED_REF: "${{ github.ref }}",
@@ -3647,7 +3647,7 @@ test("Android preview evidence keeps its pull-request validation and privacy con
       "${{ github.event.pull_request.base.sha }}",
     ANDROID_PREVIEW_HEAD_SHA:
       "${{ github.event.pull_request.head.sha }}",
-    REVIEWED_REF: "${{ github.ref }}",
+    REVIEWED_REF: "$" + "{{ github.ref }}",
   });
   assert.match(
     hostedValidation.run,
@@ -7824,7 +7824,7 @@ test("native reports use a durable redacted archive before artifact expiry", () 
   );
   assert.equal(
     createStep?.env?.GH_TOKEN,
-    "${{ github.token }}",
+    "$" + "{{ github.token }}",
     "only the release-asset creation step may receive the GitHub write token",
   );
   assert.equal(
@@ -8309,7 +8309,7 @@ test("hosted native evidence summaries record the checked revision before untrus
   for (const { label, step } of summaryCheckerCallers) {
     assert.equal(
       step.env?.REVIEWED_REF,
-      "${{ github.ref }}",
+      "$" + "{{ github.ref }}",
       `${label} must use the trusted workflow ref for revision metadata`,
     );
 
