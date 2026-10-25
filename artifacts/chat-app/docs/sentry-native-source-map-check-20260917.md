@@ -16,24 +16,24 @@ evidence, and no credential value was read or written.
 | Check time (UTC) | 2026-09-17 14:23:34 |
 | App | Chat App |
 | Workspace revision | `fc67fdfa66729f9ad4945b304d81dc8dbb3f660a` |
-| Crash reporting SDK | `@sentry/react-native` `^7.11.0`; `@sentry/cli` `2.58.4` is declared directly by the app |
+| Crash SDK | `@sentry/react-native` ^7.11.0; `@sentry/cli` 2.58.4 |
 | Sentry destination configured in `app.json` | organization `lisagorewitdecker-06`, project `react-native` |
 | Candidate builds | N/A — `artifacts/chat-app/eas.json` is absent and no candidate build IDs are configured |
-| Local native runners | N/A — no `xcrun`, `adb`, `maestro`, `java`, or `eas`; no USB bus; Expo device list is empty |
+| Local native runners | N/A — no native tools or attached devices |
 | Hosted native runners | N/A — the GitHub self-hosted runner list is empty |
 
 ## Acceptance result
 
 | Check | Status | Evidence |
 | --- | --- | --- |
-| Sentry event verifier contract | PASS | `scripts/tests/verify-sentry-native-event.test.mjs`: 25 tests passed |
+| Sentry verifier | PASS | 25 tests (`verify-sentry-native-event.test.mjs`) |
 | Native build preflight contract | PASS | `artifacts/chat-app/scripts/build.test.js`: 9 tests passed |
 | Conditional native upload policy | PASS | `pnpm --filter @workspace/chat-app run test:sentry-upload-policy`: 11 tests passed |
 | Signed iOS candidate built with source-map upload | **BLOCKED** | No EAS project configuration, iOS bundle identifier, signed candidate, or local iOS build tooling is available |
 | Signed Android candidate built with source-map upload | **BLOCKED** | No EAS project configuration, Android package, signed candidate, or local Android build tooling is available |
 | `SENTRY_AUTH_TOKEN` in the hosted `mobile-release` environment | **BLOCKED** | The environment exists, but its secret-name listing is empty; no secret value was requested |
-| Candidate metadata in the hosted `mobile-release` environment | **BLOCKED** | The environment variable-name listing is empty; no iOS or Android candidate IDs are configured |
-| Prepared native runners | **BLOCKED** | GitHub reports no self-hosted runners; the local workspace has no native runner |
+| Candidate metadata | **BLOCKED** | No hosted iOS/Android candidate IDs |
+| Prepared native runners | **BLOCKED** | None hosted or local |
 | Hosted iOS source-map event with a readable frame | **BLOCKED** | No native job ran, so no controlled iOS probe event exists to inspect |
 | Hosted Android source-map event with a readable frame | **BLOCKED** | No native job ran, so no controlled Android probe event exists to inspect |
 | Candidate-bound `sentry-source-map-evidence.json` for both platforms | **BLOCKED** | The qualifying native jobs have not produced evidence artifacts |
