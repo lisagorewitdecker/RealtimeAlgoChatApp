@@ -1,3 +1,4 @@
+/* jshint esversion: 11, node: true */
 /* jshint esversion: 6 */
 
 import assert from "node:assert/strict";
