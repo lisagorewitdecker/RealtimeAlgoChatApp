@@ -176,8 +176,8 @@ runner used by this procedure; update both together when rotating the runner:
 cd /opt/actions-runner
 RUNNER_VERSION=2.337.0
 RUNNER_ARCHIVE="actions-runner-linux-x64-${RUNNER_VERSION}.tar.gz"
-RUNNER_URL="https://github.com/actions/runner/releases/download/v${RUNNER_VERSION}"
-RUNNER_URL+="/${RUNNER_ARCHIVE}"
+RUNNER_RELEASE=https://github.com/actions/runner/releases/download
+RUNNER_URL="${RUNNER_RELEASE}/v${RUNNER_VERSION}/${RUNNER_ARCHIVE}"
 sudo -u "$RUNNER_USER" curl --fail --location --silent --show-error \
   "$RUNNER_URL" \
   --output "$RUNNER_ARCHIVE"
