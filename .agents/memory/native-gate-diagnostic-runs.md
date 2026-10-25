@@ -3,12 +3,15 @@ name: Native gate diagnostic runs
 description: How device-size overrides for the native large-text release gate must be labeled and contained so troubleshooting output is never taken as release evidence.
 ---
 
+# Native gate diagnostic runs
+
 Rule: any override that lets the native large-text gate run on a device other
 than the smallest supported one marks the *entire* run diagnostic-only, even if
 the correct device happens to be booted. Diagnostic-only runs are labeled in
-every artifact (readiness report heading and run mode, runner metadata, pass/fail
-record, console banner), default to a separate results tree outside the release
-evidence directory, and the evidence completeness check rejects any pass record
+every artifact (readiness report heading and run mode, runner metadata,
+pass/fail record, console banner), default to a separate results tree outside
+the release evidence directory, and the evidence completeness check rejects
+any pass record
 whose `run_mode` is not `release-gate`. GitHub Actions runs refuse the override
 outright with a blocking prerequisite instead of silently ignoring it.
 
