@@ -1,4 +1,4 @@
-# iPhone Liquid Glass tab bar — High contrast and Reduce transparency device check — 2026-09-20
+# iPhone Liquid Glass tab bar — accessibility device check — 2026-09-20
 
 **Result: BLOCKED — the change is implemented and the automated coverage
 passes at the reviewed revision, but no iPhone or iOS simulator was reachable
@@ -13,12 +13,14 @@ toggle (which the classic bar honors on every platform) did nothing there.
 `app/(tabs)/_layout.tsx` now maps both preferences onto the same NativeTabs
 props:
 
-| Preferences | Bar surface (`backgroundColor` + `blurEffect="none"` + `disableTransparentOnScrollEdge` + `shadowColor`) | Item tints (`tintColor`, `iconColor`, `labelStyle`) |
-| --- | --- | --- |
-| Both off | Not passed — default Liquid Glass | Not passed — system blue / gray |
-| Reduce transparency | Opaque palette `background`, border in palette `border` | Not passed — system blue / gray |
-| High contrast | Palette `tabBarBackground` (`rgba(0, 0, 0, 0.9)`, the denser see-through panel the classic iOS bar swaps in for its blur), border `#555555` | `primary` `#60BFFF` selected, `mutedForeground` `#CCCCCC` otherwise |
-| Both | Opaque high-contrast `background` `#000000`, border `#555555` | `primary` selected, `mutedForeground` otherwise |
+- **Both off:** Default Liquid Glass; system blue and gray tints.
+- **Reduce transparency:** Opaque palette `background`, `border` border,
+  and system tints.
+- **High contrast:** `tabBarBackground` (`rgba(0, 0, 0, 0.9)`) panel and
+  `#555555` border; `primary` (`#60BFFF`) selected and
+  `mutedForeground` (`#CCCCCC`) otherwise.
+- **Both:** Opaque `background` (`#000000`) and `#555555` border; high-contrast
+  item tints.
 
 High contrast alone never makes the surface opaque — that is Reduce
 transparency's job, and it wins when both are on — matching the classic bar
@@ -36,10 +38,10 @@ has to ask.
 | `expo-router` | `~57.0.22` (installed 57.0.22) |
 | `expo-glass-effect` | `~57.0.3` |
 | `react-native-screens` | `~4.26.2` |
-| Reviewed revision | the commit that adds this record and the NativeTabs mapping in `app/(tabs)/_layout.tsx` (its parent on `main` was `2667cdbe`, "Report distinct room key storage outage episodes", when the automated coverage below was last run) |
+| Coverage revision | Parent `2667cdbe` (last automated-coverage run) |
 | Target device model | **BLOCKED** — no iPhone or simulator attached |
-| Target iOS version | **BLOCKED** — no iPhone or simulator attached (iOS 26 required for the Liquid Glass bar) |
-| App container (Expo Go / development build) | **BLOCKED** — no session was available |
+| Target iOS version | **BLOCKED** — no device; iOS 26 is required |
+| App container | **BLOCKED** — no Expo Go or development-build session |
 | Check timestamp | 2026-09-20T18:52Z |
 
 The one-time availability probe (Linux `x86_64` workspace, re-run today)
@@ -51,20 +53,25 @@ device values are inferred from the preview manifest or workflow output.
 
 ## Automated coverage at the reviewed revision
 
-Run under the Chat App's Jest projects (`pnpm --filter @workspace/chat-app
-exec jest --runInBand --selectProjects iOS -- __tests__/TabLayout.test.tsx
-__tests__/NativeTabBarAppearance.test.tsx`; `TabLayout` also runs under the
-Android project). Both suites passed on 2026-09-20 (41 tests, 0 failures).
+Run under the Chat App's Jest projects:
+`pnpm --filter @workspace/chat-app exec jest --runInBand --selectProjects iOS
+-- __tests__/TabLayout.test.tsx __tests__/NativeTabBarAppearance.test.tsx`.
+`TabLayout` also runs under the Android project. Both suites passed on
+2026-09-20 (41 tests, 0 failures).
 
-| Behaviour | Test |
-| --- | --- |
-| Both toggles off: no surface or tint prop is passed, so Liquid Glass and the system tints stay | `TabLayout` › `leaves the default Liquid Glass look and system tints alone while both options are off` |
-| Reduce transparency: opaque palette background, no material, kept at the scroll edge, bordered; items keep system tints | `TabLayout` › `asks for an opaque bar while Reduce transparency is on` |
-| High contrast alone: the denser (still see-through) high-contrast panel plus palette item tints | `TabLayout` › `swaps the glass for the high-contrast panel and palette tints with high contrast alone` |
-| Both on: opaque high-contrast background plus palette item tints | `TabLayout` › `uses the opaque high-contrast bar and palette tints when both options are on` |
-| Turning either toggle off restores Liquid Glass; turning high contrast off with Reduce transparency still on keeps the opaque bar | `TabLayout` › `returns to Liquid Glass when Reduce transparency is turned off again`, `returns to Liquid Glass when high contrast is turned off again`, `keeps the opaque bar when high contrast is turned off with Reduce transparency still on` |
-| The passed item tints read at WCAG AA (4.5:1) over both high-contrast surfaces, worst case white content under the panel | `TabLayout` › `iOS 26 native tab bar tokens` |
-| The props produce the intended `UITabBarAppearance` descriptions in expo-router's real iOS builders for all four states, in both the standard and the scroll-edge appearance | `NativeTabBarAppearance` (all five tests) |
+- Both toggles off preserve Liquid Glass and system tints (`TabLayout`).
+- Reduce transparency uses an opaque, bordered bar and keeps system tints
+  (`TabLayout`).
+- High contrast alone uses the see-through panel and palette item tints
+  (`TabLayout`).
+- Both toggles use the opaque high-contrast background and palette tints
+  (`TabLayout`).
+- Toggle-off cases restore Liquid Glass; Reduce transparency keeps the bar
+  opaque when high contrast is turned off (`TabLayout`).
+- Item tints meet WCAG AA (4.5:1) on both high-contrast surfaces
+  (`TabLayout`).
+- `NativeTabBarAppearance` verifies all four states in standard and scroll-edge
+  builders (five tests).
 
 What these prove: the props the layout hands NativeTabs, and the appearance
 dictionaries expo-router 57.0.22 derives from them (`tabBarBackgroundColor`,
@@ -81,10 +88,17 @@ What they cannot prove: what UIKit draws.
 
 | Scenario | Status | Evidence |
 | --- | --- | --- |
-| High contrast on (Reduce transparency off): the bar shows the `#60BFFF` selected item and `#CCCCCC` unselected items on a near-black panel, with content faintly visible through it | **BLOCKED** | No device |
-| Unselected icons take `#CCCCCC` (react-native-screens documents that on the glass bar iOS 26 applies the item icon color to the selected item only; whether the custom-background bar behaves the same is unknown — the label color override is unconditional either way) | **BLOCKED** | No device |
-| Reduce transparency on: the bar is solid `#0E1118` (or `#000000` with high contrast) with nothing showing through, including with a short screen where content sits at the scroll edge | **BLOCKED** | No device |
-| Whether UIKit draws the opted-out bar full-width (pre-iOS 26 style) or as a filled capsule, and whether the switch back to Liquid Glass when a toggle is turned off happens without a relaunch | **BLOCKED** | No device |
+- **High contrast, Reduce transparency off — BLOCKED:** Check the near-black
+  panel, `#60BFFF` selected and `#CCCCCC` unselected items, and visible content.
+- **Unselected icon tint — BLOCKED:** `react-native-screens` says iOS 26
+  applies the glass-bar icon tint only to the selected item. The custom
+  background behavior is unknown; label tint is unconditional.
+- **Reduce transparency — BLOCKED:** Check for a solid `#0E1118` bar (or
+  `#000000` with high contrast), with no content showing through at the
+  scroll edge.
+- **Bar shape and toggle response — BLOCKED:** UIKit may draw a full-width bar
+  or filled capsule; check whether toggling restores Liquid Glass without
+  relaunch.
 
 ## Manual pass procedure
 
