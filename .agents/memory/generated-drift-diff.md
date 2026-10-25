@@ -14,6 +14,8 @@ any git repository and with a fake `pnpm` on PATH, so `git diff --no-index` or
 are not guaranteed there. The diff is explanatory only: the exit code and
 byte-for-byte restoration are the contract, so rendering failures fall back
 to the plain path list rather than masking the drift.
+byte-for-byte restoration are the contract, so rendering failures fall back to
+the plain path list rather than masking the drift.
 
 **How to apply:** When extending the drift output, change the caps in the
 report module's defaults rather than adding unbounded printing, and keep the
