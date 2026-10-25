@@ -31,25 +31,21 @@ with Build, Call, and Ship modes in a single room.
 
 ### API compatibility override instructions
 
-For an intentional versioned break, add both declarations to the pull request
-description.
+For an intentional versioned break, add both declarations to the pull request description.
 
-### Inline example
-
+**Inline example**
 ```text
 API_BREAKING_CHANGE_JUSTIFICATION: <why the existing contract must break>
 API_BREAKING_CHANGE_MIGRATION_PLAN: <how existing consumers move to the new contract>
 ```
 
-### Multi-step migration plan example
-
+**Multi-step migration plan example**
 ```text
 API_BREAKING_CHANGE_MIGRATION_PLAN:
   - Release the updated client first.
   - Keep the old API available during migration.
   - Remove the old API after adoption is confirmed.
 ```
-
 End the block with a blank line or the next `API_BREAKING_CHANGE_*` marker.
 
 ## Stack
