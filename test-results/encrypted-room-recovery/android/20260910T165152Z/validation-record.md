@@ -53,6 +53,8 @@ fix.
 
 ## Physical-device acceptance matrix
 
+| Check | Result | Evidence / blocker |
+| --- | --- | --- |
 - **Phone A creates encrypted room — BLOCKED:** No reachable Android device or
   installed release build.
 - **Phone B registers its public key before joining — BLOCKED:** No reachable
