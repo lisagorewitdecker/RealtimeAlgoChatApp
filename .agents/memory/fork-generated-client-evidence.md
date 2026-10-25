@@ -3,6 +3,8 @@ name: Fork generated-client evidence
 description: Keeps generated-client drift reports tied to the revision reviewed in fork pull requests.
 ---
 
+# Fork generated-client evidence
+
 Generated-client validation and its reviewer-visible drift check should use the
 same pull-request head SHA. Do not validate a synthetic merge ref while
 publishing evidence against the fork head, because the report can then describe
