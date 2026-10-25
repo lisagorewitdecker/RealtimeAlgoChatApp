@@ -3,6 +3,8 @@ name: Expo preview CORS
 description: Browser-based Expo previews use a distinct origin for API requests.
 ---
 
+# Expo preview CORS
+
 Include the Expo preview domain in the API's browser-origin allowlist alongside
 the normal development and deployment domains.
 
@@ -12,4 +14,4 @@ profile requests are blocked before reaching their route handler.
 
 **How to apply:** When adding or reviewing CORS restrictions for this product,
 allow the environment-provided Expo preview domain. Native requests remain
-originless and should continue to follow the existing native-client policy.
+originless and should continue following the existing native-client policy.
