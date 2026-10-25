@@ -51,14 +51,14 @@ time, the tested candidate build ID, and `decision=APPROVED`, and
 
 ---
 
-# Android physical-device supplement blocker
+## Android physical-device supplement blocker
 
 **Status:** Blocked — physical-device evidence not available
 **Checked:** 2026-09-03
 **Required pass:** One representative Android device in portrait mode with text
 size 140%, High contrast on, and Reduced motion on.
 
-## Android environment check
+### Android environment check
 
 This workspace is running on Linux (`x86_64`). The required Android execution
 prerequisites are unavailable:
@@ -89,7 +89,7 @@ The repository runner was also invoked with
 with status 2 at the prerequisite check: `Required command not found: maestro`.
 The command therefore did not launch the app or exercise any user flow.
 
-## Android result
+### Android result
 
 The Android manual supplement was **not run**. No device model, Android version,
 OEM skin, keyboard/locale, screenshots, permission observations,
@@ -112,7 +112,7 @@ time, the tested candidate build ID, and `decision=APPROVED`, and
 
 ---
 
-# Cross-platform accessibility evidence review
+## Cross-platform accessibility evidence review
 
 **Reviewed:** 2026-09-03  
 **Updated:** 2026-09-10 — per-run review records are now required; the evidence
@@ -120,7 +120,7 @@ status is unchanged.
 **Decision:** Release blocker remains active — neither platform has reviewed
 physical-device evidence.
 
-## Evidence inventory
+### Evidence inventory
 
 - **iOS:** Available evidence: `ios/runner-check.txt` only. Review record:
   None —
@@ -131,6 +131,16 @@ physical-device evidence.
   record: None — diagnostics are not evidence. Physical-device result: Blocked
   before device discovery because the workspace lacks Maestro, Android SDK
   tooling, Java, and `adb`.
+- **iOS**
+  - Available evidence: `ios/runner-check.txt` only.
+  - Review record: none; diagnostics are not evidence.
+  - Result: blocked before simulator/device discovery because the Linux
+    workspace lacks Maestro and iOS tooling.
+- **Android**
+  - Available evidence: `android/runner-check.txt` only.
+  - Review record: none; diagnostics are not evidence.
+  - Result: blocked before device discovery because the workspace lacks
+    Maestro, Android SDK tooling, Java, and `adb`.
 
 Neither platform has a timestamped `maestro-results.xml`, JUnit result, native
 screenshot set, call-surface screenshot set, device model, OS version,
@@ -139,7 +149,7 @@ findings. The runner-check files are environment evidence only; they do not
 establish that any app flow passed, and nobody has reviewed device screenshots
 because none exist.
 
-## Who reviews and how the decision is recorded
+### Who reviews and how the decision is recorded
 
 Each platform's timestamped run directory must carry its own
 `review-record.txt` (`platform`, `reviewer`, `reviewed_at_utc`,
@@ -153,7 +163,7 @@ check reports a missing record as `Review pending`, fails on
 time does not belong to the run. Runner diagnostics such as `runner-check.txt`
 and `ios-readiness.md` never receive a review record.
 
-## Shared flow comparison
+### Shared flow comparison
 
 The documented pass requires the same accessibility settings on both platforms:
 portrait orientation, text size 140%, High contrast on, and Reduced motion on.
@@ -176,11 +186,33 @@ The following shared flows therefore have no verified platform parity yet:
 - **Profile save and accessibility settings:** iOS: Not run; Android: Not run.
   Required review evidence: Full-page scrolling, saved settings, and reachable
   save action.
+- **Sign-in, client-trust verification, and password reset**
+  - iOS and Android: not run.
+  - Review: wrapping, scroll reachability, focused input above keyboard, and
+    trust/reset actions.
+- **Setup with invalid and valid display names**
+  - iOS and Android: not run.
+  - Review: error and hint visibility, keyboard-safe Sign out and Enter
+    workspace actions.
+- **Room create/join and room-key warning**
+  - iOS and Android: not run.
+  - Review: wrapped retry label and reachable submit action.
+- **Room members, long names, multiline composer, and moderation**
+  - iOS and Android: not run.
+  - Review: header/member actions, composer, send action, and
+    keyboard-obscured controls.
+- **Call permissions, loading/retry states, and embedded controls**
+  - iOS and Android: not run.
+  - Review: camera/microphone prompts, readable blocked copy, retry, and
+    independent call-surface screenshots.
+- **Profile save and accessibility settings**
+  - iOS and Android: not run.
+  - Review: full-page scrolling, saved settings, and reachable save action.
 
 Because every row is unverified on both platforms, this review cannot claim
 equivalent coverage or clear the release gate.
 
-## Device-specific follow-up decision
+### Device-specific follow-up decision
 
 A second Android device or OEM-keyboard pass cannot be assessed until the first
 representative Android device produces reviewed evidence. After that run:
