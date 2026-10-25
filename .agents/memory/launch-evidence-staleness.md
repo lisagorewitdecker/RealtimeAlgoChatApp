@@ -1,11 +1,14 @@
 ---
 name: Launch-evidence staleness in the preview preflight
-description: How the preview-startup preflight decides whether an Expo Go launch-evidence probe result belongs to the current dev server, and why its own dev server must run in pass-through mode.
+description: >-
+  How the preview-startup preflight decides whether an Expo Go launch-evidence
+  probe result belongs to the current dev server, and why its own dev server
+  must run in pass-through mode.
 ---
 
 # Launch-evidence staleness in the preview preflight
 
-**Rule:** a probe result counts as current only when its `decidedAt` is at or
+**Rule:** A probe result counts as current only when its `decidedAt` is at or
 after the start record the launcher writes on every managed (non-pass-through)
 dev server start. No start record means STALE, never "current by default".
 
@@ -16,6 +19,7 @@ unnoticed. Failing closed (STALE) keeps the preflight passing while making the
 launch row BLOCKED instead of PASS.
 
 **How to apply:**
+
 - The preflight spawns its own throwaway dev server through the same `dev`
   script. That start must set the launcher's pass-through environment flag
   (override any inherited value) so it neither consumes an armed marker meant
