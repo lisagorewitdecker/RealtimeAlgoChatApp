@@ -1,5 +1,9 @@
 # Consuming RealtimeAlgoChatApp Design System in Expo apps
 
+Read `artifacts/realtime-algo-chat-design-system/docs/AGENTS.md` first. React Native does
+not consume the web CSS or DOM components. It imports portable tokens, native
+theme/hooks, and native components directly from this package. If the Expo app
+still contains scaffolded or existing local theme/hooks/components, also read
 Read `artifacts/realtime-algo-chat-design-system/docs/AGENTS.md` first. React
 Native does not consume the web CSS or DOM components. It imports portable
 tokens, native theme/hooks, and native components directly from this package.
@@ -81,6 +85,8 @@ changes.
 
 Import and render
 `@workspace/realtime-algo-chat-design-system/components/native/button`, then
+run Expo typecheck and the development workflow. The import, native theme, and
+font hook must resolve before broader screen work begins.
 run Expo
 typecheck and the development workflow. The import, native theme, and font hook
 must resolve before broader screen work begins.
