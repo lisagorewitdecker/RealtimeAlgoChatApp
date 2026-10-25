@@ -3,6 +3,8 @@ name: Native evidence review record
 description: Why the native large-text evidence check treats a missing human review as a report but a rejected or inconsistent review as a failure.
 ---
 
+# Native evidence review record
+
 The `review-record.txt` (reviewer, UTC review time, candidate build ID,
 APPROVED/REJECTED) is validated by the evidence completeness check. A missing
 record is only reported ("Review pending") by default; explicit strict mode
