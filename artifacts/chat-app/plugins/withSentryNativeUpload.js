@@ -1,7 +1,5 @@
 /* jshint esversion: 6, node: true */
 
-"use strict";
-
 /**
  * Expo config plugin: apply @sentry/react-native's native build integration
  * only when the build can actually upload to Sentry.
@@ -94,7 +92,7 @@ function resolveSentryUploadPolicy({ env = process.env, projectRoot } = {}) {
 
 function assertPluginProps(props) {
   for (const key of REQUIRED_PROPS) {
-    if (!isNonEmptyString(props && props[key])) {
+    if (!isNonEmptyString(props?.[key])) {
       throw new Error(
         `${PLUGIN_NAME}: app.json must pass a non-empty "${key}" to this plugin ` +
           `(forwarded to ${SENTRY_EXPO_PLUGIN}); sentry-cli cannot upload without it.`,
@@ -163,7 +161,7 @@ function withSkippedUploadWarning(config) {
 const withSentryNativeUpload = (config, props) => {
   assertPluginProps(props);
   const policy = resolveSentryUploadPolicy({
-    projectRoot: config && config._internal ? config._internal.projectRoot : undefined,
+    projectRoot: config?._internal?.projectRoot,
   });
   if (!policy.upload) {
     return withSkippedUploadWarning(config);
