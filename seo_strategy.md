@@ -41,11 +41,13 @@ and no blog/docs site in this repo.
   to install/open the app, not to rank for informational search queries.
 
 ## Primary keywords
+
 - None identified — the product has no content marketing surface. The only
   discoverability lever in source is the install-gateway page's `<title>`,
   description, and social-preview tags.
 
 ## Crawler/GEO posture
+
 - No `robots.txt` exists; default (implicit allow-all) is appropriate since
   there is nothing sensitive to hide and only one public route exists.
 - No Cloudflare usage detected in source — deployed directly via Replit
