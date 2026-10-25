@@ -18,7 +18,9 @@ repository default branch and was deleted after both hosted runs completed.
 | Required ruleset | [Ruleset1](https://github.com/lisagorewitdecker/RealtimeAlgoChatApp/rules/21924513), active |
 | Required status context | `Android preview evidence` |
 | Probe pull request | [#192](https://github.com/lisagorewitdecker/RealtimeAlgoChatApp/pull/192), closed unmerged |
-| Probe branch | `task-453-android-evidence-20260915180454`, deleted after verification |
+| Probe branch | `task-453-android-evidence-20260915180454` |
+
+The probe branch was deleted after verification.
 
 ## Acceptance result
 
