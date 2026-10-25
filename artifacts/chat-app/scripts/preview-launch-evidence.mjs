@@ -37,6 +37,8 @@
 // PREVIEW_LAUNCH_PROBE_PASSTHROUGH=1, which makes `--launch` a pure
 // pass-through: no marker is consumed and no start or result is written.
 
+/* jshint esversion: 11, node: true */
+
 import { spawn } from "node:child_process";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
