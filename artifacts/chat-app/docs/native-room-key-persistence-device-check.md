@@ -165,6 +165,30 @@ the public and local probes it runs itself, and the `expoGoLaunch` boundary it
 copies from the latest launch-evidence probe result (next section). The last
 row requires filtered server-side logs from the physical iPhone session.
 
+| Handoff boundary | Status | Evidence |
+| --- | --- | --- |
+| Public manifest reachability | Replace | Replace |
+| Local handoff probe (manifest and bundle) | Replace | Replace |
+| Expo Go launch on physical iPhone | Replace | Replace |
+| Server-side native request evidence | Replace | Replace |
+
+Allowed statuses and evidence for each row:
+
+- **Public manifest reachability — PASS / FAIL.** Preflight
+  `publicManifestReachability`; status and byte count only.
+- **Local handoff probe (manifest and bundle) — PASS / FAIL / NOT_RUN.**
+  Preflight `localHandoffProbe`; no URL or launch payload.
+- **Expo Go launch on physical iPhone — PASS / FAIL / BLOCKED.** Preflight
+  `expoGoLaunch` result; status, `decided_at`, `age`, and counts only.
+- **Server-side native request evidence — PASS / FAIL / BLOCKED.** Reference
+  `logs/native-ios-request-evidence.txt`.
+
+For the physical-iPhone row, `RUNNING` = PASS; `BUNDLE_ONLY_THEN_CLOSED` =
+FAIL; `NO_DEVICE`, `NOT_RUN`, or `STALE` = BLOCKED; and `INCONCLUSIVE` means
+investigate, never PASS. Add the phone screen outcome when a device was watched.
+For server-side evidence, copy only the filtered
+`platform=ios; client=Expo Go; user-agent=[redacted]` marker, with no host, URL,
+account, or message data.
 - **Public manifest reachability — PASS / FAIL.** Preflight
   `publicManifestReachability` result; status and byte count only.
 - **Local handoff probe (manifest and bundle) — PASS / FAIL / NOT_RUN.**
@@ -251,6 +275,25 @@ script's `--launch` mode; unarmed, that is a transparent pass-through.
      result records. A corrupt result or start record fails the preflight
      before Metro starts, naming the file but never echoing its contents.
 
+- **`NO_DEVICE` — `Expo Go launch` = BLOCKED.** No
+  `app=host.exp.Exponent` inspector connection arrived within the device
+  budget. Android Expo Go, DevTools, browser, and curl traffic do not count.
+  Check that the simulator is open on the preview and the manifest is signed in.
+- **`BUNDLE_ONLY_THEN_CLOSED` — launch = FAIL; server-side evidence = PASS.**
+  Expo Go iOS fetched the bundle (HTTP 200,
+  `platform=ios client=Expo Go`), then the
+  inspector connection closed abnormally (any code other than 1000/1001, e.g.
+  1006) with no `iOS  LOG` line or asset request in between: the app quit during
+  startup.
+- **`RUNNING` — `Expo Go launch` = PASS.** The connection stayed open through
+  the settle budget after the bundle and at least one iOS client log line or
+  asset request followed, with no error-level client log.
+- **`INCONCLUSIVE` — investigate first.** `reason=` names what was missing:
+  normal close 1000/1001 = reload, close after app output, no bundle 200 in the
+  window, error-level client logs, or no app output. Do not record a PASS.
+- **`NOT_RUN` / `STALE` (preflight only) — launch = BLOCKED until rerun.** There
+  is no result file, or it is older than the latest managed dev server start.
+  This is not a probe verdict: the current dev server has not been classified.
 - **`NO_DEVICE`.** No `app=host.exp.Exponent` inspector connection within the
   device budget (Android Expo Go, DevTools, browser, and curl traffic do not
   count). Check the simulator is open on the preview and the manifest is signed
@@ -344,14 +387,30 @@ diagnostics and test coverage listed below.
 | App | Chat App |
 | SDK/runtime | Expo SDK 57 (`expo` `~57.0.22`), `expo-secure-store` `57.0.4` |
 | Revision | working tree of 2026-09-14 on top of `61a854d` |
+| Client for the phone rows | Stock Expo Go (iOS, Android) |
+| Device model / OS version / Expo Go version | PENDING — no phone reachable from the workspace |
 | Client for the phone rows | Stock Expo Go (iOS, Android), dev server `exp://<REPLIT_EXPO_DEV_DOMAIN>` |
 | Device / OS / Expo Go | PENDING — no reachable phone |
+
+Dev server: `exp://<REPLIT_EXPO_DEV_DOMAIN>`
 
 ## Acceptance result
 
 - **Every native storage key satisfies the secure-store rule — PASS.** Both
   secure-store test doubles call `test-utils/secureStoreKeyRule.ts`; disabling
   the encoding fails 25 tests across the two provider suites.
+- **The rule matches the installed module — PASS.** `secureStorageKey.test.ts`
+  runs the real `expo-secure-store` validation: logical keys are rejected
+  before any native call, and encoded keys are accepted.
+- **Odd identifiers save and restore — PASS.** Apostrophes, slashes, spaces,
+  colons, non-ASCII, and emoji account and room IDs round-trip through the
+  native path across a remount in `CryptoContext.test.tsx`.
+- **Device identity and room keys survive a native-path remount — PASS.**
+  `CryptoContext.test.tsx` remount tests verify the same public key, same room
+  key, and no regenerated entries.
+- **Native save failures log their cause; retry UX unchanged — PASS.**
+  Device-identity load/save, room-key save, and identity-reset save each log
+  the underlying error; tests assert the message and unchanged retry status.
 - **The rule matches the installed module — PASS.**
   `secureStorageKey.test.ts` runs the real `expo-secure-store` validation:
   logical keys are rejected before any native call, and encoded keys are
@@ -370,6 +429,11 @@ diagnostics and test coverage listed below.
   there is nothing to migrate.
 - **Chat App tests, typecheck, release preflight — PASS.** 22 suites / 179
   tests, `tsc --noEmit` clean, and `preflight:release` passed on 2026-09-14.
+- **Creating a room in stock Expo Go on an iPhone opens without the
+  secure-storage warning — PENDING.** Requires a physical iPhone; procedure
+  below.
+- **Force-quit and relaunch keeps the device identity and room key — PENDING.**
+  Requires a physical iPhone; procedure below.
 - **Creating a room in stock Expo Go on an iPhone opens the room without the
   secure-storage warning — PENDING.** Requires a physical iPhone; procedure
   below.
