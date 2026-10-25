@@ -3,6 +3,8 @@ name: Hosted redaction probes
 description: How to run hostile metadata probes in GitHub Actions without leaking the probe values into the hosted log.
 ---
 
+# Hosted redaction probes
+
 GitHub Actions prints step-level `env` values and the rendered shell script in
 job logs. For hosted redaction verification, do not place hostile probe strings
 directly in `env:` or the run script. Assemble them from encoded literals at
