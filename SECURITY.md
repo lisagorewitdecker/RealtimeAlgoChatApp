@@ -14,6 +14,9 @@ are applied to the latest commit on the `main` branch only.
 To report a security vulnerability, please use
 [GitHub Security Advisories](https://github.com/lisagorewitdecker/RealtimeAlgoChatApp/security/advisories/new)
 to disclose it privately.
+[GitHub Security Advisories](
+https://github.com/lisagorewitdecker/RealtimeAlgoChatApp/security/advisories/new
+) to disclose it privately.
 
 Please include the following in your report:
 
@@ -24,4 +27,6 @@ Please include the following in your report:
 You can expect an initial response within 7 days. If we confirm the
 vulnerability, we will prioritize a fix and notify you when it is resolved. If
 we decline the report, we will explain why. Please do not disclose the
+vulnerability, we will prioritize a fix and notify you when it is resolved.
+If we decline the report, we will explain why. Please do not disclose the
 vulnerability publicly until we have addressed it.
