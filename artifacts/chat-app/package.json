@@ -92,7 +92,7 @@
     "react-native-screens": "~4.26.2",
     "react-native-svg": "15.15.5",
     "react-native-web": "^0.21.2",
-    "react-native-worklets": "0.13.0",
+    "react-native-worklets": "0.10.0",
     "typescript": "~6.0.3",
     "zod": "catalog:",
     "zod-validation-error": "^3.5.4"
