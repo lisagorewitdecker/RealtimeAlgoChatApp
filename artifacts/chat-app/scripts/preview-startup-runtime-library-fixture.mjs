@@ -1,3 +1,5 @@
+/* jshint esversion: 11, node: true */
+
 import { appendFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { resolve } from "node:path";
