@@ -1,3 +1,5 @@
+/* jshint esversion: 11, node: true */
+
 import { spawnSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
