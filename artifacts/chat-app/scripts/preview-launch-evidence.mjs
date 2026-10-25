@@ -67,8 +67,8 @@ export const PROBE_PASSTHROUGH_ENVIRONMENT_NAME =
 // The probe writes `new Date().toISOString()`; anything else is corruption.
 const PROBE_TIMESTAMP_PATTERN =
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
-export const DEFAULT_DEVICE_TIMEOUT_MS = 90_000;
-export const DEFAULT_SETTLE_TIMEOUT_MS = 30_000;
+export const DEFAULT_DEVICE_TIMEOUT_MS = 90000;
+export const DEFAULT_SETTLE_TIMEOUT_MS = 30000;
 const PROBE_LOG_PREFIX = "[preview-launch-probe]";
 const PACKAGE_ROOT = resolve(import.meta.dirname, "..");
 const DEFAULT_STATE_DIRECTORY = resolve(PACKAGE_ROOT, ".expo");
@@ -209,7 +209,7 @@ export function createLaunchEvidenceClassifier(options = {}) {
       ) {
         const bundle = { atMs, lineMs: parseIsoMs(isoTimestamp) };
         if (session) {
-          session.bundle ??= bundle;
+          session.bundle = session.bundle ?? bundle;
           session.bundleCount += 1;
         } else {
           state.pendingBundle = bundle;
