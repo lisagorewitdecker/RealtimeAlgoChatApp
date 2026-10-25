@@ -40,8 +40,8 @@ The preflight is a capability check, not release evidence:
   `GET /repos/<owner>/<repo>/check-runs/<check_run_id>/annotations` for the
   relevant jobs. Require `200`; annotation-only evidence must be available.
 - **Raw job logs:** Request
-  `GET /repos/<owner>/<repo>/actions/jobs/<job_id>/logs`, following
-  redirects. Require final `200` for log-capable access, or classify a
+  `GET /repos/<owner>/<repo>/actions/jobs/<job_id>/logs`, following redirects.
+  Require final `200` for log-capable access, or classify a
   `403`/`404` limitation. Never record a signed redirect URL.
 
 The dispatch request must use the known invalid range above and must never set
@@ -111,8 +111,8 @@ cleanly and must not be hidden by the original error.
   reported `Unable to find Node version 'not-a-valid-node-range' for platform
   linux and architecture x64.`
 - **API-readable guard evidence identifies the configured field and
-  offending range — PASS (local contract):** The [guard workflow annotation
-  source](../../../.github/workflows/mobile-release.yml) emits a bounded,
+  offending range — PASS (local contract):** The
+  [guard workflow annotation source](../../../.github/workflows/mobile-release.yml) emits a bounded,
   sanitized check annotation:
   `package.json engines.node: <offending range>`.
 - **Updated hosted run captures the new API-readable annotation —
