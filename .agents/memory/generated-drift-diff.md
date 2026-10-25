@@ -12,6 +12,8 @@ checker, and keep its output bounded (per-file, total, and line-length caps).
 any git repository and with a fake `pnpm` on PATH, so `git diff --no-index` or
 `/usr/bin/diff` would make the check depend on tools and repository state that
 are not guaranteed there. The diff is explanatory only: the exit code and
+byte-for-byte restoration are the contract, so rendering failures fall back
+to the plain path list rather than masking the drift.
 byte-for-byte restoration are the contract, so rendering failures fall back to
 the plain path list rather than masking the drift.
 
