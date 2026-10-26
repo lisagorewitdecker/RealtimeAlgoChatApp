@@ -90,17 +90,17 @@ test("hosted summary regression checks only the reviewed ref", () => {
   assert.equal(job.steps[0].uses, "actions/checkout@v4");
   assert.equal(
     job.steps[0].with.ref,
-    "${{ github.event.pull_request.head.sha || inputs.reviewed_ref }}",
+    `\${{ github.event.pull_request.head.sha || inputs.reviewed_ref }}`,
   );
   assert.equal(job.steps[0].with["persist-credentials"], false);
 
   const verification = job.steps[1].run;
   assert.deepEqual(job.steps[1].env, {
     REVIEWED_REF:
-      "${{ github.event.pull_request.head.sha || inputs.reviewed_ref }}",
+      `\${{ github.event.pull_request.head.sha || inputs.reviewed_ref }}`,
     NATIVE_EVIDENCE_HOSTILE_METADATA: "1",
     NATIVE_EVIDENCE_SUMMARY_CAPTURE_PATH:
-      "${{ runner.temp }}/native-evidence-summary-capture.md",
+      `\${{ runner.temp }}/native-evidence-summary-capture.md`,
   });
   assert.equal(
     verification.trim(),
@@ -203,11 +203,11 @@ test("hosted summary regression checks only the reviewed ref", () => {
     captureStep.run,
     "node scripts/publish-native-evidence-summary-check.mjs",
   );
-  assert.equal(captureStep.if, "${{ success() }}");
+  assert.equal(captureStep.if, `\${{ success() }}`);
   assert.deepEqual(captureStep.env, {
-    GITHUB_TOKEN: "${{ github.token }}",
+    GITHUB_TOKEN: `\${{ github.token }}`,
     NATIVE_EVIDENCE_SUMMARY_CAPTURE_PATH:
-      "${{ runner.temp }}/native-evidence-summary-capture.md",
+      `\${{ runner.temp }}/native-evidence-summary-capture.md`,
   });
   assert.match(
     workflowText,
