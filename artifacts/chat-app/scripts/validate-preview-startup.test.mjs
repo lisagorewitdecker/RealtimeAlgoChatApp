@@ -1216,7 +1216,7 @@ test(
     let request;
     globalThis.fetch = async (url, options) => {
       request = { url, options };
-      return new Promise((resolve, reject) => {
+      return new Promise((_, reject) => {
         options.signal.addEventListener(
           "abort",
           () => {
@@ -2018,7 +2018,7 @@ test(
     let request;
     globalThis.fetch = async (url, options) => {
       request = { url, options };
-      return new Promise((resolve, reject) => {
+      return new Promise((_, reject) => {
         options.signal.addEventListener(
           "abort",
           () => reject(new Error("fetch aborted")),
@@ -2067,7 +2067,7 @@ test(
           { status: 200 },
         );
       }
-      return new Promise((resolve, reject) => {
+      return new Promise((_, reject) => {
         options.signal.addEventListener(
           "abort",
           () => reject(new Error("fetch aborted")),
