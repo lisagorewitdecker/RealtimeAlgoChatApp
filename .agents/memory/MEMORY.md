@@ -269,6 +269,11 @@
 - [Image parser vulnerability](image-parser-vulnerability.md) — image-size has no released fix for malformed-box loops; retain the pnpm guard patch until upstream publishes one.
 - [Sentry connector API-key quirk](sentry-connector-api-key-quirk.md) — its Management API can be unusable (bad host config); use the DSN directly for errors and Cron Monitor uptime alerts.
 - [Drizzle schema completeness](drizzle-schema-completeness.md) — every live DB table needs a pgTable export or the post-merge `push --force` will silently drop it.
+- [Socket.IO Sentry alerting](socket-sentry-alerting.md) — rate/cooldown
+  counters turn failure floods into one issue; async event handlers need their
+  own try/catch (Express integration misses them).
+- [React Native heading semantics](rn-heading-semantics.md) — pair native header semantics with web role and aria-level because RN 0.81 omits accessibilityLevel from Text typings.
+- [Static-server SAST taint](static-server-sast-taint.md) — request-time filesystem reads remain flagged despite boundary checks; serve only startup-indexed assets.
 - [Socket.IO Sentry alerting](socket-sentry-alerting.md) — rate/cooldown counters turn failure floods into one issue; async event handlers need their own try/catch (Express integration misses them).
 - [React Native heading semantics](rn-heading-semantics.md) — pair native
   header semantics with web role and aria-level because RN 0.81 omits
@@ -298,6 +303,17 @@
   Clerk token callbacks out of stateful loading-effect dependencies to prevent
   request storms.
 - [Cryptocurrency boundary](cryptocurrency-boundary.md) — do not add cryptocurrency payments or wallet features; preserve cryptographic E2EE separately.
+- [Validation workflow concurrency](validation-workflow-concurrency.md) — completion validation launches every check at once; heavy commands stay behind the shared flock prefix.
+- [Artifact cold-start readiness](artifact-startup-after-pnpm-pruning.md) —
+  open the port before async asset preloading; bypassing the package manager
+  alone is insufficient.
+- [Mobile release browser validation](mobile-release-browser-validation.md) — proxied E2E flows need a healthy, freshly served Expo/API pair; restart the one-shot API dev server after any rebase.
+- [Node preload worker inheritance](node-preload-worker-inheritance.md) — `--import` preloads also run in worker threads; guard process-wide initialization to the main thread.
+- [Node preload paths](node-preload-paths.md) — hosted monorepo artifact commands run from the workspace root; make entrypoint and `--import` paths root-relative.
+- [React Native async act](react-native-async-act.md) — flush provider effects
+  with a separate async act after render; nesting render in async act can
+  unmount RNTL trees.
+- [Orval API codegen normalization](orval-api-codegen-normalization.md) — discard Orval's wildcard Zod export after generation so explicit package exports stay stable.
 - [Validation workflow concurrency](validation-workflow-concurrency.md) —
   completion validation launches every check at once; heavy commands stay behind
   the shared flock prefix.
@@ -345,7 +361,9 @@
   read-only paths (skipped as root).
 - [Native gate diagnostic runs](native-gate-diagnostic-runs.md) — any device override marks the whole run diagnostic-only; CI refuses it loudly; evidence requires run_mode=release-gate.
 - [Native evidence review record](native-evidence-review-record.md) — a missing human review is reported, not fatal (the CI gate runs before anyone can review); rejected or mismatched records fail.
-- [Native evidence diagnostic privacy](native-evidence-diagnostic-privacy.md) — release failures name fields and artifact paths without echoing parsed fixture values or parser snippets.
+- [Native evidence diagnostic privacy](native-evidence-diagnostic-privacy.md) —
+  release failures name fields and artifact paths without echoing parsed
+  fixture values or parser snippets.
 - [Candidate-bound release evidence](candidate-bound-release-evidence.md) — checks for prebuilt mobile candidates must verify evidence inside each binary, not current release-time secrets.
 - [Expo Go native modules & preview 502s](expo-go-native-modules.md) — gate native SDK init outside Expo Go; orphan `expo start` blocks the port prompt; iOS Go 57 needs a signed-in dev server; the Go home screen means the launch dropped.
 - [Expo Go secure-store keys](expo-go-native-modules.md) — expo-secure-store
@@ -357,6 +375,10 @@
   before planning a release run.
 - [Stale node_modules after merge](physical-device-evidence.md) — Jest "Cannot find module '@babel/generator'" means node_modules lags the lockfile; reinstall frozen and offline.
 - [Release-run preconditions live on GitHub](physical-device-evidence.md) — audit environments/secrets/vars/runners/runs by name via the GitHub connection before planning a release run.
+- [Stale node_modules after merge](physical-device-evidence.md) — Jest "Cannot find module '@babel/generator'" means node_modules lags the lockfile; reinstall frozen and offline.
+- [Preview device debugging](preview-device-debugging.md) — in-container probes
+  bypass the public edge; use the opt-in Metro request log and check the live
+  manifest date first.
 - [Stale node_modules after merge](physical-device-evidence.md) — Jest "Cannot
   find module '@babel/generator'" means node_modules lags the lockfile;
   reinstall frozen and offline.
@@ -379,7 +401,9 @@
   masking is per-job and exact-match only; every workflow summary writer needs
   an inventoried sentinel contract.
 - [Node sleeping fixtures](node-sleeping-fixtures.md) — an unresolved top-level promise does not keep Node alive; use an active handle for signal-waiting fixtures.
-- [Test-only environment controls](generated-check-fault-controls.md) — faults and fixture paths need explicit subprocess opt-ins; harnesses strip them from the base env and prove inertness.
+- [Test-only environment controls](generated-check-fault-controls.md) — faults
+  and fixture paths need explicit subprocess opt-ins; harnesses strip them
+  from the base env and prove inertness.
 - [GitHub PR template discovery](github-pr-template-discovery.md) — validate templates on the live default branch; a correct workspace copy does not populate GitHub’s new-PR form.
 - [pnpm drizzle-orm / OpenTelemetry duplication](pnpm-drizzle-otel-duplication.md) — otel-api-dependent packages beside drizzle-orm can fork type instances; converge peers, don't externalize otel.
 - [Hook rollback replacement](hook-rollback-replacement.md) — restore preserved hooks by atomic replacement; never remove the active hook before restoration succeeds.
@@ -390,6 +414,17 @@
   hooks by atomic replacement; never remove the active hook before restoration
   succeeds.
 - [Shared hook transaction locks](shared-hook-transaction-locks.md) — publish, release, and reclaim cross-process hook locks with atomic renames; preserve prior registrations on rollback.
+- [Playwright runtime setup](playwright-runtime-setup.md) — declare Chromium
+  libraries through Replit Nix and launch once before diagnostics so setup
+  failures are unmistakable.
+- [Evidence metadata duplicate detection](evidence-duplicate-detection.md) — detect duplicate keys generically (no allowlists) and mirror the producer's full field set in fixtures.
+- [Task merge against a transient main](task-merge-unrelated-main.md) — no merge base, or a related tip that fails its own tests and contradicts GitHub main: abandon and retry, never resolve.
+- [Account-access lookup deadline](account-access-retry-budget.md) — one hard deadline for waits and in-flight Clerk requests, under Socket.IO’s 45 s connect timeout; pass capped hints to clients.
+- [Relocatable Pino bundles](relocatable-pino-bundles.md) — esbuild-plugin-pino can bake the build machine’s absolute output path into workers; rewrite and validate bundle-relative paths.
+- [Browser E2E phase budgets](e2e-phase-budgets.md) — bound and label external
+  setup, navigation, assertions, and teardown separately so stalls identify
+  their real phase.
+- [Chat App source-rule checks](chat-app-source-rule-checks.md) — conventions hidden by mocked dependencies need fast AST-based source rules: trace rendered code, follow local imports one hop, and reject what cannot be resolved.
 - [Playwright runtime setup](playwright-runtime-setup.md) — declare Chromium libraries through Replit Nix and launch once before diagnostics so setup failures are unmistakable.
 - [Evidence metadata duplicate detection](evidence-duplicate-detection.md)
   — detect duplicate keys generically (no allowlists) and mirror the
@@ -629,8 +664,12 @@
   live-deletion guards so stale recovery cannot revive them.
 - [Sentry native upload policy](sentry-native-upload-policy.md) — declare `@sentry/cli` in the app (pnpm) and apply the Sentry Expo plugin only when a token exists; iOS phase cannot soft-fail.
 - [GitHub candidate ID migration](github-candidate-id-migration.md) — secret values cannot be read through the API; migrate only from exact installed-device build records.
-- [macOS scripts on bash 3.2](macos-script-bash-compat.md) — avoid bash 4+ constructs; build real bash 3.2.57 (recipe inside), run the iOS-runner suites under it, and keep them Mac-safe (uname stub, shasum).
-- [Self-hosted runner provisioning](self-hosted-runner-provisioning.md) — digest short-circuits, token via ACTIONS_RUNNER_INPUT_TOKEN, verify .runner before svc.sh; macOS svc.sh/simctl facts inside.
+- [macOS scripts on bash 3.2](macos-script-bash-compat.md) — avoid bash 4+
+  constructs; build real bash 3.2.57 (recipe inside), run the iOS-runner suites
+  under it, and keep them Mac-safe (uname stub, shasum).
+- [Self-hosted runner provisioning](self-hosted-runner-provisioning.md) —
+  digest short-circuits, token via ACTIONS_RUNNER_INPUT_TOKEN, verify .runner
+  before svc.sh; macOS svc.sh/simctl facts inside.
 - [Hosted redaction probes](hosted-redaction-probes.md) — Actions echoes env and run scripts; assemble hostile values from encoded literals before capturing checker streams.
 - [Hosted regression independence](hosted-regression-independence.md) —
   controlled hosted release checks should run without protected credentials or
