@@ -27,12 +27,16 @@ the QR code or workflow output.
 
 ## Handoff result
 
-| Handoff boundary | Status | Evidence |
-| --- | --- | --- |
-| Public Android manifest reachability | **PASS** | HTTP 200; 2,801 bytes; manifest had `createdAt`, `runtimeVersion`, `launchAsset`, and a signed-in `extra.expoGo.username` |
-| Local Android handoff probe | **PASS** | Manifest HTTP 200 (2,801 bytes); bundle HTTP 200 (16,135,073 bytes) |
-| Expo Go launch on a physical device | **BLOCKED** | No phone or simulator was available; no model, OS, or Expo Go version can be recorded |
-| Server-side native request evidence | **BLOCKED** | The redacted iOS launch probe reported `NO_DEVICE`; zero Expo Go inspector connections and zero request-log lines |
+- **Public Android manifest reachability — PASS:** HTTP 200; 2,801 bytes;
+  manifest had `createdAt`, `runtimeVersion`, `launchAsset`, and a signed-in
+  `extra.expoGo.username`.
+- **Local Android handoff probe — PASS:** Manifest HTTP 200 (2,801 bytes);
+  bundle HTTP 200 (16,135,073 bytes).
+- **Expo Go launch on a physical device — BLOCKED:** No phone or simulator
+  was available; no model, OS, or Expo Go version can be recorded.
+- **Server-side native request evidence — BLOCKED:** The redacted iOS launch
+  probe reported `NO_DEVICE`; zero Expo Go inspector connections and zero
+  request-log lines.
 
 The local preview validator also recorded:
 
