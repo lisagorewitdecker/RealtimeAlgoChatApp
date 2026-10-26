@@ -1,4 +1,4 @@
-/* jshint esversion: 11, node: true */
+/* jshint esversion: 2020, node: true */
 
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
