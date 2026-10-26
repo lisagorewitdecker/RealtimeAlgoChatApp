@@ -24,13 +24,20 @@ no files and was not merged.
 
 ## Acceptance result
 
-| Check | Status | Evidence |
-| --- | --- | --- |
-| A controlled push runs the API workflow | PASS | Run `#35528481563` reports `event: push`, `head_branch: development`, `head_sha: f780f13d…`, workflow path `.github/workflows/api-codegen.yml`, and conclusion `success`. |
-| The push has no pull-request metadata | PASS | The hosted run reports `pull_requests: []`. |
-| Generated-client validation succeeds | PASS | The `Verify generated API clients` job step completed with conclusion `success`. |
-| API contract compatibility succeeds without PR metadata | PASS | The `Check API contract compatibility` job step completed with conclusion `success` on the push run. |
-| The post-merge enforcement decision is documented | PASS | The workflow states that push compatibility enforcement is skipped because breaking changes were enforced on the pull request before merge, and that the reason is printed in the log and `GITHUB_STEP_SUMMARY`. |
+- **A controlled push runs the API workflow: PASS.** Run `#35528481563` reports
+  `event: push`, `head_branch: development`, `head_sha: f780f13d…`, workflow
+  path `.github/workflows/api-codegen.yml`, and conclusion `success`.
+- **The push has no pull-request metadata: PASS.** The hosted run reports
+  `pull_requests: []`.
+- **Generated-client validation succeeds: PASS.** The `Verify generated API
+  clients` job step completed with conclusion `success`.
+- **API contract compatibility succeeds without PR metadata: PASS.** The
+  `Check API contract compatibility` job step completed with conclusion
+  `success` on the push run.
+- **The post-merge enforcement decision is documented: PASS.** The workflow
+  states that push compatibility enforcement is skipped because breaking
+  changes were enforced on the pull request before merge, and that the reason
+  is printed in the log and `GITHUB_STEP_SUMMARY`.
 
 The GitHub connection can read run and step metadata but cannot download the
 job log (`GET .../actions/jobs/106124725893/logs` returned `403`). The
@@ -41,4 +48,4 @@ documented post-merge decision without reproducing privileged log contents.
 
 - The temporary `development` ref was deleted with `204 No Content`.
 - A follow-up `GET /git/ref/heads/development` returned `404 Not Found`.
-- The verification commit was not merged.
+- The verification commit remained unmerged.
