@@ -3,6 +3,8 @@ name: Shell evidence helper discovery
 description: Static release-contract checks for evidence readers implemented in shell heredocs and dynamically imported local JavaScript helpers.
 ---
 
+# Shell evidence helper discovery
+
 Evidence parsing embedded in a shell heredoc must be checked as part of the
 shell entry point's local helper closure. Only shell scripts explicitly
 inventoried as evidence readers should contribute embedded JSON parsing;
