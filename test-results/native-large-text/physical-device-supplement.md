@@ -122,6 +122,15 @@ physical-device evidence.
 
 ### Evidence inventory
 
+- **iOS:** Available evidence: `ios/runner-check.txt` only. Review record:
+  None —
+  diagnostics are not evidence. Physical-device result: Blocked before
+  simulator/device discovery because the Linux workspace lacks Maestro and iOS
+  tooling.
+- **Android:** Available evidence: `android/runner-check.txt` only. Review
+  record: None — diagnostics are not evidence. Physical-device result: Blocked
+  before device discovery because the workspace lacks Maestro, Android SDK
+  tooling, Java, and `adb`.
 - **iOS**
   - Available evidence: `ios/runner-check.txt` only.
   - Review record: none; diagnostics are not evidence.
@@ -160,6 +169,23 @@ The documented pass requires the same accessibility settings on both platforms:
 portrait orientation, text size 140%, High contrast on, and Reduced motion on.
 The following shared flows therefore have no verified platform parity yet:
 
+- **Sign-in, client-trust verification, and password reset:** iOS: Not run;
+  Android: Not run. Required review evidence: Wrapping, scroll reachability,
+  focused input above keyboard, and trust/reset actions.
+- **Setup with invalid and valid display names:** iOS: Not run; Android: Not
+  run. Required review evidence: Error and hint visibility, keyboard-safe Sign
+  out and Enter workspace actions.
+- **Room create/join and room-key warning:** iOS: Not run; Android: Not run.
+  Required review evidence: Wrapped retry label and reachable submit action.
+- **Room members, long names, multiline composer, and moderation:** iOS: Not
+  run; Android: Not run. Required review evidence: Header/member actions,
+  composer, send action, and keyboard-obscured controls.
+- **Call permissions, loading/retry states, and embedded controls:** iOS: Not
+  run; Android: Not run. Required review evidence: Camera/microphone prompts,
+  readable blocked copy, retry, and independent call-surface screenshots.
+- **Profile save and accessibility settings:** iOS: Not run; Android: Not run.
+  Required review evidence: Full-page scrolling, saved settings, and reachable
+  save action.
 - **Sign-in, client-trust verification, and password reset**
   - iOS and Android: not run.
   - Review: wrapping, scroll reachability, focused input above keyboard, and
