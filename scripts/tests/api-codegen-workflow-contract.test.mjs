@@ -181,7 +181,7 @@ test("API codegen workflow checks out full history for generated-client validati
   );
   assert.equal(
     checkoutStep.with?.ref,
-    "${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}",
+    `\${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}`,
     "the API codegen workflow checkout must use the submitted pull request head so fork reports describe the revision being reviewed instead of a synthetic merge ref",
   );
   assert.equal(
@@ -198,7 +198,7 @@ test("API compatibility receives the current pull request description", () => {
   );
   assert.equal(
     compatibilityStep.env?.API_BREAKING_CHANGE_PR_BODY,
-    "${{ github.event.pull_request.body }}",
+    `\${{ github.event.pull_request.body }}`,
     "the compatibility command must receive the current pull request body so description edits refresh its decision",
   );
 });
@@ -527,7 +527,7 @@ test("generated-client drift evidence is complete in the reviewer-visible summar
   );
   assert.ok(
     driftSummarySource.includes(
-      "Regenerate with \\`${regenerationCommand}\\` and commit the generated output.",
+      `Regenerate with \\\`\${regenerationCommand}\\\` and commit the generated output.`,
     ),
     "the summary must include the regeneration command reviewers need",
   );
@@ -585,7 +585,7 @@ test("generated-client drift evidence is published where reviewers need no log a
   );
   assert.equal(
     driftEvidenceStep.env?.API_CODEGEN_DRIFT_HEAD_SHA,
-    "${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}",
+    `\${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}`,
     "the published evidence must use the same fork-safe submitted revision as checkout, with a push fallback",
   );
 
@@ -656,14 +656,14 @@ test("generated-client drift publication runs in the trusted workflow", () => {
     downloadStep?.uses,
     "actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093",
   );
-  assert.equal(downloadStep?.with?.["run-id"], "${{ github.event.workflow_run.id }}");
+  assert.equal(downloadStep?.with?.["run-id"], `\${{ github.event.workflow_run.id }}`);
   assert.equal(
     publishStep?.run,
     "node lib/api-spec/scripts/publish-drift-check.mjs",
   );
   assert.equal(
     publishStep?.env?.API_CODEGEN_DRIFT_HEAD_SHA,
-    "${{ github.event.workflow_run.head_sha }}",
+    `\${{ github.event.workflow_run.head_sha }}`,
   );
 });
 
