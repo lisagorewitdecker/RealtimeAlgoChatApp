@@ -20,3 +20,12 @@ evidence.
 feature-specific failure capability together in the CI job. Keep
 Clerk/database imports inside the production test after its prerequisite skip,
 and prove the controlled run with those credentials unset.
+**Why:** Playwright still executes a configured global setup project even
+when a grep selects a local test. A top-level database import can therefore
+fail on a missing `DATABASE_URL` before the controlled browser failure
+creates any evidence.
+
+**How to apply:** Set the diagnostic setup-skip capability and the
+feature-specific failure capability together in the CI job. Keep
+Clerk/database imports inside the production test after its prerequisite
+skip, and prove the controlled run with those credentials unset.
