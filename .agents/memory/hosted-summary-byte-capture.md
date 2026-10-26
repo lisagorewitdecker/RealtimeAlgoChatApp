@@ -1,6 +1,8 @@
 ---
 name: Hosted summary byte capture
-description: How hosted regressions expose exact validated summary bytes without relying on signed-in job summaries
+description: >-
+  How hosted regressions expose exact validated summary bytes without relying
+  on signed-in job summaries
 ---
 
 When reviewers need the exact bounded bytes produced by a hosted regression,
