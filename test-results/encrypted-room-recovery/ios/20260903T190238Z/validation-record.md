@@ -1,8 +1,8 @@
 # Encrypted-room recovery validation — iOS
 
-**Overall result:** BLOCKED — required physical-device validation could not run  
+**Overall result:** BLOCKED — physical-device validation not run
 **Recorded at (UTC):** 2026-09-03T19:02:38Z  
-**Source revision used for automated checks:** c3abfdbb1f0db194c38eef4df027f00f08660955  
+**Automated-check revision:** c3abfdbb1f0db194c38eef4df027f00f08660955
 **Backend target:** Replit development API (`REPLIT_DEV_DOMAIN`); no production data was used.
 
 ## Release and device metadata
@@ -26,16 +26,16 @@ substituted for a physical phone.
 
 | Check | Result | Evidence / blocker |
 | --- | --- | --- |
-| Phone A creates encrypted room | BLOCKED | No reachable iOS device or installed release build |
-| Phone B registers its public key before joining | BLOCKED | No reachable iOS device or installed release build |
-| Key envelope exchange and usable decryption | BLOCKED | No two-device session |
-| Live/history message and sandbox-state decryption | BLOCKED | No two-device session; no plaintext recorded |
-| Force-close/reopen restores the persisted key | BLOCKED | SecureStore/Keychain behavior not exercised |
-| Temporary network loss and registration retry | BLOCKED | No device/network exercise |
+| Phone A creates encrypted room | BLOCKED | No iOS device or build |
+| Phone B registers its key before join | BLOCKED | No iOS device or build |
+| Envelope exchange/decryption | BLOCKED | No two-device session |
+| Live/history and sandbox decryption | BLOCKED | No session; no plaintext |
+| Key persistence after restart | BLOCKED | SecureStore/Keychain untested |
+| Network loss and registration retry | BLOCKED | No device/network test |
 | No unintended replacement room key | BLOCKED | No device/network exercise |
-| Identity reset/re-registration and fresh envelope | BLOCKED | No physical identity reset exercise |
-| Non-participant cannot obtain a usable envelope | BLOCKED | No physical access-boundary exercise |
-| Encrypted-room assistant remains unavailable | BLOCKED | No physical UI/session exercise |
+| Identity reset and fresh envelope | BLOCKED | No physical reset test |
+| Non-participant envelope denial | BLOCKED | No access-boundary test |
+| Encrypted-room assistant unavailable | BLOCKED | No physical UI/session test |
 
 ## Identity-rotation limitation
 
