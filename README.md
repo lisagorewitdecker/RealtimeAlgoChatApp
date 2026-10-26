@@ -14,8 +14,10 @@ Clerk user IDs) can search for accounts and ban or restore access.
 
 This is a pnpm monorepo. The product is split across three artifacts,
 each independently run and previewed:
+This is a pnpm monorepo. The product is split across three artifacts, each
+independently run and previewed:
 
-```
+```text
   artifacts/
   api-server/       Express + Socket.IO backend (auth, rooms, moderation,
                     AI assistant proxy)
@@ -39,6 +41,7 @@ layout and shared packages.
   exposed to the client); using the opt-in helper sends the current sandbox
   HTML/CSS/JS and question readable to Anthropic outside the room's end-to-end
   encryption
+- **AI assistant:** Anthropic Claude, accessed only from the server (never exposed to the client); using the opt-in helper sends the current sandbox HTML/CSS/JS and question readable to Anthropic outside the room's end-to-end encryption
 - **Realtime:** Socket.IO rooms with signed, server-issued room capabilities
 
 ## Running the app
@@ -129,5 +132,9 @@ skill. They are never committed to the repository.
   client-asserted room membership.
 - See `replit.md` for project-specific conventions and decisions as they're
   recorded.
+- Server-resolved Clerk identity always overrides any client-supplied identity claims.
+- Room access is granted only via signed server-issued capabilities, not
+  client-asserted room membership.
+- See `replit.md` for project-specific conventions and decisions as they're recorded.
 
 [![Mobile release accessibility gate](https://github.com/lisagorewitdecker/RealtimeAlgoChatApp/actions/workflows/mobile-release.yml/badge.svg?branch=main)](https://github.com/lisagorewitdecker/RealtimeAlgoChatApp/actions/workflows/mobile-release.yml)
