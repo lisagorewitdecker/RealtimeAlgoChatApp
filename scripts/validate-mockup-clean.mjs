@@ -1,3 +1,4 @@
+/* jshint esversion: 11, node: true */
 import { cp, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
