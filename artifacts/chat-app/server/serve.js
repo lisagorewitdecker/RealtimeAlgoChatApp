@@ -106,7 +106,7 @@ function serveManifest(platform, res) {
 function serveLandingPage(req, res, landingPageTemplate, appName) {
   const forwardedProto = req.headers["x-forwarded-proto"];
   const protocol = forwardedProto || "https";
-  const host = req.headers["x-forwarded-host"] || req.headers["host"];
+  const host = req.headers["x-forwarded-host"] || req.headers.host;
   const baseUrl = `${protocol}://${host}`;
   const expsUrl = `${host}`;
   const pageDescription = `Get ${appName} on your phone: real-time code collaboration, calls, and chat for developers.`;
