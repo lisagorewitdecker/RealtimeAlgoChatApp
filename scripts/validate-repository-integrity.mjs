@@ -146,7 +146,7 @@ function parseJson(source) {
   }
 }
 
-function parseYaml(path, source) {
+function parseYaml(source) {
   try {
     const document = YAML.parseDocument(source.toString("utf8"), {
       prettyErrors: false,
@@ -164,7 +164,7 @@ function parseYaml(path, source) {
   }
 }
 
-function syntaxCheck(path, source, kind) {
+function syntaxCheck(path, kind) {
   const command = kind === "shell" ? "bash" : process.execPath;
   const args = kind === "shell" ? ["-n", path] : ["--check", path];
   const result = spawnSync(command, args, {
@@ -238,7 +238,7 @@ function main() {
     if (problem) {
       failures.push({ path, problem });
     } else {
-      const parseProblem = parseYaml(path, source);
+      const parseProblem = parseYaml(source);
       if (parseProblem) {
         failures.push({ path, problem: parseProblem });
       }
@@ -246,14 +246,14 @@ function main() {
   }
 
   for (const path of shellPaths) {
-    const problem = syntaxCheck(path, null, "shell");
+    const problem = syntaxCheck(path, "shell");
     if (problem) {
       failures.push({ path, problem });
     }
   }
 
   for (const path of javascriptPaths) {
-    const problem = syntaxCheck(path, null, "JavaScript");
+    const problem = syntaxCheck(path, "JavaScript");
     if (problem) {
       failures.push({ path, problem });
     }
