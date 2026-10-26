@@ -22,6 +22,8 @@ simulator and an Android emulator overridden to 320×568 dp.
    - `NATIVE_SMOKE_APP_ID` — installed iOS bundle ID or Android application ID
    - `NATIVE_SMOKE_BUILD_ID` — EAS build ID for the release candidate installed
      on the prepared device
+   - `NATIVE_SMOKE_BUILD_ID` — EAS build ID for the release candidate
+     installed on the prepared device
    - `NATIVE_SMOKE_EMAIL` — dedicated smoke-account email
    - `NATIVE_SMOKE_PASSWORD` — dedicated smoke-account password
    - `NATIVE_SMOKE_DISPLAY_NAME` — optional reusable display name
@@ -178,8 +180,10 @@ runner used by this procedure; update both together when rotating the runner:
 cd /opt/actions-runner
 RUNNER_VERSION=2.337.0
 RUNNER_ARCHIVE="actions-runner-linux-x64-${RUNNER_VERSION}.tar.gz"
+RUNNER_RELEASE=https://github.com/actions/runner/releases/download
+RUNNER_URL="${RUNNER_RELEASE}/v${RUNNER_VERSION}/${RUNNER_ARCHIVE}"
 sudo -u "$RUNNER_USER" curl --fail --location --silent --show-error \
-  "https://github.com/actions/runner/releases/download/v${RUNNER_VERSION}/${RUNNER_ARCHIVE}" \
+  "$RUNNER_URL" \
   --output "$RUNNER_ARCHIVE"
 printf '%s  %s\n' \
   70920811a4f8ad4328818682bca5c6469c1c942fab52448868071d0063816613 \
@@ -207,8 +211,9 @@ remove the token from the shell environment:
 
 ```sh
 cd /opt/actions-runner
+REPOSITORY=lisagorewitdecker/RealtimeAlgoChatApp
 RUNNER_TOKEN="$(gh api --method POST \
-  repos/lisagorewitdecker/RealtimeAlgoChatApp/actions/runners/registration-token \
+  "repos/${REPOSITORY}/actions/runners/registration-token" \
   --jq .token)"
 sudo -u "$RUNNER_USER" -H ./config.sh \
   --unattended \
@@ -442,7 +447,11 @@ directly:
 
 ```sh
 gh api repos/lisagorewitdecker/RealtimeAlgoChatApp/actions/runners \
-  --jq '.runners[] | select(.name == "ios-release-mac") | {name, status, busy, labels: [.labels[].name]}'
+  --jq '
+    .runners[]
+    | select(.name == "ios-release-mac")
+    | {name, status, busy, labels: [.labels[].name]}
+  '
 ```
 
 The result must show `"status": "online"` and all four labels.
@@ -919,7 +928,8 @@ decision=<APPROVED or REJECTED>
 # Keep notes=... for an optional one-line summary, or use this block for
 # detailed findings.
 notes<<END_NOTES
-<optional multi-line findings; headings, bullets, links, and backticks are stored literally>
+<optional multi-line findings; headings, bullets, links, and backticks are
+stored literally>
 END_NOTES
 ```
 
@@ -977,6 +987,27 @@ The flow captures eleven screens, numbered in the order they are exercised:
   Current size 140%, High contrast on, and Reduced motion on.
 - `11-profile-edit-keyboard.png`: Profile display-name edit with the keyboard
   open; the save action is visible.
+- **`01-sign-in-keyboard.png`** — Sign in with credentials typed and the
+  keyboard open: heading and OAuth labels wrap; primary action visible.
+- **`02-password-reset.png`** — Password reset: heading, email input, and Back
+  to sign in visible.
+- **`03-setup-invalid-keyboard.png`** — Setup with a one-character name:
+  validation error, hint, and Sign out visible.
+- **`04-setup-valid-keyboard.png`** — Setup with a valid display name typed:
+  Enter workspace visible.
+- **`05-new-room-create-keyboard.png`** — New room (Create) with a long name
+  typed: submit action visible.
+- **`06-room-keyboard.png`** — Room with a long name, member list open, and a
+  wrapping message composed: call and member actions, composer, send visible.
+- **`07-call-host-and-webview.png`** — Call page inside the native host:
+  embedded WebView, fit confirmation text, and dismiss action visible.
+- **`08-new-room-join-keyboard.png`** — New room (Join) with a room ID typed:
+  submit action visible.
+- **`09-joined-room.png`** — Joined room: header and participant count visible.
+- **`10-profile-accessibility.png`** — Profile accessibility controls reading
+  Current size 140%, High contrast on, and Reduced motion on.
+- **`11-profile-edit-keyboard.png`** — Profile display-name edit with the
+  keyboard open: save action visible.
 
 Open each file at full size and check the same four things on every screen:
 
