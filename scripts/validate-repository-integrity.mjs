@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+/* jshint esversion: 11, node: true */
 
 import { execFileSync, spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
