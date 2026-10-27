@@ -18,6 +18,10 @@ import { fileURLToPath } from "node:url";
 import semver from "semver";
 import YAML from "yaml";
 
+function githubExpression(expression) {
+  return `\${{ ${expression} }}`;
+}
+
 const workspaceRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "../..",
@@ -232,7 +236,7 @@ test("malformed mobile release workflow expressions fail with line-specific diag
       path.join(fixtureRoot, ".github/actionlint.yaml"),
     );
 
-    const malformedExpression = "run-name: ${{ github.ref == }}";
+    const malformedExpression = "run-name: " + githubExpression("github.ref ==");
     const fixtureSource = `${workflowText}\n# malformed expression fixture\n${malformedExpression}\n`;
     const fixturePath = path.join(fixtureWorkflowsDir, "mobile-release.yml");
     writeFileSync(fixturePath, fixtureSource);
@@ -779,7 +783,7 @@ test("credential preflight reports every missing required caller key together wi
   );
   assert.equal(
     publishInputStep?.env?.EAS_TOKEN,
-    "${{ secrets.EAS_TOKEN }}",
+    githubExpression("secrets.EAS_TOKEN"),
     "the publish job must validate its EAS token from the protected environment",
   );
   assert.match(
@@ -818,7 +822,7 @@ test("invalid Node range guard blocks release jobs before setup or publish work"
   );
   assert.equal(
     resolveStep?.with?.["node-version"],
-    "${{ steps.read-node-range.outputs.node_range }}",
+    githubExpression("steps.read-node-range.outputs.node_range"),
     "the resolver must validate the selected package or fixture range",
   );
   const rejectStep = guard.steps?.find(
@@ -826,7 +830,7 @@ test("invalid Node range guard blocks release jobs before setup or publish work"
   );
   assert.equal(
     rejectStep?.if,
-    "${{ always() }}",
+    githubExpression("always()"),
     "the invalid-range diagnostic must run after a resolver failure",
   );
   assert.match(
@@ -1394,12 +1398,15 @@ test("workflow hardening pins actions, runs for every pull request, and bounds d
   );
   assert.equal(
     workflow.concurrency?.group,
-    "mobile-release-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref || github.run_id }}",
+    "mobile-release-" +
+      githubExpression("github.workflow") +
+      "-" +
+      githubExpression("github.event.pull_request.number || github.ref || github.run_id"),
     "duplicate mobile release runs must share a stable concurrency group",
   );
   assert.equal(
     workflow.concurrency?.["cancel-in-progress"],
-    "${{ github.event_name == 'pull_request' }}",
+    githubExpression("github.event_name == 'pull_request'"),
     "only pull request reruns should cancel earlier in-flight runs",
   );
   assert.equal(
@@ -1539,14 +1546,14 @@ test("publish job runs the evidence privacy and submission-boundary regression b
   const privacySummaryStep = publishSteps[privacySummaryIndex];
   assert.equal(
     privacySummaryStep.if,
-    "${{ always() }}",
+    githubExpression("always()"),
     "the native evidence privacy summary must run after a failed privacy regression",
   );
   assert.deepEqual(
     privacySummaryStep.env,
     {
       PRIVACY_RESULT:
-        "${{ steps.native-evidence-privacy.outcome }}",
+        githubExpression("steps.native-evidence-privacy.outcome"),
     },
     "the native evidence privacy summary must use the privacy step outcome",
   );
@@ -1738,10 +1745,10 @@ test("iOS preview evidence runs for every pull request", () => {
     evidenceStep.env,
     {
       IOS_PREVIEW_BASE_SHA:
-        "${{ github.event.pull_request.base.sha }}",
+        githubExpression("github.event.pull_request.base.sha"),
       IOS_PREVIEW_HEAD_SHA:
-        "${{ github.event.pull_request.head.sha }}",
-      REVIEWED_REF: "${{ github.ref }}",
+        githubExpression("github.event.pull_request.head.sha"),
+      REVIEWED_REF: githubExpression("github.ref"),
     },
     "the iOS preview job must compare the pull request base and head",
   );
@@ -1776,7 +1783,7 @@ test("iOS preview evidence runs for every pull request", () => {
     "a public-edge FAIL record must be distinguished in the summary",
   );
   const validationLoopStart = evidenceStep.run.indexOf(
-    'for record_path in "${changed_records[@]}"; do',
+    `for record_path in "\${changed_records[@]}"; do`,
   );
   const validationLoopEnd = evidenceStep.run.indexOf(
     "\ndone",
