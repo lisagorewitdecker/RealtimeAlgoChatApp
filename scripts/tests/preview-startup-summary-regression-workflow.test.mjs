@@ -36,6 +36,10 @@ const validatorPath = path.join(
   "artifacts/chat-app/scripts/validate-preview-startup.mjs",
 );
 
+function githubExpression(expression) {
+  return `\${{ ${expression} }}`;
+}
+
 function extractWorkflowHereDoc(variableName) {
   const match = workflowText.match(
     new RegExp(
@@ -165,7 +169,7 @@ test("hosted preview startup summary regression checks the reviewed revision", (
   assert.equal(job.steps[0].uses, "actions/checkout@v4");
   assert.equal(
     job.steps[0].with.ref,
-    "${{ github.event.pull_request.head.sha || inputs.reviewed_ref }}",
+    githubExpression("github.event.pull_request.head.sha || inputs.reviewed_ref"),
   );
   assert.equal(job.steps[0].with["persist-credentials"], false);
 
@@ -182,7 +186,7 @@ test("hosted preview startup summary regression checks the reviewed revision", (
   const verification = job.steps[4].run;
   assert.deepEqual(job.steps[4].env, {
     REVIEWED_REF:
-      "${{ github.event.pull_request.head.sha || inputs.reviewed_ref }}",
+      githubExpression("github.event.pull_request.head.sha || inputs.reviewed_ref"),
   });
   assert.match(
     verification,
@@ -310,7 +314,7 @@ test("hosted preview startup summary regression checks the reviewed revision", (
 
 test("hosted preview timing evidence covers every supported runner profile", () => {
   const timingJob = workflow.jobs["measure-preview-timing"];
-  assert.equal(timingJob["runs-on"], "${{ matrix.os }}");
+  assert.equal(timingJob["runs-on"], githubExpression("matrix.os"));
   assert.equal(timingJob["timeout-minutes"], 30);
   assert.deepEqual(timingJob.strategy.matrix.os, [
     "ubuntu-latest",
