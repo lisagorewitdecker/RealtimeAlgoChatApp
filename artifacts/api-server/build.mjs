@@ -1,3 +1,5 @@
+/* jshint esversion: 11, node: true */
+
 import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
