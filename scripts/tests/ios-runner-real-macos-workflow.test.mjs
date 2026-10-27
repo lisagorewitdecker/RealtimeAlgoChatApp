@@ -154,7 +154,7 @@ test("the harness, the dry run, and the report check run under Apple's /bin/bash
   const checkStep = stepRunning(checker);
   assert.equal(
     checkStep.if,
-    "${{ !cancelled() }}",
+    `\${{ !cancelled() }}`,
     "the report check must run (and quote the transcript) even when the dry run step failed",
   );
   assert.match(

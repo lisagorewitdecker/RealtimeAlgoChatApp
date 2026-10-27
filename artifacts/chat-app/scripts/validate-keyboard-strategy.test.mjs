@@ -30,6 +30,12 @@ const execFileAsync = promisify(execFile);
 const packageRoot = path.resolve(import.meta.dirname, "..");
 const scriptPath = path.join(packageRoot, "scripts/validate-keyboard-strategy.mjs");
 
+test("declares its supported syntax version for JSHint", () => {
+  const source = readFileSync(scriptPath, "utf8");
+
+  assert.match(source, /^\/\* jshint esversion: 11, node: true \*\//);
+});
+
 function scan(file, source) {
   return scanKeyboardStrategySource({ file, source, packageRelativePath: file });
 }
