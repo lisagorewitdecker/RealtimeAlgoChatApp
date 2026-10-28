@@ -3,7 +3,9 @@
 **Result:** FAIL for the "open an encrypted room" step on the currently published
 candidate. This is a single-phone, user-reported observation against the
 production backend; it is **not** a substitute for the two-phone acceptance pass
-and does not change the BLOCKED status in `../20260910T165152Z/validation-record.md`.  
+and does not change the BLOCKED status in
+`../20260910T165152Z/validation-record.md`.
+
 **Recorded at (UTC):** 2026-09-10T18:08:51Z  
 **Source:** the workspace owner, reporting from their own phone during this
 session (platform inferred as iOS from an Expo Go screenshot shared in the same
@@ -12,17 +14,21 @@ session; phone model and OS version were not collected).
 
 ## Candidate and backend metadata (non-sensitive)
 
-| Item | Value |
-| --- | --- |
-| Distribution | Expo Go project link served by the published deployment (`exps://devalgochat.com`), not a store/EAS binary |
-| Published manifest ID | `5887e111-851a-49d0-b8d4-4f937f52f8b0` |
-| Published bundle created (UTC) | 2026-09-08T20:08:33Z |
-| Published runtime | `exposdk:54.0.0` (the workspace project is on Expo SDK 57.0.0; the SDK 57 publish has not been promoted) |
-| Development preview version labels | Expo SDK 57.0.0 project; Expo Go client reported `57.0.5` in its user agent |
-| Candidate includes native secure-storage key fix (`dddebef`, 2026-09-10)? | **No** — the published iOS bundle still contains the literal storage key template `devstudio_roomkey:${userId}:${roomId}` and none of the fix's strings |
-| Backend | Production deployment (`https://devalgochat.com`, autoscale) |
-| Accounts | The owner's own account; no test-account labels apply |
-| Room plaintext / screenshots of room content | None collected |
+- **Distribution:** Expo Go project link served by the published deployment
+  (`exps://devalgochat.com`), not a store/EAS binary.
+- **Published manifest ID:** `5887e111-851a-49d0-b8d4-4f937f52f8b0`
+- **Published bundle created (UTC):** 2026-09-08T20:08:33Z
+- **Published runtime:** `exposdk:54.0.0`; the workspace project is on Expo SDK
+  57.0.0, and that publish has not been promoted.
+- **Development preview version labels:** Expo SDK 57.0.0 project; Expo Go
+  client reported `57.0.5` in its user agent.
+- **Candidate includes native secure-storage key fix (`dddebef`, 2026-09-10)?:**
+  **No** — the published iOS bundle still contains the literal storage key
+  template `devstudio_roomkey:${userId}:${roomId}` and none of the fix's
+  strings.
+- **Backend:** Production deployment (`https://devalgochat.com`, autoscale)
+- **Accounts:** The owner's own account; no test-account labels apply
+- **Room plaintext / screenshots of room content:** None collected
 
 ## Observed behavior (as reported)
 
@@ -32,12 +38,15 @@ No error, retry, or timeout is shown.
 
 ## Backend checks performed from the workspace (2026-09-10 ≈17:59–18:02 UTC)
 
-| Check | Result |
-| --- | --- |
-| `GET /api/healthz` on the production domain | 200 (`{"status":"ok"}`), 0.16–1.5 s |
-| Socket.IO handshake, HTTP long-polling, path `/api/socket.io` | 200, open packet returned |
-| Socket.IO handshake, WebSocket, path `/api/socket.io` | opened in ~270 ms, open packet returned |
-| Deployment log stream | empty for the whole retention window (`fetchDeploymentLogs` found nothing), so no server-side evidence is available either way |
+- **`GET /api/healthz` on the production domain:** 200
+  (`{"status":"ok"}`), 0.16–1.5 s
+- **Socket.IO handshake, HTTP long-polling, path `/api/socket.io`:** 200, open
+  packet returned
+- **Socket.IO handshake, WebSocket, path `/api/socket.io`:** opened in ~270 ms,
+  open packet returned
+- **Deployment log stream:** empty for the whole retention window
+  (`fetchDeploymentLogs` found nothing), so no server-side evidence is available
+  either way
 
 The production API and realtime transport were reachable and healthy. Nothing
 indicates a backend cause.

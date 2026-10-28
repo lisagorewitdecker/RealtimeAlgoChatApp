@@ -1,3 +1,5 @@
+/* jshint esversion: 11, node: true */
+
 // Source-level guard for the Chat App's single keyboard strategy.
 //
 // replit.md ("Keyboard handling on native has one strategy") records the rule:

@@ -1,9 +1,9 @@
 # Migrating Expo UI to RealtimeAlgoChatApp Design System
 
 Read `artifacts/realtime-algo-chat-design-system/docs/AGENTS.md` and
-`artifacts/realtime-algo-chat-design-system/docs/consuming-expo.md` first. Use this guide
-when an Expo app, including a fresh scaffold, has local theme, hooks, fonts, or
-product-agnostic component implementations.
+`artifacts/realtime-algo-chat-design-system/docs/consuming-expo.md` first. Use
+this guide when an Expo app, including a fresh scaffold, has local theme, hooks,
+fonts, or product-agnostic component implementations.
 
 ## Rewrite theme and font imports
 
@@ -15,8 +15,8 @@ file before deleting anything.
   `@workspace/realtime-algo-chat-design-system/lib/native-theme` and
   `@workspace/realtime-algo-chat-design-system/hooks/use-colors`.
 - Rewrite the root layout to use
-  `@workspace/realtime-algo-chat-design-system/hooks/use-fonts` while preserving its
-  SplashScreen gating.
+  `@workspace/realtime-algo-chat-design-system/hooks/use-fonts` while
+  preserving its SplashScreen gating.
 - Delete app-local `constants/colors.ts` and `hooks/useColors.ts` after every
   import points at this package. Do not leave compatibility re-exports.
 - Remove local palette interfaces, token mappings, font registrations, and
@@ -46,5 +46,5 @@ Inventory inline and app-local styled controls before migrating screens.
   fonts, and one package primitive before presenting the app.
 
 Migration is complete when Expo imports every shared visual primitive, theme,
-and hook directly from `@workspace/realtime-algo-chat-design-system` and retains only
-product-specific UI compositions locally.
+and hook directly from `@workspace/realtime-algo-chat-design-system` and
+retains only product-specific UI compositions locally.
