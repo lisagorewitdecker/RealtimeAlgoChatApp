@@ -1,3 +1,5 @@
+/* jshint esversion: 11, node: true */
+
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { readdirSync, readFileSync, statSync } from "node:fs";
@@ -27,6 +29,12 @@ import {
 const execFileAsync = promisify(execFile);
 const packageRoot = path.resolve(import.meta.dirname, "..");
 const scriptPath = path.join(packageRoot, "scripts/validate-keyboard-strategy.mjs");
+
+test("declares its supported syntax version for JSHint", () => {
+  const source = readFileSync(scriptPath, "utf8");
+
+  assert.match(source, /^\/\* jshint esversion: 11, node: true \*\//);
+});
 
 function scan(file, source) {
   return scanKeyboardStrategySource({ file, source, packageRelativePath: file });

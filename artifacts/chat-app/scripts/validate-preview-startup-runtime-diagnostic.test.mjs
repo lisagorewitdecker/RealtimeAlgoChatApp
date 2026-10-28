@@ -1,3 +1,5 @@
+/* jshint esversion: 11, node: true */
+
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 import {
@@ -22,6 +24,10 @@ import {
 
 const scriptsDirectory = import.meta.dirname;
 const packageRoot = join(scriptsDirectory, "..");
+const previewRuntimeValidatorPath = join(
+  scriptsDirectory,
+  "validate-preview-runtime.mjs",
+);
 const validatorPath = join(scriptsDirectory, "validate-preview-startup.mjs");
 const fixturePath = join(
   scriptsDirectory,
@@ -244,6 +250,12 @@ const fixtures = [
     libraryIdentifier: "libgtk-3-0.dll",
   },
 ];
+
+test("declares its supported syntax version for JSHint", () => {
+  const source = readFileSync(previewRuntimeValidatorPath, "utf8");
+
+  assert.match(source, /^\/\* jshint esversion: 11, node: true \*\//);
+});
 
 test("live and captured preview validation report the same diagnosis for every loader format", () => {
   const temporaryDirectory = mkdtempSync(
