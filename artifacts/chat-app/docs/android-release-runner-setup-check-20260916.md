@@ -12,26 +12,47 @@ runner, and no credential value was read or written while producing it.
 
 ## Metadata
 
-| Field | Result |
-| --- | --- |
-| Check time (UTC) | 2026-09-16 16:00:00 |
-| App | Chat App |
-| Workspace revision | `2b34bda` (local `main`) |
-| Workflow under test | `.github/workflows/mobile-release.yml` (Android native release job) |
-| Required runner labels | `self-hosted`, `linux`, `android`, `smallest-simulator` |
-| Required runner tooling | Node 24, pnpm `10.26.1`, `adb`, `aapt2`, prepared small Android emulator, Maestro |
-| Live GitHub runner count | 0 (see evidence below) |
+- Check time (UTC): 2026-09-16 16:00:00
+- App: Chat App
+- Workspace revision: `2b34bda` (local `main`)
+- Workflow under test: `.github/workflows/mobile-release.yml`
+  (Android native release job)
+- Required runner labels: `self-hosted`, `linux`, `android`,
+  `smallest-simulator`
+- Required runner tooling: Node 24, pnpm `10.26.1`, `adb`, `aapt2`, prepared
+  small Android emulator, Maestro
+- Live GitHub runner count: 0 (see evidence below)
 
 ## Acceptance result
 
-| Check | Status | Evidence |
-| --- | --- | --- |
-| Operator setup/check procedure recorded and repeatable | PASS | The Linux runner section of [`native-large-text-device-check.md`](./native-large-text-device-check.md) covers the dedicated `actions` account, user-scoped SDK/AVD/Maestro installs, pinned runner `2.337.0` download with published SHA-256 verification, exact label registration, systemd services for emulator and runner, and GitHub CLI online/label verification. |
-| Emulator lifecycle owned by systemd and boot-gated | PASS | The procedure makes the systemd emulator service the sole emulator owner (no unmanaged `nohup` launch), waits for `sys.boot_completed=1` via `ExecStartPost`, and orders the runner service after the emulator service so jobs are never accepted before Android is booted. |
-| `aapt2` verified by provisioning and release preflight | PASS | `scripts/provision-android-runner.sh` resolves the configured build-tools directory and verifies `aapt2`; `scripts/check-android-release-prerequisites.sh` fails closed when `aapt2` is unavailable. |
-| Companion regression suites | PASS | Android preflight fixtures cover `aapt2`; `check-android-runner-procedure.test.sh` fails if the documented procedure launches an unmanaged emulator or drops the systemd boot ordering; the native large-text readiness suite passes at this revision. |
-| Self-hosted runner registered with required labels | BLOCKED | GitHub `/actions/runners` for the repository returns an empty runner list; this workspace has no Java, Android SDK, `adb`, `emulator`, Maestro, or `/dev/kvm`, so no host here can execute the registration. |
-| Runner online and able to complete the Android job | BLOCKED | No runner exists, so online status, reboot survival, and a real Android job run cannot be demonstrated. |
+- **Operator setup/check procedure recorded and repeatable — PASS.** The
+  procedure is recorded in
+  [`native-large-text-device-check.md`](./native-large-text-device-check.md).
+  It covers the dedicated `actions` account, user-scoped SDK/AVD/Maestro
+  installs, pinned runner `2.337.0` download with published SHA-256
+  verification, exact label registration, systemd services for emulator and
+  runner, and GitHub CLI online/label verification.
+- **Emulator lifecycle owned by systemd and boot-gated — PASS.** The procedure
+  makes the systemd emulator service the sole emulator owner (no unmanaged
+  `nohup` launch), waits for `sys.boot_completed=1` via `ExecStartPost`, and
+  orders the runner service after the emulator service so jobs are never
+  accepted before Android is booted.
+- **`aapt2` verified by provisioning and release preflight — PASS.**
+  `scripts/provision-android-runner.sh` resolves the configured build-tools
+  directory and verifies `aapt2`;
+  `scripts/check-android-release-prerequisites.sh` fails closed when `aapt2`
+  is unavailable.
+- **Companion regression suites — PASS.** Android preflight fixtures cover
+  `aapt2`; `check-android-runner-procedure.test.sh` fails if the documented
+  procedure launches an unmanaged emulator or drops the systemd boot ordering;
+  the native large-text readiness suite passes at this revision.
+- **Self-hosted runner registered with required labels — BLOCKED.** GitHub
+  `/actions/runners` for the repository returns an empty runner list; this
+  workspace has no Java, Android SDK, `adb`, `emulator`, Maestro, or `/dev/kvm`,
+  so no host here can execute the registration.
+- **Runner online and able to complete the Android job — BLOCKED.** No runner
+  exists, so online status, reboot survival, and a real Android job run cannot
+  be demonstrated.
 
 ## Exact workspace blocking evidence
 
