@@ -1,7 +1,12 @@
 ---
 name: Preload modules must not build transport-backed loggers
-description: How a static logger import in the Sentry preload produced an unbounded worker-thread chain that OOM-killed the whole workspace in development.
+description: >-
+  How a static logger import in the Sentry preload produced an unbounded
+  worker-thread chain that OOM-killed the whole workspace in development.
 ---
+
+# Preload modules must not build transport-backed loggers
+
 Nothing in a `--import` preload may execute off the main thread — not even a
 static import whose module constructs a pino logger with a `transport`.
 
@@ -15,6 +20,7 @@ log output, was killed at 10 GB, and repeatedly took the container down
 has no transport when `NODE_ENV=production`.
 
 **How to apply:**
+
 - Keep the `isMainThread` check first and load anything with side effects
   (loggers, transports, pools) behind it with a dynamic `await import(...)`.
 - A dev process that starts fine, serves requests, then silently balloons
