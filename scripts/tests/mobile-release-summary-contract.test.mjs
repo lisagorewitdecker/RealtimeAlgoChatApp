@@ -2473,8 +2473,7 @@ test("hosted native evidence regression preserves iOS when Android artifact is m
       const fixture = runStep(fixtureStep);
       assert.equal(fixture.status, 0, fixture.stderr);
       const downloadPath = downloadStep.with.path.replace(
-        "\${{ runner.temp }}",
-        "$" + "{{ runner.temp }}",
+        "${{ runner.temp }}",
         runnerTemp,
       );
       mkdirSync(downloadPath, { recursive: true });
