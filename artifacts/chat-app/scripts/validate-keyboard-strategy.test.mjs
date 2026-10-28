@@ -1,4 +1,4 @@
-/* jshint esversion: 2020, node: true */
+/* jshint esversion: 11, node: true */
 
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
@@ -34,6 +34,10 @@ test("the keyboard strategy validator declares its supported JSHint syntax versi
   const source = readFileSync(scriptPath, "utf8");
 
   assert.match(source, /^\/\* jshint esversion: 2020, node: true \*\//);
+test("declares its supported syntax version for JSHint", () => {
+  const source = readFileSync(scriptPath, "utf8");
+
+  assert.match(source, /^\/\* jshint esversion: 11, node: true \*\//);
 });
 
 function scan(file, source) {
