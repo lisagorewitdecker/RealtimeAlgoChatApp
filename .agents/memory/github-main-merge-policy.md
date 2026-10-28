@@ -3,6 +3,8 @@ name: Merging GitHub main into the workspace
 description: How to judge GitHub-side commits (Copilot autofix PRs) when origin/main diverges from the workspace, and the worktree recipe that lets the merged tree be fully validated before main moves.
 ---
 
+# Merging GitHub main into the workspace
+
 GitHub's `main` receives Copilot "fix the failing job" pull requests that the owner merges on GitHub. Until 2026-09-19 no pull-request check there ran this repo's contract tests (`pnpm test:unit`), so those commits could be unusable: duplicate YAML keys in `.github/workflows/mobile-release.yml`, bash syntax errors in `scripts/check-native-large-text-evidence.sh` and its test, a second implementation pasted above the shebang of `scripts/verify-sentry-native-event.mjs`, a placeholder `allowBuilds` block ("set this to true or false") in `pnpm-workspace.yaml`, and secret-backed candidate build IDs that the workspace deliberately moved to non-secret inputs. They also re-implement work that local task merges already landed (single-line candidate build IDs, `run_mode=release-gate`).
 
 **Why:** on 2026-09-16 every GitHub-side change to a conflicting file was either broken or a duplicate; only three small, verifiable additions were worth keeping (a `crypto.randomUUID()` message ID, a `writeStepSummary` env-fallback test that the workspace implementation already satisfied, a trailing newline).
@@ -10,6 +12,7 @@ GitHub's `main` receives Copilot "fix the failing job" pull requests that the ow
 A second join the same day (77 more GitHub commits) repeated the pattern: GitHub's `mobile-release.yml` now parsed but ran every Sentry trigger/verification step twice per platform, and a file with **no conflict** (`lib/api-spec/scripts/check-contract-compatibility.test.mjs`) auto-merged to a `SyntaxError` because GitHub's own tip already redeclared a `const` after a Copilot branch was re-merged there. GitHub's generated client also carried an owner test edit ("stale generated-client probe marker" comment) that breaks API codegen validation. One GitHub rewrite was worth keeping — the Sentry verifier's saved-evidence mode with its 25-test contract — but it inlined its own duplicate-JSON-key scanner, which the release evidence reader inventory test rejects; swap in the shared `find-duplicate-json-object-keys.mjs` helper and add the reader to the inventory.
 
 **How to apply:**
+
 - Before adopting GitHub's side of any conflicting file, run `bash -n`, `node --check`, and a unique-key YAML parse (`yaml` package with `uniqueKeys: true`) on `origin/main:<path>`; prefer the workspace version whenever a workspace contract test covers the file, and say in the merge message which GitHub edits were dropped and why.
 - Syntax-check every *auto-merged* script too, not only the conflicted ones, and restore the workspace's generated client if GitHub touched `lib/api-client-react/src/generated/*`; only the full validation set (codegen validation and `pnpm test:unit` included) proves the merged tree.
 - Compare the three trees before resolving: a remote tip can have commits since the merge base while its tree is byte-identical to that base. In that case, a clean two-parent merge retaining the local tree is intentional; verify the index tree rather than inventing file changes.
