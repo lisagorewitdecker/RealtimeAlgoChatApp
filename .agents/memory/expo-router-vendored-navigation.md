@@ -21,6 +21,40 @@ as the deprecated `expo-router/tabs` and the `Tabs` export).
 tabs, standalone renders, tests), so read the context with `useContext` and fall
 back to the safe-area inset.
 
+**The vendored navigator does run under Jest:** what blocks it is not
+`query-string` itself but the workspace security override pinning
+`decode-uri-component` to an ESM-only release that CJS `query-string@7` cannot
+import; a virtual mock of `query-string` (bare name, so the vendored `require`
+receives it) is enough, whereas widening `transformIgnorePatterns` is not. The
+vendored views then need only what NavigationContainer would provide (linking
+context, theme); the real `Tabs` layout still needs expo-router's root route
+context. Two environment quirks: the React Native Jest preset completes every
+natively driven animation on a real 16 ms timer, so a navigator that animates
+on mount produces act warnings during the testing library's async cleanup
+unless the suite controls timers; and the testing library's
+`getByRole("tablist")` cannot find the bar's plain `View`, so walk the JSON host
+tree instead.
+
+**Native tabs fallback is inset-only on purpose:** expo-router's iOS
+`NativeTabsView` wraps each tab in its own `SafeAreaProvider`, so inside iOS 26
+native tabs `useSafeAreaInsets().bottom` already includes the system tab bar.
+Adding a bar-sized constant on top of the inset double-counts it there; only
+breathing room belongs above the inset.
+
+**The real iOS native tabs view renders under Jest too:** the vendored
+`NativeTabsView.ios.js` needs only the `query-string` stand-in and a
+react-navigation `ThemeProvider` (no linking context); react-native-screens'
+`Tabs.Host`/`Tabs.Screen` become mocked host views. Its per-tab
+`SafeAreaProvider` renders no children until it has insets, so render under a
+parent provider with `initialMetrics` (it inherits them) and model UIKit's
+tab-bar safe area by calling the inner host view's
+`onInsetsChange({ nativeEvent: { insets, frame } })` inside `act`. Pick a tab
+inset that is not `root + 49`, or a hook that adds a bar constant passes by
+coincidence. `NativeBottomTabsNavigator.js` also loads under Jest, so "the
+navigator still renders this view" can be checked with `jest.isolateModules` +
+a recording `jest.doMock` of the bare `NativeTabsView` module instead of
+reading source (no `fs`/`require.resolve` types in the app).
+
 **How to apply:** Any tab screen that scrolls under the absolutely positioned
 classic tab bar needs the measured height (49 + bottom inset on native, 84 on
 web). Screen tests keep it simple with this mock:
