@@ -1405,7 +1405,7 @@ async function requestWithDeadline(
 
   const controller = new AbortController();
   let deadlineAbortError;
-  const abortPromise = new Promise((resolve, reject) => {
+  const abortPromise = new Promise((_, reject) => {
     controller.signal.addEventListener(
       "abort",
       () =>
