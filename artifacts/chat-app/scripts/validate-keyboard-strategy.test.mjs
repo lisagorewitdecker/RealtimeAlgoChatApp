@@ -30,6 +30,10 @@ const execFileAsync = promisify(execFile);
 const packageRoot = path.resolve(import.meta.dirname, "..");
 const scriptPath = path.join(packageRoot, "scripts/validate-keyboard-strategy.mjs");
 
+test("the keyboard strategy validator declares its supported JSHint syntax version", () => {
+  const source = readFileSync(scriptPath, "utf8");
+
+  assert.match(source, /^\/\* jshint esversion: 2020, node: true \*\//);
 test("declares its supported syntax version for JSHint", () => {
   const source = readFileSync(scriptPath, "utf8");
 
