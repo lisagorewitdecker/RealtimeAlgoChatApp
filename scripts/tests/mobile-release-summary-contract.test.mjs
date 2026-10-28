@@ -2750,7 +2750,7 @@ test("publish requires candidate-bound approvals from the current run attempt", 
       `${jobId} evidence directory must be unique to the GitHub run attempt`,
     );
     const upload = workflow.jobs[jobId].steps.find(
-      (step) => step[`uses`] === pinnedUploadArtifactAction,
+      (step) => step.uses === pinnedUploadArtifactAction,
     );
     assert.equal(
       upload?.with?.name,
@@ -2805,7 +2805,7 @@ test("publish requires candidate-bound approvals from the current run attempt", 
   for (const jobId of ["mobile-release-gate", "mobile-publish"]) {
     const downloads = workflow.jobs[jobId].steps.filter(
       (step) =>
-        step[`uses`] === pinnedDownloadArtifactAction &&
+        step.uses === pinnedDownloadArtifactAction &&
         step.id?.startsWith("download"),
     );
     assert.deepEqual(
