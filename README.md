@@ -6,9 +6,10 @@ Every account is authenticated through Clerk. Any signed-in user with a verified
 
 ## Structure
 
-This is a pnpm monorepo. The product is split across three artifacts, each independently run and previewed:
+This is a pnpm monorepo. The product is split across three artifacts, each
+independently run and previewed:
 
-```
+```text
   artifacts/
   api-server/       Express + Socket.IO backend (auth, rooms, moderation, AI assistant proxy)
   chat-app/         Expo/React Native app (iOS, Android, Web) — the RealtimeAlgoChatApp Studio client
@@ -22,13 +23,16 @@ See the `pnpm-workspace` skill / `pnpm-workspace.yaml` for the full workspace la
 - **Monorepo:** pnpm workspaces, TypeScript
 - **Backend:** Node.js, Express, Socket.IO, Pino logging
 - **Frontend:** Expo (React Native + React Native Web), Expo Router
-- **Auth:** Clerk (`@clerk/express`, `@clerk/expo`) — email/password with verified-email enforcement
+- **Auth:** Clerk (`@clerk/express`, `@clerk/expo`) — email/password with
+  verified-email enforcement
 - **AI assistant:** Anthropic Claude, accessed only from the server (never exposed to the client); using the opt-in helper sends the current sandbox HTML/CSS/JS and question readable to Anthropic outside the room's end-to-end encryption
 - **Realtime:** Socket.IO rooms with signed, server-issued room capabilities
 
 ## Running the app
 
-The Replit Run button starts the `Project` workflow (defined in `.replit`), which runs `chat-app-preview-startup` and validation workflows in parallel. To run things manually:
+The Replit Run button starts the `Project` workflow (defined in `.replit`),
+which runs `chat-app-preview-startup` and validation workflows in parallel. To
+run things manually:
 
 ```bash
 # Backend API + Socket.IO server
@@ -69,7 +73,8 @@ Secrets (Clerk keys, admin allowlist, session secret, Anthropic access) are mana
 ## Notes for contributors
 
 - Server-resolved Clerk identity always overrides any client-supplied identity claims.
-- Room access is granted only via signed server-issued capabilities, not client-asserted room membership.
+- Room access is granted only via signed server-issued capabilities, not
+  client-asserted room membership.
 - See `replit.md` for project-specific conventions and decisions as they're recorded.
 
 [![Mobile release accessibility gate](https://github.com/lisagorewitdecker/RealtimeAlgoChatApp/actions/workflows/mobile-release.yml/badge.svg?branch=main)](https://github.com/lisagorewitdecker/RealtimeAlgoChatApp/actions/workflows/mobile-release.yml)

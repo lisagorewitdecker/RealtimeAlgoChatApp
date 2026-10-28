@@ -1,4 +1,5 @@
 /* jshint esversion: 11, node: true */
+
 // Expo Go compatibility for packages whose JavaScript talks to native code that
 // is compiled into the Expo Go binary itself (react-native-worklets and
 // react-native-reanimated). Expo Go cannot load a different native version, so
