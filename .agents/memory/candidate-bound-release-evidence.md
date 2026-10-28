@@ -5,6 +5,10 @@ description: Why mobile release gates for prebuilt binaries must inspect evidenc
 
 # Candidate-bound release evidence
 
+When a release workflow receives immutable iOS and Android build IDs, checking
+a secret in the release environment does not prove that the secret existed
+when those candidates were bundled. Require the native build lifecycle to
+stamp non-secret evidence into the binary, then inspect that evidence in the
 When a release workflow receives immutable iOS and Android build IDs,
 checking a secret in the release environment does not prove that the secret
 existed when those candidates were bundled. Require the native build lifecycle

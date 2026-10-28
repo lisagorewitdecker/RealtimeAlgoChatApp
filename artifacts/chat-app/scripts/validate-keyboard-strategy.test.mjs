@@ -48,6 +48,11 @@ function rulesOf(findings) {
   return findings.map((finding) => finding.rule);
 }
 
+test("declares its supported syntax version for JSHint", () => {
+  const source = readFileSync(scriptPath, "utf8");
+  assert.match(source, /^\/\* jshint esversion: 11, node: true \*\//);
+});
+
 /** A root layout that satisfies the whole-tree rule: the navigator sits inside KeyboardProvider. */
 const compliantRootLayout = `import { Stack } from "expo-router";
 import { KeyboardProvider } from "react-native-keyboard-controller";
