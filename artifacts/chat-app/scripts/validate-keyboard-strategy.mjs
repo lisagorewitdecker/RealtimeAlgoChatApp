@@ -1,4 +1,4 @@
-/* jshint esversion: 11, node: true */
+/* jshint esversion: 2020, node: true */
 
 // Source-level guard for the Chat App's single keyboard strategy.
 //
