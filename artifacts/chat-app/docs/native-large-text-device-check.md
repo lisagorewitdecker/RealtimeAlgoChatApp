@@ -1,16 +1,17 @@
 # Native large-text release gate
 
 Run the automated native smoke test on both release platforms before a store
-release that changes shared text, forms, room headers, the embedded call surface,
-or keyboard behavior. The gate uses an iPhone SE (3rd generation) simulator and
-an Android emulator overridden to 320×568 dp.
+release that changes shared text, forms, room headers, the embedded call
+surface, or keyboard behavior. The gate uses an iPhone SE (3rd generation)
+simulator and an Android emulator overridden to 320×568 dp.
 
 ## Prerequisites
 
 1. Install the release-candidate app on a booted iPhone SE (3rd generation)
-   simulator and a dedicated Android emulator configured at or below 320×568 dp.
-2. Install [Maestro](https://maestro.mobile.dev/) and make `maestro` available on
-   `PATH`.
+   simulator and a dedicated Android emulator configured at or below 320×568
+   dp.
+2. Install [Maestro](https://maestro.mobile.dev/) and make `maestro` available
+   on `PATH`.
 3. Install Playwright Chromium once:
    `pnpm --filter @workspace/api-server exec playwright install chromium`.
 4. Use a dedicated, verified Clerk test account with a saved display name. Sign
@@ -19,6 +20,8 @@ an Android emulator overridden to 320×568 dp.
    source control or shell history:
 
    - `NATIVE_SMOKE_APP_ID` — installed iOS bundle ID or Android application ID
+   - `NATIVE_SMOKE_BUILD_ID` — EAS build ID for the release candidate installed
+     on the prepared device
    - `NATIVE_SMOKE_BUILD_ID` — EAS build ID for the release candidate
      installed on the prepared device
    - `NATIVE_SMOKE_EMAIL` — dedicated smoke-account email
@@ -76,8 +79,9 @@ release run, reconcile project changes with `main` and push the resulting
 `.github/workflows/mobile-release.yml`; do not run a release from a workspace
 copy or another branch that has not been synchronized with `main`.
 
-- The Android workflow first runs `scripts/check-android-release-prerequisites.sh`
-  as a fast runner preflight. It reports
+- The Android workflow first runs
+  `scripts/check-android-release-prerequisites.sh` as a fast runner preflight.
+  It reports
   `ANDROID_RELEASE_PREFLIGHT=BLOCKED` with each missing tool, secret, device, or
   device-configuration problem in the job summary, and the evidence job is not
   scheduled until the preflight reports `READY`.
@@ -257,7 +261,8 @@ User=actions
 Environment=HOME=/home/actions
 Environment=ANDROID_HOME=/home/actions/android-sdk
 Environment=ANDROID_SDK_ROOT=/home/actions/android-sdk
-ExecStart=/home/actions/android-sdk/emulator/emulator @native-small-api35 -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect
+ExecStart=/home/actions/android-sdk/emulator/emulator @native-small-api35 \
+    -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect
 ExecStartPost=/usr/bin/timeout 120 /usr/local/sbin/wait-for-android-native-emulator
 Restart=always
 RestartSec=5
@@ -271,9 +276,12 @@ name is stable for this repository and runner name; if the runner package
 prints a different escaped name, use that name instead:
 
 ```sh
-RUNNER_SERVICE=actions.runner.lisagorewitdecker-RealtimeAlgoChatApp.android-release-linux.service
+RUNNER_SERVICE=actions.runner.lisagorewitdecker-\
+RealtimeAlgoChatApp.android-release-linux.service
 sudo mkdir --parents "/etc/systemd/system/${RUNNER_SERVICE}.d"
-sudo tee "/etc/systemd/system/${RUNNER_SERVICE}.d/10-android-emulator.conf" >/dev/null <<'EOF'
+sudo tee \
+  "/etc/systemd/system/${RUNNER_SERVICE}.d/10-android-emulator.conf" \
+  >/dev/null <<'EOF'
 [Unit]
 Requires=android-native-emulator.service
 After=android-native-emulator.service
@@ -366,7 +374,8 @@ runner's `ACTIONS_RUNNER_INPUT_TOKEN` environment input rather than a
 `--token` argument, so it never appears in a process list, and clears both
 variables as soon as registration finishes. Generate the token from
 **Settings → Actions → Runners → New self-hosted runner** (macOS), or with
-`gh api --method POST repos/lisagorewitdecker/RealtimeAlgoChatApp/actions/runners/registration-token`;
+`gh api --method POST
+repos/lisagorewitdecker/RealtimeAlgoChatApp/actions/runners/registration-token`;
 it expires after one hour. Registration is skipped, with an `INCOMPLETE`
 report, while any core prerequisite (Xcode, the simulator runtime, pnpm, Java,
 Maestro, or the booted simulator) is still missing, so GitHub never routes the
@@ -578,8 +587,9 @@ exact tested candidates, and the publish job also needs the same secret in the
 protected `mobile-store-submission` environment.
 
 Store the runner-read token below as a repository Actions **secret** so manual
-dispatches can use it, and pass it through the reusable-workflow secret contract.
-Store the release credentials in the GitHub Actions `mobile-release` environment.
+dispatches can use it, and pass it through the reusable-workflow secret
+contract. Store the release credentials in the GitHub Actions `mobile-release`
+environment.
 If the workflow will publish after approval, also store `EAS_TOKEN` in the
 protected `mobile-store-submission` environment. Authentication values are
 injected only into the process that needs them and are never written to the
@@ -608,9 +618,12 @@ tested candidate can be audited by the publish job:
 - `NATIVE_SMOKE_ANDROID_SENTRY_DIST`
 - `E2E_CHAT_URL` — browser-test target for the Chat App
 - `E2E_API_URL` — browser-test target for the API server
-- `CLERK_PUBLISHABLE_KEY` — Clerk publishable key used by the browser test target
-- `CLERK_SECRET_KEY` — Clerk secret key used by the API server during browser setup
-- `DATABASE_URL` — database connection used by the API server during browser setup
+- `CLERK_PUBLISHABLE_KEY` — Clerk publishable key used by the browser test
+  target
+- `CLERK_SECRET_KEY` — Clerk secret key used by the API server during browser
+  setup
+- `DATABASE_URL` — database connection used by the API server during browser
+  setup
 
 #### Optional reusable-workflow secrets
 
@@ -830,12 +843,13 @@ alongside the automated `native-branding-check.md` report.
 ### Screens
 
 - **Sign in:** exercise password sign-in, client-trust verification, and every
-  password-reset step. Confirm headings and OAuth labels wrap, all actions can be
-  reached by scrolling, and the focused input stays above the keyboard.
+  password-reset step. Confirm headings and OAuth labels wrap, all actions
+  can be reached by scrolling, and the focused input stays above the keyboard.
 - **Setup:** enter an invalid and then a valid display name. Confirm the error,
   hint, Sign out, and Enter workspace actions remain reachable with the keyboard
   open.
-- **New room:** exercise Create and Join, including the room-key storage warning.
+- **New room:** exercise Create and Join, including the room-key storage
+  warning.
   Confirm the retry label wraps and the submit action remains reachable.
 - **Room:** use a long room name and long member names, open the member list,
   scroll it, compose a multiline message, and open the keyboard. Confirm the
@@ -950,6 +964,29 @@ supplement document.
 
 The flow captures eleven screens, numbered in the order they are exercised:
 
+- `01-sign-in-keyboard.png`: Sign in with credentials typed and the keyboard
+  open; heading and OAuth labels wrap, and the primary action is visible.
+- `02-password-reset.png`: Password reset with the heading, email input, and
+  Back to sign in visible.
+- `03-setup-invalid-keyboard.png`: Setup with a one-character name; validation
+  error, hint, and Sign out are visible.
+- `04-setup-valid-keyboard.png`: Setup with a valid display name typed; Enter
+  workspace is visible.
+- `05-new-room-create-keyboard.png`: New room (Create) with a long name typed;
+  the submit action is visible.
+- `06-room-keyboard.png`: Room with a long name, member list open, and a
+  wrapping message composed; call and member actions, composer, and send are
+  visible.
+- `07-call-host-and-webview.png`: Call page inside the native host; embedded
+  WebView, fit confirmation text, and dismiss action are visible.
+- `08-new-room-join-keyboard.png`: New room (Join) with a room ID typed; the
+  submit action is visible.
+- `09-joined-room.png`: Joined room with the header and participant count
+  visible.
+- `10-profile-accessibility.png`: Profile accessibility controls reading
+  Current size 140%, High contrast on, and Reduced motion on.
+- `11-profile-edit-keyboard.png`: Profile display-name edit with the keyboard
+  open; the save action is visible.
 - **`01-sign-in-keyboard.png`** — Sign in with credentials typed and the
   keyboard open: heading and OAuth labels wrap; primary action visible.
 - **`02-password-reset.png`** — Password reset: heading, email input, and Back
