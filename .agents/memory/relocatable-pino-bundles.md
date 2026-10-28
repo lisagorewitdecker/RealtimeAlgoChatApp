@@ -3,6 +3,8 @@ name: Relocatable Pino bundles
 description: Why bundled Pino worker paths must be normalized and checked before API startup.
 ---
 
+# Relocatable Pino bundles
+
 `esbuild-plugin-pino` can embed the absolute build-time output directory when
 esbuild receives an absolute `outdir`. Normalize that generated path to the
 bundle directory and verify every worker and transport asset before startup.
