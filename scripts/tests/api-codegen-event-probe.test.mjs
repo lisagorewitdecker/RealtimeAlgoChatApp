@@ -26,8 +26,10 @@ test("modules flagged for modern syntax declare their supported JSHint version",
     [new URL("./root-contract-checks-workflow.test.mjs", import.meta.url), false],
   ]) {
     const source = readFileSync(sourceUrl, "utf8");
-    const directive = /^\/\* jshint esversion: 11, node: true \*\//;
-    assert.match(source, hasShebang ? /^#!.*\n\/\* jshint esversion: 11, node: true \*\// : directive);
+    const directive = hasShebang
+      ? /^#!.*\n\/\* jshint esversion: 11, node: true \*\//
+      : /^\/\* jshint esversion: 11, node: true \*\//;
+    assert.match(source, directive);
   }
 });
 
