@@ -20,6 +20,19 @@ import {
   writeEvidenceRecord,
 } from "../probe-api-codegen-events.mjs";
 
+test("modules flagged for modern syntax declare their supported JSHint version", () => {
+  for (const [sourceUrl, hasShebang, version] of [
+    [new URL("../probe-api-codegen-events.mjs", import.meta.url), true, 12],
+    [new URL("./root-contract-checks-workflow.test.mjs", import.meta.url), false, 11],
+  ]) {
+    const source = readFileSync(sourceUrl, "utf8");
+    const directive = hasShebang
+      ? new RegExp(`^#!.*\\n/\\* jshint esversion: ${version}, node: true \\*/`)
+      : new RegExp(`^/\\* jshint esversion: ${version}, node: true \\*/`);
+    assert.match(source, directive);
+  }
+});
+
 test("probe arguments keep the hosted check defaults and accept an output path", () => {
   const { options, showHelp } = parseArgs([
     "--repo",
