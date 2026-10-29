@@ -1,3 +1,5 @@
+/* jshint esversion: 11, node: true */
+
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -12,6 +14,14 @@ const repositoryRoot = path.resolve(
 function readRepositoryFile(filePath) {
   return readFileSync(path.join(repositoryRoot, filePath), "utf8");
 }
+
+test("Sentry upload plugin test declares its supported JSHint syntax version", () => {
+  const source = readRepositoryFile(
+    "artifacts/chat-app/plugins/withSentryNativeUpload.test.mjs",
+  );
+
+  assert.match(source, /^\/\* jshint esversion: 11, node: true \*\//);
+});
 
 test("token generator declares its supported JSHint syntax version", () => {
   const source = readRepositoryFile(
@@ -29,6 +39,12 @@ test("flagged chat-app tests declare their supported JSHint syntax version", () 
     const source = readRepositoryFile(filePath);
     assert.match(source, /^\/\* jshint esversion: 11, node: true \*\//);
   }
+test("mobile release contract test declares its supported JSHint syntax version", () => {
+  const source = readRepositoryFile(
+    "scripts/tests/mobile-release-summary-contract.test.mjs",
+  );
+
+  assert.match(source, /^\/\* jshint esversion: 11, node: true \*\//);
 });
 
 function getFunctionBody(source, functionName) {
