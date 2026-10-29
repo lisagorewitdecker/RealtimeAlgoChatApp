@@ -1,3 +1,5 @@
+/* jshint esversion: 11 */
+
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
@@ -320,7 +322,7 @@ test("a transient pre-bundle inspector close waits for the replacement session",
   const classifier = createLaunchEvidenceClassifier({
     startedAt: 0,
     deviceTimeoutMs: 10_000,
-    settleTimeoutMs: 1_000,
+    settleTimeoutMs: 1000,
   });
   classifier.observe(READY, 100);
   classifier.observe(CONNECT, 1_000);
