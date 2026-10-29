@@ -1,3 +1,5 @@
+/* jshint esversion: 11, node: true */
+
 import { existsSync, readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 
