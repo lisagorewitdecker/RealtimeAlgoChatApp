@@ -53,6 +53,12 @@ test("mobile release contract test declares its supported JSHint syntax version"
   assert.match(source, /^\/\* jshint esversion: 11, node: true \*\//);
 });
 
+test("Sentry native event verifier declares its supported JSHint syntax version", () => {
+  const source = readRepositoryFile(
+    "scripts/verify-sentry-native-event.mjs",
+  );
+
+  assert.match(source, /^#!.*\n\/\* jshint esversion: 11, node: true \*\//);
 test("JSHint alerts declare the syntax version used by Node.js modules", () => {
   for (const filePath of [
     "scripts/tests/validate-junit-xml.test.mjs",
