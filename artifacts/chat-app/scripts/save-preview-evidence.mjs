@@ -1,3 +1,4 @@
+/* jshint esversion: 11 */
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
