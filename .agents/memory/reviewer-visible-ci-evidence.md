@@ -3,9 +3,12 @@ name: Reviewer-visible CI evidence
 description: Why CI failure evidence belongs in a check-run summary rather than an Actions step summary, and how to prove it is readable.
 ---
 
-Publish reviewer-facing CI evidence as its own GitHub **check run** (`POST
-/repos/{owner}/{repo}/check-runs` with `output.title` and `output.summary`,
-job permission `checks: write`), not only through `GITHUB_STEP_SUMMARY`.
+# Reviewer-visible CI evidence
+
+Publish reviewer-facing CI evidence as its own GitHub **check run**
+(`POST /repos/{owner}/{repo}/check-runs` with `output.title` and
+`output.summary`, job permission `checks: write`), not only through
+`GITHUB_STEP_SUMMARY`.
 
 **Why:** an Actions step summary is visible only to signed-in viewers with log
 access. It is never exposed through the API — the job's check run reports
@@ -18,6 +21,7 @@ signed-out visitors on a public repository, and it survives the pull request
 being closed and its branch deleted.
 
 **How to apply:**
+
 - Have the failing check write its report to a file named by an environment
   variable, then publish it from a separate `if: failure()` step. Each step
   gets its own step-summary file, so the two paths cannot share one.
