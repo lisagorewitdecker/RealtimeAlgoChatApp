@@ -3,6 +3,7 @@
 
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -21,6 +22,18 @@ import {
 
 const execFileAsync = promisify(execFile);
 const scriptPath = fileURLToPath(new URL("../verify-sentry-native-event.mjs", import.meta.url));
+
+test("native evidence scripts declare their supported JSHint syntax version", () => {
+  for (const scriptUrl of [
+    new URL("../verify-sentry-native-event.mjs", import.meta.url),
+    new URL("../publish-native-evidence-summary-check.mjs", import.meta.url),
+  ]) {
+    assert.match(
+      readFileSync(scriptUrl, "utf8"),
+      /^#!.*\n\/\* jshint esversion: 11, node: true \*\/|^\/\* jshint esversion: 11, node: true \*\//,
+    );
+  }
+});
 
 function eventFixture(overrides = {}) {
   return {
