@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/* jshint esversion: 12, node: true */
+/* jshint esversion: 11, node: true */
 
 import { mkdirSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, extname, join, resolve } from "node:path";
