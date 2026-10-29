@@ -1,7 +1,7 @@
 /* jshint esversion: 11, node: true */
 
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import test from "node:test";
@@ -46,6 +46,15 @@ const summary = [
   "- Status: **FAIL**",
   "",
 ].join("\n");
+
+test("publisher declares its supported JSHint syntax version", () => {
+  const source = readFileSync(
+    new URL("../publish-native-evidence-summary-check.mjs", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(source, /^\/\* jshint esversion: 11, node: true \*\//);
+});
 
 test("publishes the exact validated summary as a public check run", async () => {
   await withCapture(summary, async ({ capturePath }) => {
