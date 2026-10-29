@@ -31,6 +31,14 @@ test("token generator declares its supported JSHint syntax version", () => {
   assert.match(source, /^\/\* jshint esversion: 11, node: true \*\//);
 });
 
+test("flagged chat-app tests declare their supported JSHint syntax version", () => {
+  for (const filePath of [
+    "artifacts/chat-app/plugins/withSentryNativeUpload.test.mjs",
+    "artifacts/chat-app/scripts/validate-branding.test.mjs",
+  ]) {
+    const source = readRepositoryFile(filePath);
+    assert.match(source, /^\/\* jshint esversion: 11, node: true \*\//);
+  }
 test("mobile release contract test declares its supported JSHint syntax version", () => {
   const source = readRepositoryFile(
     "scripts/tests/mobile-release-summary-contract.test.mjs",
