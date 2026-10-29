@@ -54,6 +54,7 @@ test("mobile release contract test declares its supported JSHint syntax version"
 });
 
 test("Sentry native event verifier declares its supported JSHint syntax version", () => {
+  const source = readRepositoryFile("scripts/verify-sentry-native-event.mjs");
   const source = readRepositoryFile(
     "scripts/verify-sentry-native-event.mjs",
   );
