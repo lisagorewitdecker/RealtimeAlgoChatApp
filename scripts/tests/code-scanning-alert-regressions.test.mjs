@@ -13,6 +13,14 @@ function readRepositoryFile(filePath) {
   return readFileSync(path.join(repositoryRoot, filePath), "utf8");
 }
 
+test("token generator declares its supported JSHint syntax version", () => {
+  const source = readRepositoryFile(
+    "artifacts/realtime-algo-chat-design-system/scripts/build-tokens.mjs",
+  );
+
+  assert.match(source, /^\/\* jshint esversion: 11, node: true \*\//);
+});
+
 function getFunctionBody(source, functionName) {
   const declaration = new RegExp(`function ${functionName}\\s*\\([^)]*\\)\\s*\\{`);
   const match = declaration.exec(source);
