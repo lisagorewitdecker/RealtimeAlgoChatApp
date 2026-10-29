@@ -1,3 +1,6 @@
+/* jshint esversion: 11, node: true */
+/* jshint esversion: 11 */
+
 import { readBoundedFileBytesSync } from "./read-bounded-text.mjs";
 
 /**

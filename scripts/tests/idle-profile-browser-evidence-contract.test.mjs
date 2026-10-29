@@ -1,3 +1,5 @@
+/* jshint esversion: 11, node: true */
+
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
@@ -40,6 +42,7 @@ const downloadArtifactAction =
 const evidencePath = "artifacts/api-server/test-results/**";
 const contractArtifactName =
   "idle-profile-registration-browser-evidence-contract";
+const alwaysCondition = "$" + "{{ always() }}";
 
 test("the browser evidence contract locks the design-system Zod manifest specifier", () => {
   const lockfile = YAML.parse(
@@ -132,6 +135,7 @@ test("the idle-profile evidence contract runs without production secrets", () =>
     (step) => step.name === "Upload controlled idle-profile browser evidence",
   );
   assert.ok(upload, "the contract job must upload the controlled evidence");
+  assert.equal(upload.if, alwaysCondition);
   assert.equal(upload.if, `\${{ always() }}`);
   assert.equal(upload.uses, uploadArtifactAction);
   assert.equal(upload.with?.name, contractArtifactName);
@@ -142,6 +146,7 @@ test("the idle-profile evidence contract runs without production secrets", () =>
     (step) => step.name === "Download controlled idle-profile browser evidence",
   );
   assert.ok(download, "the contract job must download the uploaded evidence");
+  assert.equal(download.if, alwaysCondition);
   assert.equal(download.if, `\${{ always() }}`);
   assert.equal(download.uses, downloadArtifactAction);
   assert.equal(download.with?.name, contractArtifactName);
@@ -150,6 +155,7 @@ test("the idle-profile evidence contract runs without production secrets", () =>
     (step) => step.name === "Verify controlled idle-profile browser evidence",
   );
   assert.ok(verify, "the contract job must verify the downloaded archive");
+  assert.equal(verify.if, alwaysCondition);
   assert.equal(verify.if, `\${{ always() }}`);
   assert.match(
     verify.run,
@@ -183,6 +189,7 @@ test("the production idle-profile check keeps its browser evidence settings", ()
     job.steps.indexOf(upload) > job.steps.indexOf(run),
     "the release evidence upload must follow the browser check",
   );
+  assert.equal(upload.if, alwaysCondition);
   assert.equal(upload.if, `\${{ always() }}`);
   assert.equal(upload.uses, uploadArtifactAction);
   assert.equal(upload.with?.name, "idle-profile-registration-browser-evidence");
