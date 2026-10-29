@@ -1,4 +1,4 @@
-/* jshint esversion: 2020, node: true */
+/* jshint esversion: 11, node: true */
 
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
@@ -30,6 +30,16 @@ const execFileAsync = promisify(execFile);
 const packageRoot = path.resolve(import.meta.dirname, "..");
 const scriptPath = path.join(packageRoot, "scripts/validate-keyboard-strategy.mjs");
 
+test("the keyboard strategy validator declares its supported JSHint syntax version", () => {
+  const source = readFileSync(scriptPath, "utf8");
+
+  assert.match(source, /^\/\* jshint esversion: 2020, node: true \*\//);
+test("declares its supported syntax version for JSHint", () => {
+  const source = readFileSync(scriptPath, "utf8");
+
+  assert.match(source, /^\/\* jshint esversion: 11, node: true \*\//);
+});
+
 function scan(file, source) {
   return scanKeyboardStrategySource({ file, source, packageRelativePath: file });
 }
@@ -37,6 +47,11 @@ function scan(file, source) {
 function rulesOf(findings) {
   return findings.map((finding) => finding.rule);
 }
+
+test("declares its supported syntax version for JSHint", () => {
+  const source = readFileSync(scriptPath, "utf8");
+  assert.match(source, /^\/\* jshint esversion: 11, node: true \*\//);
+});
 
 /** A root layout that satisfies the whole-tree rule: the navigator sits inside KeyboardProvider. */
 const compliantRootLayout = `import { Stack } from "expo-router";

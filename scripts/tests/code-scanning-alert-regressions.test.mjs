@@ -1,3 +1,5 @@
+/* jshint esversion: 11, node: true */
+
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -12,6 +14,62 @@ const repositoryRoot = path.resolve(
 function readRepositoryFile(filePath) {
   return readFileSync(path.join(repositoryRoot, filePath), "utf8");
 }
+
+test("Sentry upload plugin test declares its supported JSHint syntax version", () => {
+  const source = readRepositoryFile(
+    "artifacts/chat-app/plugins/withSentryNativeUpload.test.mjs",
+  );
+
+  assert.match(source, /^\/\* jshint esversion: 11, node: true \*\//);
+});
+
+test("token generator declares its supported JSHint syntax version", () => {
+  const source = readRepositoryFile(
+    "artifacts/realtime-algo-chat-design-system/scripts/build-tokens.mjs",
+  );
+
+  assert.match(source, /^\/\* jshint esversion: 11, node: true \*\//);
+});
+
+test("flagged test modules declare their supported JSHint syntax version", () => {
+  for (const filePath of [
+    "artifacts/chat-app/plugins/withSentryNativeUpload.test.mjs",
+    "artifacts/chat-app/scripts/validate-branding.test.mjs",
+    "artifacts/chat-app/scripts/save-android-preview-evidence.test.mjs",
+    "artifacts/chat-app/scripts/save-preview-evidence.mjs",
+    "scripts/tests/shell-cleanup-boundary-contract.test.mjs",
+    "scripts/tests/validate-junit-xml.test.mjs",
+  ]) {
+    const source = readRepositoryFile(filePath);
+    assert.match(source, /^\/\* jshint esversion: 11, node: true \*\//);
+  }
+});
+
+test("mobile release contract test declares its supported JSHint syntax version", () => {
+  const source = readRepositoryFile(
+    "scripts/tests/mobile-release-summary-contract.test.mjs",
+  );
+
+  assert.match(source, /^\/\* jshint esversion: 11, node: true \*\//);
+});
+
+test("Sentry native event verifier declares its supported JSHint syntax version", () => {
+  const source = readRepositoryFile("scripts/verify-sentry-native-event.mjs");
+  const source = readRepositoryFile(
+    "scripts/verify-sentry-native-event.mjs",
+  );
+
+  assert.match(source, /^#!.*\n\/\* jshint esversion: 11, node: true \*\//);
+test("JSHint alerts declare the syntax version used by Node.js modules", () => {
+  for (const filePath of [
+    "scripts/tests/validate-junit-xml.test.mjs",
+    "lib/api-spec/scripts/staged-codegen-backups.mjs",
+    "artifacts/chat-app/scripts/save-android-preview-evidence.test.mjs",
+  ]) {
+    const source = readRepositoryFile(filePath);
+    assert.match(source, /^\/\* jshint esversion: 11, node: true \*\//);
+  }
+});
 
 function getFunctionBody(source, functionName) {
   const declaration = new RegExp(`function ${functionName}\\s*\\([^)]*\\)\\s*\\{`);
