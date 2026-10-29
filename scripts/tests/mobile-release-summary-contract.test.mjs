@@ -1,3 +1,5 @@
+/* jshint esversion: 11, node: true */
+
 /**
  * Contract test for the mobile release summary path.
  *
