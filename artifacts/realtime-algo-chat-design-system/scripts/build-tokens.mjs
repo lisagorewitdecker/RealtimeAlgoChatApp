@@ -1,5 +1,4 @@
 /* jshint esversion: 11, node: true */
-
 /**
  * Generates the consumable web theme (src/index.css) and the portable token
  * object (src/generated/tokens.tsx) from tokens.json.
