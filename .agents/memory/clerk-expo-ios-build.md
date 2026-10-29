@@ -3,6 +3,17 @@ name: Clerk Expo iOS builds
 description: Why the @clerk/expo config plugin is mandatory for native iOS builds of the Chat App and how its absence shows up in pod install logs.
 ---
 
+Keep `@clerk/expo` in the `plugins` array of the Chat App's static `app.json`
+(currently `["@clerk/expo", { "appleSignIn": true }]`).
+
+**Why:** `@clerk/expo` 4.x ships a native Expo module (`ClerkExpo` pod) whose
+podspec requires iOS 17.0 and declares a Swift package (`clerk-ios`, products
+ClerkKit/ClerkKitUI). Expo autolinking evaluates every module podspec first —
+which registers the Swift package with React Native's SPM helper — and only
+then compares deployment targets. On the Expo SDK 57 default (16.4) it skips
+the pod with a `[Expo] @clerk/expo was not linked` warning, but the SPM
+registration stays behind, so `react_native_post_install` looks up the missing
+`ClerkExpo` target and `pod install` dies with
 # Clerk Expo iOS builds
 
 Keep `@clerk/expo` in the `plugins` array of the Chat App's static `app.json`
