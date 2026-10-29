@@ -1,3 +1,4 @@
+/* jshint esversion: 11 */
 /* jshint esversion: 11, node: true */
 
 import assert from "node:assert/strict";
@@ -327,7 +328,7 @@ test("a transient pre-bundle inspector close waits for the replacement session",
   const classifier = createLaunchEvidenceClassifier({
     startedAt: 0,
     deviceTimeoutMs: 10_000,
-    settleTimeoutMs: 1_000,
+    settleTimeoutMs: 1000,
   });
   classifier.observe(READY, 100);
   classifier.observe(CONNECT, 1_000);

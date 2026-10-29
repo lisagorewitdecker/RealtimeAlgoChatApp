@@ -6234,20 +6234,22 @@ function runGate(name, expectedStatus, commandOptions) {
 
 let gateRuns;
 function getGateRuns() {
-  gateRuns ??= {
-    missingMaestro: runGate("missing-maestro", 2, { includeMaestro: false }),
-    wrongModel: runGate("wrong-model", 2, {
-      bootedDevices:
-        "iPhone 14 (00000000-0000-0000-0000-000000000000) (Booted)",
-    }),
-    hostileWrongModel: runGate("hostile-wrong-model", 2, {
-      bootedDevices: `iPhone 14 ${readinessWorkflowCommand} (00000000-0000-0000-0000-000000000000) (Booted)`,
-    }),
-    supportedModel: runGate("supported-model", 1, {
-      bootedDevices:
-        "iPhone SE (3rd generation) (00000000-0000-0000-0000-000000000000) (Booted)",
-    }),
-  };
+  if (gateRuns === undefined) {
+    gateRuns = {
+      missingMaestro: runGate("missing-maestro", 2, { includeMaestro: false }),
+      wrongModel: runGate("wrong-model", 2, {
+        bootedDevices:
+          "iPhone 14 (00000000-0000-0000-0000-000000000000) (Booted)",
+      }),
+      hostileWrongModel: runGate("hostile-wrong-model", 2, {
+        bootedDevices: `iPhone 14 ${readinessWorkflowCommand} (00000000-0000-0000-0000-000000000000) (Booted)`,
+      }),
+      supportedModel: runGate("supported-model", 1, {
+        bootedDevices:
+          "iPhone SE (3rd generation) (00000000-0000-0000-0000-000000000000) (Booted)",
+      }),
+    };
+  }
   return gateRuns;
 }
 
