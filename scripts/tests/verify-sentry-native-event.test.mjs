@@ -3,6 +3,7 @@
 
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -21,6 +22,11 @@ import {
 
 const execFileAsync = promisify(execFile);
 const scriptPath = fileURLToPath(new URL("../verify-sentry-native-event.mjs", import.meta.url));
+
+test("Sentry verifier declares its supported JSHint syntax version", () => {
+  const source = readFileSync(scriptPath, "utf8");
+  assert.match(source, /^#!.*\n\/\* jshint esversion: 11, node: true \*\//);
+});
 
 function eventFixture(overrides = {}) {
   return {
