@@ -22,7 +22,7 @@ import {
 
 test("modules flagged for modern syntax declare their supported JSHint version", () => {
   for (const [sourceUrl, hasShebang, version] of [
-    [new URL("../probe-api-codegen-events.mjs", import.meta.url), true, 12],
+    [new URL("../probe-api-codegen-events.mjs", import.meta.url), true, 11],
     [new URL("./root-contract-checks-workflow.test.mjs", import.meta.url), false, 11],
   ]) {
     const source = readFileSync(sourceUrl, "utf8");
