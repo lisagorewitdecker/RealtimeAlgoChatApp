@@ -1,3 +1,5 @@
+/* jshint esversion: 11, node: true */
+
 import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";

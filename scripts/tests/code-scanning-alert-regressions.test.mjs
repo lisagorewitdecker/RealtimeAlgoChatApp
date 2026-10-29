@@ -35,6 +35,8 @@ test("flagged chat-app tests declare their supported JSHint syntax version", () 
   for (const filePath of [
     "artifacts/chat-app/plugins/withSentryNativeUpload.test.mjs",
     "artifacts/chat-app/scripts/validate-branding.test.mjs",
+    "artifacts/chat-app/scripts/save-android-preview-evidence.test.mjs",
+    "artifacts/chat-app/scripts/save-preview-evidence.mjs",
   ]) {
     const source = readRepositoryFile(filePath);
     assert.match(source, /^\/\* jshint esversion: 11, node: true \*\//);
