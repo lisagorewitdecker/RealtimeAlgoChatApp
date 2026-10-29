@@ -23,6 +23,18 @@ import {
 const execFileAsync = promisify(execFile);
 const scriptPath = fileURLToPath(new URL("../verify-sentry-native-event.mjs", import.meta.url));
 
+test("native evidence scripts declare their supported JSHint syntax version", () => {
+  for (const scriptUrl of [
+    new URL("../verify-sentry-native-event.mjs", import.meta.url),
+    new URL("../publish-native-evidence-summary-check.mjs", import.meta.url),
+  ]) {
+    assert.match(
+      readFileSync(scriptUrl, "utf8"),
+      /^#!.*\n\/\* jshint esversion: 11, node: true \*\/|^\/\* jshint esversion: 11, node: true \*\//,
+    );
+  }
+});
+
 test("Sentry verifier declares its supported JSHint syntax version", () => {
   const source = readFileSync(scriptPath, "utf8");
   assert.match(source, /^#!.*\n\/\* jshint esversion: 11, node: true \*\//);
