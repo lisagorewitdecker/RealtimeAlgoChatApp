@@ -21,6 +21,14 @@ test("token generator declares its supported JSHint syntax version", () => {
   assert.match(source, /^\/\* jshint esversion: 11, node: true \*\//);
 });
 
+test("mobile release contract test declares its supported JSHint syntax version", () => {
+  const source = readRepositoryFile(
+    "scripts/tests/mobile-release-summary-contract.test.mjs",
+  );
+
+  assert.match(source, /^\/\* jshint esversion: 11, node: true \*\//);
+});
+
 function getFunctionBody(source, functionName) {
   const declaration = new RegExp(`function ${functionName}\\s*\\([^)]*\\)\\s*\\{`);
   const match = declaration.exec(source);
