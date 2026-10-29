@@ -177,10 +177,16 @@ server-side logs. Keep the four rows even when their status is `BLOCKED`,
 
 | Handoff boundary | Status | Evidence |
 | --- | --- | --- |
-| Public manifest reachability | PASS / FAIL | Preflight `publicManifestReachability` result; status and byte count only |
-| Local handoff probe (manifest and bundle) | PASS / FAIL / NOT_RUN | Preflight `localHandoffProbe` result; no URL or launch payload |
-| Expo Go launch on physical Android | PASS / FAIL / BLOCKED | Phone screen reached the landing screen, or the exact phone error |
-| Server-side native request evidence | PASS / FAIL / BLOCKED | Filtered Metro/API marker with `platform=android` and an Expo Go client or user-agent; no full host, URL, credentials, or message content |
+| Public manifest reachability | PASS / FAIL | Preflight status + bytes |
+| Local handoff probe | PASS / FAIL / NOT_RUN | Manifest/bundle result |
+| Expo Go launch | PASS / FAIL / BLOCKED | Phone screen or exact error |
+| Server-side native request evidence | PASS / FAIL / BLOCKED | Marker |
+
+Use the `publicManifestReachability` and `localHandoffProbe` results for the
+first two rows. The public row contains status and byte count only; omit URLs
+and payloads from the local row. The phone row records the landing screen or
+exact error. The native row uses the filtered Android Expo Go marker; omit the
+host, URL, credentials, and message content.
 
 The local handoff probe is a workspace request against Metro. It proves that
 the manifest and bundle can be fetched locally, not that Expo Go launched on a
@@ -298,9 +304,14 @@ The check enforces these boundaries:
 11. **Automated companions.** Run the existing suites and record the results:
 
     ```sh
-    pnpm --filter @workspace/chat-app exec jest __tests__/CryptoContext.test.tsx __tests__/Room.test.tsx __tests__/secureStorageKey.test.ts --runInBand --coverage=false
-    pnpm --filter @workspace/api-server exec vitest run src/socket.rooms.test.ts --maxWorkers=1
-    pnpm --filter @workspace/api-server exec vitest run src/socket.assistant.test.ts src/socket.security.test.ts src/routes/profile.test.ts --maxWorkers=1
+    pnpm --filter @workspace/chat-app exec jest \
+      __tests__/CryptoContext.test.tsx __tests__/Room.test.tsx \
+      __tests__/secureStorageKey.test.ts --runInBand --coverage=false
+    pnpm --filter @workspace/api-server exec vitest run \
+      src/socket.rooms.test.ts --maxWorkers=1
+    pnpm --filter @workspace/api-server exec vitest run \
+      src/socket.assistant.test.ts src/socket.security.test.ts \
+      src/routes/profile.test.ts --maxWorkers=1
     ```
 
 ## Evidence and redaction
