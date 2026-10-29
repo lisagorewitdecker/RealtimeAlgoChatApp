@@ -31,10 +31,12 @@ test("token generator declares its supported JSHint syntax version", () => {
   assert.match(source, /^\/\* jshint esversion: 11, node: true \*\//);
 });
 
-test("flagged chat-app tests declare their supported JSHint syntax version", () => {
+test("flagged test modules declare their supported JSHint syntax version", () => {
   for (const filePath of [
     "artifacts/chat-app/plugins/withSentryNativeUpload.test.mjs",
     "artifacts/chat-app/scripts/validate-branding.test.mjs",
+    "scripts/tests/shell-cleanup-boundary-contract.test.mjs",
+    "scripts/tests/validate-junit-xml.test.mjs",
   ]) {
     const source = readRepositoryFile(filePath);
     assert.match(source, /^\/\* jshint esversion: 11, node: true \*\//);
@@ -55,6 +57,15 @@ test("Sentry native event verifier declares its supported JSHint syntax version"
   );
 
   assert.match(source, /^#!.*\n\/\* jshint esversion: 11, node: true \*\//);
+test("JSHint alerts declare the syntax version used by Node.js modules", () => {
+  for (const filePath of [
+    "scripts/tests/validate-junit-xml.test.mjs",
+    "lib/api-spec/scripts/staged-codegen-backups.mjs",
+    "artifacts/chat-app/scripts/save-android-preview-evidence.test.mjs",
+  ]) {
+    const source = readRepositoryFile(filePath);
+    assert.match(source, /^\/\* jshint esversion: 11, node: true \*\//);
+  }
 });
 
 function getFunctionBody(source, functionName) {
