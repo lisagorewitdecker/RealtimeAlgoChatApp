@@ -33,6 +33,8 @@ test("native evidence scripts declare their supported JSHint syntax version", ()
       /^#!.*\n\/\* jshint esversion: 11, node: true \*\/|^\/\* jshint esversion: 11, node: true \*\//,
     );
   }
+});
+
 test("Sentry verifier declares its supported JSHint syntax version", () => {
   const source = readFileSync(scriptPath, "utf8");
   assert.match(source, /^#!.*\n\/\* jshint esversion: 11, node: true \*\//);
