@@ -1,4 +1,5 @@
 /* jshint esversion: 11 */
+/* jshint esversion: 11, node: true */
 
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
@@ -33,6 +34,11 @@ const SCRIPT = resolve(import.meta.dirname, "preview-launch-evidence.mjs");
 const FIXTURE = resolve(import.meta.dirname, "preview-launch-evidence-fixture.mjs");
 const { noDevice, bundleOnlyThenClosed, running, inconclusive } =
   LAUNCH_EVIDENCE_STATUSES;
+
+test("declares its supported syntax version for JSHint", async () => {
+  const source = await readFile(new URL(import.meta.url), "utf8");
+  assert.match(source, /^\/\* jshint esversion: 11, node: true \*\//);
+});
 
 // Log lines as the workflow log shows them: `debug` prefixes an ISO timestamp
 // when stderr is not a TTY, and metro.config.js writes the redacted request
