@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-/* jshint esversion: 11 */
 /* jshint esversion: 11, node: true */
 
 import { existsSync, readFileSync } from "node:fs";
