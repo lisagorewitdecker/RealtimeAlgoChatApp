@@ -34,6 +34,11 @@ const FIXTURE = resolve(import.meta.dirname, "preview-launch-evidence-fixture.mj
 const { noDevice, bundleOnlyThenClosed, running, inconclusive } =
   LAUNCH_EVIDENCE_STATUSES;
 
+test("declares its supported syntax version for JSHint", async () => {
+  const source = await readFile(new URL(import.meta.url), "utf8");
+  assert.match(source, /^\/\* jshint esversion: 11, node: true \*\//);
+});
+
 // Log lines as the workflow log shows them: `debug` prefixes an ISO timestamp
 // when stderr is not a TTY, and metro.config.js writes the redacted request
 // log. Device names, ids, hosts, accounts, and sessions are sentinels.
