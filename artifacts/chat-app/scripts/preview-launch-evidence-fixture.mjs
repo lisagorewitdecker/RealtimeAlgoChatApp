@@ -1,3 +1,6 @@
+/* jshint esversion: 11, node: true */
+/* jshint expr: true */
+
 // Scripted dev-server stand-in for preview-launch-evidence.test.mjs.
 //
 // Prints the environment it received (to prove the launcher injects or
