@@ -20,25 +20,106 @@ value was read or written while producing it.
 | SDK/runtime | Expo SDK 57 (`expo` `~57.0.22`; `@expo/cli` `57.0.24`; `react-native` `0.86.3`) |
 | Crash reporting SDK | `@sentry/react-native` `7.11.0` (Expo SDK 57 bundled range: `~7.11.0`) |
 | Sentry destination configured in `app.json` | organization `lisagorewitdecker-06`, project `react-native` |
-| Candidate builds | N/A — no EAS project, build profile, or signed candidate exists |
-| Device runners | N/A — no self-hosted runner is registered for this repository |
+| Candidate builds | N/A — no EAS project/profile or signed candidate exists |
+| Device runners | N/A — no self-hosted runner is registered |
 
 ## Acceptance result
 
-| Check | Status | Evidence |
-| --- | --- | --- |
-| `@sentry/react-native` matches the range Expo SDK 57 expects | PASS | `expo install --check` reported `Dependencies are up to date`; the installed `7.11.0` equals Expo's bundled `~7.11.0`. No alignment change was needed. |
-| Native build preflight fails closed without the upload credential | PASS | `node scripts/build.js --native-build-preflight` exited 1 and named the missing `SENTRY_AUTH_TOKEN`, `SENTRY_RELEASE`, and `SENTRY_DIST` settings without printing any value. |
-| Sentry pipeline exists at this revision | PASS | Native init, the hidden probe route, the Maestro flow, the build stamping, the event verifier, the evidence checker, and the workflow steps are all present (see companion checks below). |
-| Signed iOS candidate built with source-map upload | BLOCKED | No `eas.json`, EAS project ID, or iOS bundle identifier exists in `artifacts/chat-app`; `eas` and `xcrun` are unavailable; no EAS or Expo token is present. |
-| Signed Android candidate built with source-map upload | BLOCKED | Same as iOS; `android.package` is also undefined in `app.json`, and `adb`, `emulator`, and Java are unavailable. |
-| `SENTRY_AUTH_TOKEN` reachable by the `mobile-release` GitHub environment | BLOCKED | The repository has no `mobile-release` environment (only `copilot`) and zero repository-level Actions secrets. |
-| Candidate metadata recorded on GitHub | BLOCKED | Zero repository variables (`NATIVE_SMOKE_IOS_BUILD_ID`, `NATIVE_SMOKE_ANDROID_BUILD_ID`) and zero secrets (`NATIVE_SMOKE_*_SENTRY_RELEASE`, `NATIVE_SMOKE_*_SENTRY_DIST`, app IDs, test account). |
-| Prepared iOS and Android runners | BLOCKED | The repository's self-hosted runner list is empty; no runner carries the `smallest-simulator` labels. |
-| Pipeline present on GitHub's `development` branch | BLOCKED | GitHub `development` (`eae587d`) predates the crash-reporting work: the verifier, probe route, native init, build stamping, evidence checker, and the Maestro flow are absent there, and its `mobile-release.yml` (375 lines, no Sentry steps) differs from the workspace copy (898 lines). The workflow has zero recorded runs. |
-| iOS Sentry event with a readable `createNativeSourceMapProbeError` frame | BLOCKED | No candidate was built, so no probe was sent and the verifier was not run. |
-| Android Sentry event with a readable `createNativeSourceMapProbeError` frame | BLOCKED | Same as iOS. |
-| Sanitized `sentry-source-map-evidence.json` for both platforms | BLOCKED | No release-gate run directory exists under `test-results/native-large-text/<platform>/`. |
+- **`@sentry/react-native` matches the range Expo SDK 57 expects — PASS.**
+  `expo install --check` reported `Dependencies are up to date`; installed
+  `7.11.0` equals Expo's bundled `~7.11.0`. No alignment change was needed.
+- **Native build preflight fails closed without the upload credential — PASS.**
+  `node scripts/build.js --native-build-preflight` exited 1 and named the
+  missing `SENTRY_AUTH_TOKEN`, `SENTRY_RELEASE`, and `SENTRY_DIST` settings
+  without printing any value.
+- **Sentry pipeline exists at this revision — PASS.** Native init, the hidden
+  probe route, the Maestro flow, build stamping, the event verifier, the
+  evidence checker, and the workflow steps are present (see companion checks).
+- **Signed iOS candidate built with source-map upload — BLOCKED.** No
+  `eas.json`, EAS project ID, or iOS bundle identifier exists in
+  `artifacts/chat-app`; `eas` and `xcrun` are unavailable; no EAS or Expo token
+  is present.
+- **Signed Android candidate built with source-map upload — BLOCKED.** Same as
+  iOS; `android.package` is also undefined in `app.json`, and `adb`, `emulator`,
+  and Java are unavailable.
+- **`SENTRY_AUTH_TOKEN` reachable by the `mobile-release` GitHub environment —
+  BLOCKED.** The repository has no `mobile-release` environment (only
+  `copilot`) and zero repository-level Actions secrets.
+- **Candidate metadata recorded on GitHub — BLOCKED.** Zero repository
+  variables (`NATIVE_SMOKE_IOS_BUILD_ID`, `NATIVE_SMOKE_ANDROID_BUILD_ID`) and
+  zero secrets (`NATIVE_SMOKE_*_SENTRY_RELEASE`,
+  `NATIVE_SMOKE_*_SENTRY_DIST`, app IDs, test account).
+- **Prepared iOS and Android runners — BLOCKED.** The repository's self-hosted
+  runner list is empty; no runner carries the `smallest-simulator` labels.
+- **Pipeline present on GitHub's `development` branch — BLOCKED.** GitHub
+  `development` (`eae587d`) predates the crash-reporting work: the verifier,
+  probe route, native init, build stamping, evidence checker, and Maestro flow
+  are absent there. Its `mobile-release.yml` (375 lines, no Sentry steps)
+  differs from the workspace copy (898 lines). The workflow has zero recorded
+  runs.
+- **iOS Sentry event with a readable `createNativeSourceMapProbeError` frame —
+  BLOCKED.** No candidate was built, so no probe was sent and the verifier was
+  not run.
+- **Android Sentry event with a readable `createNativeSourceMapProbeError`
+  frame — BLOCKED.** Same as iOS.
+- **Sanitized `sentry-source-map-evidence.json` for both platforms — BLOCKED.**
+- **Check time (UTC):** 2026-09-14 17:11:00
+- **App:** Chat App
+- **Workspace revision:** `1fa13a2` (local `development`)
+- **SDK/runtime:** Expo SDK 57 (`expo` `~57.0.22`; `@expo/cli` `57.0.24`;
+  `react-native` `0.86.3`)
+- **Crash reporting SDK:** `@sentry/react-native` `7.11.0` (Expo SDK 57
+  bundled range: `~7.11.0`)
+- **Sentry destination configured in `app.json`:** organization
+  `lisagorewitdecker-06`, project `react-native`
+- **Candidate builds:** N/A — no EAS project, build profile, or signed
+  candidate exists
+- **Device runners:** N/A — no self-hosted runner is registered for this
+  repository
+
+## Acceptance result
+
+- **`@sentry/react-native` matches the range Expo SDK 57 expects — PASS:**
+  `expo install --check` reported `Dependencies are up to date`; the installed
+  `7.11.0` equals Expo's bundled `~7.11.0`. No alignment change was needed.
+- **Native build preflight fails closed without the upload credential — PASS:**
+  `node scripts/build.js --native-build-preflight` exited 1 and named the
+  missing `SENTRY_AUTH_TOKEN`, `SENTRY_RELEASE`, and `SENTRY_DIST` settings
+  without printing any value.
+- **Sentry pipeline exists at this revision — PASS:** Native init, the hidden
+  probe route, the Maestro flow, the build stamping, the event verifier, the
+  evidence checker, and the workflow steps are all present (see companion
+  checks below).
+- **Signed iOS candidate built with source-map upload — BLOCKED:** No
+  `eas.json`, EAS project ID, or iOS bundle identifier exists in
+  `artifacts/chat-app`; `eas` and `xcrun` are unavailable; no EAS or Expo token
+  is present.
+- **Signed Android candidate built with source-map upload — BLOCKED:** Same as
+  iOS; `android.package` is also undefined in `app.json`, and `adb`,
+  `emulator`, and Java are unavailable.
+- **`SENTRY_AUTH_TOKEN` reachable by the `mobile-release` GitHub environment —
+  BLOCKED:** The repository has no `mobile-release` environment (only
+  `copilot`) and zero repository-level Actions secrets.
+- **Candidate metadata recorded on GitHub — BLOCKED:** Zero repository
+  variables (`NATIVE_SMOKE_IOS_BUILD_ID`, `NATIVE_SMOKE_ANDROID_BUILD_ID`) and
+  zero secrets (`NATIVE_SMOKE_*_SENTRY_RELEASE`,
+  `NATIVE_SMOKE_*_SENTRY_DIST`, app IDs, test account).
+- **Prepared iOS and Android runners — BLOCKED:** The repository's self-hosted
+  runner list is empty; no runner carries the `smallest-simulator` labels.
+- **Pipeline present on GitHub's `development` branch — BLOCKED:** GitHub
+  `development` (`eae587d`) predates the crash-reporting work: the verifier,
+  probe route, native init, build stamping, evidence checker, and the Maestro
+  flow are absent there, and its `mobile-release.yml` (375 lines, no Sentry
+  steps) differs from the workspace copy (898 lines). The workflow has zero
+  recorded runs.
+- **iOS Sentry event with a readable `createNativeSourceMapProbeError` frame —
+  BLOCKED:** No candidate was built, so no probe was sent and the verifier was
+  not run.
+- **Android Sentry event with a readable `createNativeSourceMapProbeError`
+  frame — BLOCKED:** Same as iOS.
+- **Sanitized `sentry-source-map-evidence.json` for both platforms — BLOCKED:**
+  No release-gate run directory exists under
+  `test-results/native-large-text/<platform>/`.
 
 ## Exact workspace blocking evidence
 
@@ -67,7 +148,8 @@ names, counts, and statuses were read; no secret or variable value was
 requested.
 
 ```text
-default branch: development @ eae587d (workspace development is 230 commits ahead)
+default branch: development @ eae587d (workspace development is 230 commits
+ahead)
 environments: copilot            (mobile-release: not found)
 repository Actions secrets: 0    repository Actions variables: 0
 self-hosted runners: 0
@@ -79,12 +161,19 @@ runs of .github/workflows/mobile-release.yml: 0
 These passed at the same revision; they prove the pipeline fails closed and
 validates evidence correctly, not that a real device event was readable:
 
-1. Sentry event verifier contract (`scripts/tests/verify-sentry-native-event.test.mjs`): **5 tests passed** — accepts only a matching release, dist, platform, candidate build ID, and a mapped in-app probe frame with a line and column; rejects other releases, minified bundle frames, and unrelated mapped frames; retries transient API failures.
+1. Sentry event verifier contract
+   (`scripts/tests/verify-sentry-native-event.test.mjs`): **5 tests passed** —
+   accepts only a matching release, dist, platform, candidate build ID, and a
+   mapped in-app probe frame with a line and column; rejects other releases,
+   minified bundle frames, and unrelated mapped frames; retries transient API
+   failures.
 2. Mobile release summary contract: **14 tests passed**.
 3. Mobile release caller contract: **6 tests passed**.
-4. Native evidence completeness regression suite: **passed** (candidate-bound Sentry evidence is required for a complete platform).
+4. Native evidence completeness regression suite: **passed**
+   (candidate-bound Sentry evidence is required for a complete platform).
 5. Chat App build preflight (`scripts/build.test.js`): **9 tests passed**.
-6. Chat App `sentry.test.ts` and `buildIdentity.test.ts`: **2 suites, 7 tests passed** (Expo Go gating, release/dist stamping, probe tagging).
+6. Chat App `sentry.test.ts` and `buildIdentity.test.ts`: **2 suites, 7 tests
+   passed** (Expo Go gating, release/dist stamping, probe tagging).
 
 ## Required next evidence
 

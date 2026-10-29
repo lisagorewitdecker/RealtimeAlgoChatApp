@@ -3,6 +3,8 @@ name: Sandbox release validation
 description: How to keep the generated sandbox and mobile host covered by stable release checks.
 ---
 
+# Sandbox release validation
+
 The collaborative sandbox spans two delivery boundaries: server-generated HTML
 and the authenticated client host that renders it. Native clients use WebView;
 browser previews fetch the HTML with a bearer token and host it in an iframe.
