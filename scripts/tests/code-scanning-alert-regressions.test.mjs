@@ -49,6 +49,14 @@ test("mobile release contract test declares its supported JSHint syntax version"
   assert.match(source, /^\/\* jshint esversion: 11, node: true \*\//);
 });
 
+test("Sentry native event verifier declares its supported JSHint syntax version", () => {
+  const source = readRepositoryFile(
+    "scripts/verify-sentry-native-event.mjs",
+  );
+
+  assert.match(source, /^#!.*\n\/\* jshint esversion: 11, node: true \*\//);
+});
+
 function getFunctionBody(source, functionName) {
   const declaration = new RegExp(`function ${functionName}\\s*\\([^)]*\\)\\s*\\{`);
   const match = declaration.exec(source);
