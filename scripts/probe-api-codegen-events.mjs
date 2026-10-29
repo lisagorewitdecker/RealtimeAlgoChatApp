@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/* jshint esversion: 12, node: true */
+/* jshint esversion: 11, node: true */
 
 import { mkdirSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, extname, join, resolve } from "node:path";
@@ -17,9 +17,9 @@ const DEFAULTS = {
 };
 
 const RETRYABLE_GET_STATUS_CODES = new Set([408, 429, 500, 502, 503, 504]);
-const DEFAULT_GET_RETRY_DEADLINE_MS = 30_000;
+const DEFAULT_GET_RETRY_DEADLINE_MS = 30000;
 const DEFAULT_GET_RETRY_BASE_DELAY_MS = 250;
-const DEFAULT_GET_RETRY_MAX_DELAY_MS = 2_000;
+const DEFAULT_GET_RETRY_MAX_DELAY_MS = 2000;
 
 function encodePath(path) {
   return path.split("/").map(encodeURIComponent).join("/");
@@ -633,7 +633,7 @@ export function findMatchingWorkflowRun(
   runs,
   { branch, headSha, pullRequestNumber, after, excludedRunIds = new Set() },
 ) {
-  const afterMs = new Date(after).getTime() - 30_000;
+  const afterMs = new Date(after).getTime() - 30000;
   return (runs ?? [])
     .filter((run) => {
       const pullRequestMatches =

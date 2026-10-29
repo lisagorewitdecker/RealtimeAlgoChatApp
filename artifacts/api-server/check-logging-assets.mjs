@@ -1,3 +1,5 @@
+/* jshint esversion: 11, node: true */
+
 import { access, readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
