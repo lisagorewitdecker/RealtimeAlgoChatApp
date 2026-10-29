@@ -1,3 +1,4 @@
+/* jshint esversion: 11, node: true */
 import { chromium } from "@playwright/test";
 import { readFile } from "node:fs/promises";
 import { resolveRuntimeConfigPath } from "./playwright-runtime-config.mjs";
@@ -42,5 +43,7 @@ try {
   console.error(error instanceof Error ? error.message : String(error));
   process.exitCode = 1;
 } finally {
-  await browser?.close();
+  if (browser) {
+    await browser.close();
+  }
 }
