@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 /* jshint esversion: 11 */
+/* jshint esversion: 11, node: true */
+
 import { existsSync, readFileSync } from "node:fs";
 import { chmod, mkdir, writeFile } from "node:fs/promises";
 import path, { dirname, join } from "node:path";
