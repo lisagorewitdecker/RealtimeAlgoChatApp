@@ -1,3 +1,4 @@
+/* jshint esversion: 11, node: true */
 // Guards the Sentry native upload policy that keeps App Store / Play builds
 // started without SENTRY_AUTH_TOKEN (Replit's Publish pane via Expo Launch)
 // from failing inside @sentry/react-native's Xcode phases, while builds that
