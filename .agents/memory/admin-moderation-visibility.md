@@ -3,6 +3,8 @@ name: Admin moderation visibility
 description: How workspace moderation controls discover the current account's administrator role safely.
 ---
 
+# Admin moderation visibility
+
 Admin-only workspace controls must use a boolean derived by the authenticated
 server for the current account. The client must never receive or duplicate the
 administrator allowlist.
