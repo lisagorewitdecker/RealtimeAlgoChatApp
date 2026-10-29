@@ -3,6 +3,8 @@ name: Tagged wrapper test doubles
 description: Why a stand-in for a wrapper component must render a marker the real replacement cannot, and how to prove the resulting containment assertions with a typecheck-clean mutant.
 ---
 
+# Tagged wrapper test doubles
+
 Rule: when a suite replaces a wrapper component (keyboard-aware scroll view,
 provider, avoiding view) with a stand-in, the stand-in must render a tagged
 host element of its own and the suite must query the wrapped content through
@@ -18,6 +20,7 @@ compat import merely went unused (the app tsconfig does not enable
 components. Phones would lose keyboard-aware scrolling with every check green.
 
 **How to apply:**
+
 - Keep the screen's own props on the inner element and put the marker on an
   outer host, so existing prop assertions keep working; share the stand-in
   from `test-utils/` instead of copying an inline `jest.mock` per suite

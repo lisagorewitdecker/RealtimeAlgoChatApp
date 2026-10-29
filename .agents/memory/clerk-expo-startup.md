@@ -3,6 +3,8 @@ name: Clerk Expo startup
 description: Environment and rendering constraints for the managed Clerk Expo client.
 ---
 
+# Clerk Expo startup
+
 Expo only exposes environment variables prefixed with `EXPO_PUBLIC_` to the
 mobile bundle. The managed Clerk publishable key may be provided to the process
 under a different publishable-key environment name, so map it into
