@@ -51,6 +51,17 @@ test("mobile release contract test declares its supported JSHint syntax version"
   assert.match(source, /^\/\* jshint esversion: 11, node: true \*\//);
 });
 
+test("JSHint alerts declare the syntax version used by Node.js modules", () => {
+  for (const filePath of [
+    "scripts/tests/validate-junit-xml.test.mjs",
+    "lib/api-spec/scripts/staged-codegen-backups.mjs",
+    "artifacts/chat-app/scripts/save-android-preview-evidence.test.mjs",
+  ]) {
+    const source = readRepositoryFile(filePath);
+    assert.match(source, /^\/\* jshint esversion: 11, node: true \*\//);
+  }
+});
+
 function getFunctionBody(source, functionName) {
   const declaration = new RegExp(`function ${functionName}\\s*\\([^)]*\\)\\s*\\{`);
   const match = declaration.exec(source);
