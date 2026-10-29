@@ -35,6 +35,8 @@ test("flagged test modules declare their supported JSHint syntax version", () =>
   for (const filePath of [
     "artifacts/chat-app/plugins/withSentryNativeUpload.test.mjs",
     "artifacts/chat-app/scripts/validate-branding.test.mjs",
+    "artifacts/chat-app/scripts/save-android-preview-evidence.test.mjs",
+    "artifacts/chat-app/scripts/save-preview-evidence.mjs",
     "scripts/tests/shell-cleanup-boundary-contract.test.mjs",
     "scripts/tests/validate-junit-xml.test.mjs",
   ]) {
