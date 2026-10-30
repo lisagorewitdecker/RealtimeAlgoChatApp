@@ -68,10 +68,10 @@ export async function updateAccountProfile(
   userId: string,
   profile: AccountProfile,
 ): Promise<AccountProfile> {
-  const existingUser = await clerkClient.users.getUser(userId);
+  // Clerk deep-merges metadata updates, so write only the profile key. Echoing
+  // a previously read copy of the other keys could undo a concurrent ban.
   const user = await clerkClient.users.updateUserMetadata(userId, {
     privateMetadata: {
-      ...existingUser.privateMetadata,
       [PROFILE_METADATA_KEY]: profile,
     },
   });

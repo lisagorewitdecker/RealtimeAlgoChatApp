@@ -46,6 +46,7 @@ afterAll(async () => {
 });
 
 beforeEach(() => {
+  process.env["SESSION_SECRET"] = "rooms-http-test-session-secret";
   mockGetAuth.mockReset();
   mockGetRooms.mockReset();
   mockGetAccountProfile.mockReset().mockResolvedValue({
@@ -113,6 +114,7 @@ describe("GET /api/rooms route", () => {
         `${baseUrl}/${purpose}?roomId=identity-room`,
         {
           headers: {
+            Authorization: "Bearer session-token",
             "X-DevStudio-Display-Name": "Imposter",
             "X-DevStudio-Avatar-Emoji": "untrusted-avatar",
           },
@@ -124,4 +126,42 @@ describe("GET /api/rooms route", () => {
       expect(mockGetAccountProfile).toHaveBeenCalledWith("user-ada");
     },
   );
+
+  it.each(["call", "sandbox"])(
+    "refuses to mint a %s room document for a cookie-only cross-site navigation",
+    async (purpose) => {
+      // Clerk would accept the session cookie, so getAuth reports a user.
+      mockGetAuth.mockReturnValue({ userId: "user-ada" });
+
+      const response = await fetch(
+        `${baseUrl}/${purpose}?roomId=attacker-room`,
+        {
+          headers: {
+            Cookie: "__session=victim-session",
+            "Sec-Fetch-Site": "cross-site",
+            "Sec-Fetch-Mode": "navigate",
+          },
+        },
+      );
+
+      expect(response.status).toBe(401);
+      await expect(response.json()).resolves.toEqual({
+        error: "Authentication required.",
+      });
+      expect(mockGetAccountProfile).not.toHaveBeenCalled();
+      expect(mockGetAccountAccess).not.toHaveBeenCalled();
+    },
+  );
+
+  it("answers with a server error instead of hanging when capabilities cannot be issued", async () => {
+    delete process.env["SESSION_SECRET"];
+    mockGetAuth.mockReturnValue({ userId: "user-ada" });
+
+    const response = await fetch(`${baseUrl}/call?roomId=identity-room`, {
+      headers: { Authorization: "Bearer session-token" },
+      signal: AbortSignal.timeout(2_000),
+    });
+
+    expect(response.status).toBe(500);
+  });
 });

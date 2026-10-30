@@ -103,10 +103,33 @@ function serveManifest(platform, res) {
   res.end(manifest.content);
 }
 
+const HOST_HEADER_PATTERN = /^[A-Za-z0-9.-]+(?::\d{1,5})?$/;
+
+function firstHeaderValue(value) {
+  const raw = Array.isArray(value) ? value[0] : value;
+  return typeof raw === "string" ? raw.split(",")[0].trim() : "";
+}
+
+// Host and proto come from request headers and are written into HTML and an
+// inline script, so only accept plain hostnames and known schemes.
+function getRequestOrigin(req) {
+  const forwardedProto = firstHeaderValue(
+    req.headers["x-forwarded-proto"],
+  ).toLowerCase();
+  const protocol =
+    forwardedProto === "http" || forwardedProto === "https"
+      ? forwardedProto
+      : "https";
+  const host =
+    [
+      firstHeaderValue(req.headers["x-forwarded-host"]),
+      firstHeaderValue(req.headers.host),
+    ].find((candidate) => HOST_HEADER_PATTERN.test(candidate)) || "localhost";
+  return { protocol, host };
+}
+
 function serveLandingPage(req, res, landingPageTemplate, appName) {
-  const forwardedProto = req.headers["x-forwarded-proto"];
-  const protocol = forwardedProto || "https";
-  const host = req.headers["x-forwarded-host"] || req.headers.host;
+  const { protocol, host } = getRequestOrigin(req);
   const baseUrl = `${protocol}://${host}`;
   const expsUrl = `${host}`;
   const pageDescription = `Get ${appName} on your phone: real-time code collaboration, calls, and chat for developers.`;
@@ -204,7 +227,9 @@ const appName = getAppName();
 
 function createStaticServer() {
   return http.createServer((req, res) => {
-    const url = new URL(req.url || "/", `http://${req.headers.host}`);
+    // Only the path is used; a fixed base keeps a malformed Host header from
+    // throwing inside the request handler.
+    const url = new URL(req.url || "/", "http://localhost");
     let pathname = url.pathname;
 
     if (basePath && pathname.startsWith(basePath)) {
