@@ -1346,6 +1346,40 @@ describe("room Socket.IO lifecycle", () => {
     ]);
   });
 
+  it("rejects a pending room join when the member is kicked during public-key lookup", async () => {
+    const roomId = `pending-member-kick-${Date.now()}`;
+    const ada = createRoomClient("token-ada");
+    const ben = createRoomClient("token-ben");
+    await Promise.all([waitForEvent(ada, "connect"), waitForEvent(ben, "connect")]);
+
+    const adaJoined = waitForEvent(ada, "room-joined");
+    ada.emit("join-room", { roomId });
+    await adaJoined;
+
+    let resolveBenPublicKey!: (publicKey: string | null) => void;
+    mockGetPublicKey.mockImplementation((userId: string) =>
+      userId === "user-ben"
+        ? new Promise<string | null>((resolve) => {
+            resolveBenPublicKey = resolve;
+          })
+        : Promise.resolve(null),
+    );
+    const benError = waitForEvent<{ message: string }>(ben, "error");
+    ben.emit("join-room", { roomId, createIfMissing: false });
+    await vi.waitFor(() => expect(resolveBenPublicKey).toBeDefined());
+
+    await expect(kickRoomMember(roomId, "user-ada", "user-ben")).resolves.toBe("ok");
+    resolveBenPublicKey("ben-public-key");
+
+    await expect(benError).resolves.toMatchObject({
+      message:
+        "You were recently removed from this room. Please wait a few minutes before rejoining.",
+    });
+    expect(getRooms()).toEqual([
+      expect.objectContaining({ id: roomId, userCount: 1 }),
+    ]);
+  });
+
   it("rejects a pending authentication when the account is banned during profile lookup", async () => {
     let resolveProfile!: (profile: { username: string; avatarEmoji: string }) => void;
     let profileLookupStarted!: () => void;

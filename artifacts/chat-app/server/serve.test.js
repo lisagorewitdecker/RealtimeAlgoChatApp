@@ -6,6 +6,7 @@ const {
 } = require("./serve");
 const fs = require("node:fs");
 const http = require("node:http");
+const net = require("node:net");
 const os = require("node:os");
 const path = require("node:path");
 
@@ -132,6 +133,115 @@ describe("static file path resolution", () => {
         url: `https://127.0.0.1:${address.port}/`,
       });
       expect(structuredData).not.toHaveProperty("downloadUrl");
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+    }
+  });
+
+  it("does not reflect an untrusted forwarded host or proto into the landing page", async () => {
+    const server = createStaticServer();
+
+    await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+
+    try {
+      const address = server.address();
+      const response = await new Promise((resolve, reject) => {
+        const request = http.get(
+          {
+            host: "127.0.0.1",
+            port: address.port,
+            path: "/",
+            headers: {
+              "x-forwarded-host": 'evil.example"><script>alert(1)</script>',
+              "x-forwarded-proto": "javascript:alert(1)//",
+            },
+          },
+          (res) => {
+            let body = "";
+            res.setEncoding("utf8");
+            res.on("data", (chunk) => {
+              body += chunk;
+            });
+            res.on("end", () => resolve({ status: res.statusCode, body }));
+          },
+        );
+        request.on("error", reject);
+      });
+
+      expect(response.status).toBe(200);
+      expect(response.body).not.toContain("<script>alert(1)</script>");
+      expect(response.body).not.toContain("evil.example");
+      expect(response.body).not.toContain("javascript:alert");
+      expect(response.body).toContain(`https://127.0.0.1:${address.port}/`);
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+    }
+  });
+
+  it("reflects bracketed IPv6 hosts into the landing page", async () => {
+    const server = createStaticServer();
+
+    await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+
+    const getLandingPage = (headers) =>
+      new Promise((resolve, reject) => {
+        const request = http.get(
+          { host: "127.0.0.1", port: server.address().port, path: "/", headers },
+          (res) => {
+            let body = "";
+            res.setEncoding("utf8");
+            res.on("data", (chunk) => {
+              body += chunk;
+            });
+            res.on("end", () => resolve(body));
+          },
+        );
+        request.on("error", reject);
+      });
+
+    try {
+      const fromHost = await getLandingPage({ host: "[2001:db8::1]:8080" });
+      expect(fromHost).toContain('href="https://[2001:db8::1]:8080/"');
+      expect(fromHost).toContain('const deepLink = "exps://[2001:db8::1]:8080"');
+      expect(fromHost).not.toContain("https://localhost");
+
+      const fromForwarded = await getLandingPage({
+        "x-forwarded-host": "[::ffff:192.0.2.1]",
+      });
+      expect(fromForwarded).toContain('href="https://[::ffff:192.0.2.1]/"');
+
+      const injected = await getLandingPage({
+        host: "[::1]:8080",
+        "x-forwarded-host": '[::1]"><script>alert(1)</script>',
+      });
+      expect(injected).not.toContain("<script>alert(1)</script>");
+      expect(injected).toContain('href="https://[::1]:8080/"');
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+    }
+  });
+
+  it("keeps serving when a request carries a malformed Host header", async () => {
+    const server = createStaticServer();
+
+    await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+
+    try {
+      const address = server.address();
+      const statusLine = await new Promise((resolve, reject) => {
+        const socket = net.connect(address.port, "127.0.0.1", () => {
+          socket.write("GET /status HTTP/1.1\r\nHost: bad host\r\nConnection: close\r\n\r\n");
+        });
+        let raw = "";
+        socket.setEncoding("utf8");
+        socket.on("data", (chunk) => {
+          raw += chunk;
+        });
+        socket.on("end", () => resolve(raw.split("\r\n")[0]));
+        socket.on("error", reject);
+      });
+
+      expect(statusLine).toBe("HTTP/1.1 200 OK");
     } finally {
       await new Promise((resolve) => server.close(resolve));
     }

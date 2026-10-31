@@ -778,6 +778,9 @@ export async function kickRoomMember(
       banned: false,
     });
   });
+  // The revocation NOTIFY is ignored by this instance, so cancel joins that
+  // already passed the cooldown check here before they re-add the target.
+  revokePendingRoomJoins(roomId, targetId, false);
   const io = activeServer;
   const target = rooms.get(roomId)?.users.get(targetId);
   if (io && target) {

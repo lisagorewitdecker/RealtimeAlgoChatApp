@@ -38,13 +38,9 @@ router.get("/", async (req, res) => {
   res.json({ rooms: getRooms() });
 });
 
-router.get("/call", (req, res) => {
-  void renderRoomDocument(req, res, "call");
-});
+router.get("/call", (req, res) => renderRoomDocument(req, res, "call"));
 
-router.get("/sandbox", (req, res) => {
-  void renderRoomDocument(req, res, "sandbox");
-});
+router.get("/sandbox", (req, res) => renderRoomDocument(req, res, "sandbox"));
 
 router.get("/:roomId/key-envelope", async (req, res, next) => {
   const userId = await requireAuthorizedUser(req, res);
@@ -66,6 +62,13 @@ async function renderRoomDocument(
   res: Response,
   purpose: RoomAccessPurpose,
 ) {
+  // These documents mint a room capability and auto-join the room, so they
+  // must not be reachable by a cross-site navigation that carries only the
+  // Clerk session cookie. Legitimate clients always send a bearer token.
+  if (!hasBearerAuthorization(req)) {
+    res.status(401).json({ error: "Authentication required." });
+    return;
+  }
   const userId = await requireAuthorizedUser(req, res);
   if (!userId) return;
   const roomId = getRoomId(req.query["roomId"]);
@@ -109,6 +112,14 @@ async function renderRoomDocument(
             capability,
           }),
     );
+}
+
+function hasBearerAuthorization(req: Request): boolean {
+  const authorization = req.headers.authorization;
+  return (
+    typeof authorization === "string" &&
+    /^Bearer\s+\S+/i.test(authorization)
+  );
 }
 
 function allowRoomDocumentIssuance(

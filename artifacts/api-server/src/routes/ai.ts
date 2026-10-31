@@ -8,6 +8,7 @@ import type { Request, Response } from "express";
 import { requireAuth } from "../middlewares/requireAuth";
 import { createIpRateLimit } from "../middlewares/rateLimit";
 import { anthropic } from "@workspace/integrations-anthropic-ai";
+import { logger } from "../lib/logger";
 
 const router = Router();
 const aiRateLimit = createIpRateLimit({
@@ -69,13 +70,24 @@ router.post("/code-assist", requireAuth, async (req: Request, res: Response) => 
   res.setHeader("X-Accel-Buffering", "no");
   res.flushHeaders();
 
+  // Stop generating (and paying for) tokens once the client goes away.
+  const upstream = new AbortController();
+  res.on("close", () => {
+    if (!res.writableEnded) upstream.abort();
+  });
+  // `close` only fires once; the client may have left while auth was pending.
+  if (res.destroyed) return;
+
   try {
-    const stream = anthropic.messages.stream({
-      model: "claude-sonnet-4-6",
-      max_tokens: 8192,
-      system: SYSTEM_PROMPT,
-      messages: trimmed,
-    });
+    const stream = anthropic.messages.stream(
+      {
+        model: "claude-sonnet-4-6",
+        max_tokens: 8192,
+        system: SYSTEM_PROMPT,
+        messages: trimmed,
+      },
+      { signal: upstream.signal },
+    );
 
     for await (const event of stream) {
       if (
@@ -89,8 +101,9 @@ router.post("/code-assist", requireAuth, async (req: Request, res: Response) => 
     res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
     res.end();
   } catch (err) {
-    const message = err instanceof Error ? err.message : "AI service error";
-    res.write(`data: ${JSON.stringify({ error: message })}\n\n`);
+    if (upstream.signal.aborted) return;
+    logger.warn({ err }, "AI code assist request failed");
+    res.write(`data: ${JSON.stringify({ error: "AI service error" })}\n\n`);
     res.end();
   }
 });
