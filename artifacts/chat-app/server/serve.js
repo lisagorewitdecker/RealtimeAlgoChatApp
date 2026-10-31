@@ -103,7 +103,7 @@ function serveManifest(platform, res) {
   res.end(manifest.content);
 }
 
-const HOST_HEADER_PATTERN = /^[A-Za-z0-9.-]+(?::\d{1,5})?$/;
+const HOST_HEADER_PATTERN = /^(?:[A-Za-z0-9.-]+|\[[0-9A-Fa-f:.]+\])(?::\d{1,5})?$/;
 
 function firstHeaderValue(value) {
   const raw = Array.isArray(value) ? value[0] : value;
