@@ -1,17 +1,30 @@
 import { once } from "node:events";
-import { createServer, request, type Server } from "node:http";
+import {
+  createServer,
+  request,
+  type Server,
+  type ServerResponse,
+} from "node:http";
 import type { AddressInfo } from "node:net";
 import express from "express";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mockStream = vi.hoisted(() => vi.fn());
+const authHook = vi.hoisted(() => ({
+  pause: undefined as
+    | undefined
+    | ((res: ServerResponse, next: () => void) => void),
+}));
 
 vi.mock("@workspace/integrations-anthropic-ai", () => ({
   anthropic: { messages: { stream: mockStream } },
 }));
 
 vi.mock("../middlewares/requireAuth", () => ({
-  requireAuth: (_req: unknown, _res: unknown, next: () => void) => next(),
+  requireAuth: (_req: unknown, res: ServerResponse, next: () => void) => {
+    if (authHook.pause) authHook.pause(res, next);
+    else next();
+  },
 }));
 
 vi.mock("../lib/logger", () => ({
@@ -41,6 +54,7 @@ afterAll(async () => {
 
 beforeEach(() => {
   mockStream.mockReset();
+  authHook.pause = undefined;
 });
 
 const body = JSON.stringify({ messages: [{ role: "user", content: "hello" }] });
@@ -111,5 +125,33 @@ describe("POST /api/ai/code-assist", () => {
     });
 
     await vi.waitFor(() => expect(upstreamSignal?.aborted).toBe(true));
+  });
+
+  it("does not start the upstream stream when the client disconnects during auth", async () => {
+    const authPending = new Promise<{ res: ServerResponse; next: () => void }>(
+      (resolve) => {
+        authHook.pause = (res, next) => resolve({ res, next });
+      },
+    );
+
+    const { port } = server.address() as AddressInfo;
+    const req = request({
+      host: "127.0.0.1",
+      port,
+      path: "/code-assist",
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+    });
+    req.on("error", () => {});
+    req.end(body);
+
+    const { res, next } = await authPending;
+    const closed = once(res, "close");
+    req.destroy();
+    await closed;
+
+    next();
+
+    expect(mockStream).not.toHaveBeenCalled();
   });
 });

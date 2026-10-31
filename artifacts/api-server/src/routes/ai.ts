@@ -75,6 +75,8 @@ router.post("/code-assist", requireAuth, async (req: Request, res: Response) => 
   res.on("close", () => {
     if (!res.writableEnded) upstream.abort();
   });
+  // `close` only fires once; the client may have left while auth was pending.
+  if (res.destroyed) return;
 
   try {
     const stream = anthropic.messages.stream(
