@@ -178,6 +178,49 @@ describe("static file path resolution", () => {
     }
   });
 
+  it("reflects bracketed IPv6 hosts into the landing page", async () => {
+    const server = createStaticServer();
+
+    await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+
+    const getLandingPage = (headers) =>
+      new Promise((resolve, reject) => {
+        const request = http.get(
+          { host: "127.0.0.1", port: server.address().port, path: "/", headers },
+          (res) => {
+            let body = "";
+            res.setEncoding("utf8");
+            res.on("data", (chunk) => {
+              body += chunk;
+            });
+            res.on("end", () => resolve(body));
+          },
+        );
+        request.on("error", reject);
+      });
+
+    try {
+      const fromHost = await getLandingPage({ host: "[2001:db8::1]:8080" });
+      expect(fromHost).toContain('href="https://[2001:db8::1]:8080/"');
+      expect(fromHost).toContain('const deepLink = "exps://[2001:db8::1]:8080"');
+      expect(fromHost).not.toContain("https://localhost");
+
+      const fromForwarded = await getLandingPage({
+        "x-forwarded-host": "[::ffff:192.0.2.1]",
+      });
+      expect(fromForwarded).toContain('href="https://[::ffff:192.0.2.1]/"');
+
+      const injected = await getLandingPage({
+        host: "[::1]:8080",
+        "x-forwarded-host": '[::1]"><script>alert(1)</script>',
+      });
+      expect(injected).not.toContain("<script>alert(1)</script>");
+      expect(injected).toContain('href="https://[::1]:8080/"');
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+    }
+  });
+
   it("keeps serving when a request carries a malformed Host header", async () => {
     const server = createStaticServer();
 

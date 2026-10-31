@@ -111,7 +111,8 @@ function firstHeaderValue(value) {
 }
 
 // Host and proto come from request headers and are written into HTML and an
-// inline script, so only accept plain hostnames and known schemes.
+// inline script, so only accept plain hostnames, bracketed IPv6 literals, and
+// known schemes.
 function getRequestOrigin(req) {
   const forwardedProto = firstHeaderValue(
     req.headers["x-forwarded-proto"],
