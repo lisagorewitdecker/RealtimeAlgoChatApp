@@ -51,7 +51,8 @@ Reports that show new impact beyond these documented limitations are welcome.
 
 Administrator privileges come only from the `ADMIN_USER_IDS` environment
 variable (comma-separated Clerk user IDs). `MAIN_ADMIN_EMAIL` names the owner's
-Clerk account, the only account allowed to use the owner's display name; set
-it in Replit Secrets/Configurations for the deployment. When it is unset no
-account may use that name and the API logs a warning at startup. Neither
-value belongs in the repository.
+Clerk account, the only account allowed to select the owner's display name;
+set it in Replit Secrets/Configurations for the deployment. When it is unset
+no account can newly set that name (display names already stored are still
+shown) and the API logs a warning at startup. Neither value belongs in the
+repository.

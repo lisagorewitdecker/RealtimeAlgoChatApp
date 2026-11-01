@@ -218,6 +218,7 @@ These are accepted, documented gaps. Report them only with new impact.
   identifiers by design (the mobile app ships one); they do not grant read
   access to Sentry data.
 - **`MAIN_ADMIN_EMAIL` must be configured** (in Replit Secrets for the
-  deployment) for the owner's account to keep using the owner's display name;
-  when it is unset no account may use that name and the API logs a warning at
-  startup. It grants no privileges; those come only from `ADMIN_USER_IDS`.
+  deployment) for the owner's account to be able to set the owner's display
+  name; when it is unset no account can newly set that name (display names
+  already stored are still shown) and the API logs a warning at startup. It
+  grants no privileges; those come only from `ADMIN_USER_IDS`.
