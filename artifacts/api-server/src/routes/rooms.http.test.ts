@@ -153,6 +153,25 @@ describe("GET /api/rooms route", () => {
     },
   );
 
+  it.each(["call", "sandbox"])(
+    "forbids framing the %s room document by URL",
+    async (purpose) => {
+      mockGetAuth.mockReturnValue({ userId: "user-ada" });
+
+      const response = await fetch(
+        `${baseUrl}/${purpose}?roomId=identity-room`,
+        { headers: { Authorization: "Bearer test-token" } },
+      );
+      await response.text();
+
+      expect(response.status).toBe(200);
+      expect(response.headers.get("content-security-policy")).toBe(
+        "frame-ancestors 'none'",
+      );
+      expect(response.headers.get("x-frame-options")).toBe("DENY");
+    },
+  );
+
   it("answers with a server error instead of hanging when capabilities cannot be issued", async () => {
     delete process.env["SESSION_SECRET"];
     mockGetAuth.mockReturnValue({ userId: "user-ada" });

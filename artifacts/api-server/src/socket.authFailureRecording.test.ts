@@ -139,6 +139,55 @@ describe("Socket.IO auth-failure and disconnect recording", () => {
     );
   });
 
+  describe("Clerk authorized party (azp)", () => {
+    beforeEach(() => {
+      vi.stubEnv("REPLIT_DEV_DOMAIN", "");
+      vi.stubEnv("REPLIT_EXPO_DEV_DOMAIN", "");
+      vi.stubEnv("REPLIT_DOMAINS", "chat.example.test");
+      vi.stubEnv("REPLIT_INTERNAL_APP_DOMAIN", "");
+    });
+
+    afterEach(() => {
+      vi.unstubAllEnvs();
+    });
+
+    it("rejects a session token minted for a foreign browser origin", async () => {
+      mockVerifyToken.mockResolvedValue({
+        sub: "user-ada",
+        azp: "https://attacker.example.test",
+      });
+      const client = connect({ token: "token-foreign" });
+
+      const error = await waitForEvent<Error>(client, "connect_error");
+
+      expect(error.message).toBe("Invalid session.");
+      expect(mockRecordSocketAuthFailure).toHaveBeenCalledWith("invalid_session");
+      expect(mockGetAccountAccess).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ["an allowlisted browser origin", { azp: "https://chat.example.test" }],
+      ["a native client token without azp", {}],
+    ])("accepts %s", async (_label, claims) => {
+      mockVerifyToken.mockResolvedValue({ sub: "user-ada", ...claims });
+      const client = connect({ token: "token-ada" });
+
+      await waitForEvent(client, "connect");
+
+      expect(mockRecordSocketAuthFailure).not.toHaveBeenCalled();
+    });
+  });
+
+  it("marks Engine.IO transport responses nosniff", async () => {
+    const response = await fetch(
+      `${serverUrl}/api/socket.io/?EIO=4&transport=polling`,
+    );
+    await response.text();
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("x-content-type-options")).toBe("nosniff");
+  });
+
   it("records the disconnect reason when a client disconnects", async () => {
     mockVerifyToken.mockResolvedValue({ sub: "user-ada" });
     const client = connect({ token: "token-ada" });

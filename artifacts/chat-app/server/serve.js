@@ -228,6 +228,7 @@ const appName = getAppName();
 
 function createStaticServer() {
   return http.createServer((req, res) => {
+    res.setHeader("x-content-type-options", "nosniff");
     // Only the path is used; a fixed base keeps a malformed Host header from
     // throwing inside the request handler.
     const url = new URL(req.url || "/", "http://localhost");

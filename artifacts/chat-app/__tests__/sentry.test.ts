@@ -36,6 +36,12 @@ describe("mobile Sentry setup", () => {
       sentryEnabled: boolean;
     };
 
+    const { scrubSentryBreadcrumb, scrubSentryEvent } =
+      require("@/lib/sentryScrub") as {
+        scrubSentryBreadcrumb: unknown;
+        scrubSentryEvent: unknown;
+      };
+
     expect(sentryEnabled).toBe(true);
     expect(mockInit).toHaveBeenCalledWith({
       dsn: "https://public-dsn.example/123",
@@ -43,6 +49,8 @@ describe("mobile Sentry setup", () => {
       release: undefined,
       dist: undefined,
       sendDefaultPii: false,
+      beforeSend: scrubSentryEvent,
+      beforeBreadcrumb: scrubSentryBreadcrumb,
     });
   });
 
