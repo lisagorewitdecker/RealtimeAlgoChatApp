@@ -10,9 +10,9 @@ const net = require("node:net");
 const os = require("node:os");
 const path = require("node:path");
 
-function getHttpResponse(url) {
+function getHttpResponse(url, headers = {}) {
   return new Promise((resolve, reject) => {
-    const request = http.get(url, (response) => {
+    const request = http.get(url, { headers }, (response) => {
       let body = "";
       response.setEncoding("utf8");
       response.on("data", (chunk) => {
@@ -21,6 +21,7 @@ function getHttpResponse(url) {
       response.on("end", () => {
         resolve({
           status: response.statusCode,
+          headers: response.headers,
           body,
         });
       });
@@ -79,6 +80,31 @@ describe("static file path resolution", () => {
 
       expect(response.status).toBe(200);
       expect(JSON.parse(response.body)).toEqual({ status: "ok" });
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+    }
+  });
+
+  it("marks every response nosniff, including errors and manifests", async () => {
+    const server = createStaticServer();
+
+    await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+
+    try {
+      const { port } = server.address();
+      const responses = await Promise.all([
+        getHttpResponse(`http://127.0.0.1:${port}/status`),
+        getHttpResponse(`http://127.0.0.1:${port}/`),
+        getHttpResponse(`http://127.0.0.1:${port}/manifest`, {
+          "expo-platform": "ios",
+        }),
+        getHttpResponse(`http://127.0.0.1:${port}/assets/missing.js`),
+        getHttpResponse(`http://127.0.0.1:${port}/%E0%A4%A`),
+      ]);
+
+      for (const response of responses) {
+        expect(response.headers["x-content-type-options"]).toBe("nosniff");
+      }
     } finally {
       await new Promise((resolve) => server.close(resolve));
     }

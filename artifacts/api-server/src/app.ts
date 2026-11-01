@@ -19,6 +19,7 @@ import {
   getClerkProxyHost,
 } from "./middlewares/clerkProxyMiddleware";
 import { createIpRateLimit } from "./middlewares/rateLimit";
+import { noSniff } from "./middlewares/securityHeaders";
 import { Sentry } from "./lib/sentry";
 import healthRouter from "./routes/health";
 
@@ -38,6 +39,7 @@ const staticAssetRateLimit = createIpRateLimit({
 });
 app.set("trust proxy", 1);
 
+app.use(noSniff);
 app.use(
   pinoHttp({
     logger,
@@ -93,7 +95,6 @@ app.use(
   }),
 );
 app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
 
 app.get("/api/socket-client.js", staticAssetRateLimit, (_req, res) => {
   res

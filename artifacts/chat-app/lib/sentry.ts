@@ -6,6 +6,7 @@ import {
   RELEASE_SENTRY_DIST,
   RELEASE_SENTRY_RELEASE,
 } from "@/constants/releaseCrashReporting";
+import { scrubSentryBreadcrumb, scrubSentryEvent } from "@/lib/sentryScrub";
 
 const dsn = process.env.EXPO_PUBLIC_SENTRY_DSN;
 const isExpoGo =
@@ -20,6 +21,8 @@ if (sentryEnabled) {
     release: RELEASE_SENTRY_RELEASE,
     dist: RELEASE_SENTRY_DIST,
     sendDefaultPii: false,
+    beforeSend: scrubSentryEvent,
+    beforeBreadcrumb: scrubSentryBreadcrumb,
   });
 }
 

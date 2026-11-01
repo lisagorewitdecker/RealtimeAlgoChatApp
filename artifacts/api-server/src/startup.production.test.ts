@@ -402,6 +402,9 @@ describe("built production server startup", () => {
         `http://127.0.0.1:${port}/api/livez`,
       );
       expect(firstResponse.status).toBe(200);
+      expect(firstResponse.headers.get("x-content-type-options")).toBe(
+        "nosniff",
+      );
       expect(await firstResponse.json()).toEqual({ status: "ok" });
 
       const readinessResponse = await fetch(
