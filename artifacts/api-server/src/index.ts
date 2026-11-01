@@ -10,7 +10,7 @@ async function startServer(): Promise<void> {
   const { port } = loadStartupConfig();
   if (!getMainAdminEmail()) {
     logger.warn(
-      "MAIN_ADMIN_EMAIL is not set to a valid email address; no account receives main-admin profile treatment",
+      "MAIN_ADMIN_EMAIL is not set to a valid email address; no account can newly set the owner's reserved display name (display names already stored are unchanged)",
     );
   }
   const [{ default: app }, { setupSocketIO }, { startHealthMonitor }] =
