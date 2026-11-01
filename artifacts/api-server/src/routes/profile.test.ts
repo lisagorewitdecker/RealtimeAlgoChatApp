@@ -1,7 +1,16 @@
 import { once } from "node:events";
 import { createServer, type Server } from "node:http";
 import express from "express";
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 
 const mockGetAuth = vi.hoisted(() => vi.fn());
 const mockGetAccountProfile = vi.hoisted(() => vi.fn());
@@ -11,6 +20,7 @@ const mockIsConfiguredAdmin = vi.hoisted(() => vi.fn());
 const mockGetPublicKey = vi.hoisted(() => vi.fn());
 const mockGetPublicKeyRecord = vi.hoisted(() => vi.fn());
 const mockRegisterPublicKey = vi.hoisted(() => vi.fn());
+const mockGetAccountSnapshot = vi.hoisted(() => vi.fn());
 
 vi.mock("@clerk/express", () => ({
   getAuth: mockGetAuth,
@@ -18,6 +28,7 @@ vi.mock("@clerk/express", () => ({
 
 vi.mock("../lib/accountProfile", () => ({
   getAccountProfile: mockGetAccountProfile,
+  getAccountSnapshot: mockGetAccountSnapshot,
   updateAccountProfile: mockUpdateAccountProfile,
   normalizeProfileUsername: (value: unknown) =>
     typeof value === "string" ? value.trim() : "Member",
@@ -82,7 +93,24 @@ beforeEach(() => {
     username: "Ada Lovelace",
     avatarEmoji: "🦄",
   });
+  mockGetAccountSnapshot.mockReset().mockResolvedValue({
+    userId: "user-ada",
+    username: "Ada",
+    email: "ada@example.com",
+  });
 });
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
+
+function putProfile(body: Record<string, unknown>) {
+  return fetch(`${baseUrl}/`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
 
 describe("account profile routes", () => {
   it("returns the account-owned profile for the signed-in user", async () => {
@@ -337,6 +365,95 @@ describe("account profile routes", () => {
 
     expect(response.status).toBe(400);
     expect(mockRegisterPublicKey).not.toHaveBeenCalled();
+  });
+
+  it("rejects a new avatar outside the allowlist", async () => {
+    const response = await putProfile({ avatarEmoji: "💩" });
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: "Invalid profile details.",
+    });
+    expect(mockUpdateAccountProfile).not.toHaveBeenCalled();
+  });
+
+  it("still accepts re-sending a stored avatar that predates the allowlist", async () => {
+    mockGetAccountProfile.mockResolvedValue({
+      username: "Ada",
+      avatarEmoji: "🐢",
+    });
+
+    const response = await putProfile({
+      username: "Ada Lovelace",
+      avatarEmoji: "🐢",
+    });
+
+    expect(response.status).toBe(200);
+    expect(mockUpdateAccountProfile).toHaveBeenCalledWith("user-ada", {
+      username: "Ada Lovelace",
+      avatarEmoji: "🐢",
+    });
+  });
+
+  it.each([
+    "System",
+    "  system  ",
+    "ＳＹＳＴＥＭ",
+    "Sуstem",
+    "Lisa Gorewit-Decker",
+    "lisa  gorewit decker",
+    "Ad\u200bmin",
+  ])("rejects the reserved display name %j for non-admins", async (username) => {
+    const response = await putProfile({ username });
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: "That display name is reserved. Choose a different name.",
+      code: "RESERVED_USERNAME",
+    });
+    expect(mockUpdateAccountProfile).not.toHaveBeenCalled();
+    expect(mockRegisterPublicKey).not.toHaveBeenCalled();
+  });
+
+  it("lets a configured administrator use a reserved display name", async () => {
+    mockIsConfiguredAdmin.mockReturnValue(true);
+
+    const response = await putProfile({ username: "Lisa Gorewit-Decker" });
+
+    expect(response.status).toBe(200);
+    expect(mockUpdateAccountProfile).toHaveBeenCalledWith("user-ada", {
+      username: "Lisa Gorewit-Decker",
+      avatarEmoji: "👩‍💻",
+    });
+  });
+
+  it("lets the MAIN_ADMIN_EMAIL account use a reserved display name", async () => {
+    vi.stubEnv("MAIN_ADMIN_EMAIL", " Owner@Example.com ");
+    mockGetAccountSnapshot.mockResolvedValue({
+      userId: "user-ada",
+      username: "Ada",
+      email: "owner@example.com",
+    });
+
+    const response = await putProfile({ username: "Lisa Gorewit-Decker" });
+
+    expect(response.status).toBe(200);
+    expect(mockGetAccountSnapshot).toHaveBeenCalledWith("user-ada");
+  });
+
+  it("keeps reserved names locked when MAIN_ADMIN_EMAIL is unset", async () => {
+    vi.stubEnv("MAIN_ADMIN_EMAIL", "");
+
+    const response = await putProfile({ username: "Lisa Gorewit-Decker" });
+
+    expect(response.status).toBe(400);
+    expect(mockGetAccountSnapshot).not.toHaveBeenCalled();
+  });
+
+  it("allows ordinary names that merely resemble a reserved word", async () => {
+    const response = await putProfile({ username: "Systems Ada" });
+
+    expect(response.status).toBe(200);
   });
 
   it("rejects profile writes without a signed-in account", async () => {

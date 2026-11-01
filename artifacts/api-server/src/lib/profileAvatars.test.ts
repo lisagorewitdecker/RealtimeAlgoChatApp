@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { expect, test } from "vitest";
 import {
   PROFILE_AVATARS,
@@ -25,5 +26,26 @@ test("rejects arbitrary, empty, and oversized avatar values", () => {
 
   for (const value of invalidValues) {
     expect(isProfileAvatar(value)).toBe(false);
+  }
+});
+
+test("accepts every avatar the mobile profile picker offers", () => {
+  const pickerSource = readFileSync(
+    new URL(
+      "../../../chat-app/constants/avatarEmojis.ts",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+  const pickerList = pickerSource.match(
+    /AVATAR_EMOJIS = \[([\s\S]*?)\] as const/,
+  )?.[1];
+  const pickerAvatars = [...(pickerList ?? "").matchAll(/"([^"]+)"/g)].map(
+    (match) => match[1],
+  );
+
+  expect(pickerAvatars.length).toBeGreaterThan(0);
+  for (const avatar of pickerAvatars) {
+    expect(isProfileAvatar(avatar), avatar).toBe(true);
   }
 });

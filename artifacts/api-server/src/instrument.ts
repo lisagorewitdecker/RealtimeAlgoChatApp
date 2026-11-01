@@ -13,10 +13,12 @@ import { isMainThread } from "node:worker_threads";
 // autoscale machine that has to answer the platform health check within a few
 // seconds, so this preload must stay cheap on every thread but the main one.
 if (isMainThread) {
-  const [Sentry, { logger }] = await Promise.all([
-    import("@sentry/node"),
-    import("./lib/logger"),
-  ]);
+  const [Sentry, { logger }, { scrubSentryBreadcrumb, scrubSentryEvent }] =
+    await Promise.all([
+      import("@sentry/node"),
+      import("./lib/logger"),
+      import("./lib/sentryScrub"),
+    ]);
   const dsn = process.env["SENTRY_DSN"];
 
   if (dsn) {
@@ -33,6 +35,10 @@ if (isMainThread) {
       // Express is intentionally not instrumented because this service only
       // reports errors. Keep the SDK from emitting its tracing-only warning.
       disableInstrumentationWarnings: true,
+      // Strip credentials (Authorization/Cookie headers, Clerk session values,
+      // room access capabilities) before anything is sent.
+      beforeSend: scrubSentryEvent,
+      beforeBreadcrumb: scrubSentryBreadcrumb,
     });
     logger.info("Sentry error monitoring initialized");
   } else {
