@@ -52,8 +52,16 @@ function scrubRecord(
       scrubbed[key] = SENTRY_FILTERED;
     } else if (typeof value === "string") {
       scrubbed[key] = scrubSensitiveText(value);
-    } else if (isRecord(value) && depth < MAX_DATA_DEPTH) {
-      scrubbed[key] = scrubRecord(value, depth + 1);
+    } else if (Array.isArray(value)) {
+      scrubbed[key] =
+        depth < MAX_DATA_DEPTH
+          ? value.map((item) => scrubRecord({ item }, depth + 1)["item"])
+          : SENTRY_FILTERED;
+    } else if (isRecord(value)) {
+      scrubbed[key] =
+        depth < MAX_DATA_DEPTH
+          ? scrubRecord(value, depth + 1)
+          : SENTRY_FILTERED;
     } else {
       scrubbed[key] = value;
     }
