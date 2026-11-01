@@ -4,7 +4,8 @@ import type { Breadcrumb, Event } from "@sentry/node";
  * Removes credentials from Sentry events and breadcrumbs before they leave the
  * process: Authorization/Cookie/Set-Cookie headers, request cookies, Bearer
  * tokens, and token-like query or cookie parameters (room access
- * capabilities, Clerk session and handshake values).
+ * capabilities, Clerk session and handshake values). Request bodies are
+ * dropped, and `extra`/`contexts` and breadcrumb data are scrubbed by key.
  */
 
 export const SENTRY_FILTERED = "[Filtered]";

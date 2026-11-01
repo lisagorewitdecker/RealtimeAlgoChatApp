@@ -152,6 +152,49 @@ describe("Sentry credential scrubbing", () => {
     });
   });
 
+  it("scrubs credentials inside arrays and filters containers beyond the depth limit", () => {
+    const breadcrumb = scrubSentryBreadcrumb({
+      data: {
+        arguments: [
+          { token: ROOM_CAPABILITY, roomId: "room-1" },
+          `GET /api/rooms/call?token=${ROOM_CAPABILITY}`,
+          3,
+        ],
+        a: { b: { c: { d: { e: { token: ROOM_CAPABILITY } } } } },
+      },
+    });
+
+    expect(breadcrumb.data).toEqual({
+      arguments: [
+        { token: SENTRY_FILTERED, roomId: "room-1" },
+        `GET /api/rooms/call?token=${SENTRY_FILTERED}`,
+        3,
+      ],
+      a: { b: { c: { d: { e: SENTRY_FILTERED } } } },
+    });
+  });
+
+  it("drops request bodies and scrubs extra and contexts", () => {
+    const event = scrubSentryEvent({
+      request: {
+        url: "https://api.example.test/api/profile",
+        data: { capability: ROOM_CAPABILITY },
+      },
+      extra: { auth: { token: ROOM_CAPABILITY }, note: "ok" },
+      contexts: {
+        session: { __session: ROOM_CAPABILITY },
+        app: { app_name: "api-server" },
+      },
+    } satisfies Event);
+
+    expect(event.request).not.toHaveProperty("data");
+    expect(event.extra).toEqual({ auth: { token: SENTRY_FILTERED }, note: "ok" });
+    expect(event.contexts).toEqual({
+      session: { __session: SENTRY_FILTERED },
+      app: { app_name: "api-server" },
+    });
+  });
+
   it("leaves unrelated parameters that merely contain a sensitive word alone", () => {
     expect(scrubSensitiveText("?tokenizer=on&roomId=token-room")).toBe(
       "?tokenizer=on&roomId=token-room",

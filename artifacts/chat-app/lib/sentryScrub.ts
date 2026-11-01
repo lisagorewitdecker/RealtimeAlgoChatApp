@@ -4,7 +4,8 @@ import type { Breadcrumb, Event } from "@sentry/react-native";
  * Removes credentials from Sentry events and breadcrumbs before they leave the
  * process: Authorization/Cookie/Set-Cookie headers, request cookies, Bearer
  * tokens, and token-like query or cookie parameters (room access
- * capabilities, Clerk session and handshake values).
+ * capabilities, Clerk session and handshake values). Request bodies are
+ * dropped, and `extra`/`contexts` and breadcrumb data are scrubbed by key.
  */
 
 export const SENTRY_FILTERED = "[Filtered]";
@@ -52,8 +53,16 @@ function scrubRecord(
       scrubbed[key] = SENTRY_FILTERED;
     } else if (typeof value === "string") {
       scrubbed[key] = scrubSensitiveText(value);
-    } else if (isRecord(value) && depth < MAX_DATA_DEPTH) {
-      scrubbed[key] = scrubRecord(value, depth + 1);
+    } else if (Array.isArray(value)) {
+      scrubbed[key] =
+        depth < MAX_DATA_DEPTH
+          ? value.map((item) => scrubRecord({ item }, depth + 1)["item"])
+          : SENTRY_FILTERED;
+    } else if (isRecord(value)) {
+      scrubbed[key] =
+        depth < MAX_DATA_DEPTH
+          ? scrubRecord(value, depth + 1)
+          : SENTRY_FILTERED;
     } else {
       scrubbed[key] = value;
     }
@@ -93,6 +102,11 @@ export function scrubSentryEvent<T extends Event>(event: T): T {
     if (request.query_string !== undefined) {
       request.query_string = scrubQueryParams(request.query_string);
     }
+    delete request.data;
+  }
+  if (event.extra) event.extra = scrubRecord(event.extra);
+  if (event.contexts) {
+    event.contexts = scrubRecord(event.contexts) as NonNullable<Event["contexts"]>;
   }
   if (typeof event.message === "string") {
     event.message = scrubSensitiveText(event.message);
