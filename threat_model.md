@@ -96,9 +96,10 @@ Native app tokens carry no `azp` and are accepted; with no deployment domains
 configured (local development, tests) the check is off.
 
 Display names cannot impersonate the system or staff: "System", "Admin",
-"Administrator", "Moderator", and the owner's display name are reserved for
-`ADMIN_USER_IDS` accounts and the `MAIN_ADMIN_EMAIL` account. The comparison
-ignores case, spacing, Unicode compatibility forms, invisible format
+"Administrator", and "Moderator" are reserved for `ADMIN_USER_IDS` accounts
+and the `MAIN_ADMIN_EMAIL` account, and the owner's display name is reserved
+for the `MAIN_ADMIN_EMAIL` account alone (nobody when it is unset). The
+comparison ignores case, spacing, Unicode compatibility forms, invisible format
 characters, and common Cyrillic/Greek/digit look-alikes. Names that were
 already stored are still displayed.
 
@@ -216,6 +217,7 @@ These are accepted, documented gaps. Report them only with new impact.
 - **The Sentry DSN appears in git history.** DSNs are public ingestion
   identifiers by design (the mobile app ships one); they do not grant read
   access to Sentry data.
-- **`MAIN_ADMIN_EMAIL` must be configured** for the owner's account to keep
-  using the owner's display name; when it is unset nobody receives main-admin
-  treatment and the API logs a warning at startup.
+- **`MAIN_ADMIN_EMAIL` must be configured** (in Replit Secrets for the
+  deployment) for the owner's account to keep using the owner's display name;
+  when it is unset no account may use that name and the API logs a warning at
+  startup. It grants no privileges; those come only from `ADMIN_USER_IDS`.

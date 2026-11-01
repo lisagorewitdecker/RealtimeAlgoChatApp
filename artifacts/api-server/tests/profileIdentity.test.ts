@@ -7,6 +7,7 @@ import {
   isMainAdminEmail,
   isReservedDisplayName,
   isValidEmail,
+  mayUseDisplayName,
   normalizeEmail,
 } from "../src/lib/profileIdentity.ts";
 
@@ -84,4 +85,22 @@ test("allows ordinary display names that only resemble reserved ones", () => {
   for (const name of ["Ada", "Lisa", "Systems", "System32", "Admin Fan", "Mod"]) {
     assert.equal(isReservedDisplayName(name), false, name);
   }
+});
+
+test("reserves the owner's name for the MAIN_ADMIN_EMAIL account only", () => {
+  const member = { isConfiguredAdmin: false, isMainAdmin: false };
+  const admin = { isConfiguredAdmin: true, isMainAdmin: false };
+  const owner = { isConfiguredAdmin: false, isMainAdmin: true };
+
+  for (const name of [MAIN_ADMIN_NAME, "lisa gorewit decker"]) {
+    assert.equal(mayUseDisplayName(name, member), false, name);
+    assert.equal(mayUseDisplayName(name, admin), false, name);
+    assert.equal(mayUseDisplayName(name, owner), true, name);
+  }
+  for (const name of ["System", "Adm1n"]) {
+    assert.equal(mayUseDisplayName(name, member), false, name);
+    assert.equal(mayUseDisplayName(name, admin), true, name);
+    assert.equal(mayUseDisplayName(name, owner), true, name);
+  }
+  assert.equal(mayUseDisplayName("Ada", member), true);
 });

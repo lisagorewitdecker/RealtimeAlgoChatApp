@@ -1,6 +1,6 @@
 import { clerkClient } from "@clerk/express";
 import { isAccountBanned, isConfiguredAdmin } from "./accountAccess";
-import { isMainAdminEmail, isReservedDisplayName } from "./profileIdentity";
+import { isMainAdminEmail, mayUseDisplayName } from "./profileIdentity";
 
 const DEFAULT_AVATAR_EMOJI = "🧑‍💻";
 const DEFAULT_USERNAME = "Member";
@@ -73,9 +73,10 @@ function fallbackDisplayName(user: ClerkProfileSource): string {
     user.username ?? user.firstName ?? DEFAULT_USERNAME,
   );
   if (
-    isReservedDisplayName(name) &&
-    !(user.id && isConfiguredAdmin(user.id)) &&
-    !isMainAdminEmail(primaryEmailOf(user))
+    !mayUseDisplayName(name, {
+      isConfiguredAdmin: Boolean(user.id && isConfiguredAdmin(user.id)),
+      isMainAdmin: isMainAdminEmail(primaryEmailOf(user)),
+    })
   ) {
     return DEFAULT_USERNAME;
   }

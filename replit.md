@@ -35,11 +35,13 @@ with Build, Call, and Ship modes in a single room.
   `/api/livez` uptime monitor in `artifacts/api-server` (see Gotchas)
 - Admin env (set in production): `ADMIN_USER_IDS` — comma-separated Clerk user
   IDs that get administrator privileges (admin routes, global moderation).
-  `MAIN_ADMIN_EMAIL` — the primary email address of the owner's Clerk account;
-  only that account (and `ADMIN_USER_IDS` accounts) may use reserved display
-  names such as the owner's name or "System". Store it as a deployment secret,
-  not in the repository. If it is unset or not a valid address, nobody gets
-  main-admin treatment and the API server logs a warning at startup.
+  `MAIN_ADMIN_EMAIL` — the primary email address of the owner's Clerk account
+  (normalized: trimmed, lowercased). Only that account may use the owner's
+  display name; it and `ADMIN_USER_IDS` accounts may use the other reserved
+  names such as "System". It grants no privileges. Set it in Replit
+  Secrets/Configurations for the deployment, never in the repository. If it is
+  unset or not a valid address, no account may use the owner's name and the
+  API server logs a warning at startup.
 
 ### API compatibility override instructions
 
