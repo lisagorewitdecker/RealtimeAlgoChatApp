@@ -7,13 +7,14 @@ import {
   accountAccessRetryAfterSeconds,
 } from "./accountAccessUnavailable";
 import { logger } from "./logger";
+import { isAuthorizedParty } from "./origins";
 
 export async function requireAuthorizedUser(
   req: Request,
   res: Response,
 ): Promise<string | null> {
-  const { userId } = getAuth(req);
-  if (!userId) {
+  const { userId, sessionClaims } = getAuth(req);
+  if (!userId || !isAuthorizedParty(sessionClaims?.azp)) {
     res.status(401).json({ error: "Authentication required." });
     return null;
   }

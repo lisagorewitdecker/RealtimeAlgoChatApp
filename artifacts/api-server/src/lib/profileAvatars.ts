@@ -1,15 +1,35 @@
+/**
+ * Avatars a profile write may set. This must include every choice the mobile
+ * profile picker offers (artifacts/chat-app/constants/avatarEmojis.ts); the
+ * profileAvatars test checks that.
+ */
 export const PROFILE_AVATARS = [
+  "😀",
+  "😎",
+  "🤓",
   "🧑‍💻",
-  "🚀",
+  "👩‍💻",
+  "👨‍💻",
+  "🦄",
+  "🐱",
+  "🐶",
   "🦊",
   "🐼",
   "🐸",
   "🐙",
-  "🦄",
+  "🦋",
+  "🌈",
+  "🔥",
+  "⚡",
+  "🚀",
+  "🎨",
+  "🎮",
+  "💡",
+  "🛠️",
+  "🌟",
+  "🍀",
   "🌻",
   "🍕",
-  "🎮",
-  "🔥",
   "💎",
 ] as const;
 

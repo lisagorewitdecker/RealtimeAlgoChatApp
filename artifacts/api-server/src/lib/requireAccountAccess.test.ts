@@ -2,7 +2,16 @@ import { once } from "node:events";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import express from "express";
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 
 const mockGetAuth = vi.hoisted(() => vi.fn());
 const mockGetAccountAccess = vi.hoisted(() => vi.fn());
@@ -140,5 +149,39 @@ describe("requireAuthorizedUser retry hints", () => {
       code: "ACCOUNT_ACCESS_UNAVAILABLE",
       retryAfterSeconds: 1,
     });
+  });
+});
+
+describe("requireAuthorizedUser authorized party (azp) check", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("rejects a session token minted for a browser origin outside the deployment allowlist", async () => {
+    vi.stubEnv("REPLIT_DOMAINS", "chat.example.test");
+    mockGetAuth.mockReturnValue({
+      userId: "user-ada",
+      sessionClaims: { azp: "https://attacker.example.test" },
+    });
+
+    const response = await fetch(`${baseUrl}/protected`);
+
+    expect(response.status).toBe(401);
+    await expect(response.json()).resolves.toEqual({
+      error: "Authentication required.",
+    });
+    expect(mockGetAccountAccess).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["an allowlisted browser origin", { azp: "https://chat.example.test" }],
+    ["a native client token without azp", {}],
+  ])("accepts %s", async (_label, sessionClaims) => {
+    vi.stubEnv("REPLIT_DOMAINS", "chat.example.test");
+    mockGetAuth.mockReturnValue({ userId: "user-ada", sessionClaims });
+
+    const response = await fetch(`${baseUrl}/protected`);
+
+    expect(response.status).toBe(200);
   });
 });
