@@ -1,5 +1,6 @@
 import { clerkClient } from "@clerk/express";
-import { isAccountBanned } from "./accountAccess";
+import { isAccountBanned, isConfiguredAdmin } from "./accountAccess";
+import { isMainAdminEmail, isReservedDisplayName } from "./profileIdentity";
 
 const DEFAULT_AVATAR_EMOJI = "🧑‍💻";
 const DEFAULT_USERNAME = "Member";
@@ -46,15 +47,47 @@ function getRecord(value: unknown): Record<string, unknown> | null {
     : null;
 }
 
-function fromClerkUser(user: {
+interface ClerkProfileSource {
+  id?: string;
   username: string | null;
   firstName: string | null;
   privateMetadata: Record<string, unknown>;
-}): AccountProfile {
+  primaryEmailAddressId?: string | null;
+  emailAddresses?: { id: string; emailAddress: string }[];
+}
+
+function primaryEmailOf(user: ClerkProfileSource): string | null {
+  return (
+    user.emailAddresses?.find(
+      (emailAddress) => emailAddress.id === user.primaryEmailAddressId,
+    )?.emailAddress ?? null
+  );
+}
+
+/**
+ * The Clerk username and first name are user-editable outside this API, so a
+ * reserved display name there is not used as the fallback for non-admins.
+ */
+function fallbackDisplayName(user: ClerkProfileSource): string {
+  const name = normalizeProfileUsername(
+    user.username ?? user.firstName ?? DEFAULT_USERNAME,
+  );
+  if (
+    isReservedDisplayName(name) &&
+    !(user.id && isConfiguredAdmin(user.id)) &&
+    !isMainAdminEmail(primaryEmailOf(user))
+  ) {
+    return DEFAULT_USERNAME;
+  }
+  return name;
+}
+
+function fromClerkUser(user: ClerkProfileSource): AccountProfile {
   const saved = getRecord(user.privateMetadata[PROFILE_METADATA_KEY]);
-  const fallbackName = user.username ?? user.firstName ?? DEFAULT_USERNAME;
   return {
-    username: normalizeProfileUsername(saved?.["username"] ?? fallbackName),
+    username: normalizeProfileUsername(
+      saved?.["username"] ?? fallbackDisplayName(user),
+    ),
     avatarEmoji: normalizeProfileAvatar(saved?.["avatarEmoji"]),
   };
 }

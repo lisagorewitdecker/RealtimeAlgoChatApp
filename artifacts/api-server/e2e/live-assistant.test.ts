@@ -243,6 +243,11 @@ describe("live sandbox assistant integration", () => {
   });
 
   it("cancels a provider-backed response without late chunks or completion", async () => {
+    // Every client here is the same account, and the assistant cooldown is
+    // per account, so let the previous test's request age out first.
+    await new Promise((resolve) =>
+      setTimeout(resolve, ASSISTANT_REQUEST_COOLDOWN_MS),
+    );
     const cancellationClient = await connectAndJoinSandboxClient();
     additionalClients.push(cancellationClient);
 
@@ -352,6 +357,11 @@ describe("live sandbox assistant integration", () => {
   });
 
   it("cancels a provider-backed response immediately before the first chunk", async () => {
+    // Every client here is the same account, and the assistant cooldown is
+    // per account, so let the previous test's request age out first.
+    await new Promise((resolve) =>
+      setTimeout(resolve, ASSISTANT_REQUEST_COOLDOWN_MS),
+    );
     const cancellationClient = await connectAndJoinSandboxClient();
     additionalClients.push(cancellationClient);
 
