@@ -33,6 +33,13 @@ with Build, Call, and Ship modes in a single room.
 - Required env: `DATABASE_URL` — Postgres connection string
 - Optional env: `SENTRY_DSN` — enables production error tracking and the
   `/api/livez` uptime monitor in `artifacts/api-server` (see Gotchas)
+- Admin env (set in production): `ADMIN_USER_IDS` — comma-separated Clerk user
+  IDs that get administrator privileges (admin routes, global moderation).
+  `MAIN_ADMIN_EMAIL` — the primary email address of the owner's Clerk account;
+  only that account (and `ADMIN_USER_IDS` accounts) may use reserved display
+  names such as the owner's name or "System". Store it as a deployment secret,
+  not in the repository. If it is unset or not a valid address, nobody gets
+  main-admin treatment and the API server logs a warning at startup.
 
 ### API compatibility override instructions
 

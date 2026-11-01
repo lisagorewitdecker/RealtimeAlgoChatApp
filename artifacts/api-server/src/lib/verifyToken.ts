@@ -1,4 +1,5 @@
 import { verifyToken as clerkVerifyToken } from "@clerk/backend";
+import { isAuthorizedParty } from "./origins";
 
 /**
  * Verifies a Clerk session token (Bearer) and returns the userId.
@@ -11,5 +12,8 @@ export async function verifySessionToken(token: string): Promise<string> {
   const payload = await clerkVerifyToken(token, { secretKey });
   const userId = payload.sub;
   if (!userId) throw new Error("Token has no sub claim");
+  if (!isAuthorizedParty(payload.azp)) {
+    throw new Error("Token was issued to an unauthorized party");
+  }
   return userId;
 }

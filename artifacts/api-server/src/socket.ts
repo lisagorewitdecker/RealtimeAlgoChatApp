@@ -14,7 +14,7 @@ import {
   ACCOUNT_ACCESS_UNAVAILABLE_MESSAGE,
   AccountAccessUnavailableError,
 } from "./lib/accountAccessUnavailable";
-import { isAllowedOrigin } from "./lib/origins";
+import { isAllowedOrigin, isAuthorizedParty } from "./lib/origins";
 import {
   verifyRoomAccessCapability,
   type RoomAccessPurpose,
@@ -841,6 +841,9 @@ export function setupSocketIO(httpServer: HttpServer) {
       callback(null, isAllowedOrigin(req.headers.origin));
     },
   });
+  io.engine.on("headers", (headers: Record<string, string>) => {
+    headers["X-Content-Type-Options"] = "nosniff";
+  });
   activeServer = io;
   let revocationListenerGeneration = 0;
   const revocationListener = startSocketRevocationListener(
@@ -988,7 +991,11 @@ export function setupSocketIO(httpServer: HttpServer) {
       }
 
       const userId = verifiedToken?.sub;
-      if (typeof userId !== "string" || !userId) {
+      if (
+        typeof userId !== "string" ||
+        !userId ||
+        !isAuthorizedParty(verifiedToken.azp)
+      ) {
         rejectHandshake(
           next,
           connectionRegistry,
@@ -1710,8 +1717,10 @@ function setupConnectedSocket(
         return;
       }
 
+      // Keyed by account, not socket, so opening more sockets does not reset
+      // the cooldown.
       const now = Date.now();
-      const lastRequestAt = lastAssistantRequestAt.get(socket.id);
+      const lastRequestAt = lastAssistantRequestAt.get(authenticatedUser.userId);
       const sinceLastRequest =
         lastRequestAt === undefined ? Number.POSITIVE_INFINITY : now - lastRequestAt;
       if (sinceLastRequest < ASSISTANT_REQUEST_COOLDOWN_MS) {
@@ -1726,7 +1735,8 @@ function setupConnectedSocket(
         });
         return;
       }
-      lastAssistantRequestAt.set(socket.id, now);
+      pruneAssistantCooldowns(lastAssistantRequestAt, now);
+      lastAssistantRequestAt.set(authenticatedUser.userId, now);
       startAssistantRequest(room.id, request);
     });
 
@@ -1945,10 +1955,21 @@ function setupConnectedSocket(
       eventBudgetRegistry.byUser.delete(userId);
     }
     abortAssistantRequest();
-    lastAssistantRequestAt.delete(socket.id);
     if (socket.data.roomId) leaveRoom(socket, io, socket.data.roomId);
     logger.info({ sid: socket.id, reason }, "socket disconnected");
   });
+}
+
+/** Drops cooldown entries that have expired so the map stays bounded. */
+function pruneAssistantCooldowns(
+  lastAssistantRequestAt: Map<string, number>,
+  now: number,
+): void {
+  for (const [userId, requestedAt] of lastAssistantRequestAt) {
+    if (now - requestedAt >= ASSISTANT_REQUEST_COOLDOWN_MS) {
+      lastAssistantRequestAt.delete(userId);
+    }
+  }
 }
 
 function getJoinedRoom(socket: AppSocket, roomId: string): Room | null {
