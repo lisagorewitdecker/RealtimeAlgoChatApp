@@ -40,7 +40,7 @@
     "test:native-sentry": "bash e2e/sentry-source-map/run.sh"
   },
   "devDependencies": {
-    "@babel/core": "^7.29.7",
+    "@babel/core": "^8.0.9",
     "@clerk/expo": "^4.6.1",
     "@expo-google-fonts/inter": "^0.4.2",
     "@expo/cli": "57.0.20",
