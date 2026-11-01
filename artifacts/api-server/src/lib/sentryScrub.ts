@@ -101,6 +101,11 @@ export function scrubSentryEvent<T extends Event>(event: T): T {
     if (request.query_string !== undefined) {
       request.query_string = scrubQueryParams(request.query_string);
     }
+    delete request.data;
+  }
+  if (event.extra) event.extra = scrubRecord(event.extra);
+  if (event.contexts) {
+    event.contexts = scrubRecord(event.contexts) as NonNullable<Event["contexts"]>;
   }
   if (typeof event.message === "string") {
     event.message = scrubSensitiveText(event.message);
