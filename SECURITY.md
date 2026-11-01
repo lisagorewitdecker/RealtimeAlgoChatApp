@@ -14,9 +14,6 @@ are applied to the latest commit on the `main` branch only.
 To report a security vulnerability, please use
 [GitHub Security Advisories](https://github.com/lisagorewitdecker/RealtimeAlgoChatApp/security/advisories/new)
 to disclose it privately.
-[GitHub Security Advisories](
-https://github.com/lisagorewitdecker/RealtimeAlgoChatApp/security/advisories/new
-) to disclose it privately.
 
 Please include the following in your report:
 
@@ -27,6 +24,33 @@ Please include the following in your report:
 You can expect an initial response within 7 days. If we confirm the
 vulnerability, we will prioritize a fix and notify you when it is resolved. If
 we decline the report, we will explain why. Please do not disclose the
-vulnerability, we will prioritize a fix and notify you when it is resolved.
-If we decline the report, we will explain why. Please do not disclose the
 vulnerability publicly until we have addressed it.
+
+## Security Model and Known Limitations
+
+[`threat_model.md`](threat_model.md) describes the trust boundaries, the
+controls in place, and the limitations we already know about. Before
+reporting, please check its "Known Limitations and Deferred Work" section and
+the end-to-end encryption notes under "Information Disclosure". In short:
+
+- The server is trusted for E2EE key distribution, room keys are not rotated
+  after a kick or ban, and WebRTC signaling is relayed by the server.
+- Live sockets are not disconnected when a Clerk session signs out or is
+  revoked; account bans and room kicks/bans do disconnect them.
+- There is no full Content Security Policy; responses send
+  `X-Content-Type-Options: nosniff`, and the room call/sandbox documents
+  forbid framing.
+- Rate limits and the assistant cooldown are per API instance, and per-IP
+  limits assume exactly one trusted proxy hop.
+- The Sentry DSN in the repository history is a public ingestion identifier by
+  design.
+
+Reports that show new impact beyond these documented limitations are welcome.
+
+## Deployment Configuration
+
+Administrator privileges come only from the `ADMIN_USER_IDS` environment
+variable (comma-separated Clerk user IDs). `MAIN_ADMIN_EMAIL` names the owner's
+Clerk account for reserved display names; set it as a deployment secret.
+When it is unset nobody receives main-admin treatment and the API logs a
+warning at startup. Neither value belongs in the repository.

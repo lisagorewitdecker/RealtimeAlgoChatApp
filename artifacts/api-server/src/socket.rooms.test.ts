@@ -70,6 +70,7 @@ import {
   setRoomActiveForModeration,
   setupSocketIO,
 } from "./socket.js";
+import { ASSISTANT_REQUEST_COOLDOWN_MS } from "./lib/assistantLimits.js";
 import { createRoomAccessCapability } from "./lib/roomAccess.js";
 
 let httpServer: HttpServer;
@@ -266,6 +267,12 @@ describe("room Socket.IO lifecycle", () => {
         onText("fresh reply");
       },
     );
+    // The assistant cooldown is per account and survives the reconnect, so
+    // step past it before the follow-up request.
+    const realNow = Date.now();
+    const clock = vi
+      .spyOn(Date, "now")
+      .mockImplementation(() => realNow + ASSISTANT_REQUEST_COOLDOWN_MS + 50);
     secondClient.emit("assistant-request", {
       requestId: "assistant-follow-up-request",
       roomId,
@@ -274,10 +281,14 @@ describe("room Socket.IO lifecycle", () => {
       disclosureAcknowledged: true,
     });
 
-    await expect(secondDone).resolves.toEqual({
-      requestId: "assistant-follow-up-request",
-      cancelled: false,
-    });
+    try {
+      await expect(secondDone).resolves.toEqual({
+        requestId: "assistant-follow-up-request",
+        cancelled: false,
+      });
+    } finally {
+      clock.mockRestore();
+    }
     await new Promise((resolve) => setTimeout(resolve, 50));
 
     expect(secondChunks).toEqual([

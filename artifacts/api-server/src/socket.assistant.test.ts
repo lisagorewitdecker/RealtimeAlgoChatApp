@@ -369,6 +369,54 @@ describe("sandbox assistant streaming", () => {
     expect(mockStreamSandboxAssistant).toHaveBeenCalledTimes(2);
   });
 
+  it("applies the cooldown per account across sockets and reconnects", async () => {
+    const roomId = "assistant-cooldown-account";
+    const first = await connectSandboxClient(roomId);
+    const second = await connectSandboxClient(roomId);
+    const firstDone = collectEvents<AssistantDoneEvent>(first, "assistant-done");
+    const secondErrors = collectEvents<AssistantErrorEvent>(
+      second,
+      "assistant-error",
+    );
+    mockStreamSandboxAssistant.mockImplementation(async ({ onText }: StreamArgs) => {
+      onText("ok");
+    });
+
+    first.emit(
+      "assistant-request",
+      acknowledgedRequest(roomId, "assistant-account-first"),
+    );
+    await vi.waitFor(() => expect(firstDone).toHaveLength(1));
+    second.emit(
+      "assistant-request",
+      acknowledgedRequest(roomId, "assistant-account-second-socket"),
+    );
+    await vi.waitFor(() => expect(secondErrors).toHaveLength(1));
+    expect(secondErrors[0]).toMatchObject({
+      requestId: "assistant-account-second-socket",
+      code: "COOLDOWN",
+    });
+
+    first.close();
+    second.close();
+    await settle();
+    const reconnected = await connectSandboxClient(roomId);
+    const reconnectedErrors = collectEvents<AssistantErrorEvent>(
+      reconnected,
+      "assistant-error",
+    );
+    reconnected.emit(
+      "assistant-request",
+      acknowledgedRequest(roomId, "assistant-account-reconnected"),
+    );
+    await vi.waitFor(() => expect(reconnectedErrors).toHaveLength(1));
+    expect(reconnectedErrors[0]).toMatchObject({
+      requestId: "assistant-account-reconnected",
+      code: "COOLDOWN",
+    });
+    expect(mockStreamSandboxAssistant).toHaveBeenCalledTimes(1);
+  });
+
   it("turns model rate limits into a retry countdown", async () => {
     const roomId = "assistant-rate-limit";
     const client = await connectSandboxClient(roomId);

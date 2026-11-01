@@ -1,11 +1,19 @@
 import { Router } from "express";
 import {
   getAccountProfile,
+  getAccountSnapshot,
   normalizeProfileAvatar,
   normalizeProfileUsername,
   updateAccountProfile,
+  type AccountProfile,
 } from "../lib/accountProfile";
 import { isConfiguredAdmin } from "../lib/accountAccess";
+import { isProfileAvatar } from "../lib/profileAvatars";
+import {
+  getMainAdminEmail,
+  isMainAdminEmail,
+  isReservedDisplayName,
+} from "../lib/profileIdentity";
 import { requireAuthorizedUser } from "../lib/requireAccountAccess";
 import {
   getPublicKeyRecord,
@@ -31,6 +39,13 @@ function isValidPublicKey(value: unknown): value is string {
   }
   const decoded = Buffer.from(value, "base64");
   return decoded.length === 32 && decoded.toString("base64") === value;
+}
+
+async function mayUseReservedDisplayName(userId: string): Promise<boolean> {
+  if (isConfiguredAdmin(userId)) return true;
+  if (!getMainAdminEmail()) return false;
+  const { email } = await getAccountSnapshot(userId);
+  return isMainAdminEmail(email);
 }
 
 router.get("/", async (req, res, next) => {
@@ -100,6 +115,27 @@ router.put("/", async (req, res, next) => {
   }
 
   try {
+    let current: AccountProfile | null = null;
+    if (typeof avatarEmoji === "string" && !isProfileAvatar(avatarEmoji)) {
+      // Avatars saved before the allowlist keep working: re-sending the
+      // current value is accepted, but nothing new outside the list is.
+      current = await getAccountProfile(userId);
+      if (avatarEmoji !== current.avatarEmoji) {
+        res.status(400).json({ error: "Invalid profile details." });
+        return;
+      }
+    }
+    if (
+      typeof username === "string" &&
+      isReservedDisplayName(normalizeProfileUsername(username)) &&
+      !(await mayUseReservedDisplayName(userId))
+    ) {
+      res.status(400).json({
+        error: "That display name is reserved. Choose a different name.",
+        code: "RESERVED_USERNAME",
+      });
+      return;
+    }
     if (typeof publicKey === "string") {
       const registration =
         typeof registrationVersion === "number"
@@ -153,7 +189,7 @@ router.put("/", async (req, res, next) => {
         return;
       }
     }
-    const current = await getAccountProfile(userId);
+    current ??= await getAccountProfile(userId);
     const profile = await updateAccountProfile(userId, {
       username:
         username === undefined
