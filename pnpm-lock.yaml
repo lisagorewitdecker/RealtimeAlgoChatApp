@@ -383,6 +383,9 @@ importers:
       babel-plugin-react-compiler:
         specifier: 19.0.0-beta-ebf51a3-20250411
         version: 19.0.0-beta-ebf51a3-20250411
+      babel-preset-expo:
+        specifier: 57.0.12
+        version: 57.0.12(@babel/core@7.29.7(supports-color@8.1.1))(@babel/runtime@7.29.2)(expo@57.0.24)(react-refresh@0.14.2)(supports-color@8.1.1)
       create-launch:
         specifier: 0.3.6
         version: 0.3.6

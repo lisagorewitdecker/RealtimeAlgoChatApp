@@ -13,6 +13,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { createServer } from "node:http";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -63,6 +64,42 @@ const ANSI_ESCAPE_PATTERN = new RegExp(
   `${ANSI_ESCAPE}\\[[0-?]*[ -/]*[@-~]`,
 );
 const ANSI_CSI_FRAGMENT_PATTERN = /\[[0-9;?]+[ -/]*[@-~]/;
+
+for (const platform of ["android", "ios"]) {
+  test(`Expo Metro resolves the app Babel preset for ${platform} preview bundles`, () => {
+    const packageRequire = createRequire(join(packageRoot, "package.json"));
+    const expoRequire = createRequire(packageRequire.resolve("expo/package.json"));
+    const transformer = expoRequire("@expo/metro-config/babel-transformer");
+    const directory = mkdtempSync(join(tmpdir(), "preview-metro-transform-"));
+    const filename = join(directory, "preview.tsx");
+    const src = `
+      export const Preview = () => <Text>Ready</Text>;
+      export function previewWorklet() {
+        "worklet";
+        return 1;
+      }
+    `;
+    try {
+      writeFileSync(filename, src);
+      const result = transformer.transform({
+        filename,
+        src,
+        options: {
+          projectRoot: packageRoot,
+          platform,
+          dev: true,
+          type: "module",
+          enableBabelRCLookup: true,
+        },
+        plugins: [],
+      });
+      assert.ok(result.ast, "the preview TSX must transform using the app Babel config");
+      assert.match(JSON.stringify(result.ast), /__workletHash/);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+}
 
 function assertHasNoControlCharacters(value, message = "unexpected control characters") {
   const hasControlCharacters = [...value].some((char) => {
