@@ -11,7 +11,7 @@ import { requireAuthorizedUser } from "../lib/requireAccountAccess";
 import { getRooms } from "../socket";
 import { getRoomEnvelope } from "../lib/e2eePersistence";
 import { createIpRateLimit } from "../middlewares/rateLimit";
-import { denyFraming } from "../middlewares/securityHeaders";
+import { setDenyFramingHeaders } from "../middlewares/securityHeaders";
 
 const router = Router();
 const ROOM_DOCUMENT_WINDOW_MS = 60 * 1_000;
@@ -39,13 +39,9 @@ router.get("/", async (req, res) => {
   res.json({ rooms: getRooms() });
 });
 
-router.get("/call", denyFraming, (req, res) =>
-  renderRoomDocument(req, res, "call"),
-);
+router.get("/call", (req, res) => renderRoomDocument(req, res, "call"));
 
-router.get("/sandbox", denyFraming, (req, res) =>
-  renderRoomDocument(req, res, "sandbox"),
-);
+router.get("/sandbox", (req, res) => renderRoomDocument(req, res, "sandbox"));
 
 router.get("/:roomId/key-envelope", async (req, res, next) => {
   const userId = await requireAuthorizedUser(req, res);
@@ -67,6 +63,7 @@ async function renderRoomDocument(
   res: Response,
   purpose: RoomAccessPurpose,
 ) {
+  setDenyFramingHeaders(res);
   // These documents mint a room capability and auto-join the room, so they
   // must not be reachable by a cross-site navigation that carries only the
   // Clerk session cookie. Legitimate clients always send a bearer token.

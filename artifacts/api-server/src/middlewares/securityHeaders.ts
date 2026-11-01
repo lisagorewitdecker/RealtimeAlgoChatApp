@@ -12,8 +12,7 @@ export function noSniff(_req: Request, res: Response, next: NextFunction) {
  * headers do not apply), and their own `srcdoc` preview child is unaffected.
  * Only the `frame-ancestors` directive is set; this is not a full CSP.
  */
-export function denyFraming(_req: Request, res: Response, next: NextFunction) {
+export function setDenyFramingHeaders(res: Response): void {
   res.setHeader("Content-Security-Policy", "frame-ancestors 'none'");
   res.setHeader("X-Frame-Options", "DENY");
-  next();
 }
