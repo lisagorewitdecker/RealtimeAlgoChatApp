@@ -32,6 +32,22 @@ function escapeXmlText(value: string): string {
   });
 }
 
+function redactSensitiveText(value: string): string {
+  return value
+    .replace(
+      /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g,
+      "[REDACTED_PRIVATE_KEY]",
+    )
+    .replace(
+      /\b(authorization\s*:\s*bearer\s+)[a-z0-9\-._~+/]+=*/gi,
+      "$1[REDACTED_TOKEN]",
+    )
+    .replace(
+      /\b(api[_-]?key|token|secret|password)\b(\s*[:=]\s*)(["'])?[^"',\s]+(\3)?/gi,
+      "$1$2[REDACTED]",
+    );
+}
+
 function extractFirstJsonObject(value: string): string | null {
   const start = value.indexOf("{");
   const end = value.lastIndexOf("}");
@@ -69,11 +85,16 @@ export async function streamSandboxAssistant({
 }: SandboxAssistantRequest): Promise<void> {
   if (signal.aborted) return;
 
+  const redactedHtml = redactSensitiveText(files.html);
+  const redactedCss = redactSensitiveText(files.css);
+  const redactedJs = redactSensitiveText(files.js);
+  const redactedPrompt = redactSensitiveText(prompt);
+
   const context = [
     "<sandbox-files>",
-    `<html>\n${escapeXmlText(files.html)}\n</html>`,
-    `<css>\n${escapeXmlText(files.css)}\n</css>`,
-    `<javascript>\n${escapeXmlText(files.js)}\n</javascript>`,
+    `<html>\n${escapeXmlText(redactedHtml)}\n</html>`,
+    `<css>\n${escapeXmlText(redactedCss)}\n</css>`,
+    `<javascript>\n${escapeXmlText(redactedJs)}\n</javascript>`,
     "</sandbox-files>",
   ].join("\n");
 
@@ -87,7 +108,7 @@ export async function streamSandboxAssistant({
       messages: [
         {
           role: "user",
-          content: `${context}\n\n<request>\n${escapeXmlText(prompt)}\n</request>\n\n<output-contract>\n${escapeXmlText(
+          content: `${context}\n\n<request>\n${escapeXmlText(redactedPrompt)}\n</request>\n\n<output-contract>\n${escapeXmlText(
             OUTPUT_CONTRACT,
           )}\n</output-contract>`,
         },
