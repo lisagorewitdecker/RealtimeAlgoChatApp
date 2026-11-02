@@ -23,7 +23,7 @@ jest.mock("@expo/vector-icons", () => ({
 }));
 
 jest.mock("expo-crypto", () => ({
-  getRandomBytes: mockGetRandomBytes,
+  getRandomBytes: (length: number) => mockGetRandomBytes(length),
 }));
 
 jest.mock("expo-haptics", () => ({
