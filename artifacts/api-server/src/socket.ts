@@ -98,6 +98,7 @@ interface Room {
 }
 
 interface PendingRoomJoin {
+  roomId: string;
   revoked: boolean;
   banned: boolean;
 }
@@ -115,7 +116,7 @@ function roomUserJoinKey(roomId: string, userId: string): string {
 
 function registerPendingRoomJoin(roomId: string, userId: string) {
   const key = roomUserJoinKey(roomId, userId);
-  const pendingJoin: PendingRoomJoin = { revoked: false, banned: false };
+  const pendingJoin: PendingRoomJoin = { roomId, revoked: false, banned: false };
   let joins = pendingRoomJoins.get(key);
   if (!joins) {
     joins = new Set();
@@ -130,6 +131,14 @@ function registerPendingRoomJoin(roomId: string, userId: string) {
       if (currentJoins?.size === 0) pendingRoomJoins.delete(key);
     },
   };
+}
+
+function revokePendingRoomJoinsForRoom(roomId: string): void {
+  for (const joins of pendingRoomJoins.values()) {
+    for (const pendingJoin of joins) {
+      if (pendingJoin.roomId === roomId) pendingJoin.revoked = true;
+    }
+  }
 }
 
 function revokePendingRoomJoins(
@@ -697,6 +706,24 @@ export function setRoomActiveForModeration(
   room.isActive = isActive;
   if (isActive) {
     room.lastAccessedAt = Date.now();
+  }
+}
+
+export function deleteRoomForModeration(roomId: string): void {
+  revokePendingRoomJoinsForRoom(roomId);
+  const room = rooms.get(roomId);
+  if (!room) return;
+
+  rooms.delete(roomId);
+  const io = activeServer;
+  if (!io) return;
+  for (const user of room.users.values()) {
+    for (const socketId of user.socketIds) {
+      const socket = io.sockets.sockets.get(socketId) as AppSocket | undefined;
+      if (!socket) continue;
+      socket.emit("room-deleted", { roomId });
+      socket.disconnect(true);
+    }
   }
 }
 
@@ -1487,7 +1514,7 @@ function setupConnectedSocket(
 
       if (isNewPresence) {
         const sysMsg = makeSystemMsg(`${user.username} joined`);
-        room.messages.push(sysMsg);
+        appendRoomMessage(room, sysMsg);
         emitRoomEvent(io, room, "user-joined", {
           userId: user.userId,
           username: user.username,
@@ -1788,10 +1815,7 @@ function setupConnectedSocket(
           nonce: encrypted.nonce,
           timestamp: msg.timestamp,
         });
-        room.messages.push(msg);
-        if (room.messages.length > ROOM_MESSAGE_HISTORY_LIMIT) {
-          room.messages = room.messages.slice(-ROOM_MESSAGE_HISTORY_LIMIT);
-        }
+        appendRoomMessage(room, msg);
         emitRoomEvent(io, room, "message", msg);
       } catch (error) {
          reportSocketHandlerError("save-encrypted-message", error, {
@@ -2042,7 +2066,7 @@ function leaveRoom(socket: AppSocket, io: AppServer, roomId: string) {
     return;
   }
   const sysMsg = makeSystemMsg(`${user.username} left`);
-  room.messages.push(sysMsg);
+  appendRoomMessage(room, sysMsg);
   emitRoomEvent(io, room, "user-left", {
     userId,
     username: user.username,
@@ -2115,4 +2139,11 @@ function makeSystemMsg(content: string): Message {
     avatarEmoji: DEFAULT_AVATAR_EMOJI,
     timestamp: Date.now(), type: "system",
   };
+}
+
+function appendRoomMessage(room: Room, message: Message): void {
+  room.messages.push(message);
+  if (room.messages.length > ROOM_MESSAGE_HISTORY_LIMIT) {
+    room.messages = room.messages.slice(-ROOM_MESSAGE_HISTORY_LIMIT);
+  }
 }

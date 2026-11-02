@@ -1,4 +1,5 @@
 import { Feather } from "@expo/vector-icons";
+import * as ExpoCrypto from "expo-crypto";
 import * as Haptics from "expo-haptics";
 import { useRouter } from "expo-router";
 import { useState } from "react";
@@ -46,9 +47,14 @@ export default function NewRoomScreen() {
           ? pendingRoom
           : {
               id:
-                name.toLowerCase().replace(/\s+/g, "-") +
-                "-" +
-                Math.random().toString(36).slice(2, 6),
+                `${name
+                  .toLowerCase()
+                  .replace(/[^a-z0-9_-]+/g, "-")
+                  .replace(/^-+|-+$/g, "")
+                  .slice(0, 31) || "room"}-${Array.from(
+                  ExpoCrypto.getRandomBytes(16),
+                  (byte) => byte.toString(16).padStart(2, "0"),
+                ).join("")}`,
               name,
             };
       setPendingRoom(room);

@@ -63,6 +63,7 @@ vi.mock("./lib/socketRevocations", () => ({
 }));
 
 import {
+  deleteRoomForModeration,
   disconnectBannedUser,
   getRooms,
   kickRoomMember,
@@ -72,6 +73,7 @@ import {
 } from "./socket.js";
 import { ASSISTANT_REQUEST_COOLDOWN_MS } from "./lib/assistantLimits.js";
 import { createRoomAccessCapability } from "./lib/roomAccess.js";
+import { ROOM_MESSAGE_HISTORY_LIMIT } from "./lib/roomLimits.js";
 
 let httpServer: HttpServer;
 let socketServer: ReturnType<typeof setupSocketIO>;
@@ -317,6 +319,72 @@ describe("room Socket.IO lifecycle", () => {
     expect(getRooms()).toEqual([
       expect.objectContaining({ id: roomId, userCount: 1 }),
     ]);
+  });
+
+  it("removes a deleted room and disconnects its resident sockets", async () => {
+    const roomId = `deleted-room-${Date.now()}`;
+    const client = createRoomClient("token-ada");
+    await waitForEvent(client, "connect");
+    const joined = waitForEvent(client, "room-joined");
+    client.emit("join-room", { roomId });
+    await joined;
+
+    const deleted = waitForEvent<{ roomId: string }>(client, "room-deleted");
+    const disconnected = waitForEvent(client, "disconnect");
+    deleteRoomForModeration(roomId);
+
+    await expect(deleted).resolves.toEqual({ roomId });
+    await disconnected;
+    expect(getRooms()).toEqual([]);
+    expect(mockSaveEncryptedMessage).not.toHaveBeenCalled();
+  });
+
+  it("bounds room history when join and leave system messages accumulate", async () => {
+    const roomId = `system-history-${Date.now()}`;
+    const ada = createRoomClient("token-ada");
+    await waitForEvent(ada, "connect");
+    const adaJoined = waitForEvent(ada, "room-joined");
+    ada.emit("join-room", { roomId });
+    await adaJoined;
+
+    const ben = createRoomClient("token-ben");
+    await waitForEvent(ben, "connect");
+    const firstSystemMessage = waitForEvent<{ message: { id: string } }>(
+      ada,
+      "user-joined",
+    );
+    const benJoined = waitForEvent(ben, "room-joined");
+    ben.emit("join-room", { roomId, createIfMissing: false });
+    await benJoined;
+    const firstMessageId = (await firstSystemMessage).message.id;
+
+    for (let index = 0; index < ROOM_MESSAGE_HISTORY_LIMIT / 2 + 1; index += 1) {
+      const left = waitForEvent(ada, "user-left");
+      ben.emit("leave-room", { roomId });
+      await left;
+
+      const joined = waitForEvent(ben, "room-joined");
+      ben.emit("join-room", { roomId, createIfMissing: false });
+      await joined;
+    }
+
+    const left = waitForEvent(ada, "user-left");
+    ben.emit("leave-room", { roomId });
+    await left;
+    const rejoined = waitForEvent<{
+      replayGap: boolean;
+      messages: Array<{ type: string }>;
+    }>(ben, "room-joined");
+    ben.emit("join-room", {
+      roomId,
+      createIfMissing: false,
+      lastSeenMessageId: firstMessageId,
+    });
+    const replay = await rejoined;
+    expect(replay.replayGap).toBe(true);
+    expect(replay.messages.length).toBeLessThanOrEqual(80);
+
+    ben.emit("leave-room", { roomId });
   });
 
   it("relays only encrypted chat and sandbox payloads and delivers key envelopes", async () => {
