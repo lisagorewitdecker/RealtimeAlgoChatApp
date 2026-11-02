@@ -13,7 +13,7 @@
 // - both must default keyboardShouldPersistTaps to "handled" so a tap on a
 //   submit button lands while an input is focused instead of only dismissing
 //   the keyboard, and must pass the form's props and children through.
-import React from "react";
+import type React from "react";
 import { render, within } from "@testing-library/react-native";
 import { Platform, ScrollView, Text } from "react-native";
 
