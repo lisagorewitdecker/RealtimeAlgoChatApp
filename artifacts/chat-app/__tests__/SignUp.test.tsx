@@ -35,8 +35,8 @@ jest.mock("expo-web-browser", () => ({
 }));
 
 jest.mock("expo-router", () => {
-  const RN = require("react-native");
-  const mockReact = require("react");
+  const RN = jest.requireActual<typeof import("react-native")>("react-native");
+  const mockReact = jest.requireActual<typeof import("react")>("react");
   return {
     Link: ({ children }: { children: unknown }) =>
       mockReact.createElement(RN.Text, null, children),

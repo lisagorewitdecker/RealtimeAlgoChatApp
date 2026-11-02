@@ -1,7 +1,7 @@
 import React from "react";
 import { act, cleanup, fireEvent, render } from "@testing-library/react-native";
 import * as Sentry from "@sentry/react-native";
-import { Alert, StyleSheet } from "react-native";
+import { Alert, FlatList, StyleSheet } from "react-native";
 import RoomScreen from "../app/room/[roomId]";
 
 const mockRouter = {
@@ -89,8 +89,10 @@ jest.mock("react-native-keyboard-controller", () => ({
     children: React.ReactNode;
     [key: string]: unknown;
   }) => {
-    const mockReact = require("react");
-    const { View: MockView } = require("react-native");
+    const mockReact = jest.requireActual<typeof import("react")>("react");
+    const { View: MockView } = jest.requireActual<
+      typeof import("react-native")
+    >("react-native");
     return mockReact.createElement(MockView, props, children);
   },
 }));
@@ -133,7 +135,9 @@ jest.mock("@/contexts/CryptoContext", () => ({
 jest.mock("@/components/MessageBubble", () => ({
   __esModule: true,
   default: ({ message }: { message: { id: string; content: string } }) => {
-    const { Text: MockText } = require("react-native");
+    const { Text: MockText } = jest.requireActual<
+      typeof import("react-native")
+    >("react-native");
     return <MockText testID={`message-${message.id}`}>{message.content}</MockText>;
   },
 }));
@@ -1710,7 +1714,7 @@ describe("room device-key registration ordering", () => {
     expect(mockDecryptRoomKeyEnvelope).toHaveBeenCalledTimes(1);
     expect(mockSetRoomKey).toHaveBeenCalledTimes(1);
     expect(
-      view.UNSAFE_getByType(require("react-native").FlatList).props.data.map(
+      view.UNSAFE_getByType(FlatList).props.data.map(
         (message: { id: string }) => message.id,
       ),
     ).toEqual(["live", "second", "plain", "first"]);
