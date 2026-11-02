@@ -19,9 +19,9 @@ jest.mock("expo-haptics", () => ({
 }));
 
 jest.mock("expo-router", () => {
-  const mockReact = require("react");
-  const RN = require("react-native");
-  const Stack = ({ children }: { children: unknown }) =>
+  const mockReact = jest.requireActual<typeof import("react")>("react");
+  const RN = jest.requireActual<typeof import("react-native")>("react-native");
+  const Stack = ({ children }: { children: React.ReactNode }) =>
     mockReact.createElement(RN.View, null, children);
   Stack.Screen = () => null;
   return {
@@ -75,11 +75,11 @@ jest.mock("react-native-keyboard-controller", () => ({
     children,
     ...props
   }: {
-    children: unknown;
+    children: React.ReactNode;
     [key: string]: unknown;
   }) => {
-    const RN = require("react-native");
-    const mockReact = require("react");
+    const RN = jest.requireActual<typeof import("react-native")>("react-native");
+    const mockReact = jest.requireActual<typeof import("react")>("react");
     return mockReact.createElement(RN.ScrollView, props, children);
   },
 }));
@@ -134,7 +134,7 @@ describe("entry-screen branding", () => {
 
   it("uses RealtimeAlgoChatApp on the setup screen", async () => {
     const view = render(<SetupScreen />);
-    await act(async () => {});
+    await act(() => Promise.resolve());
 
     expect(view.getByText("RealtimeAlgoChatApp")).toBeTruthy();
     expect(view.queryByText("DevAlgoChat Studio")).toBeNull();
@@ -143,7 +143,7 @@ describe("entry-screen branding", () => {
 
   it("uses RealtimeAlgoChatApp in shared account access messaging", async () => {
     const view = render(<RootLayout />);
-    await act(async () => {});
+    await act(() => Promise.resolve());
 
     expect(
       view.getByText(
@@ -160,7 +160,7 @@ describe("entry-screen branding", () => {
   it("uses RealtimeAlgoChatApp on the unauthenticated access gate", async () => {
     mockIsSignedIn = false;
     const view = render(<RootLayout />);
-    await act(async () => {});
+    await act(() => Promise.resolve());
 
     expect(
       view.getByText(
@@ -176,7 +176,7 @@ describe("entry-screen branding", () => {
     // would be dark on the dark background. The root layout pins light
     // content once for every screen.
     const view = render(<RootLayout />);
-    await act(async () => {});
+    await act(() => Promise.resolve());
 
     expect(view.UNSAFE_getByType(StatusBar).props.style).toBe("light");
     expect(view.UNSAFE_getByType(NativeStatusBar).props.barStyle).toBe(
@@ -192,7 +192,7 @@ describe("entry-screen branding", () => {
 
     try {
       const view = render(<RootLayout />);
-      await act(async () => {});
+      await act(() => Promise.resolve());
 
       expect(view.getByText("Authentication setup needed")).toBeTruthy();
       expect(view.UNSAFE_getByType(StatusBar).props.style).toBe("light");
@@ -218,7 +218,7 @@ describe("entry-screen branding", () => {
 
     try {
       const view = render(<RootLayout />);
-      await act(async () => {});
+      await act(() => Promise.resolve());
 
       expect(view.getByText("Authentication setup needed")).toBeTruthy();
       expect(
@@ -246,7 +246,7 @@ describe("entry-screen branding", () => {
 
     try {
       const view = render(<RootLayout />);
-      await act(async () => {});
+      await act(() => Promise.resolve());
 
       expect(view.getByText("Authentication setup needed")).toBeTruthy();
       expect(view.getByText(/Clerk publishable key is not valid/)).toBeTruthy();

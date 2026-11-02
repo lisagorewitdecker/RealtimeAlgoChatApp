@@ -6,7 +6,7 @@ import { cn } from "@/lib/utils"
 const Drawer = ({
   shouldScaleBackground = true,
   ...props
-}: React.ComponentProps<typeof DrawerPrimitive.Root>) => (
+}: React.ComponentProps<typeof DrawerPrimitive.Root>): React.ReactElement => (
   <DrawerPrimitive.Root
     shouldScaleBackground={shouldScaleBackground}
     {...props}
@@ -56,7 +56,7 @@ DrawerContent.displayName = "DrawerContent"
 const DrawerHeader = ({
   className,
   ...props
-}: React.HTMLAttributes<HTMLDivElement>) => (
+}: React.HTMLAttributes<HTMLDivElement>): React.ReactElement => (
   <div
     className={cn("grid gap-1.5 p-4 text-center sm:text-left", className)}
     {...props}
@@ -67,7 +67,7 @@ DrawerHeader.displayName = "DrawerHeader"
 const DrawerFooter = ({
   className,
   ...props
-}: React.HTMLAttributes<HTMLDivElement>) => (
+}: React.HTMLAttributes<HTMLDivElement>): React.ReactElement => (
   <div
     className={cn("mt-auto flex flex-col gap-2 p-4", className)}
     {...props}
