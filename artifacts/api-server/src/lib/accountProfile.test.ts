@@ -99,6 +99,18 @@ describe("getAccountProfile display-name fallback", () => {
     });
   });
 
+  it("does not adopt the owner's Clerk name for other administrators", async () => {
+    vi.stubEnv("ADMIN_USER_IDS", "user-ada");
+    vi.stubEnv("MAIN_ADMIN_EMAIL", "owner@example.com");
+    mockGetUser.mockResolvedValue(
+      clerkUser({ firstName: "Lisa Gorewit-Decker" }),
+    );
+
+    await expect(getAccountProfile("user-ada")).resolves.toMatchObject({
+      username: "Member",
+    });
+  });
+
   it("still renders a stored reserved name instead of failing the load", async () => {
     vi.stubEnv("ADMIN_USER_IDS", "");
     mockGetUser.mockResolvedValue(

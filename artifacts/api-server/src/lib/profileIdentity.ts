@@ -44,7 +44,8 @@ export function canonicalProfileName(
 
 /**
  * Names that only administrators may use: "System" labels server-generated
- * room messages, and the others claim staff authority.
+ * room messages, and the others claim staff authority. MAIN_ADMIN_NAME is
+ * further limited to the MAIN_ADMIN_EMAIL account (see mayUseDisplayName).
  */
 export const RESERVED_DISPLAY_NAMES = [
   "System",
@@ -121,4 +122,21 @@ const RESERVED_DISPLAY_NAME_SKELETONS = new Set<string>(
 
 export function isReservedDisplayName(value: string): boolean {
   return RESERVED_DISPLAY_NAME_SKELETONS.has(displayNameSkeleton(value));
+}
+
+const MAIN_ADMIN_NAME_SKELETON = displayNameSkeleton(MAIN_ADMIN_NAME);
+
+/**
+ * Whether an account may use `value` as its display name. The owner's name is
+ * only for the MAIN_ADMIN_EMAIL account (so nobody when it is unset); the other
+ * reserved names are also open to configured administrators.
+ */
+export function mayUseDisplayName(
+  value: string,
+  account: { isConfiguredAdmin: boolean; isMainAdmin: boolean },
+): boolean {
+  const skeleton = displayNameSkeleton(value);
+  if (!RESERVED_DISPLAY_NAME_SKELETONS.has(skeleton)) return true;
+  if (account.isMainAdmin) return true;
+  return skeleton !== MAIN_ADMIN_NAME_SKELETON && account.isConfiguredAdmin;
 }

@@ -12,7 +12,7 @@ import { isProfileAvatar } from "../lib/profileAvatars";
 import {
   getMainAdminEmail,
   isMainAdminEmail,
-  isReservedDisplayName,
+  mayUseDisplayName,
 } from "../lib/profileIdentity";
 import { requireAuthorizedUser } from "../lib/requireAccountAccess";
 import {
@@ -41,8 +41,12 @@ function isValidPublicKey(value: unknown): value is string {
   return decoded.length === 32 && decoded.toString("base64") === value;
 }
 
-async function mayUseReservedDisplayName(userId: string): Promise<boolean> {
-  if (isConfiguredAdmin(userId)) return true;
+async function mayUseRequestedDisplayName(
+  userId: string,
+  username: string,
+): Promise<boolean> {
+  const account = { isConfiguredAdmin: isConfiguredAdmin(userId), isMainAdmin: false };
+  if (mayUseDisplayName(username, account)) return true;
   if (!getMainAdminEmail()) return false;
   const { email } = await getAccountSnapshot(userId);
   return isMainAdminEmail(email);
@@ -127,8 +131,10 @@ router.put("/", async (req, res, next) => {
     }
     if (
       typeof username === "string" &&
-      isReservedDisplayName(normalizeProfileUsername(username)) &&
-      !(await mayUseReservedDisplayName(userId))
+      !(await mayUseRequestedDisplayName(
+        userId,
+        normalizeProfileUsername(username),
+      ))
     ) {
       res.status(400).json({
         error: "That display name is reserved. Choose a different name.",

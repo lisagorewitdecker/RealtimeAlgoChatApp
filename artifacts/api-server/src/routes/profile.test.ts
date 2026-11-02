@@ -415,19 +415,35 @@ describe("account profile routes", () => {
     expect(mockRegisterPublicKey).not.toHaveBeenCalled();
   });
 
-  it("lets a configured administrator use a reserved display name", async () => {
+  it.each(["System", "Administrator"])(
+    "lets a configured administrator use the reserved display name %j",
+    async (username) => {
+      mockIsConfiguredAdmin.mockReturnValue(true);
+
+      const response = await putProfile({ username });
+
+      expect(response.status).toBe(200);
+      expect(mockUpdateAccountProfile).toHaveBeenCalledWith("user-ada", {
+        username,
+        avatarEmoji: "👩‍💻",
+      });
+    },
+  );
+
+  it("keeps the owner's display name from configured administrators", async () => {
     mockIsConfiguredAdmin.mockReturnValue(true);
+    vi.stubEnv("MAIN_ADMIN_EMAIL", "owner@example.com");
 
     const response = await putProfile({ username: "Lisa Gorewit-Decker" });
 
-    expect(response.status).toBe(200);
-    expect(mockUpdateAccountProfile).toHaveBeenCalledWith("user-ada", {
-      username: "Lisa Gorewit-Decker",
-      avatarEmoji: "👩‍💻",
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({
+      code: "RESERVED_USERNAME",
     });
+    expect(mockUpdateAccountProfile).not.toHaveBeenCalled();
   });
 
-  it("lets the MAIN_ADMIN_EMAIL account use a reserved display name", async () => {
+  it("lets the MAIN_ADMIN_EMAIL account use the owner's display name", async () => {
     vi.stubEnv("MAIN_ADMIN_EMAIL", " Owner@Example.com ");
     mockGetAccountSnapshot.mockResolvedValue({
       userId: "user-ada",
@@ -441,8 +457,9 @@ describe("account profile routes", () => {
     expect(mockGetAccountSnapshot).toHaveBeenCalledWith("user-ada");
   });
 
-  it("keeps reserved names locked when MAIN_ADMIN_EMAIL is unset", async () => {
+  it("keeps the owner's display name from everyone when MAIN_ADMIN_EMAIL is unset", async () => {
     vi.stubEnv("MAIN_ADMIN_EMAIL", "");
+    mockIsConfiguredAdmin.mockReturnValue(true);
 
     const response = await putProfile({ username: "Lisa Gorewit-Decker" });
 
