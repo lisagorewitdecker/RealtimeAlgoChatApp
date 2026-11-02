@@ -1,4 +1,4 @@
-import React from "react";
+import type React from "react";
 import { act, render } from "@testing-library/react-native";
 import { Platform, StyleSheet, type StyleProp, type ViewStyle } from "react-native";
 import { BottomTabBarHeightContext } from "expo-router/js-tabs";

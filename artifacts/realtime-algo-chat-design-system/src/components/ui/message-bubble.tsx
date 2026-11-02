@@ -10,7 +10,7 @@ export type MessageBubbleProps = {
 export function MessageBubble({ content, username, time, isSelf = false, deleted = false, system = false }: MessageBubbleProps) {
   if (system) return <p role="status" className="py-2 text-center text-xs italic text-muted-foreground">{content}</p>;
   return (
-    <div className={`flex gap-2 ${isSelf ? 'justify-end' : 'justify-start'}`} aria-label={`${isSelf ? 'You' : username}: ${deleted ? 'message deleted' : content}, ${time}`}>
+    <div className={`flex gap-2 ${isSelf ? 'justify-end' : 'justify-start'}`} role="group" aria-label={`${isSelf ? 'You' : username}: ${deleted ? 'message deleted' : content}, ${time}`}>
       {!isSelf ? <span aria-hidden className="mt-auto grid size-8 place-items-center rounded-full bg-primary font-bold text-primary-foreground">{username[0]?.toUpperCase()}</span> : null}
       <div className="max-w-[75%]">
         {!isSelf ? <p className="mb-1 ml-0.5 text-[11px] text-muted-foreground">{username}</p> : null}
