@@ -1,4 +1,3 @@
-import React from "react";
 import { FontAwesome } from "@expo/vector-icons";
 import { StyleSheet, TouchableOpacity, View } from "react-native";
 import { ScaledText as Text } from "@/components/ScaledText";

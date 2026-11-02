@@ -86,7 +86,7 @@ async function renderRoomDocument(
     return;
   }
 
-  let profile;
+  let profile: Awaited<ReturnType<typeof getAccountProfile>>;
   try {
     profile = await getAccountProfile(userId);
   } catch {
