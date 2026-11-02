@@ -64,6 +64,7 @@ vi.mock("./lib/socketRevocations", () => ({
 
 import {
   deleteRoomForModeration,
+  deleteRoomForModerationWithPersistence,
   disconnectBannedUser,
   getRooms,
   kickRoomMember,
@@ -337,6 +338,39 @@ describe("room Socket.IO lifecycle", () => {
     await disconnected;
     expect(getRooms()).toEqual([]);
     expect(mockSaveEncryptedMessage).not.toHaveBeenCalled();
+  });
+
+  it("does not recreate a room when deletion races a pending join", async () => {
+    const roomId = `deleted-pending-join-${Date.now()}`;
+    let startDelete!: () => void;
+    let finishDelete!: () => void;
+    const deleteStarted = new Promise<void>((resolve) => {
+      startDelete = resolve;
+    });
+    const deletion = deleteRoomForModerationWithPersistence(
+      roomId,
+      () =>
+        new Promise<void>((resolve) => {
+          finishDelete = resolve;
+          startDelete();
+        }),
+    );
+    await deleteStarted;
+
+    const client = createRoomClient("token-ben");
+    await waitForEvent(client, "connect");
+    const joinError = waitForEvent<{ message: string }>(client, "error");
+    client.emit("join-room", { roomId });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    finishDelete();
+
+    await deletion;
+    await expect(joinError).resolves.toMatchObject({
+      message:
+        "You were recently removed from this room. Please wait a few minutes before rejoining.",
+    });
+    expect(mockLoadEncryptedMessages).not.toHaveBeenCalled();
+    expect(getRooms()).toEqual([]);
   });
 
   it("bounds room history when join and leave system messages accumulate", async () => {

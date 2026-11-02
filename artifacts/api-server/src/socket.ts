@@ -105,10 +105,32 @@ interface PendingRoomJoin {
 
 const rooms = new Map<string, Room>();
 const pendingRoomJoins = new Map<string, Set<PendingRoomJoin>>();
+const roomLifecycleGates = new Map<string, Promise<void>>();
 const DEFAULT_AVATAR_EMOJI = "🧑‍💻";
 const ASSISTANT_REQUEST_ID_PATTERN = /^[a-zA-Z0-9_-]{8,80}$/;
 let accountBanSequence = 0;
 const accountBanSequences = new Map<string, number>();
+
+async function withRoomLifecycleLock<T>(
+  roomId: string,
+  operation: () => Promise<T>,
+): Promise<T> {
+  const previous = roomLifecycleGates.get(roomId);
+  let release!: () => void;
+  const current = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  roomLifecycleGates.set(roomId, current);
+  await previous;
+  try {
+    return await operation();
+  } finally {
+    if (roomLifecycleGates.get(roomId) === current) {
+      roomLifecycleGates.delete(roomId);
+    }
+    release();
+  }
+}
 
 function roomUserJoinKey(roomId: string, userId: string): string {
   return JSON.stringify([roomId, userId]);
@@ -152,6 +174,24 @@ function revokePendingRoomJoins(
     pendingJoin.revoked = true;
     pendingJoin.banned ||= banned;
   }
+}
+
+function emitPendingRoomJoinRevoked(
+  socket: AppSocket,
+  pendingJoin: PendingRoomJoin,
+): void {
+  socket.emit(
+    "error",
+    pendingJoin.banned
+      ? {
+          code: "ROOM_BANNED",
+          message: "You are banned from this room",
+        }
+      : {
+          message:
+            "You were recently removed from this room. Please wait a few minutes before rejoining.",
+        },
+  );
 }
 
 type SessionPurpose = "chat" | RoomAccessPurpose;
@@ -727,6 +767,16 @@ export function deleteRoomForModeration(roomId: string): void {
   }
 }
 
+export async function deleteRoomForModerationWithPersistence(
+  roomId: string,
+  deletePersistedRoom: () => Promise<unknown>,
+): Promise<void> {
+  await withRoomLifecycleLock(roomId, async () => {
+    await deletePersistedRoom();
+    deleteRoomForModeration(roomId);
+  });
+}
+
 export function broadcastMessageDeletion(roomId: string, messageId: string): void {
   const io = activeServer;
   if (!io) return;
@@ -760,6 +810,7 @@ export function resetSocketRoomStateForTest(): void {
   }
   rooms.clear();
   pendingRoomJoins.clear();
+  roomLifecycleGates.clear();
   activeServer = null;
 }
 
@@ -1268,6 +1319,11 @@ function setupConnectedSocket(
         roomId,
         authenticatedUser.userId,
       );
+      const pendingJoin = pendingJoinRegistration.pendingJoin;
+      if (pendingJoin.revoked) {
+        emitPendingRoomJoinRevoked(socket, pendingJoin);
+        return;
+      }
 
       if (await hasActiveRoomBan(roomId, authenticatedUser.userId)) {
         socket.emit("error", {
@@ -1312,14 +1368,25 @@ function setupConnectedSocket(
         };
         const requestedName = getText(data?.["roomName"], 60) ?? roomId;
         if (data?.["createIfMissing"] !== false) {
-          await db
-            .insert(roomsTable)
-            .values({
-              id: roomId,
-              name: requestedName,
-              createdBy: authenticatedUser.userId,
-            })
-            .onConflictDoNothing();
+          const createdOrNotRevoked = await withRoomLifecycleLock(
+            roomId,
+            async () => {
+              if (pendingJoin.revoked) return false;
+              await db
+                .insert(roomsTable)
+                .values({
+                  id: roomId,
+                  name: requestedName,
+                  createdBy: authenticatedUser.userId,
+                })
+                .onConflictDoNothing();
+              return true;
+            },
+          );
+          if (!createdOrNotRevoked) {
+            emitPendingRoomJoinRevoked(socket, pendingJoin);
+            return;
+          }
         }
         const [persistedRoom] = await db
           .select({
@@ -1425,20 +1492,8 @@ function setupConnectedSocket(
           userId: authenticatedUser.userId,
         });
       }
-      const pendingJoin = pendingJoinRegistration.pendingJoin;
       if (pendingJoin.revoked) {
-        socket.emit(
-          "error",
-          pendingJoin.banned
-            ? {
-                code: "ROOM_BANNED",
-                message: "You are banned from this room",
-              }
-            : {
-                message:
-                  "You were recently removed from this room. Please wait a few minutes before rejoining.",
-              },
-        );
+        emitPendingRoomJoinRevoked(socket, pendingJoin);
         return;
       }
       const user =
