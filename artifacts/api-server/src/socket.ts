@@ -929,6 +929,20 @@ export function setupSocketIO(httpServer: HttpServer) {
         disconnectBannedUser(revocation.userId);
         return;
       }
+      if (revocation.type === "room-deletion") {
+        void deleteRoomForModerationWithPersistence(
+          revocation.roomId,
+          () =>
+            db
+              .delete(roomsTable)
+              .where(eq(roomsTable.id, revocation.roomId)),
+        ).catch((error: unknown) => {
+          reportSocketHandlerError("delete-room-revocation", error, {
+            roomId: revocation.roomId,
+          });
+        });
+        return;
+      }
       void kickRoomUser(
         revocation.roomId,
         revocation.userId,

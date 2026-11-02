@@ -123,6 +123,14 @@ describe("socket revocation notifications", () => {
       }),
     });
     client.emit("notification", {
+      channel: "realtimealgo_socket_revocations",
+      payload: JSON.stringify({
+        type: "room-deletion",
+        roomId: "room-456",
+        source: "another-instance",
+      }),
+    });
+    client.emit("notification", {
       channel: "another-channel",
       payload: JSON.stringify({
         type: "account-ban",
@@ -138,11 +146,15 @@ describe("socket revocation notifications", () => {
       }),
     });
 
-    expect(onRevocation).toHaveBeenCalledExactlyOnceWith({
+    expect(onRevocation).toHaveBeenNthCalledWith(1, {
       type: "room-revocation",
       roomId: "room-123",
       userId: "user-banned",
       banned: true,
+    });
+    expect(onRevocation).toHaveBeenNthCalledWith(2, {
+      type: "room-deletion",
+      roomId: "room-456",
     });
     expect(onUnavailable).not.toHaveBeenCalled();
     listener.close();

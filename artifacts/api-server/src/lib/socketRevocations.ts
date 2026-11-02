@@ -10,6 +10,7 @@ const instanceId = randomUUID();
 
 export type SocketRevocation =
   | { type: "account-ban"; userId: string }
+  | { type: "room-deletion"; roomId: string }
   | {
       type: "room-revocation";
       roomId: string;
@@ -186,16 +187,18 @@ export function startSocketRevocationListener(
           ) {
             return;
           }
-          onRevocation(
-            event.type === "account-ban"
-              ? { type: event.type, userId: event.userId }
-              : {
-                  type: event.type,
-                  roomId: event.roomId,
-                  userId: event.userId,
-                  banned: event.banned,
-                },
-          );
+          if (event.type === "account-ban") {
+            onRevocation({ type: event.type, userId: event.userId });
+          } else if (event.type === "room-deletion") {
+            onRevocation({ type: event.type, roomId: event.roomId });
+          } else {
+            onRevocation({
+              type: event.type,
+              roomId: event.roomId,
+              userId: event.userId,
+              banned: event.banned,
+            });
+          }
         } catch (error) {
           logger.warn({ err: error }, "Ignoring malformed socket revocation");
         }
@@ -289,6 +292,9 @@ function isSocketRevocation(
 ): event is PublishedSocketRevocation {
   if (event.type === "account-ban") {
     return typeof event.userId === "string" && event.userId.length > 0;
+  }
+  if (event.type === "room-deletion") {
+    return typeof event.roomId === "string" && event.roomId.length > 0;
   }
   return (
     event.type === "room-revocation" &&

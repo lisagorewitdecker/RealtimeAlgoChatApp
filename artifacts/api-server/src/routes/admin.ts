@@ -11,6 +11,7 @@ import { createIpRateLimit } from "../middlewares/rateLimit";
 import { db } from "@workspace/db";
 import { roomsTable, roomMembersTable, messagesTable } from "@workspace/db";
 import { eq, isNull, count, max } from "drizzle-orm";
+import { publishSocketRevocationInTransaction } from "../lib/socketRevocations";
 import {
   deleteRoomForModerationWithPersistence,
   setRoomActiveForModeration,
@@ -102,9 +103,20 @@ router.delete("/rooms/:roomId", requireAuth, async (req: Request, res: Response)
     return;
   }
 
-  await deleteRoomForModerationWithPersistence(roomId, () =>
-    db.delete(roomsTable).where(eq(roomsTable.id, roomId)),
-  );
+  await deleteRoomForModerationWithPersistence(roomId, async () => {
+    await db.transaction(async (transaction) => {
+      const [deletedRoom] = await transaction
+        .delete(roomsTable)
+        .where(eq(roomsTable.id, roomId))
+        .returning({ id: roomsTable.id });
+      if (!deletedRoom) return;
+
+      await publishSocketRevocationInTransaction(transaction, {
+        type: "room-deletion",
+        roomId,
+      });
+    });
+  });
 
   res.json({ ok: true, deleted: { id: room.id, name: room.name } });
 });

@@ -20,6 +20,7 @@ const mockSaveEncryptedMessage = vi.hoisted(() => vi.fn());
 const mockSaveEncryptedSandboxState = vi.hoisted(() => vi.fn());
 const mockSaveRoomEnvelope = vi.hoisted(() => vi.fn());
 const mockStreamSandboxAssistant = vi.hoisted(() => vi.fn());
+const mockStartSocketRevocationListener = vi.hoisted(() => vi.fn());
 
 vi.mock("@clerk/express", () => ({
   verifyToken: mockVerifyToken,
@@ -56,10 +57,7 @@ vi.mock("./lib/sandboxAssistant", () => ({
 vi.mock("./lib/socketRevocations", () => ({
   publishSocketRevocation: vi.fn(),
   publishSocketRevocationInTransaction: vi.fn().mockResolvedValue(undefined),
-  startSocketRevocationListener: () => ({
-    waitUntilReady: async () => undefined,
-    close: vi.fn(),
-  }),
+  startSocketRevocationListener: mockStartSocketRevocationListener,
 }));
 
 import {
@@ -122,6 +120,10 @@ beforeEach(async () => {
   mockSaveEncryptedSandboxState.mockReset().mockResolvedValue(undefined);
   mockSaveRoomEnvelope.mockReset().mockResolvedValue(undefined);
   mockStreamSandboxAssistant.mockReset();
+  mockStartSocketRevocationListener.mockReset().mockImplementation(() => ({
+    waitUntilReady: async () => undefined,
+    close: vi.fn(),
+  }));
 
   httpServer = createServer();
   socketServer = setupSocketIO(httpServer);
@@ -375,6 +377,24 @@ describe("room Socket.IO lifecycle", () => {
         "You were recently removed from this room. Please wait a few minutes before rejoining.",
     });
     expect(mockLoadEncryptedMessages).not.toHaveBeenCalled();
+    expect(getRooms()).toEqual([]);
+  });
+
+  it("evicts a room without disconnecting sockets after a remote deletion revocation", async () => {
+    const roomId = `remote-deleted-room-${Date.now()}`;
+    const client = createRoomClient("token-ada");
+    await waitForEvent(client, "connect");
+    const joined = waitForEvent(client, "room-joined");
+    client.emit("join-room", { roomId });
+    await joined;
+    const deleted = waitForEvent<{ roomId: string }>(client, "room-deleted");
+    const onRevocation = mockStartSocketRevocationListener.mock.calls[0]?.[0] as (
+      revocation: { type: "room-deletion"; roomId: string },
+    ) => void;
+    onRevocation({ type: "room-deletion", roomId });
+
+    await expect(deleted).resolves.toEqual({ roomId });
+    expect(client.connected).toBe(true);
     expect(getRooms()).toEqual([]);
   });
 
