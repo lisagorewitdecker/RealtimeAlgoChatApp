@@ -401,7 +401,9 @@ export async function saveEncryptedMessage({
     const retainedMessages = await tx
       .select({ id: messagesTable.id })
       .from(messagesTable)
-      .where(eq(messagesTable.roomId, roomId))
+      .where(
+        and(eq(messagesTable.roomId, roomId), isNull(messagesTable.deletedAt)),
+      )
       .orderBy(desc(messagesTable.timestampMs), desc(messagesTable.id))
       .limit(ROOM_MESSAGE_HISTORY_LIMIT + 1);
 
@@ -411,6 +413,7 @@ export async function saveEncryptedMessage({
         .where(
           and(
             eq(messagesTable.roomId, roomId),
+            isNull(messagesTable.deletedAt),
             notInArray(
               messagesTable.id,
               retainedMessages
