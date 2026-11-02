@@ -1,4 +1,3 @@
-import React from "react";
 import { act, render } from "@testing-library/react-native";
 import { StatusBar as NativeStatusBar } from "react-native";
 import { StatusBar } from "expo-status-bar";

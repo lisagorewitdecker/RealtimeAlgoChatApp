@@ -1,7 +1,7 @@
 import { Feather } from "@expo/vector-icons";
 import { useAuth } from "@clerk/expo";
 import * as Haptics from "expo-haptics";
-import React, { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Alert,
   Platform,
@@ -416,7 +416,7 @@ export default function ProfileScreen() {
         <View
           style={[
             styles.avatarRing,
-            { backgroundColor: colors.primary + "20", borderRadius: 60 },
+            { backgroundColor: `${colors.primary}20`, borderRadius: 60 },
           ]}
         >
           <Text style={styles.avatarEmoji}>{avatarEmoji}</Text>
@@ -443,7 +443,7 @@ export default function ProfileScreen() {
                   style={[
                     styles.emojiOption,
                     {
-                      backgroundColor: selected ? colors.primary + "20" : colors.background,
+                      backgroundColor: selected ? `${colors.primary}20` : colors.background,
                       borderColor: selected ? colors.primary : colors.border,
                       borderRadius: colors.radius - 2,
                     },
@@ -855,7 +855,7 @@ export default function ProfileScreen() {
                         {
                           borderColor: colors.border,
                           backgroundColor: selected
-                            ? colors.primary + "20"
+                            ? `${colors.primary}20`
                             : "transparent",
                         },
                       ]}

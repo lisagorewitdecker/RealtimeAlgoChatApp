@@ -74,7 +74,9 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
-  clients.splice(0).forEach((client) => client.close());
+  clients.splice(0).forEach((client) => {
+    client.close();
+  });
   await new Promise((resolve) => setTimeout(resolve, 10));
   await new Promise<void>((resolve) => socketServer.close(() => resolve()));
   await new Promise<void>((resolve) => httpServer.close(() => resolve()));
