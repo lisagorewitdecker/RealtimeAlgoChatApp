@@ -59,6 +59,7 @@
     "@ungap/structured-clone": "^1.4.0",
     "@workspace/api-client-react": "workspace:*",
     "babel-plugin-react-compiler": "19.0.0-beta-ebf51a3-20250411",
+    "babel-preset-expo": "57.0.12",
     "create-launch": "0.3.6",
     "expo": "~57.0.24",
     "expo-auth-session": "~57.0.12",
