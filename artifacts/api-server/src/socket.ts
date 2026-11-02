@@ -762,7 +762,10 @@ export function deleteRoomForModeration(roomId: string): void {
       const socket = io.sockets.sockets.get(socketId) as AppSocket | undefined;
       if (!socket) continue;
       socket.emit("room-deleted", { roomId });
-      socket.disconnect(true);
+      socket.leave(roomId);
+      if (socket.data.roomId === roomId) {
+        delete socket.data.roomId;
+      }
     }
   }
 }

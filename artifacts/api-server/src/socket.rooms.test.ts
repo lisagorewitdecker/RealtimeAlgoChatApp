@@ -322,7 +322,7 @@ describe("room Socket.IO lifecycle", () => {
     ]);
   });
 
-  it("removes a deleted room and disconnects its resident sockets", async () => {
+  it("removes a deleted room without disconnecting its resident sockets", async () => {
     const roomId = `deleted-room-${Date.now()}`;
     const client = createRoomClient("token-ada");
     await waitForEvent(client, "connect");
@@ -331,13 +331,18 @@ describe("room Socket.IO lifecycle", () => {
     await joined;
 
     const deleted = waitForEvent<{ roomId: string }>(client, "room-deleted");
-    const disconnected = waitForEvent(client, "disconnect");
     deleteRoomForModeration(roomId);
 
     await expect(deleted).resolves.toEqual({ roomId });
-    await disconnected;
+    expect(client.connected).toBe(true);
     expect(getRooms()).toEqual([]);
     expect(mockSaveEncryptedMessage).not.toHaveBeenCalled();
+
+    const nextRoomId = `next-room-${Date.now()}`;
+    const nextRoomJoined = waitForEvent<{ roomId: string }>(client, "room-joined");
+    client.emit("join-room", { roomId: nextRoomId });
+    await expect(nextRoomJoined).resolves.toMatchObject({ roomId: nextRoomId });
+    expect(client.connected).toBe(true);
   });
 
   it("does not recreate a room when deletion races a pending join", async () => {
