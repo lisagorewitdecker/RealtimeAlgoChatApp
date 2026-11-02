@@ -1,9 +1,11 @@
 import type { RequestHandler } from "express";
 import type { IncomingHttpHeaders } from "node:http";
 import { createProxyMiddleware } from "http-proxy-middleware";
+import { getAllowedOrigins } from "../lib/origins";
 
 const CLERK_FAPI = "https://frontend-api.clerk.dev";
 export const CLERK_PROXY_PATH = "/api/__clerk";
+const HOST_HEADER_PATTERN = /^(?:[A-Za-z0-9.-]+|\[[0-9A-Fa-f:.]+\])(?::\d{1,5})?$/;
 
 export function getClerkProxyHost(req: {
   headers: IncomingHttpHeaders;
@@ -11,7 +13,19 @@ export function getClerkProxyHost(req: {
   const forwarded = req.headers["x-forwarded-host"];
   const raw = Array.isArray(forwarded) ? forwarded[0] : forwarded;
   const firstHop = raw?.split(",")[0]?.trim();
-  return firstHop || req.headers.host?.trim() || undefined;
+  return [firstHop, req.headers.host?.trim()].find(isAllowedProxyHost);
+}
+
+function isAllowedProxyHost(host: string | undefined): host is string {
+  if (!host || !HOST_HEADER_PATTERN.test(host)) return false;
+  const normalizedHost = host.toLowerCase();
+  return getAllowedOrigins().some((origin) => {
+    try {
+      return new URL(origin).host.toLowerCase() === normalizedHost;
+    } catch {
+      return false;
+    }
+  });
 }
 
 export function clerkProxyMiddleware(): RequestHandler {
@@ -24,7 +38,7 @@ export function clerkProxyMiddleware(): RequestHandler {
     return (_req, _res, next) => next();
   }
 
-  return createProxyMiddleware({
+  const proxyMiddleware = createProxyMiddleware({
     target: CLERK_FAPI,
     changeOrigin: true,
     selfHandleResponse: true,
@@ -32,11 +46,10 @@ export function clerkProxyMiddleware(): RequestHandler {
       path.replace(new RegExp(`^${CLERK_PROXY_PATH}`), ""),
     on: {
       proxyReq: (proxyReq, req) => {
-        const protocol = req.headers["x-forwarded-proto"] || "https";
         const host = getClerkProxyHost(req) || "";
         proxyReq.setHeader(
           "Clerk-Proxy-Url",
-          `${protocol}://${host}${CLERK_PROXY_PATH}`,
+          `https://${host}${CLERK_PROXY_PATH}`,
         );
         proxyReq.setHeader("Clerk-Secret-Key", secretKey);
       },
@@ -78,4 +91,11 @@ export function clerkProxyMiddleware(): RequestHandler {
       },
     },
   }) as RequestHandler;
+  return (req, res, next) => {
+    if (!getClerkProxyHost(req)) {
+      res.status(400).end();
+      return;
+    }
+    return proxyMiddleware(req, res, next);
+  };
 }

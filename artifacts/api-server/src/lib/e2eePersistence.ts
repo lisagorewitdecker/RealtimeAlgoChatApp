@@ -14,9 +14,12 @@ import {
   inArray,
   isNull,
   isNotNull,
+  notInArray,
   or,
   sql,
 } from "drizzle-orm";
+import { ROOM_MESSAGE_HISTORY_LIMIT } from "./roomLimits";
+
 export interface EncryptedPayload {
   ciphertext: string;
   nonce: string;
@@ -380,15 +383,46 @@ export async function saveEncryptedMessage({
   nonce: string;
   timestamp: number;
 }): Promise<void> {
-  await db.insert(messagesTable).values({
-    id,
-    roomId,
-    userId,
-    username,
-    ciphertext,
-    nonce,
-    type: "text",
-    timestampMs: timestamp,
+  await db.transaction(async (tx) => {
+    await tx.execute(
+      sql`SELECT id FROM rooms WHERE id = ${roomId} FOR NO KEY UPDATE`,
+    );
+    await tx.insert(messagesTable).values({
+      id,
+      roomId,
+      userId,
+      username,
+      ciphertext,
+      nonce,
+      type: "text",
+      timestampMs: timestamp,
+    });
+
+    const retainedMessages = await tx
+      .select({ id: messagesTable.id })
+      .from(messagesTable)
+      .where(
+        and(eq(messagesTable.roomId, roomId), isNull(messagesTable.deletedAt)),
+      )
+      .orderBy(desc(messagesTable.timestampMs), desc(messagesTable.id))
+      .limit(ROOM_MESSAGE_HISTORY_LIMIT + 1);
+
+    if (retainedMessages.length > ROOM_MESSAGE_HISTORY_LIMIT) {
+      await tx
+        .delete(messagesTable)
+        .where(
+          and(
+            eq(messagesTable.roomId, roomId),
+            isNull(messagesTable.deletedAt),
+            notInArray(
+              messagesTable.id,
+              retainedMessages
+                .slice(0, ROOM_MESSAGE_HISTORY_LIMIT)
+                .map((message) => message.id),
+            ),
+          ),
+        );
+    }
   });
 }
 

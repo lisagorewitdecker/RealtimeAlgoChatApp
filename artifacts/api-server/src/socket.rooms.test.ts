@@ -20,6 +20,7 @@ const mockSaveEncryptedMessage = vi.hoisted(() => vi.fn());
 const mockSaveEncryptedSandboxState = vi.hoisted(() => vi.fn());
 const mockSaveRoomEnvelope = vi.hoisted(() => vi.fn());
 const mockStreamSandboxAssistant = vi.hoisted(() => vi.fn());
+const mockStartSocketRevocationListener = vi.hoisted(() => vi.fn());
 
 vi.mock("@clerk/express", () => ({
   verifyToken: mockVerifyToken,
@@ -56,13 +57,12 @@ vi.mock("./lib/sandboxAssistant", () => ({
 vi.mock("./lib/socketRevocations", () => ({
   publishSocketRevocation: vi.fn(),
   publishSocketRevocationInTransaction: vi.fn().mockResolvedValue(undefined),
-  startSocketRevocationListener: () => ({
-    waitUntilReady: async () => undefined,
-    close: vi.fn(),
-  }),
+  startSocketRevocationListener: mockStartSocketRevocationListener,
 }));
 
 import {
+  deleteRoomForModeration,
+  deleteRoomForModerationWithPersistence,
   disconnectBannedUser,
   getRooms,
   kickRoomMember,
@@ -72,6 +72,7 @@ import {
 } from "./socket.js";
 import { ASSISTANT_REQUEST_COOLDOWN_MS } from "./lib/assistantLimits.js";
 import { createRoomAccessCapability } from "./lib/roomAccess.js";
+import { ROOM_MESSAGE_HISTORY_LIMIT } from "./lib/roomLimits.js";
 
 let httpServer: HttpServer;
 let socketServer: ReturnType<typeof setupSocketIO>;
@@ -119,6 +120,10 @@ beforeEach(async () => {
   mockSaveEncryptedSandboxState.mockReset().mockResolvedValue(undefined);
   mockSaveRoomEnvelope.mockReset().mockResolvedValue(undefined);
   mockStreamSandboxAssistant.mockReset();
+  mockStartSocketRevocationListener.mockReset().mockImplementation(() => ({
+    waitUntilReady: async () => undefined,
+    close: vi.fn(),
+  }));
 
   httpServer = createServer();
   socketServer = setupSocketIO(httpServer);
@@ -317,6 +322,128 @@ describe("room Socket.IO lifecycle", () => {
     expect(getRooms()).toEqual([
       expect.objectContaining({ id: roomId, userCount: 1 }),
     ]);
+  });
+
+  it("removes a deleted room without disconnecting its resident sockets", async () => {
+    const roomId = `deleted-room-${Date.now()}`;
+    const client = createRoomClient("token-ada");
+    await waitForEvent(client, "connect");
+    const joined = waitForEvent(client, "room-joined");
+    client.emit("join-room", { roomId });
+    await joined;
+
+    const deleted = waitForEvent<{ roomId: string }>(client, "room-deleted");
+    deleteRoomForModeration(roomId);
+
+    await expect(deleted).resolves.toEqual({ roomId });
+    expect(client.connected).toBe(true);
+    expect(getRooms()).toEqual([]);
+    expect(mockSaveEncryptedMessage).not.toHaveBeenCalled();
+
+    const nextRoomId = `next-room-${Date.now()}`;
+    const nextRoomJoined = waitForEvent<{ roomId: string }>(client, "room-joined");
+    client.emit("join-room", { roomId: nextRoomId });
+    await expect(nextRoomJoined).resolves.toMatchObject({ roomId: nextRoomId });
+    expect(client.connected).toBe(true);
+  });
+
+  it("does not recreate a room when deletion races a pending join", async () => {
+    const roomId = `deleted-pending-join-${Date.now()}`;
+    let startDelete!: () => void;
+    let finishDelete!: () => void;
+    const deleteStarted = new Promise<void>((resolve) => {
+      startDelete = resolve;
+    });
+    const deletion = deleteRoomForModerationWithPersistence(
+      roomId,
+      () =>
+        new Promise<void>((resolve) => {
+          finishDelete = resolve;
+          startDelete();
+        }),
+    );
+    await deleteStarted;
+
+    const client = createRoomClient("token-ben");
+    await waitForEvent(client, "connect");
+    const joinError = waitForEvent<{ message: string }>(client, "error");
+    client.emit("join-room", { roomId });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    finishDelete();
+
+    await deletion;
+    await expect(joinError).resolves.toMatchObject({
+      message:
+        "You were recently removed from this room. Please wait a few minutes before rejoining.",
+    });
+    expect(mockLoadEncryptedMessages).not.toHaveBeenCalled();
+    expect(getRooms()).toEqual([]);
+  });
+
+  it("evicts a room without disconnecting sockets after a remote deletion revocation", async () => {
+    const roomId = `remote-deleted-room-${Date.now()}`;
+    const client = createRoomClient("token-ada");
+    await waitForEvent(client, "connect");
+    const joined = waitForEvent(client, "room-joined");
+    client.emit("join-room", { roomId });
+    await joined;
+    const deleted = waitForEvent<{ roomId: string }>(client, "room-deleted");
+    const onRevocation = mockStartSocketRevocationListener.mock.calls[0]?.[0] as (
+      revocation: { type: "room-deletion"; roomId: string },
+    ) => void;
+    onRevocation({ type: "room-deletion", roomId });
+
+    await expect(deleted).resolves.toEqual({ roomId });
+    expect(client.connected).toBe(true);
+    expect(getRooms()).toEqual([]);
+  });
+
+  it("bounds room history when join and leave system messages accumulate", async () => {
+    const roomId = `system-history-${Date.now()}`;
+    const ada = createRoomClient("token-ada");
+    await waitForEvent(ada, "connect");
+    const adaJoined = waitForEvent(ada, "room-joined");
+    ada.emit("join-room", { roomId });
+    await adaJoined;
+
+    const ben = createRoomClient("token-ben");
+    await waitForEvent(ben, "connect");
+    const firstSystemMessage = waitForEvent<{ message: { id: string } }>(
+      ada,
+      "user-joined",
+    );
+    const benJoined = waitForEvent(ben, "room-joined");
+    ben.emit("join-room", { roomId, createIfMissing: false });
+    await benJoined;
+    const firstMessageId = (await firstSystemMessage).message.id;
+
+    for (let index = 0; index < ROOM_MESSAGE_HISTORY_LIMIT / 2 + 1; index += 1) {
+      const left = waitForEvent(ada, "user-left");
+      ben.emit("leave-room", { roomId });
+      await left;
+
+      const joined = waitForEvent(ben, "room-joined");
+      ben.emit("join-room", { roomId, createIfMissing: false });
+      await joined;
+    }
+
+    const left = waitForEvent(ada, "user-left");
+    ben.emit("leave-room", { roomId });
+    await left;
+    const rejoined = waitForEvent<{
+      replayGap: boolean;
+      messages: Array<{ type: string }>;
+    }>(ben, "room-joined");
+    ben.emit("join-room", {
+      roomId,
+      createIfMissing: false,
+      lastSeenMessageId: firstMessageId,
+    });
+    const replay = await rejoined;
+    expect(replay.replayGap).toBe(true);
+    expect(replay.messages.length).toBeLessThanOrEqual(80);
+
+    ben.emit("leave-room", { roomId });
   });
 
   it("relays only encrypted chat and sandbox payloads and delivers key envelopes", async () => {

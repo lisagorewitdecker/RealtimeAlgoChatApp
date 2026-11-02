@@ -1,11 +1,18 @@
 import { randomUUID } from "node:crypto";
-import { db, userProfilesTable } from "@workspace/db";
+import { db, messagesTable, roomsTable, userProfilesTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { afterEach, describe, expect, it } from "vitest";
-import { getPublicKey, getPublicKeyRecord, registerPublicKey } from "./e2eePersistence";
+import {
+  getPublicKey,
+  getPublicKeyRecord,
+  registerPublicKey,
+  saveEncryptedMessage,
+} from "./e2eePersistence";
+import { ROOM_MESSAGE_HISTORY_LIMIT } from "./roomLimits";
 
 const key = (fill: number) => Buffer.alloc(32, fill).toString("base64");
 const createdUserIds: string[] = [];
+const createdRoomIds: string[] = [];
 
 function newUserId() {
   const userId = `e2ee-registration-test-${randomUUID()}`;
@@ -14,9 +21,58 @@ function newUserId() {
 }
 
 afterEach(async () => {
+  for (const roomId of createdRoomIds.splice(0)) {
+    await db.delete(roomsTable).where(eq(roomsTable.id, roomId));
+  }
   for (const userId of createdUserIds.splice(0)) {
     await db.delete(userProfilesTable).where(eq(userProfilesTable.userId, userId));
   }
+});
+
+it("prunes persisted room messages to the history limit", async () => {
+  const roomId = `e2ee-retention-${randomUUID()}`;
+  const messageIdPrefix = `retention-${randomUUID()}`;
+  const userId = newUserId();
+  createdRoomIds.push(roomId);
+  await db.insert(roomsTable).values({
+    id: roomId,
+    name: "Retention test",
+    createdBy: userId,
+  });
+  await db.insert(messagesTable).values(
+    Array.from({ length: ROOM_MESSAGE_HISTORY_LIMIT + 1 }, (_, index) => ({
+      id: `${messageIdPrefix}-${String(index).padStart(3, "0")}`,
+      roomId,
+      userId,
+      username: "Member",
+      ciphertext: "ciphertext",
+      nonce: "nonce",
+      type: "text" as const,
+      timestampMs: index,
+    })),
+  );
+
+  await saveEncryptedMessage({
+    id: `${messageIdPrefix}-newest`,
+    roomId,
+    userId,
+    username: "Member",
+    ciphertext: "ciphertext",
+    nonce: "nonce",
+    timestamp: ROOM_MESSAGE_HISTORY_LIMIT + 1,
+  });
+
+  const retained = await db
+    .select({ id: messagesTable.id })
+    .from(messagesTable)
+    .where(eq(messagesTable.roomId, roomId));
+  expect(retained).toHaveLength(ROOM_MESSAGE_HISTORY_LIMIT);
+  expect(retained.map((message) => message.id)).not.toContain(
+    `${messageIdPrefix}-000`,
+  );
+  expect(retained.map((message) => message.id)).toContain(
+    `${messageIdPrefix}-newest`,
+  );
 });
 
 describe("registerPublicKey compare-and-set semantics", () => {

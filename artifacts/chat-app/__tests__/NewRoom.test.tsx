@@ -10,6 +10,9 @@ const mockRouter = {
 const mockGenerateRoomKey = jest.fn();
 const mockGetRoomKey = jest.fn();
 const mockRetryRoomKeyPersistence = jest.fn();
+const mockGetRandomBytes = jest.fn((length: number) =>
+  new Uint8Array(length).fill(42),
+);
 const mockRoomKeyPersistenceFailures = new Map<
   string,
   { roomId: string; message: string }
@@ -17,6 +20,10 @@ const mockRoomKeyPersistenceFailures = new Map<
 
 jest.mock("@expo/vector-icons", () => ({
   Feather: () => null,
+}));
+
+jest.mock("expo-crypto", () => ({
+  getRandomBytes: (length: number) => mockGetRandomBytes(length),
 }));
 
 jest.mock("expo-haptics", () => ({
@@ -92,6 +99,7 @@ describe("new room encryption-key setup", () => {
     inMemoryKey = null;
     mockRoomKeyPersistenceFailures.clear();
     Object.values(mockRouter).forEach((mock) => mock.mockReset());
+    mockGetRandomBytes.mockClear();
     mockGetRoomKey.mockReset().mockImplementation(() => inMemoryKey);
     mockGenerateRoomKey.mockReset().mockImplementation(async (roomId: string) => {
       inMemoryKey = new Uint8Array(32).fill(7);
@@ -148,6 +156,8 @@ describe("new room encryption-key setup", () => {
     expect(getByText("Retry creating room").props.style.fontSize).toBeCloseTo(22.4);
 
     const failedRoomId = mockGenerateRoomKey.mock.calls[0]?.[0] as string;
+    expect(failedRoomId).toMatch(/^design-team-[a-f0-9]{32}$/);
+    expect(mockGetRandomBytes).toHaveBeenCalledWith(16);
     await act(async () => {
       fireEvent.press(getByTestId("room-submit-button"));
     });
