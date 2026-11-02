@@ -384,6 +384,9 @@ export async function saveEncryptedMessage({
   timestamp: number;
 }): Promise<void> {
   await db.transaction(async (tx) => {
+    await tx.execute(
+      sql`SELECT id FROM rooms WHERE id = ${roomId} FOR NO KEY UPDATE`,
+    );
     await tx.insert(messagesTable).values({
       id,
       roomId,
