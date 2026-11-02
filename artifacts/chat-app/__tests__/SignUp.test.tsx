@@ -38,7 +38,7 @@ jest.mock("expo-router", () => {
   const RN = jest.requireActual<typeof import("react-native")>("react-native");
   const mockReact = jest.requireActual<typeof import("react")>("react");
   return {
-    Link: ({ children }: { children: unknown }) =>
+    Link: ({ children }: { children: React.ReactNode }) =>
       mockReact.createElement(RN.Text, null, children),
   };
 });

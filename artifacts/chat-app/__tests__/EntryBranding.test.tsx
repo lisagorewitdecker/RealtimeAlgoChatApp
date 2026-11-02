@@ -21,7 +21,7 @@ jest.mock("expo-haptics", () => ({
 jest.mock("expo-router", () => {
   const mockReact = jest.requireActual<typeof import("react")>("react");
   const RN = jest.requireActual<typeof import("react-native")>("react-native");
-  const Stack = ({ children }: { children: unknown }) =>
+  const Stack = ({ children }: { children: React.ReactNode }) =>
     mockReact.createElement(RN.View, null, children);
   Stack.Screen = () => null;
   return {
@@ -75,7 +75,7 @@ jest.mock("react-native-keyboard-controller", () => ({
     children,
     ...props
   }: {
-    children: unknown;
+    children: React.ReactNode;
     [key: string]: unknown;
   }) => {
     const RN = jest.requireActual<typeof import("react-native")>("react-native");
