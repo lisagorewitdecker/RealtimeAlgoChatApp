@@ -1,5 +1,5 @@
 import { useRouter } from "expo-router";
-import React, { useEffect } from "react";
+import { useEffect } from "react";
 import { ActivityIndicator, StyleSheet, View } from "react-native";
 import { ScaledText as Text } from "@/components/ScaledText";
 import { useAccessibility } from "@/contexts/AccessibilityContext";

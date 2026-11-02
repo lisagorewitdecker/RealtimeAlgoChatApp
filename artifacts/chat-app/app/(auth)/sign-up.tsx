@@ -2,7 +2,7 @@ import { useOAuth } from "@clerk/expo";
 import { useSignUp } from "@clerk/expo/legacy";
 import * as WebBrowser from "expo-web-browser";
 import { Link } from "expo-router";
-import React, { useCallback, useState } from "react";
+import { useCallback, useState } from "react";
 import { ActivityIndicator, Platform, StyleSheet, TouchableOpacity, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { PRODUCT_NAME } from "@/constants/branding";

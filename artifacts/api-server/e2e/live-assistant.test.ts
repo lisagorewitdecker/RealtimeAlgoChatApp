@@ -201,7 +201,9 @@ beforeAll(async () => {
 
 afterAll(async () => {
   client?.close();
-  additionalClients.splice(0).forEach((additionalClient) => additionalClient.close());
+  additionalClients.splice(0).forEach((additionalClient) => {
+    additionalClient.close();
+  });
   await new Promise((resolve) => setTimeout(resolve, 10));
   socketServer?.close();
   await new Promise<void>((resolve) => httpServer?.close(() => resolve()));

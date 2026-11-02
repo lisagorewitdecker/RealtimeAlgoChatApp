@@ -1,7 +1,7 @@
 import { Feather } from "@expo/vector-icons";
 import { useAuth } from "@clerk/expo";
 import * as Haptics from "expo-haptics";
-import React, { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Alert,
   Platform,
