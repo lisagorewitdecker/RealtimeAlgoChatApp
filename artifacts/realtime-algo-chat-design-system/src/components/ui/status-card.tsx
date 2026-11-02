@@ -19,7 +19,7 @@ export function StatusCard({ title, description, status, fingerprint, tone = 'de
         <p className="mt-1 text-sm font-semibold">{status}</p>
         {fingerprint ? <code className="mt-2 block font-mono text-xs text-secondary-foreground">{fingerprint}</code> : null}
       </div>
-      {actionLabel ? <button disabled={disabled} className="mt-4 min-h-11 rounded-lg bg-destructive/10 px-4 text-sm font-semibold text-destructive disabled:opacity-50">{actionLabel}</button> : null}
+      {actionLabel ? <button type="button" disabled={disabled} className="mt-4 min-h-11 rounded-lg bg-destructive/10 px-4 text-sm font-semibold text-destructive disabled:opacity-50">{actionLabel}</button> : null}
     </section>
   );
 }

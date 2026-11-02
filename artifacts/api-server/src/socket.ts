@@ -1,12 +1,8 @@
 import type { Server as HttpServer } from "node:http";
 import { randomUUID } from "node:crypto";
 import { verifyToken } from "@clerk/express";
-import {
-  Server,
-  Socket,
-  type DefaultEventsMap,
-  type ExtendedError,
-} from "socket.io";
+import { Server, Socket } from "socket.io";
+import type { DefaultEventsMap, ExtendedError } from "socket.io";
 import { logger } from "./lib/logger";
 import { getAccountProfile } from "./lib/accountProfile";
 import {
