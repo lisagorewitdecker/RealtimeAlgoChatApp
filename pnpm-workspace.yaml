@@ -233,3 +233,4 @@ patchedDependencies:
   braces@3.0.3: patches/braces@3.0.3.patch
   # TypeDoc still calls matchOne(), removed in minimatch 11.
   typedoc@0.28.19: patches/typedoc@0.28.19.patch
+  deepmerge@4.3.1: patches/deepmerge@4.3.1.patch
