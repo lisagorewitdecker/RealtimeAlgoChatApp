@@ -37,6 +37,11 @@ intentionally omitted; ordinary merge options and enumerable symbols remain
 supported. Run `node --test scripts/tests/deepmerge-security-patch.test.mjs`
 after dependency updates. Keep the patch until an upstream fix is available.
 Dependabot may continue reporting the version despite this local mitigation.
+Modern Glob dependencies are overridden to 14.0.2 for GHSA-3g3m-2fjr-6pw4,
+which fixes filesystem traversal continuing after AbortSignal cancellation.
+Glob 7 consumers are outside this advisory's affected range and are unchanged.
+Run `node --test scripts/tests/glob-security-patch.test.mjs` after dependency
+updates to verify cancellation and normal traversal behavior.
 
 [`threat_model.md`](threat_model.md) describes the trust boundaries, the
 controls in place, and the limitations we already know about. Before
