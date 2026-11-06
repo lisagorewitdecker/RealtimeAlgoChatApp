@@ -9,6 +9,13 @@ are applied to the latest commit on the `main` branch only.
 | ------ | ------------------ |
 | main   | :white_check_mark: |
 
+The workspace requires Zod 4.6.6 or newer for
+GHSA-mrhx-c7xc-m3w5 (oversized constrained collection validation). The
+`@expo/cli>zod` override also covers Expo CLI's transitive Zod dependency.
+Run `node --test scripts/tests/zod-security-patch.test.mjs` after dependency
+updates to check the resolved versions, early collection rejection, and Expo
+plugin/MCP schema compatibility.
+
 ## Reporting a Vulnerability
 
 To report a security vulnerability, please use
