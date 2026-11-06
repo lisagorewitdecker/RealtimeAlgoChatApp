@@ -50,6 +50,16 @@ Glob 7 consumers are outside this advisory's affected range and are unchanged.
 Run `node --test scripts/tests/glob-security-patch.test.mjs` after dependency
 updates to verify cancellation and normal traversal behavior.
 
+Modern minimatch dependencies are overridden to 11.0.1 for
+GHSA-g3hv-75wg-m249 (globparts amplification during optimization). Legacy
+minimatch 3 consumers are outside the affected range and retain their callable
+API. TypeDoc 0.28.19 is patched to use `match(path, true)` for partial matching
+instead of the removed `matchOne()` API, preserving its unnegated directory
+pruning behavior. Retain the patch until TypeDoc supports minimatch 11.
+Run `node --test scripts/tests/minimatch-security-patch.test.mjs` after dependency
+updates to check resolved versions, preprocessing limits, Expo ignore patterns,
+and TypeDoc file discovery.
+
 [`threat_model.md`](threat_model.md) describes the trust boundaries, the
 controls in place, and the limitations we already know about. Before
 reporting, please check its "Known Limitations and Deferred Work" section and
