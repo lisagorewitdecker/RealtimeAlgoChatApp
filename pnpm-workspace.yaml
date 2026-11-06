@@ -210,6 +210,8 @@ overrides:
   socket.io-parser: "4.2.7"
   undici: "6.29.1"
   node-forge: "1.4.2"
+  # Stop filesystem traversal when AbortSignal cancels a walk (GHSA-3g3m-2fjr-6pw4).
+  "glob@>=9.0.0 <14.0.2": "14.0.2"
   "vitest>vite": "^7.3.7"
   "@anthropic-ai/sdk>zod": "^4.6.6"
   # Expo CLI otherwise retains Zod 3, affected by GHSA-mrhx-c7xc-m3w5.
