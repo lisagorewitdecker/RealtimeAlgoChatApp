@@ -214,6 +214,8 @@ overrides:
   "glob@>=9.0.0 <14.0.2": "14.0.2"
   "vitest>vite": "^7.3.7"
   "@anthropic-ai/sdk>zod": "^4.6.6"
+  # Expo CLI otherwise retains Zod 3, affected by GHSA-mrhx-c7xc-m3w5.
+  "@expo/cli>zod": "^4.6.6"
   "nanoid@<4.0.0": "3.3.18"
   uuid: "11.1.1"
   # The upstream image-size package has no published fix for its parser loops.
