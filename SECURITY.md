@@ -28,6 +28,16 @@ vulnerability publicly until we have addressed it.
 
 ## Security Model and Known Limitations
 
+deepmerge 4.3.1 has no published fix for GHSA-gcqx-w48m-w2h4. The workspace
+applies `patches/deepmerge@4.3.1.patch` to its source, CommonJS, and UMD builds.
+The patch filters `__proto__`, `constructor`, and `prototype` keys from both
+merge inputs before reading their values, and defines own data properties on
+the result instead of invoking inherited setters. These reserved keys are
+intentionally omitted; ordinary merge options and enumerable symbols remain
+supported. Run `node --test scripts/tests/deepmerge-security-patch.test.mjs`
+after dependency updates. Keep the patch until an upstream fix is available.
+Dependabot may continue reporting the version despite this local mitigation.
+
 [`threat_model.md`](threat_model.md) describes the trust boundaries, the
 controls in place, and the limitations we already know about. Before
 reporting, please check its "Known Limitations and Deferred Work" section and
