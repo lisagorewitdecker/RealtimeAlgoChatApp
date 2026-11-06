@@ -34,10 +34,11 @@ test("the keyboard strategy validator declares its supported JSHint syntax versi
   const source = readFileSync(scriptPath, "utf8");
 
   assert.match(source, /^\/\* jshint esversion: 2020, node: true \*\//);
+});
 test("declares its supported syntax version for JSHint", () => {
   const source = readFileSync(scriptPath, "utf8");
 
-  assert.match(source, /^\/\* jshint esversion: 11, node: true \*\//);
+  assert.match(source, /^\/\* jshint esversion: 2020, node: true \*\//);
 });
 
 function scan(file, source) {
