@@ -188,6 +188,9 @@ patchedDependencies:
   braces@3.0.3:
     hash: 29f5793d00d4de79a04237fabe2aeb176258b92f4432d938be759bd5e2781ef9
     path: patches/braces@3.0.3.patch
+  deepmerge@4.3.1:
+    hash: 1568de864b5eea60e5368529216f5b2e9bcc4a8b2b560f09ca5a683c0e2dbf5a
+    path: patches/deepmerge@4.3.1.patch
 
 importers:
 
@@ -9737,7 +9740,7 @@ snapshots:
       '@expo/config-types': 57.0.2
       '@expo/json-file': 11.0.1
       '@expo/require-utils': 57.0.5(supports-color@8.1.1)(typescript@6.0.3)
-      deepmerge: 4.3.1
+      deepmerge: 4.3.1(patch_hash=1568de864b5eea60e5368529216f5b2e9bcc4a8b2b560f09ca5a683c0e2dbf5a)
       getenv: 2.0.0
       glob: 14.0.2
       resolve-workspace-root: 2.0.1
@@ -14712,7 +14715,7 @@ snapshots:
 
   dedent@1.7.2: {}
 
-  deepmerge@4.3.1: {}
+  deepmerge@4.3.1(patch_hash=1568de864b5eea60e5368529216f5b2e9bcc4a8b2b560f09ca5a683c0e2dbf5a): {}
 
   defaults@1.0.4:
     dependencies:
@@ -15941,7 +15944,7 @@ snapshots:
       babel-jest: 29.7.0(@babel/core@7.29.7(supports-color@8.1.1))(supports-color@8.1.1)
       chalk: 4.1.2
       ci-info: 3.9.0
-      deepmerge: 4.3.1
+      deepmerge: 4.3.1(patch_hash=1568de864b5eea60e5368529216f5b2e9bcc4a8b2b560f09ca5a683c0e2dbf5a)
       glob: 7.2.3
       graceful-fs: 4.2.11
       jest-circus: 29.7.0(supports-color@8.1.1)
@@ -15971,7 +15974,7 @@ snapshots:
       babel-jest: 29.7.0(@babel/core@7.29.7(supports-color@8.1.1))(supports-color@8.1.1)
       chalk: 4.1.2
       ci-info: 3.9.0
-      deepmerge: 4.3.1
+      deepmerge: 4.3.1(patch_hash=1568de864b5eea60e5368529216f5b2e9bcc4a8b2b560f09ca5a683c0e2dbf5a)
       glob: 7.2.3
       graceful-fs: 4.2.11
       jest-circus: 29.7.0(supports-color@8.1.1)
