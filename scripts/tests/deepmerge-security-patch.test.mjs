@@ -81,7 +81,7 @@ for (const [label, merge] of [
       const input = Object.defineProperty({}, key, {
         enumerable: true,
         get() {
-          assert.fail(`must not read forbidden key ${key}`);
+          return assert.fail(`must not read forbidden key ${key}`);
         },
       });
       assert.deepEqual(merge({}, input), {});
