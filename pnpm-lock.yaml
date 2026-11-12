@@ -186,9 +186,15 @@ overrides:
 packageExtensionsChecksum: sha256-L46y8gHGkHzhGpYQTjBAm8nja76/qe6Crj/ItXtWZSQ=
 
 patchedDependencies:
-  braces@3.0.3: 29f5793d00d4de79a04237fabe2aeb176258b92f4432d938be759bd5e2781ef9
-  deepmerge@4.3.1: 1568de864b5eea60e5368529216f5b2e9bcc4a8b2b560f09ca5a683c0e2dbf5a
-  typedoc@0.28.19: 06a82551d8f1849a69d3be2c8b0a1c8b59517f1346ba03456cb560d91541a98b
+  braces@3.0.3:
+    hash: 29f5793d00d4de79a04237fabe2aeb176258b92f4432d938be759bd5e2781ef9
+    path: patches/braces@3.0.3.patch
+  deepmerge@4.3.1:
+    hash: 1568de864b5eea60e5368529216f5b2e9bcc4a8b2b560f09ca5a683c0e2dbf5a
+    path: patches/deepmerge@4.3.1.patch
+  typedoc@0.28.19:
+    hash: 06a82551d8f1849a69d3be2c8b0a1c8b59517f1346ba03456cb560d91541a98b
+    path: patches/typedoc@0.28.19.patch
 
 importers:
 
