@@ -209,7 +209,7 @@ overrides:
   "@xmldom/xmldom@0.9.10": "0.9.12"
   socket.io-parser: "4.2.7"
   undici: "6.29.1"
-  node-forge: "1.4.2"
+  node-forge: "1.4.3"
   # Stop filesystem traversal when AbortSignal cancels a walk (GHSA-3g3m-2fjr-6pw4).
   "glob@>=9.0.0 <14.0.2": "14.0.2"
   # Bound globparts amplification without changing the callable minimatch 3 API.
