@@ -9563,7 +9563,7 @@ snapshots:
 
   '@clerk/shared@4.44.1(react-dom@19.3.0(react@19.2.3))(react@19.2.3)':
     dependencies:
-      '@tanstack/query-core': 5.102.8
+      '@tanstack/query-core': 5.107.1
       dequal: 2.0.3
       glob-to-regexp: 0.4.1
       js-cookie: 3.0.8
