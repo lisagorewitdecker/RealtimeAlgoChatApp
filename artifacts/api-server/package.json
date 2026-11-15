@@ -25,7 +25,7 @@
   "dependencies": {
     "@clerk/backend": "^3.16.13",
     "@clerk/express": "^2.1.64",
-    "@clerk/shared": "^4.30.2",
+    "@clerk/shared": "^4.44.1",
     "@sentry/node": "^10.71.0",
     "@workspace/api-zod": "workspace:*",
     "@workspace/db": "workspace:*",
