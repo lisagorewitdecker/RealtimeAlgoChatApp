@@ -16,8 +16,8 @@ catalogs:
       specifier: ^4.3.3
       version: 4.3.3
     '@tanstack/react-query':
-      specifier: ^5.102.8
-      version: 5.102.8
+      specifier: ^5.107.1
+      version: 5.107.1
     '@types/node':
       specifier: ^26.6.3
       version: 26.6.3
@@ -370,7 +370,7 @@ importers:
         version: 1.0.2
       '@tanstack/react-query':
         specifier: 'catalog:'
-        version: 5.102.8(react@19.2.3)
+        version: 5.107.1(@types/react@19.2.18)(react@19.2.3)
       '@testing-library/react-native':
         specifier: ^13.3.3
         version: 13.3.3(jest@29.7.0(@types/node@26.6.3)(supports-color@8.1.1))(react-native@0.86.3(@babel/core@7.29.7(supports-color@8.1.1))(@react-native/jest-preset@0.86.3(@babel/core@7.29.7(supports-color@8.1.1))(react@19.2.3)(supports-color@8.1.1))(@react-native/metro-config@0.87.1(@babel/core@7.29.7(supports-color@8.1.1))(supports-color@8.1.1))(@types/react@19.2.18)(react@19.2.3)(supports-color@8.1.1))(react-test-renderer@19.2.3(react@19.2.3))(react@19.2.3)
@@ -875,7 +875,7 @@ importers:
     dependencies:
       '@tanstack/react-query':
         specifier: 'catalog:'
-        version: 5.102.8(react@19.2.3)
+        version: 5.107.1(@types/react@19.2.18)(react@19.2.3)
     devDependencies:
       vitest:
         specifier: ^4.1.12
@@ -885,7 +885,7 @@ importers:
     devDependencies:
       orval:
         specifier: ^8.43.0
-        version: 8.43.0(@tanstack/react-query@5.102.8(react@19.2.3))(prettier@3.9.6)(typedoc-plugin-markdown@4.11.0(typedoc@0.28.19(patch_hash=06a82551d8f1849a69d3be2c8b0a1c8b59517f1346ba03456cb560d91541a98b)(typescript@5.9.3)))(typedoc@0.28.19(patch_hash=06a82551d8f1849a69d3be2c8b0a1c8b59517f1346ba03456cb560d91541a98b)(typescript@5.9.3))(typescript@5.9.3)(zod@4.6.7)
+        version: 8.43.0(@tanstack/react-query@5.107.1(@types/react@19.2.18)(react@19.2.3))(prettier@3.9.6)(typedoc-plugin-markdown@4.11.0(typedoc@0.28.19(patch_hash=06a82551d8f1849a69d3be2c8b0a1c8b59517f1346ba03456cb560d91541a98b)(typescript@5.9.3)))(typedoc@0.28.19(patch_hash=06a82551d8f1849a69d3be2c8b0a1c8b59517f1346ba03456cb560d91541a98b)(typescript@5.9.3))(typescript@5.9.3)(zod@4.6.7)
 
   lib/api-zod:
     dependencies:
@@ -4280,13 +4280,17 @@ packages:
   '@tanstack/query-core@5.100.9':
     resolution: {integrity: sha512-SJSFw1S8+kQ0+knv/XGfrbocWoAlT7vDKsSImtLx3ZPQmEcR46hkDjLSvynSy25N8Ms4tIEini1FuBd5k7IscQ==}
 
-  '@tanstack/query-core@5.102.8':
-    resolution: {integrity: sha512-ZNjkJ33CqvPNec/6lZBnHqLc3EVGPZ9ySLhYahU9TcuRFdmwXewuj0c4hwSWcGHqEUwcSrKeZ+oGcvPBqXcQcg==}
+  '@tanstack/query-core@5.107.1':
+    resolution: {integrity: sha512-PSyAik11oQBEVOiVy5hjZWHmoUqOXqK1WYy4v55mcxozEfKaQgpUMsgnXhWjuESzSht8JfzqMS1m6M/9CpNgvg==}
 
-  '@tanstack/react-query@5.102.8':
-    resolution: {integrity: sha512-TYBea4OuXWD7MhaSHq069TWbFe7rcwWN6kzT7JF0OKi1K6c1gTv2IzD6A6ExJsCMozdkqBWeuIUZmu4KQg0O5A==}
+  '@tanstack/react-query@5.107.1':
+    resolution: {integrity: sha512-udCOOLp3ZAheUrIHLCe+ZZge6nr2ZUrGMSWcCuXsjY1Bf2JeeE09oxst97PILiCY6N8xo/7bIo3Hvz13zh06FA==}
     peerDependencies:
+      '@types/react': ^18 || ^19
       react: ^18 || ^19
+    peerDependenciesMeta:
+      '@types/react':
+        optional: true
 
   '@testing-library/react-native@13.3.3':
     resolution: {integrity: sha512-k6Mjsd9dbZgvY4Bl7P1NIpePQNi+dfYtlJ5voi9KQlynxSyQkfOgJmYGCYmw/aSgH/rUcFvG8u5gd4npzgRDyg==}
@@ -9559,7 +9563,7 @@ snapshots:
 
   '@clerk/shared@4.44.1(react-dom@19.3.0(react@19.2.3))(react@19.2.3)':
     dependencies:
-      '@tanstack/query-core': 5.102.8
+      '@tanstack/query-core': 5.107.1
       dequal: 2.0.3
       glob-to-regexp: 0.4.1
       js-cookie: 3.0.8
@@ -10679,12 +10683,12 @@ snapshots:
       - '@faker-js/faker'
       - '@modelcontextprotocol/server'
 
-  '@orval/query@8.43.0(@tanstack/react-query@5.102.8(react@19.2.3))':
+  '@orval/query@8.43.0(@tanstack/react-query@5.107.1(@types/react@19.2.18)(react@19.2.3))':
     dependencies:
       '@orval/core': 8.43.0
       '@orval/fetch': 8.43.0
     optionalDependencies:
-      '@tanstack/react-query': 5.102.8(react@19.2.3)
+      '@tanstack/react-query': 5.107.1(@types/react@19.2.18)(react@19.2.3)
     transitivePeerDependencies:
       - '@faker-js/faker'
       - '@modelcontextprotocol/server'
@@ -13896,12 +13900,14 @@ snapshots:
 
   '@tanstack/query-core@5.100.9': {}
 
-  '@tanstack/query-core@5.102.8': {}
+  '@tanstack/query-core@5.107.1': {}
 
-  '@tanstack/react-query@5.102.8(react@19.2.3)':
+  '@tanstack/react-query@5.107.1(@types/react@19.2.18)(react@19.2.3)':
     dependencies:
-      '@tanstack/query-core': 5.102.8
+      '@tanstack/query-core': 5.107.1
       react: 19.2.3
+    optionalDependencies:
+      '@types/react': 19.2.18
 
   '@testing-library/react-native@13.3.3(jest@29.7.0(@types/node@26.6.3)(supports-color@8.1.1))(react-native@0.86.3(@babel/core@7.29.7(supports-color@8.1.1))(@react-native/jest-preset@0.86.3(@babel/core@7.29.7(supports-color@8.1.1))(react@19.2.3)(supports-color@8.1.1))(@react-native/metro-config@0.87.1(@babel/core@7.29.7(supports-color@8.1.1))(supports-color@8.1.1))(@types/react@19.2.18)(react@19.2.3)(supports-color@8.1.1))(react-test-renderer@19.2.3(react@19.2.3))(react@19.2.3)':
     dependencies:
@@ -17492,7 +17498,7 @@ snapshots:
       strip-ansi: 5.2.0
       wcwidth: 1.0.1
 
-  orval@8.43.0(@tanstack/react-query@5.102.8(react@19.2.3))(prettier@3.9.6)(typedoc-plugin-markdown@4.11.0(typedoc@0.28.19(patch_hash=06a82551d8f1849a69d3be2c8b0a1c8b59517f1346ba03456cb560d91541a98b)(typescript@5.9.3)))(typedoc@0.28.19(patch_hash=06a82551d8f1849a69d3be2c8b0a1c8b59517f1346ba03456cb560d91541a98b)(typescript@5.9.3))(typescript@5.9.3)(zod@4.6.7):
+  orval@8.43.0(@tanstack/react-query@5.107.1(@types/react@19.2.18)(react@19.2.3))(prettier@3.9.6)(typedoc-plugin-markdown@4.11.0(typedoc@0.28.19(patch_hash=06a82551d8f1849a69d3be2c8b0a1c8b59517f1346ba03456cb560d91541a98b)(typescript@5.9.3)))(typedoc@0.28.19(patch_hash=06a82551d8f1849a69d3be2c8b0a1c8b59517f1346ba03456cb560d91541a98b)(typescript@5.9.3))(typescript@5.9.3)(zod@4.6.7):
     dependencies:
       '@commander-js/extra-typings': 15.0.0(commander@15.0.0)
       '@orval/angular': 8.43.0
@@ -17504,7 +17510,7 @@ snapshots:
       '@orval/mcp': 8.43.0(zod@4.6.7)
       '@orval/mock': 8.43.0
       '@orval/pinia-colada': 8.43.0
-      '@orval/query': 8.43.0(@tanstack/react-query@5.102.8(react@19.2.3))
+      '@orval/query': 8.43.0(@tanstack/react-query@5.107.1(@types/react@19.2.18)(react@19.2.3))
       '@orval/solid-start': 8.43.0
       '@orval/swr': 8.43.0
       '@orval/zod': 8.43.0(zod@4.6.7)
