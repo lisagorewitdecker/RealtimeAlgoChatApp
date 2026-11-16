@@ -35,15 +35,18 @@ vulnerability publicly until we have addressed it.
 
 ## Security Model and Known Limitations
 
-deepmerge 4.3.1 has no published fix for GHSA-gcqx-w48m-w2h4. The workspace
-applies `patches/deepmerge@4.3.1.patch` to its source, CommonJS, and UMD builds.
+[GHSA-gcqx-w48m-w2h4](https://github.com/advisories/GHSA-gcqx-w48m-w2h4)
+for deepmerge was withdrawn on November 16, 2026. The workspace retains
+`patches/deepmerge@4.3.1.patch` as defense in depth for its source, CommonJS,
+and UMD builds.
 The patch filters `__proto__`, `constructor`, and `prototype` keys from both
 merge inputs before reading their values, and defines own data properties on
 the result instead of invoking inherited setters. These reserved keys are
 intentionally omitted; ordinary merge options and enumerable symbols remain
 supported. Run `node --test scripts/tests/deepmerge-security-patch.test.mjs`
-after dependency updates. Keep the patch until an upstream fix is available.
-Dependabot may continue reporting the version despite this local mitigation.
+after dependency updates. Retain the hardening unless an upstream replacement
+provides equivalent protection. A version-only scanner may still flag 4.3.1
+despite the withdrawal and local patch.
 Modern Glob dependencies are overridden to 14.0.2 for GHSA-3g3m-2fjr-6pw4,
 which fixes filesystem traversal continuing after AbortSignal cancellation.
 Glob 7 consumers are outside this advisory's affected range and are unchanged.
