@@ -238,8 +238,8 @@ importers:
         specifier: ^2.1.64
         version: 2.1.64(express@5.3.0)(react-dom@19.3.0(react@19.2.3))(react@19.2.3)
       '@clerk/shared':
-        specifier: ^4.44.1
-        version: 4.44.1(react-dom@19.3.0(react@19.2.3))(react@19.2.3)
+        specifier: ^4.48.1
+        version: 4.48.1(react-dom@19.3.0(react@19.2.3))(react@19.2.3)
       '@sentry/node':
         specifier: ^10.71.0
         version: 10.71.0(@opentelemetry/core@2.10.0(@opentelemetry/api@1.9.1))
@@ -1519,8 +1519,8 @@ packages:
       react: ^18.0.0 || ~19.0.3 || ~19.1.4 || ~19.2.3 || ~19.3.0-0
       react-dom: ^18.0.0 || ~19.0.3 || ~19.1.4 || ~19.2.3 || ~19.3.0-0
 
-  '@clerk/shared@4.44.1':
-    resolution: {integrity: sha512-c06U6GtlLJNOKj900rHDSqjVRz0/0zb3RZXVGKUqTulfQxr4Ym543JE6cbOnZVJZCbm0fGPhdRKvHq6fO/SvVw==}
+  '@clerk/shared@4.48.1':
+    resolution: {integrity: sha512-qNj66fHshem+ozP7R9fsVekJR/HvuI+R3PkpZmOE95Fg4B7BlqSkpKVuw0iD8xn7Guo3zGrHFqe6jzdjDHPXkw==}
     engines: {node: '>=20.9.0'}
     peerDependencies:
       react: ^18.0.0 || ~19.0.3 || ~19.1.4 || ~19.2.3 || ~19.3.0-0
@@ -9645,7 +9645,7 @@ snapshots:
 
   '@clerk/backend@3.16.13(react-dom@19.3.0(react@19.2.3))(react@19.2.3)':
     dependencies:
-      '@clerk/shared': 4.44.1(react-dom@19.3.0(react@19.2.3))(react@19.2.3)
+      '@clerk/shared': 4.48.1(react-dom@19.3.0(react@19.2.3))(react@19.2.3)
       standardwebhooks: 1.0.0
       tslib: 2.8.1
     transitivePeerDependencies:
@@ -9655,7 +9655,7 @@ snapshots:
   '@clerk/clerk-js@6.30.2(@types/react@19.2.18)(react-dom@19.3.0(react@19.2.3))(react-native@0.86.3(@babel/core@7.29.7)(@react-native/jest-preset@0.88.1(@babel/core@7.29.7)(react@19.2.3))(@react-native/metro-config@0.87.1(@babel/core@7.29.7))(@types/react@19.2.18)(react@19.2.3))(react@19.2.3)(typescript@6.0.3)(zod@4.6.7)':
     dependencies:
       '@base-org/account': 2.0.1(@types/react@19.2.18)(react@19.2.3)(typescript@6.0.3)(zod@4.6.7)
-      '@clerk/shared': 4.44.1(react-dom@19.3.0(react@19.2.3))(react@19.2.3)
+      '@clerk/shared': 4.48.1(react-dom@19.3.0(react@19.2.3))(react@19.2.3)
       '@coinbase/wallet-sdk': 4.3.7(typescript@6.0.3)(zod@4.6.7)
       '@solana/wallet-adapter-base': 0.9.27
       '@solana/wallet-adapter-react': 0.15.39(react-native@0.86.3(@babel/core@7.29.7)(@react-native/jest-preset@0.88.1(@babel/core@7.29.7)(react@19.2.3))(@react-native/metro-config@0.87.1(@babel/core@7.29.7))(@types/react@19.2.18)(react@19.2.3))(react@19.2.3)(typescript@6.0.3)
@@ -9691,7 +9691,7 @@ snapshots:
     dependencies:
       '@clerk/clerk-js': 6.30.2(@types/react@19.2.18)(react-dom@19.3.0(react@19.2.3))(react-native@0.86.3(@babel/core@7.29.7)(@react-native/jest-preset@0.88.1(@babel/core@7.29.7)(react@19.2.3))(@react-native/metro-config@0.87.1(@babel/core@7.29.7))(@types/react@19.2.18)(react@19.2.3))(react@19.2.3)(typescript@6.0.3)(zod@4.6.7)
       '@clerk/react': 6.14.8(react-dom@19.3.0(react@19.2.3))(react@19.2.3)
-      '@clerk/shared': 4.44.1(react-dom@19.3.0(react@19.2.3))(react@19.2.3)
+      '@clerk/shared': 4.48.1(react-dom@19.3.0(react@19.2.3))(react@19.2.3)
       base-64: 1.0.0
       expo: 57.0.24(@babel/core@7.29.7)(@expo/metro-runtime@57.0.16)(expo-router@57.0.25)(react-dom@19.3.0(react@19.2.3))(react-native-web@0.21.4(react-dom@19.3.0(react@19.2.3))(react@19.2.3))(react-native-webview@13.16.1(react-native@0.86.3(@babel/core@7.29.7)(@react-native/jest-preset@0.88.1(@babel/core@7.29.7)(react@19.2.3))(@react-native/metro-config@0.87.1(@babel/core@7.29.7))(@types/react@19.2.18)(react@19.2.3))(react@19.2.3))(react-native-worklets@0.10.0(@babel/core@7.29.7)(@react-native/metro-config@0.87.1(@babel/core@7.29.7))(react-native@0.86.3(@babel/core@7.29.7)(@react-native/jest-preset@0.88.1(@babel/core@7.29.7)(react@19.2.3))(@react-native/metro-config@0.87.1(@babel/core@7.29.7))(@types/react@19.2.18)(react@19.2.3))(react@19.2.3))(react-native@0.86.3(@babel/core@7.29.7)(@react-native/jest-preset@0.88.1(@babel/core@7.29.7)(react@19.2.3))(@react-native/metro-config@0.87.1(@babel/core@7.29.7))(@types/react@19.2.18)(react@19.2.3))(react@19.2.3)(typescript@6.0.3)
       react: 19.2.3
@@ -9723,6 +9723,8 @@ snapshots:
       '@clerk/backend': 3.16.13(react-dom@19.3.0(react@19.2.3))(react@19.2.3)
       '@clerk/shared': 4.44.1(react-dom@19.3.0(react@19.2.3))(react@19.2.3)
       express: 5.3.0
+      '@clerk/shared': 4.48.1(react-dom@19.3.0(react@19.2.3))(react@19.2.3)
+      express: 5.3.0(supports-color@8.1.1)
       tslib: 2.8.1
     transitivePeerDependencies:
       - react
@@ -9730,12 +9732,12 @@ snapshots:
 
   '@clerk/react@6.14.8(react-dom@19.3.0(react@19.2.3))(react@19.2.3)':
     dependencies:
-      '@clerk/shared': 4.44.1(react-dom@19.3.0(react@19.2.3))(react@19.2.3)
+      '@clerk/shared': 4.48.1(react-dom@19.3.0(react@19.2.3))(react@19.2.3)
       react: 19.2.3
       react-dom: 19.3.0(react@19.2.3)
       tslib: 2.8.1
 
-  '@clerk/shared@4.44.1(react-dom@19.3.0(react@19.2.3))(react@19.2.3)':
+  '@clerk/shared@4.48.1(react-dom@19.3.0(react@19.2.3))(react@19.2.3)':
     dependencies:
       '@tanstack/query-core': 5.107.1
       dequal: 2.0.3
@@ -9748,7 +9750,7 @@ snapshots:
   '@clerk/testing@2.2.31(@playwright/test@1.62.1)(react-dom@19.3.0(react@19.2.3))(react@19.2.3)':
     dependencies:
       '@clerk/backend': 3.16.13(react-dom@19.3.0(react@19.2.3))(react@19.2.3)
-      '@clerk/shared': 4.44.1(react-dom@19.3.0(react@19.2.3))(react@19.2.3)
+      '@clerk/shared': 4.48.1(react-dom@19.3.0(react@19.2.3))(react@19.2.3)
       dotenv: 17.2.2
     optionalDependencies:
       '@playwright/test': 1.62.1
