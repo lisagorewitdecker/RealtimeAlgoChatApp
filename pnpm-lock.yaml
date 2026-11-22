@@ -186,15 +186,9 @@ overrides:
 packageExtensionsChecksum: sha256-L46y8gHGkHzhGpYQTjBAm8nja76/qe6Crj/ItXtWZSQ=
 
 patchedDependencies:
-  braces@3.0.3:
-    hash: 29f5793d00d4de79a04237fabe2aeb176258b92f4432d938be759bd5e2781ef9
-    path: patches/braces@3.0.3.patch
-  deepmerge@4.3.1:
-    hash: 1568de864b5eea60e5368529216f5b2e9bcc4a8b2b560f09ca5a683c0e2dbf5a
-    path: patches/deepmerge@4.3.1.patch
-  typedoc@0.28.19:
-    hash: 06a82551d8f1849a69d3be2c8b0a1c8b59517f1346ba03456cb560d91541a98b
-    path: patches/typedoc@0.28.19.patch
+  braces@3.0.3: 29f5793d00d4de79a04237fabe2aeb176258b92f4432d938be759bd5e2781ef9
+  deepmerge@4.3.1: 1568de864b5eea60e5368529216f5b2e9bcc4a8b2b560f09ca5a683c0e2dbf5a
+  typedoc@0.28.19: 06a82551d8f1849a69d3be2c8b0a1c8b59517f1346ba03456cb560d91541a98b
 
 importers:
 
@@ -265,8 +259,8 @@ importers:
         specifier: ^5.3.0
         version: 5.3.0(supports-color@8.1.1)
       http-proxy-middleware:
-        specifier: ^4.2.0
-        version: 4.2.0(supports-color@8.1.1)
+        specifier: ^4.2.2
+        version: 4.2.2(supports-color@8.1.1)
       pino:
         specifier: ^10.4.0
         version: 10.4.0
@@ -6368,8 +6362,8 @@ packages:
     resolution: {integrity: sha512-n2hY8YdoRE1i7r6M0w9DIw5GgZN0G25P8zLCRQ8rjXtTU3vsNFBI/vWK/UIeE6g5MUUz6avwAPXmL6Fy9D/90w==}
     engines: {node: '>= 6'}
 
-  http-proxy-middleware@4.2.0:
-    resolution: {integrity: sha512-ZA+oNOoM+GLoFTIzhkJptVQov73Srep2LBqhF8hG8CIPKO3nam1jonXVQ/QUH8RbwsmaaVz2SOJdzBNBHNtKbw==}
+  http-proxy-middleware@4.2.2:
+    resolution: {integrity: sha512-GHP6tbjWsdSZbWSyqYvwPwoR76ozJ2IccVYoBR702N9vfqO0KBIwJ9vkDRErxwbb5Z6ej2Wn+9D/YitlUTseSQ==}
     engines: {node: ^22.15.0 || ^24.0.0 || >=26.0.0}
 
   http2-wrapper@1.0.3:
@@ -6384,8 +6378,8 @@ packages:
     resolution: {integrity: sha512-vK9P5/iUfdl95AI+JVyUuIcVtd4ofvtrOr3HNtM2yxC9bnMbEdp3x01OhQNnjb8IJYi38VlTE3mBXwcfvywuSw==}
     engines: {node: '>= 14'}
 
-  httpxy@0.5.5:
-    resolution: {integrity: sha512-uDjmnPyp1q4Sgzf3w+J/Fc6UqcCEj0x4Wjp7OqK5dGhNeDgpyrAmnS6ey8QWrX3SWDon2DMKf9sBa5X9+CVyMA==}
+  httpxy@0.5.6:
+    resolution: {integrity: sha512-iqc3nOxvNb5FxbhJozt8wNmHgjlmk4zzba512jMEXVwHCEBCbGAj49eGfy5PI8ts3/LFSFq8siiSNqwfY1AlfQ==}
 
   human-signals@2.1.0:
     resolution: {integrity: sha512-B4FFZ6q/T2jhhksgkbEW3HBvWIfDW85snkQgawt07S7J5QXTk6BkNV+0yAeZrM5QpMAdYlocGoljn0sJ/WQkFw==}
@@ -9995,7 +9989,7 @@ snapshots:
     dependencies:
       '@expo/config-plugins': 57.0.9(supports-color@8.1.1)(typescript@6.0.3)
       '@expo/config-types': 57.0.2
-      '@expo/json-file': 11.0.1
+      '@expo/json-file': 11.2.1
       '@expo/require-utils': 57.0.5(supports-color@8.1.1)(typescript@6.0.3)
       deepmerge: 4.3.1(patch_hash=1568de864b5eea60e5368529216f5b2e9bcc4a8b2b560f09ca5a683c0e2dbf5a)
       getenv: 2.0.0
@@ -16296,10 +16290,10 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  http-proxy-middleware@4.2.0(supports-color@8.1.1):
+  http-proxy-middleware@4.2.2(supports-color@8.1.1):
     dependencies:
       debug: 4.4.3(supports-color@8.1.1)
-      httpxy: 0.5.5
+      httpxy: 0.5.6
       is-glob: 4.0.3
       is-plain-obj: 4.1.0
       micromatch: 4.0.8
@@ -16325,7 +16319,7 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  httpxy@0.5.5: {}
+  httpxy@0.5.6: {}
 
   human-signals@2.1.0: {}
 
@@ -16881,7 +16875,7 @@ snapshots:
 
   jest-worker@29.7.0:
     dependencies:
-      '@types/node': 26.6.2
+      '@types/node': 26.6.3
       jest-util: 29.7.0
       merge-stream: 2.0.0
       supports-color: 8.1.1
