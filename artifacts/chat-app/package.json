@@ -99,7 +99,7 @@
     "zod-validation-error": "^3.5.4"
   },
   "dependencies": {
-    "@sentry/react-native": "^7.11.0",
+    "@sentry/react-native": "^8.36.0",
     "react-native-webview": "13.16.1",
     "socket.io-client": "^4.8.4",
     "tweetnacl": "^1.0.3",
